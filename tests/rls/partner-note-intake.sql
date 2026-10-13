@@ -7,9 +7,11 @@
 --
 --  Since 13.10.2026 there is no review: a note from a linked driver is a
 --  driver_notes row the moment it arrives (20261013100000), and one from a
---  driver nobody has linked is recorded and waits for the link. Sections 5 to 7
---  measure that; the four review functions are retired from the screen but
---  still exist, and the probes say what each of them does now.
+--  driver nobody has linked is recorded and waits for the link. Section 5
+--  measures that. The review functions (partner_note_accept and
+--  partner_note_reject) were dropped by 20261013110000; section 6 asserts they
+--  stay gone, and the probes that exercised them retired with them. Probe
+--  numbers are not reused, so a gap is a probe that retired.
 --
 --  Eight sections, and the ones worth reading first are 1, 4 and 5:
 --
@@ -87,24 +89,6 @@ $$;
 
 -- The claim shape every other file in the kit sends, including the `amr` that
 -- 20260919130000 expects. Nothing here is platform staff.
-CREATE OR REPLACE FUNCTION _pn_as(p_user uuid) RETURNS void
-LANGUAGE plpgsql AS $$
-BEGIN
-  PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
-  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
-END $$;
-
-CREATE OR REPLACE FUNCTION _pn_reset() RETURNS void
-LANGUAGE plpgsql AS $$
-BEGIN
-  RESET ROLE;
-  PERFORM set_config('request.jwt.claim.sub', '', true);
-  PERFORM set_config('request.jwt.claim.role', '', true);
-  PERFORM set_config('request.jwt.claim.amr', '', true);
-END $$;
-
 -- ─── fixtures ───────────────────────────────────────────────────────────────
 
 INSERT INTO drivers (id, company_id, name) VALUES
@@ -267,7 +251,6 @@ END $$;
 DO $$
 DECLARE
   v_co    constant text := 'c0000000-0000-4000-8000-00000000000a';
-  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
   v_linked   uuid;
   v_unlinked uuid;
   v_note     uuid;
@@ -324,89 +307,22 @@ BEGIN
     (SELECT count(*)::text FROM driver_notes
       WHERE company_id = v_co::uuid AND note_text = 'Blitzer A100'),
     '1');
-
-  -- The retired functions still exist (nothing was dropped). Neither can do
-  -- anything to an applied row, and the accept still cannot invent a driver.
-  PERFORM _pn_as(v_admin);
-  PERFORM _pn_rec(27, 'the retired accept refuses an applied note',
-    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_linked)),
-    'ERR P0001 already_reviewed');
-  PERFORM _pn_rec(40, 'and still refuses an unlinked one rather than invent a driver',
-    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_unlinked)),
-    'ERR P0001 driver_not_linked');
-  PERFORM _pn_reset();
 END $$;
 
--- ─── 6. the reject ──────────────────────────────────────────────────────────
+-- ─── 6. the review functions are gone ──────────────────────────────────────
 
 DO $$
-DECLARE
-  v_co    constant text := 'c0000000-0000-4000-8000-00000000000a';
-  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
-  v_id uuid;
 BEGIN
-  -- Unlinked on purpose: a linked driver's note would already be accepted, and
-  -- the reject only ever has a pending row to act on.
-  PERFORM _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-r1', 'pn-unknown', 'wait', 'Wartezeit')::text$q$, v_co));
-  SELECT id INTO v_id FROM partner_note_submissions
-   WHERE company_id = v_co::uuid AND external_submission_id = 'pn-r1';
-
-  PERFORM _pn_as(v_admin);
-
-  -- Named here rather than left to the table's CHECK, so the screen can say
-  -- which field is missing instead of reporting a 23514.
-  PERFORM _pn_rec(28, 'a rejection with no reason is refused by name',
-    _pn_call(format($q$SELECT partner_note_reject(%L, '   ')::text$q$, v_id)),
-    'ERR 22023 reason_required');
-
-  PERFORM _pn_rec(29, 'with a reason it is rejected',
-    _pn_call(format($q$SELECT partner_note_reject(%L, 'Beleg fehlt') ->> 'ok'$q$, v_id)),
-    'true');
-
-  PERFORM _pn_reset();
-
-  PERFORM _pn_rec(30, 'and the reason is stored for the driver to be told',
-    (SELECT status || ' / ' || rejected_reason FROM partner_note_submissions WHERE id = v_id),
-    'rejected / Beleg fehlt');
-
-  PERFORM _pn_rec(31, 'a rejection writes no driver_notes row',
-    (SELECT coalesce(driver_note_id::text, 'null') FROM partner_note_submissions WHERE id = v_id),
-    'null');
-END $$;
-
--- ─── 7. the role gate, which the definer has to ask itself ──────────────────
--- Running past RLS means running past the role gate, so each function asks
--- current_role_permits('notes', true). A viewer holds can_edit nowhere.
-
-DO $$
-DECLARE
-  v_co     constant text := 'c0000000-0000-4000-8000-00000000000a';
-  v_viewer constant uuid := 'a0000000-0000-4000-8000-000000000003';
-  v_editor constant uuid := 'a0000000-0000-4000-8000-000000000002';
-  v_id uuid;
-BEGIN
-  PERFORM _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-g1', 'pn-linked', 'general', 'x')::text$q$, v_co));
-  SELECT id INTO v_id FROM partner_note_submissions
-   WHERE company_id = v_co::uuid AND external_submission_id = 'pn-g1';
-
-  PERFORM _pn_as(v_viewer);
-  PERFORM _pn_rec(32, 'a viewer may not accept',
-    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_id)),
-    'ERR 42501 not_authorized');
-  PERFORM _pn_rec(33, 'nor reject',
-    _pn_call(format($q$SELECT partner_note_reject(%L, 'x')::text$q$, v_id)),
-    'ERR 42501 not_authorized');
-  PERFORM _pn_reset();
-
-  -- The control: without it probe 32 would pass for a fixture that is simply
-  -- unacceptable to everyone.
-  PERFORM _pn_as(v_editor);
-  -- The note is already applied, so a permitted caller is told that, not that
-  -- it lacks the right: the two answers differ, which is the whole probe.
-  PERFORM _pn_rec(34, 'an editor, who holds the notes page, passes the gate',
-    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_id)),
-    'ERR P0001 already_reviewed');
-  PERFORM _pn_reset();
+  -- Counted in the catalogue: has_function_privilege raises on a function that
+  -- does not exist, which would turn this probe into an error.
+  PERFORM _pn_rec(27, 'partner_note_accept no longer exists',
+    (SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'partner_note_accept'),
+    '0');
+  PERFORM _pn_rec(28, 'nor does partner_note_reject',
+    (SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'partner_note_reject'),
+    '0');
 END $$;
 
 -- ─── 8. the shape, read from the catalogue ──────────────────────────────────
@@ -426,13 +342,11 @@ BEGIN
       'EXECUTE')::text,
     'false');
 
-  PERFORM _pn_rec(37, 'and none of the three is executable by anon',
-    (has_function_privilege('anon', 'public.partner_note_accept(uuid)', 'EXECUTE')::int
-     + has_function_privilege('anon', 'public.partner_note_reject(uuid,text)', 'EXECUTE')::int
-     + has_function_privilege('anon',
-         'public.partner_note_submission_record(uuid,text,text,text,text,text,date,date,boolean,text,text,jsonb)',
-         'EXECUTE')::int)::text,
-    '0');
+  PERFORM _pn_rec(37, 'and it is not executable by anon either',
+    has_function_privilege('anon',
+      'public.partner_note_submission_record(uuid,text,text,text,text,text,date,date,boolean,text,text,jsonb)',
+      'EXECUTE')::text,
+    'false');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────

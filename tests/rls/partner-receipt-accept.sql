@@ -25,8 +25,12 @@
 --  13.10.2026 (20261013100000): there is no review. A Beleg from a LINKED driver
 --  is a receipts row the moment the door records it, with nobody accepting it;
 --  one from a driver nobody has linked is recorded and waits for the link. The
---  probes below measure that. The four review functions still exist (nothing
---  was dropped) and sections 2, 4 and 5 say what each does now.
+--  probes below measure that. The review functions are gone (20261013110000
+--  dropped them), and section 2 asserts that they stay gone - a removal nobody
+--  asserts comes back the next time someone copies an old migration. The
+--  probes that exercised them (a viewer refused, an applied Beleg refused, a
+--  rejection keeping the photo) are gone with them; probe numbers are not
+--  reused, so a gap is a probe that retired.
 
 BEGIN;
 
@@ -68,24 +72,6 @@ BEGIN
   END IF;
 END;
 $$;
-
-CREATE OR REPLACE FUNCTION _ra_as(p_user uuid) RETURNS void
-LANGUAGE plpgsql AS $$
-BEGIN
-  PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
-  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
-END $$;
-
-CREATE OR REPLACE FUNCTION _ra_reset() RETURNS void
-LANGUAGE plpgsql AS $$
-BEGIN
-  RESET ROLE;
-  PERFORM set_config('request.jwt.claim.sub', '', true);
-  PERFORM set_config('request.jwt.claim.role', '', true);
-  PERFORM set_config('request.jwt.claim.amr', '', true);
-END $$;
 
 -- ─── fixtures ───────────────────────────────────────────────────────────────
 
@@ -152,21 +138,21 @@ BEGIN
     'null');
 END $$;
 
--- ─── 2. the role gate ───────────────────────────────────────────────────────
+-- ─── 2. the review functions are gone ──────────────────────────────────────
 
 DO $$
-DECLARE v_viewer constant uuid := 'a0000000-0000-4000-8000-000000000003';
 BEGIN
-  PERFORM _ra_as(v_viewer);
-  PERFORM _ra_rec(9, 'a viewer may not accept a Beleg',
-    _ra_call($q$SELECT partner_receipt_accept(
-      (SELECT id FROM partner_receipt_submissions WHERE external_submission_id = 'ra-ok'))::text$q$),
-    'ERR 42501 not_authorized');
-  PERFORM _ra_rec(10, 'nor reject one',
-    _ra_call($q$SELECT partner_receipt_reject(
-      (SELECT id FROM partner_receipt_submissions WHERE external_submission_id = 'ra-ok'), 'x')::text$q$),
-    'ERR 42501 not_authorized');
-  PERFORM _ra_reset();
+  -- Counted in the catalogue, never through has_function_privilege: that
+  -- raises on a function that does not exist, which would turn this probe into
+  -- an error instead of an answer.
+  PERFORM _ra_rec(9, 'partner_receipt_accept no longer exists',
+    (SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'partner_receipt_accept'),
+    '0');
+  PERFORM _ra_rec(10, 'nor does partner_receipt_reject',
+    (SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'partner_receipt_reject'),
+    '0');
 END $$;
 
 -- ─── 3. the arrival writes the Beleg; an unlinked driver waits ─────────────
@@ -201,7 +187,6 @@ END $$;
 
 DO $$
 DECLARE
-  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
   v_id      uuid;
   v_receipt uuid;
 BEGIN
@@ -236,14 +221,6 @@ BEGIN
        FROM partner_receipt_submissions WHERE id = v_id),
     'accepted / named');
 
-  -- The retired accept. Nothing was dropped, and it can do nothing to an
-  -- applied row.
-  PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(20, 'the retired accept refuses an applied Beleg',
-    _ra_call(format($q$SELECT partner_receipt_accept(%L)::text$q$, v_id)),
-    'ERR P0001 already_reviewed');
-  PERFORM _ra_reset();
-
   -- probe 6 retried this very submission at the door.
   PERFORM _ra_rec(21, 'so there is exactly one Beleg, not two, after the retry',
     (SELECT count(*)::text FROM receipts WHERE document_path =
@@ -268,37 +245,6 @@ BEGIN
         AND submitted_by_name = 'Omar Khalil'));
 END $$;
 
--- ─── 5. the reject keeps the record ────────────────────────────────────────
-
-DO $$
-DECLARE
-  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
-  v_id uuid;
-BEGIN
-  SELECT id INTO v_id FROM partner_receipt_submissions WHERE external_submission_id = 'ra-unlinked';
-
-  PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(22, 'a rejection with no reason is refused by name',
-    _ra_call(format($q$SELECT partner_receipt_reject(%L, '  ')::text$q$, v_id)),
-    'ERR 22023 reason_required');
-
-  PERFORM _ra_rec(23, 'with a reason it is rejected',
-    _ra_call(format($q$SELECT partner_receipt_reject(%L, 'Foto unleserlich') ->> 'ok'$q$, v_id)),
-    'true');
-  PERFORM _ra_reset();
-
-  -- A rejected Beleg is still a record of what was claimed, so the photo stays.
-  PERFORM _ra_rec(24, 'the photo stays with the rejected submission',
-    (SELECT status || ' / ' || coalesce(rejected_reason, 'null') || ' / '
-            || CASE WHEN document_path IS NULL THEN 'gone' ELSE 'kept' END
-       FROM partner_receipt_submissions WHERE id = v_id),
-    'rejected / Foto unleserlich / kept');
-
-  PERFORM _ra_rec(25, 'and it wrote no Beleg',
-    (SELECT coalesce(receipt_id::text, 'null') FROM partner_receipt_submissions WHERE id = v_id),
-    'null');
-END $$;
-
 -- ─── 6. the shape ──────────────────────────────────────────────────────────
 
 DO $$
@@ -309,11 +255,6 @@ BEGIN
        'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text)', 'EXECUTE')::int
      + has_function_privilege('authenticated',
        'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text)', 'EXECUTE')::int)::text,
-    '0');
-
-  PERFORM _ra_rec(27, 'and the two decisions are not executable by anon',
-    (has_function_privilege('anon', 'public.partner_receipt_accept(uuid)', 'EXECUTE')::int
-     + has_function_privilege('anon', 'public.partner_receipt_reject(uuid,text)', 'EXECUTE')::int)::text,
     '0');
 
   -- 20260920100000 refuses a database where a policy names a company bucket
