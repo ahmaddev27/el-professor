@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
+import { Check, DownloadCloud, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
 import { Income, IncomeFormData, Driver, INCOME_TYPES } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,7 @@ import { handleDatabaseError } from '../utils/errorHandler';
 import { exportIncomeToExcel } from '../utils/excelExport';
 import { tallyTrips } from '../utils/incomeTrips';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
+import UberEarningsImportModal from './UberEarningsImportModal';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -76,6 +77,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [loadFailed, setLoadFailed] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [uberImportOpen, setUberImportOpen] = useState(false);
 
   // ── Batch add form state ───────────────────────────────────────────────────
   const [batchForm, setBatchForm] = useState({
@@ -886,6 +888,12 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
             <Download aria-hidden />
             {t('common.exportExcelShort')}
           </Button>
+          {canCreate && (
+            <Button variant="secondary" onClick={() => setUberImportOpen(true)}>
+              <DownloadCloud aria-hidden />
+              {t('inc.uber.button')}
+            </Button>
+          )}
           {addButton()}
         </>,
       )}
@@ -1181,6 +1189,12 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         description={t('inc.deleteMessage')}
         confirmLabel={t('common.delete')}
         icon={Trash2}
+      />
+
+      <UberEarningsImportModal
+        isOpen={uberImportOpen}
+        onClose={() => setUberImportOpen(false)}
+        onImported={() => { void loadIncomes(); }}
       />
     </div>
   );

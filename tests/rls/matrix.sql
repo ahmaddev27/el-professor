@@ -2826,6 +2826,16 @@ VALUES (_mx_id('rpc_partner_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
         'mx', 'mx-rpc', _mx_id('drivers2', 'a'), 'linked', now())
 ON CONFLICT (id) DO NOTHING;
 
+-- A CONFIRMED Reidey link of company A with a digits-only external id, for
+-- income_import_uber: the function takes the partner's driver id as digits and
+-- resolves OUR driver through this table. A probe on an id nobody linked would
+-- raise driver_not_linked for every authorised caller and read T for all of
+-- them, saying nothing about the gate it was written for.
+INSERT INTO partner_driver_links (id, company_id, partner, external_driver_id, driver_id, status, linked_at)
+VALUES (_mx_id('rpc_uber_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
+        'reidey', '4711', _mx_id('drivers2', 'a'), 'linked', now())
+ON CONFLICT (id) DO NOTHING;
+
 
 -- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
 -- to assign, an invoice that is already paid (so "mark unpaid" has something to
@@ -3634,7 +3644,21 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PTYYYYT', NULL),
     ('issue_salary_cash_receipt(no payment)',
      $q$SELECT issue_salary_cash_receipt(gen_random_uuid(), gen_random_uuid(), 'mx')::text$q$,
-     'PTTTTTT', NULL);
+     'PTTTTTT', NULL),
+    -- The Uber earnings import (20261013120000). Probed on the confirmed link
+    -- above, so an authorised caller of company A succeeds and the cell measures
+    -- the gate. The viewer is refused by the gate (42501, T) and company B's
+    -- administrator by the lookup (driver_not_linked, 22023, E): B holds no such
+    -- link. They are different classes on purpose, which is what lets this row
+    -- tell the gate from the lookup; the HINTs are read apart in
+    -- tests/rls/income-import-uber.sql. A platform account is refused with no
+    -- context (no company, T) and with one (platform_session_not_allowed, T).
+    ('income_import_uber(confirmed link of A)',
+     $q$SELECT income_import_uber(jsonb_build_array(jsonb_build_object(
+        'external_driver_id', '4711', 'type', 'umsatz', 'amount', '1.00',
+        'date', '2026-01-05', 'week', 1, 'description', 'Woche 1 - Uber',
+        'trip_count', NULL, 'period_start', '2026-01-05', 'period_end', '2026-01-11')))->>'inserted'$q$,
+     'PTYYYET', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -3722,7 +3746,10 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- The preview is the screen's and STABLE: a view context reads the opened
     -- company through get_active_company_id() like any other read, and a
     -- support session is that company's administrator.
-    ('abrechnung_schedule_preview(a week)',                          'NY')
+    ('abrechnung_schedule_preview(a week)',                          'NY'),
+    -- Refused in both modes, with its own reason: importing a customer's
+    -- earnings from the customer's own partner connection is not an agent's act.
+    ('income_import_uber(confirmed link of A)',                       'TT')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3758,7 +3785,8 @@ BEGIN
       ('partner_driver_link_reject(pending link of A)'),
       ('record_cash_movement(company A)'),
       ('issue_salary_cash_receipt(no payment)'),
-      ('abrechnung_schedule_preview(a week)')
+      ('abrechnung_schedule_preview(a week)'),
+      ('income_import_uber(confirmed link of A)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

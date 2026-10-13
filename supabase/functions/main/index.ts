@@ -139,6 +139,10 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // place a sealed token is opened. By a button and not a schedule (the
   // owner's decision of 06.10.2026), so it needs a session like Connect.
   ['partner-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // The Uber earnings preview: the same shape as partner-pull (session, then the
+  // sealed token), and it writes nothing. The rows are written by the database's
+  // income_import_uber with the caller's own session.
+  ['uber-earnings-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

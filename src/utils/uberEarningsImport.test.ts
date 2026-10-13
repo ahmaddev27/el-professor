@@ -1,0 +1,298 @@
+import { describe, expect, it } from 'vitest';
+import {
+  centsToDecimal,
+  isWeekSegment,
+  mondayOf,
+  parseCents,
+  parseEarningsBody,
+  splitIntoBusinessWeeks,
+} from '../../supabase/functions/_shared/uber-earnings-core';
+import {
+  blockingEarners,
+  buildImportRows,
+  findExistingIncome,
+  findUnlinked,
+  importDescription,
+  readPullAnswer,
+  summarizeByDriver,
+  weekNumberOf,
+  type WeekEarnings,
+} from './uberEarningsImport';
+
+const driverWire = (over: Record<string, unknown> = {}) => ({
+  driver_id: 139, uber_driver_uuid: 'u-1', name: 'Ahmed Hemaid',
+  fare: '664.19', promotion: '0.00', tips: '28.00', cash: '226.26',
+  net_outstanding: '465.93', trips: 67, difference: '0.00', ...over,
+});
+const body = (drivers: unknown[], over: Record<string, unknown> = {}) => ({
+  data: { from: '2026-10-06', to: '2026-10-12', currency: 'EUR', drivers, ...over },
+  meta: { driver_count: drivers.length },
+});
+
+describe('parseCents: money is a strict decimal string', () => {
+  it('reads dot decimals into integer cents without a float', () => {
+    expect(parseCents('664.19')).toBe(66419);
+    expect(parseCents('28')).toBe(2800);
+    expect(parseCents('0.5')).toBe(50);
+    expect(parseCents('1234.50')).toBe(123450);
+  });
+  it('refuses a JSON number, a comma, a thousands dot, three places and a sign', () => {
+    for (const bad of [664.19, '664,19', '1.234', '1.234,50', '0.001', '-1.00', '', ' 1.00', '1.', '.5', '007.50', null, undefined]) {
+      expect(parseCents(bad), String(bad)).toBeNull();
+    }
+  });
+  it('allows a sign only where the field is signed', () => {
+    expect(parseCents('-12.5', true)).toBe(-1250);
+    expect(parseCents('+12.5', true)).toBeNull();
+  });
+  it('writes cents back as the same plain decimal', () => {
+    expect(centsToDecimal(66419)).toBe('664.19');
+    expect(centsToDecimal(5)).toBe('0.05');
+    expect(centsToDecimal(-1250)).toBe('-12.50');
+  });
+});
+
+describe('splitIntoBusinessWeeks', () => {
+  const cut = (a: string, b: string) => {
+    const r = splitIntoBusinessWeeks(a, b);
+    if (!r.ok) throw new Error(r.problem);
+    return r.value.map(s => [s.from, s.to, s.monday]);
+  };
+  it('a Monday to Sunday range is one week', () => {
+    expect(cut('2026-10-05', '2026-10-11')).toEqual([['2026-10-05', '2026-10-11', '2026-10-05']]);
+  });
+  it('cuts at every Sunday and keeps the partial ends', () => {
+    expect(cut('2026-09-30', '2026-10-13')).toEqual([
+      ['2026-09-30', '2026-10-04', '2026-09-28'],
+      ['2026-10-05', '2026-10-11', '2026-10-05'],
+      ['2026-10-12', '2026-10-13', '2026-10-12'],
+    ]);
+  });
+  it('a single day is a segment', () => {
+    expect(cut('2026-10-04', '2026-10-04')).toEqual([['2026-10-04', '2026-10-04', '2026-09-28']]);
+  });
+  it('is not shifted by a daylight-saving night', () => {
+    expect(cut('2026-10-24', '2026-10-27')).toEqual([
+      ['2026-10-24', '2026-10-25', '2026-10-19'],
+      ['2026-10-26', '2026-10-27', '2026-10-26'],
+    ]);
+    expect(mondayOf('2026-03-29')).toBe('2026-03-23');
+  });
+  it('refuses a reversed range, an impossible date and an over-long range', () => {
+    expect(splitIntoBusinessWeeks('2026-10-12', '2026-10-05')).toEqual({ ok: false, problem: 'invalid_range' });
+    expect(splitIntoBusinessWeeks('2026-02-30', '2026-03-05')).toEqual({ ok: false, problem: 'invalid_range' });
+    expect(splitIntoBusinessWeeks('2026-01-01', '2026-06-30')).toEqual({ ok: false, problem: 'range_too_long' });
+  });
+  it('a segment must lie inside one week', () => {
+    expect(isWeekSegment({ from: '2026-10-05', to: '2026-10-11' })).toBe(true);
+    expect(isWeekSegment({ from: '2026-10-11', to: '2026-10-12' })).toBe(false);
+  });
+});
+
+describe('parseEarningsBody', () => {
+  it('reads a valid answer into cents', () => {
+    const r = parseEarningsBody(body([driverWire()]), '2026-10-06', '2026-10-12');
+    expect(r).toMatchObject({ ok: true });
+    if (r.ok) {
+      expect(r.value.drivers[0]).toMatchObject({
+        externalDriverId: '139', fareCents: 66419, tipsCents: 2800, cashCents: 22626,
+        netOutstandingCents: 46593, trips: 67, differenceCents: 0,
+      });
+    }
+  });
+  it('accepts a null trip count and a signed difference', () => {
+    const r = parseEarningsBody(body([driverWire({ trips: null, difference: '-3.40' })]), '2026-10-06', '2026-10-12');
+    expect(r.ok && r.value.drivers[0]).toMatchObject({ trips: null, differenceCents: -340 });
+  });
+  it.each([
+    ['a float fare', { fare: 664.19 }, 'amount_invalid'],
+    ['a comma fare', { fare: '664,19' }, 'amount_invalid'],
+    ['a negative fare', { fare: '-1.00' }, 'amount_invalid'],
+    ['a string driver id', { driver_id: '139' }, 'driver_id_invalid'],
+    ['a fractional trip count', { trips: 6.5 }, 'trips_invalid'],
+    ['a missing difference', { difference: undefined }, 'amount_invalid'],
+  ])('refuses the whole answer for %s', (_n, over, problem) => {
+    expect(parseEarningsBody(body([driverWire(), driverWire({ driver_id: 2, ...over })]), '2026-10-06', '2026-10-12'))
+      .toEqual({ ok: false, problem });
+  });
+  it('refuses another range, another currency and a repeated driver', () => {
+    expect(parseEarningsBody(body([], { to: '2026-10-13' }), '2026-10-06', '2026-10-12')).toEqual({ ok: false, problem: 'range_mismatch' });
+    expect(parseEarningsBody(body([], { currency: 'USD' }), '2026-10-06', '2026-10-12')).toEqual({ ok: false, problem: 'currency_unsupported' });
+    expect(parseEarningsBody(body([driverWire(), driverWire()]), '2026-10-06', '2026-10-12')).toEqual({ ok: false, problem: 'driver_duplicated' });
+    expect(parseEarningsBody({ data: null }, '2026-10-06', '2026-10-12')).toEqual({ ok: false, problem: 'malformed' });
+  });
+});
+
+function week(from: string, to: string, monday: string, wire: Record<string, unknown>[]): WeekEarnings {
+  const parsed = parseEarningsBody(body(wire, { from, to }), from, to);
+  if (!parsed.ok) throw new Error(parsed.problem);
+  return { segment: { from, to, monday }, drivers: parsed.value.drivers };
+}
+
+describe('unmatched earners and the 31-day cap', () => {
+  it('reads meta.unmatched by name, with no money', () => {
+    const b = { ...body([driverWire()]), meta: { driver_count: 1, unmatched: [{ name: 'Ahmed Hemaid', uber_driver_uuid: 'u-9', trips: 12 }] } };
+    const r = parseEarningsBody(b, '2026-10-06', '2026-10-12');
+    expect(r.ok && r.value.unmatched).toEqual([{ name: 'Ahmed Hemaid', uberDriverUuid: 'u-9', trips: 12 }]);
+  });
+  it('an absent list is none; a malformed one refuses the whole answer', () => {
+    expect(parseEarningsBody(body([]), '2026-10-06', '2026-10-12')).toMatchObject({ ok: true, value: { unmatched: [] } });
+    const bad = { ...body([]), meta: { unmatched: [{ name: '', trips: 1 }] } };
+    expect(parseEarningsBody(bad, '2026-10-06', '2026-10-12')).toEqual({ ok: false, problem: 'unmatched_invalid' });
+    const bad2 = { ...body([]), meta: { unmatched: 'x' } };
+    expect(parseEarningsBody(bad2, '2026-10-06', '2026-10-12')).toEqual({ ok: false, problem: 'unmatched_invalid' });
+  });
+  it('both causes are named, unmatched first, and either one blocks', () => {
+    const list = blockingEarners(
+      [{ externalDriverId: '7', name: 'Linked Nowhere' }],
+      [{ name: 'Not At Reidey', uberDriverUuid: null, trips: null }],
+    );
+    expect(list).toEqual([
+      { name: 'Not At Reidey', kind: 'unmatched_at_reidey', externalDriverId: null },
+      { name: 'Linked Nowhere', kind: 'unlinked_here', externalDriverId: '7' },
+    ]);
+    expect(blockingEarners([], [])).toEqual([]);
+  });
+  it('the pull answer carries unmatched through, and refuses a malformed one', () => {
+    const w = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire()]);
+    const answer = { ok: true, weeks: [{ ...w.segment, drivers: w.drivers }], links: {}, unmatched: [{ name: 'X', uberDriverUuid: null, trips: null }] };
+    expect(readPullAnswer(answer)?.unmatched).toHaveLength(1);
+    expect(readPullAnswer({ ...answer, unmatched: [{ trips: 1 }] })).toBeNull();
+  });
+  it('31 days are accepted and 32 are refused', () => {
+    expect(splitIntoBusinessWeeks('2026-10-01', '2026-10-31').ok).toBe(true);
+    expect(splitIntoBusinessWeeks('2026-10-01', '2026-11-01')).toEqual({ ok: false, problem: 'range_too_long' });
+  });
+});
+
+describe('the week number is the screen\'s Woche N', () => {
+  it('counts Mondays of the business month', () => {
+    expect(weekNumberOf({ from: '2026-10-06', to: '2026-10-11', monday: '2026-10-05' })).toBe(1);
+    expect(weekNumberOf({ from: '2026-10-12', to: '2026-10-18', monday: '2026-10-12' })).toBe(2);
+  });
+  it('a week whose Monday is in September belongs to September', () => {
+    // 28.09.2026 is the fourth Monday of September; 1.-4.10. are in that week.
+    expect(weekNumberOf({ from: '2026-10-01', to: '2026-10-04', monday: '2026-09-28' })).toBe(4);
+  });
+  it('keeps the German word first so the screen\'s regex still finds it', () => {
+    expect(importDescription(3)).toMatch(/^Woche 3\b/);
+    expect(/Woche \d+/i.test(importDescription(3))).toBe(true);
+  });
+});
+
+describe('buildImportRows', () => {
+  const w1 = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire()]);
+  it('maps fare, promotion, tips and cash one to one and drops zero amounts', () => {
+    const rows = buildImportRows([w1]);
+    expect(rows.map(r => [r.type, r.amount])).toEqual([
+      ['umsatz', '664.19'], ['trinkgeld', '28.00'], ['bargeld', '226.26'],
+    ]);
+  });
+  it('puts the trip count on the net-fare row only', () => {
+    const rows = buildImportRows([w1]);
+    expect(rows.map(r => r.trip_count)).toEqual([67, null, null]);
+  });
+  it('is dated and keyed by its own stretch of days, one set per week', () => {
+    const w2 = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ fare: '10.00', tips: '0.00', cash: '0.00' })]);
+    const rows = buildImportRows([w1, w2]);
+    expect(rows).toHaveLength(4);
+    expect(rows[3]).toMatchObject({
+      type: 'umsatz', date: '2026-10-12', period_start: '2026-10-12', period_end: '2026-10-13',
+      week: 2, description: 'Woche 2 - Uber', external_driver_id: '139',
+    });
+  });
+  it('never carries Reidey\'s name to the database', () => {
+    expect(JSON.stringify(buildImportRows([w1]))).not.toContain('Hemaid');
+  });
+  it('a driver with nothing to write produces no row', () => {
+    const idle = week('2026-10-06', '2026-10-11', '2026-10-05',
+      [driverWire({ fare: '0.00', tips: '0.00', cash: '0.00', trips: 0 })]);
+    expect(buildImportRows([idle])).toEqual([]);
+  });
+});
+
+describe('the link decides who may be imported', () => {
+  const w = week('2026-10-06', '2026-10-11', '2026-10-05', [
+    driverWire(),
+    driverWire({ driver_id: 7, name: 'Nobody Linked' }),
+    driverWire({ driver_id: 8, name: 'Idle', fare: '0.00', tips: '0.00', cash: '0.00', trips: null }),
+  ]);
+  const links = { '139': { driverId: 'd-1', driverName: 'Ahmed Hemaid GmbH-Name' } };
+  it('names each unlinked driver that would produce a row, once', () => {
+    expect(findUnlinked([w, w], links)).toEqual([{ externalDriverId: '7', name: 'Nobody Linked' }]);
+  });
+  it('nothing is unlinked when every driver with rows has a link', () => {
+    expect(findUnlinked([w], { ...links, '7': { driverId: 'd-2', driverName: 'X' } })).toEqual([]);
+  });
+  it('the preview shows our name beside theirs and flags a non-zero difference', () => {
+    const wd = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire({ difference: '-2.50' })]);
+    const [line] = summarizeByDriver([wd], links);
+    expect(line).toMatchObject({
+      uberName: 'Ahmed Hemaid', ourName: 'Ahmed Hemaid GmbH-Name',
+      differenceCents: -250, hasDifference: true, rowCount: 3,
+    });
+  });
+  it('two weeks of opposite differences still flag the driver', () => {
+    const a = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire({ difference: '1.00' })]);
+    const b = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ difference: '-1.00' })]);
+    const [line] = summarizeByDriver([a, b], links);
+    expect(line.differenceCents).toBe(0);
+    expect(line.hasDifference).toBe(true);
+  });
+});
+
+describe('readPullAnswer: the screen trusts the function\'s reply only in full shape', () => {
+  const good = () => {
+    const w = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire()]);
+    return { ok: true, weeks: [{ ...w.segment, drivers: w.drivers }], links: { '139': { driverId: 'd-1', driverName: 'Ahmed' } } };
+  };
+  it('reads a well-formed answer', () => {
+    const read = readPullAnswer(good());
+    expect(read?.weeks[0].segment).toEqual({ from: '2026-10-06', to: '2026-10-11', monday: '2026-10-05' });
+    expect(read?.links['139'].driverName).toBe('Ahmed');
+  });
+  it('refuses a refusal, a NaN figure, a negative fare and a segment across two weeks', () => {
+    expect(readPullAnswer({ ok: false, reason: 'not_connected' })).toBeNull();
+    expect(readPullAnswer(null)).toBeNull();
+    const nan = good(); (nan.weeks[0].drivers[0] as { fareCents: number }).fareCents = NaN;
+    expect(readPullAnswer(nan)).toBeNull();
+    const neg = good(); (neg.weeks[0].drivers[0] as { fareCents: number }).fareCents = -5;
+    expect(readPullAnswer(neg)).toBeNull();
+    const across = good(); (across.weeks[0] as { to: string }).to = '2026-10-12';
+    expect(readPullAnswer(across)).toBeNull();
+  });
+});
+
+describe('findExistingIncome: typed rows warn, imported rows refuse', () => {
+  const links = { '139': { driverId: 'd-1', driverName: 'Ahmed Hemaid' } };
+  const w = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire()]);
+  const row = (over: Partial<import('./uberEarningsImport').ExistingIncome> = {}) => ({
+    driver_name: 'Ahmed Hemaid', date: '2026-10-07', type: 'umsatz', amount: 100,
+    source: null, source_period_start: null, source_period_end: null, ...over,
+  });
+  it('a hand-entered row in the week is reported as manual, naming driver and week', () => {
+    expect(findExistingIncome([w], links, [row(), row({ type: 'bargeld' })])).toEqual([
+      { driverName: 'Ahmed Hemaid', segment: w.segment, manualCount: 2, importedCount: 0 },
+    ]);
+  });
+  it('nothing is reported for another driver, another week or another spelling', () => {
+    expect(findExistingIncome([w], links, [
+      row({ driver_name: 'Someone Else' }), row({ date: '2026-10-12' }), row({ driver_name: 'ahmed hemaid' }),
+    ])).toEqual([]);
+  });
+  it('an earlier import that overlaps by its period is imported, not manual, even dated before the range', () => {
+    const imported = row({ source: 'uber', date: '2026-10-04', source_period_start: '2026-10-04', source_period_end: '2026-10-08' });
+    expect(findExistingIncome([w], links, [imported])).toEqual([
+      { driverName: 'Ahmed Hemaid', segment: w.segment, manualCount: 0, importedCount: 1 },
+    ]);
+  });
+  it('both at once are counted apart', () => {
+    const imported = row({ source: 'uber', source_period_start: '2026-10-06', source_period_end: '2026-10-11' });
+    expect(findExistingIncome([w], links, [row(), imported])[0]).toMatchObject({ manualCount: 1, importedCount: 1 });
+  });
+  it('a driver the import would write nothing for is not warned about', () => {
+    const idle = week('2026-10-06', '2026-10-11', '2026-10-05',
+      [driverWire({ fare: '0.00', tips: '0.00', cash: '0.00', trips: null })]);
+    expect(findExistingIncome([idle], links, [row()])).toEqual([]);
+  });
+});
