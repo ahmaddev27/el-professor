@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, type ReactNode } from 'react';
-import { Plus, RotateCw, Trash2 } from 'lucide-react';
+import { DownloadCloud, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
@@ -11,18 +11,13 @@ import ReceiptList, { PdfFilterInfo } from '../components/ReceiptList';
 import ReceiptModal from '../components/ReceiptModal';
 import {
   Alert,
-  Badge,
   Button,
   ConfirmDialog,
   DataTable,
   KpiCard,
   PageHeader,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '../components/ui';
-import { PartnerReceiptInbox } from '../components/partner/PartnerReceiptInbox';
+import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
 import { exportTableToExcel } from '../utils/excelExport';
 import { buildBelegeExportOptions, type ReceiptExportFilters } from '../utils/belegeExport';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -61,10 +56,12 @@ const BelegePage: React.FC = () => {
   // while it is set. Without it a failed read wrote a workbook whose totals row
   // claimed 0,00 € for a company that has Belege.
   const [loadFailed, setLoadFailed] = useState(false);
-  const [tab, setTab] = useState<'own' | 'inbox'>('own');
-  // null means "not known": a count whose read failed must not be drawn as
-  // 0, which would tell a reviewer there is nothing waiting for them.
-  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  // Belege from the driver app are Belege the moment they arrive (owner,
+  // 13.10.2026), so there is no inbox and nothing to accept. What can still be
+  // waiting is one whose driver nobody has linked yet: it is recorded, and it
+  // becomes a Beleg when the link is confirmed. null means "not known": a count
+  // whose read failed must not be drawn as 0, which would claim nothing waits.
+  const [waitingForLink, setWaitingForLink] = useState<number | null>(null);
   // The fleet the catch-up asks. Null means "no connection to ask", which is
   // also what a failed read leaves — and then the button is not drawn, which is
   // the honest outcome either way: there is nothing this screen can fetch.
@@ -84,9 +81,9 @@ const BelegePage: React.FC = () => {
     if (!dbLoading) loadData();
   }, [dbLoading]);
 
-  const loadPendingCount = useCallback(async () => {
+  const loadWaitingForLink = useCallback(async () => {
     if (!effectiveCompanyId) {
-      setPendingCount(null);
+      setWaitingForLink(null);
       return;
     }
     const { count, error } = await supabase
@@ -94,7 +91,7 @@ const BelegePage: React.FC = () => {
       .select('id', { count: 'exact', head: true })
       .eq('company_id', effectiveCompanyId)
       .eq('status', 'pending');
-    setPendingCount(error ? null : count ?? 0);
+    setWaitingForLink(error ? null : count ?? 0);
   }, [effectiveCompanyId]);
 
   const loadConnection = useCallback(async () => {
@@ -119,7 +116,12 @@ const BelegePage: React.FC = () => {
 
   useEffect(() => { void loadConnection(); }, [loadConnection]);
 
-  useEffect(() => { void loadPendingCount(); }, [loadPendingCount]);
+  useEffect(() => { void loadWaitingForLink(); }, [loadWaitingForLink]);
+
+  // The one recovery for a ring that never arrived (src/hooks/usePartnerCatchUp.ts):
+  // it asks the partner what is waiting and ingests it. It outlived the inbox
+  // because nothing else can retry a lost ring.
+  const { catchUp, fetching, available: canCatchUp } = usePartnerCatchUp(connection);
 
   const loadData = async () => {
     setLoading(true);
@@ -304,63 +306,67 @@ const BelegePage: React.FC = () => {
           wrapped in a fragment, which PageHeader would render as an empty
           actions row for a reader who may not add. */}
       {header(
-        canCreate ? (
-          <Button
-            onClick={() => {
-              setEditingReceipt(null);
-              setIsReceiptModalOpen(true);
-            }}
-          >
-            <Plus aria-hidden />
-            {t('belege.add')}
-          </Button>
+        canCreate || canCatchUp ? (
+          <>
+            {canCatchUp && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void (async () => {
+                    if (await catchUp()) {
+                      await loadData();
+                      await loadWaitingForLink();
+                    }
+                  })();
+                }}
+                disabled={fetching}
+                loading={fetching}
+                title={t('partner.catchup.hint')}
+              >
+                <DownloadCloud aria-hidden />
+                {t('partner.catchup.action')}
+              </Button>
+            )}
+            {canCreate && (
+              <Button
+                onClick={() => {
+                  setEditingReceipt(null);
+                  setIsReceiptModalOpen(true);
+                }}
+              >
+                <Plus aria-hidden />
+                {t('belege.add')}
+              </Button>
+            )}
+          </>
         ) : undefined,
       )}
 
-      {/* Two tabs since M4: the company's own Belege, and what drivers
-          photographed in the partner app and nobody has judged yet. The
-          inbox is a component of its own — see its header for why. */}
-      <Tabs value={tab} onValueChange={value => setTab(value as 'own' | 'inbox')} className="space-y-4">
-        <TabsList aria-label={t('nav.belege')}>
-          <TabsTrigger value="own">{t('partner.belege.tabOwn')}</TabsTrigger>
-          <TabsTrigger value="inbox">
-            {t('partner.belege.tab')}
-            {/* Only when the count is known. An unread count drawn as 0 says
-                "nothing is waiting", which is the claim this avoids. */}
-            {pendingCount !== null && pendingCount > 0 && (
-              <Badge tone="brand" className="ml-2">{pendingCount}</Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+      {/* One list. The driver app's Belege are in it beside the company's own,
+          with the driver as the author (owner, 13.10.2026: no status, no
+          review, always accepted). */}
+      {waitingForLink !== null && waitingForLink > 0 && (
+        <Alert
+          tone="caution"
+          title={t('belege.waitingForLink.title', { count: String(waitingForLink) })}
+          className="mb-4"
+        >
+          {t('belege.waitingForLink.body')}
+        </Alert>
+      )}
 
-        <TabsContent value="own">
-          <ReceiptList
-            receipts={receipts}
-            drivers={drivers}
-            onEdit={handleEditReceipt}
-            onDelete={handleDeleteReceipt}
-            onExportExcel={handleExportExcel}
-            onDownloadPdf={handleDownloadPdf}
-            canEdit={canEditReceipt}
-            canDelete={canDeleteReceipt}
-            userDisplayNames={userDisplayNames}
-            exportDisabled={loadFailed}
-          />
-        </TabsContent>
-
-        <TabsContent value="inbox">
-          <PartnerReceiptInbox
-            companyId={effectiveCompanyId}
-            connection={connection}
-            onDecided={() => {
-              // An accepted Beleg becomes a row in the list beside it, and the
-              // badge has to stop counting it.
-              void loadData();
-              void loadPendingCount();
-            }}
-          />
-        </TabsContent>
-      </Tabs>
+      <ReceiptList
+        receipts={receipts}
+        drivers={drivers}
+        onEdit={handleEditReceipt}
+        onDelete={handleDeleteReceipt}
+        onExportExcel={handleExportExcel}
+        onDownloadPdf={handleDownloadPdf}
+        canEdit={canEditReceipt}
+        canDelete={canDeleteReceipt}
+        userDisplayNames={userDisplayNames}
+        exportDisabled={loadFailed}
+      />
 
       {isReceiptModalOpen && (
         <ReceiptModal
