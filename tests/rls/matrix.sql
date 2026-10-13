@@ -2826,33 +2826,6 @@ VALUES (_mx_id('rpc_partner_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
         'mx', 'mx-rpc', _mx_id('drivers2', 'a'), 'linked', now())
 ON CONFLICT (id) DO NOTHING;
 
--- A pending note submission of company A whose driver IS linked, for
--- partner_note_accept and partner_note_reject. The table section's row has
--- driver_id NULL -- the state the accept refuses, because driver_notes.driver_id
--- is NOT NULL -- so an accept probed on it would read T for every principal and
--- measure nothing, which is the fault partner_submission_claim_driver had above.
-INSERT INTO partner_note_submissions
-       (id, company_id, partner, external_submission_id, external_driver_id,
-        driver_id, note_type, note_text)
-VALUES (_mx_id('rpc_note_submission', 'a'), 'c0000000-0000-4000-8000-00000000000a',
-        'mx', 'mx-rpc-note', 'mx-rpc', _mx_id('drivers2', 'a'), 'general', 'mx')
-ON CONFLICT (id) DO NOTHING;
-
--- A pending RECEIPT submission of company A with a linked driver AND a
--- document_path, for partner_receipt_accept and partner_receipt_reject. The
--- table section's row has neither, and each absence is a refusal of its own
--- (`driver_not_linked`, `document_missing`) that raises exactly as the role
--- gate does — so probed on that row the accept read T for every principal and
--- measured nothing. Third time in this slice: the fixture is the fix, and
--- partner-receipt-accept.sql is what tests the two refusals on purpose.
-INSERT INTO partner_receipt_submissions
-       (id, company_id, partner, external_submission_id, external_driver_id,
-        driver_id, receipt_date, category, amount, payment_method, document_path)
-VALUES (_mx_id('rpc_receipt_submission', 'a'), 'c0000000-0000-4000-8000-00000000000a',
-        'mx', 'mx-rpc-beleg', 'mx-rpc', _mx_id('drivers2', 'a'),
-        '2026-09-15', 'Tanken', 41.47, 'bar',
-        'c0000000-0000-4000-8000-00000000000a/partner/mx-rpc-beleg.jpg')
-ON CONFLICT (id) DO NOTHING;
 
 -- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
 -- to assign, an invoice that is already paid (so "mark unpaid" has something to
@@ -3571,19 +3544,6 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('partner_note_submission_record(no company)',
      $q$SELECT partner_note_submission_record(NULL, 'mx', 'mx-probe', 'mx-rpc', 'general')::text$q$,
      'PPPPPPP', NULL),
-    -- The reviewer's two, on company A's pending submission whose driver is
-    -- linked. Both ask get_active_company_id() and the `notes` page themselves,
-    -- being SECURITY DEFINER: a viewer holds can_edit nowhere and is refused,
-    -- company B's admin finds no such submission, and the platform account with
-    -- no company is refused for want of one. Each probe is rolled back, so the
-    -- pending row is still pending for the principal after it.
-    ('partner_note_accept(pending submission of A)',
-     $q$SELECT partner_note_accept({ref:rpc_note_submission}) ->> 'ok'$q$,
-     'PTYYYTT', NULL),
-    ('partner_note_reject(pending submission of A)',
-     $q$SELECT partner_note_reject({ref:rpc_note_submission}, 'mx') ->> 'ok'$q$,
-     'PTYYYTT', NULL),
-
     -- M2's two (20261008100000): the human decision about a partner driver.
     -- Both ask get_active_company_id() and the `drivers` page themselves. The
     -- confirm is probed on the table section's PENDING link and names a driver
@@ -3617,32 +3577,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      $q$SELECT partner_pull_record('c0000000-0000-4000-8000-00000000000a', 'mx') ->> 'ok'$q$,
      'PPPPPPP', NULL),
 
-    -- M3's sender (20261008130000). The target function describes a
-    -- submission to whoever can call it, so a client cell moving off P here
-    -- would hand one company a driver's identifier at the partner and
-    -- another reviewer's words.
-    ('partner_submission_push_target(submission of A)',
-     $q$SELECT partner_submission_push_target({ref:rpc_note_submission}) ->> 'ok'$q$,
-     'PPPPPPP', NULL),
-    ('partner_submission_push_record(submission of A)',
-     $q$SELECT partner_submission_push_record({ref:rpc_note_submission}) ->> 'ok'$q$,
-     'PPPPPPP', NULL),
-
-    -- M4's three (20261008140000). The door is service_role's; the two
-    -- decisions are the reviewer's, behind the `receipts` page, and both are
-    -- probed on the fixture above — a Beleg with a linked driver and a photo,
-    -- so an authorised caller COMPLETES the accept and the cell separates the
-    -- gate from the Beleg's own refusals. Each probe is rolled back, so the
-    -- row is still pending for the principal after it.
+    -- M4's door (20261008140000). It is service_role's. The two reviewer
+    -- decisions that used to sit beside it were dropped by 20261013110000: a
+    -- submission is accepted on arrival, so there is nothing left to decide.
+    -- tests/rls/partner-receipt-accept.sql asserts they stay gone.
     ('partner_receipt_submission_record(no company)',
      $q$SELECT partner_receipt_submission_record(NULL, 'mx', 'x', 'y', '2026-10-07')::text$q$,
      'PPPPPPP', NULL),
-    ('partner_receipt_accept(pending Beleg of A)',
-     $q$SELECT partner_receipt_accept({ref:rpc_receipt_submission}) ->> 'ok'$q$,
-     'PTYYYTT', NULL),
-    ('partner_receipt_reject(pending Beleg of A)',
-     $q$SELECT partner_receipt_reject({ref:rpc_receipt_submission}, 'mx') ->> 'ok'$q$,
-     'PTYYYTT', NULL),
 
     -- The doorbell's resolver (20261008170000). A ring carries NO credential
     -- by the owner's decision of 08.10.2026, so this function and its rate
@@ -3766,23 +3707,11 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('partner_submission_claim_driver(confirmed link of A)',         'TY'),
     ('receipt_number_next(my own company)',                          'TY'),
     ('receipt_ocr_allow()',                                          'NY'),
-    -- The reviewer's two: the same platform branch of current_role_permits()
-    -- that lets a support session draw a Belegnummer lets it review a note, and
-    -- the view context is refused by the gate before driver_notes' statement
-    -- trigger is ever reached.
-    ('partner_note_accept(pending submission of A)',                 'TY'),
-    ('partner_note_reject(pending submission of A)',                 'TY'),
     -- The same platform branch of current_role_permits() that lets a support
-    -- session review a note lets it decide a link; a view context is refused by
+    -- session draw a Belegnummer lets it decide a link; a view context is refused by
     -- the gate before the tenant tables' statement trigger is reached.
     ('partner_driver_link_confirm(pending link of A)',               'TY'),
     ('partner_driver_link_reject(pending link of A)',                'TY'),
-    -- The same platform branch of current_role_permits() that lets a support
-    -- session draw a Belegnummer lets it accept a Beleg, which is one call
-    -- writing two rows, both recorded by 3.4c's triggers. A view context is
-    -- refused by that branch before either is written.
-    ('partner_receipt_accept(pending Beleg of A)',                   'TY'),
-    ('partner_receipt_reject(pending Beleg of A)',                   'TY'),
     -- The till and the Gehaltsquittung: refused in BOTH context modes, by the
     -- functions themselves and with their own sentence. A cash movement and a
     -- receipt attest to a physical handover that no platform agent witnessed,
@@ -3825,12 +3754,8 @@ BEGIN
       ('monthly_plan_confirm(execute grant only)'),
       ('partner_submission_claim_driver(confirmed link of A)'),
       ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
-      ('partner_note_accept(pending submission of A)'),
-      ('partner_note_reject(pending submission of A)'),
       ('partner_driver_link_confirm(pending link of A)'),
       ('partner_driver_link_reject(pending link of A)'),
-      ('partner_receipt_accept(pending Beleg of A)'),
-      ('partner_receipt_reject(pending Beleg of A)'),
       ('record_cash_movement(company A)'),
       ('issue_salary_cash_receipt(no payment)'),
       ('abrechnung_schedule_preview(a week)')
