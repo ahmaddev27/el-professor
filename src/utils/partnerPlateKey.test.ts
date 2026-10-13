@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { isValidKennzeichen, normalise } from './fahrtenbuchImportParser'
 
 /*
-  `app_private.plate_key` (20261013120000) is the SQL twin of this file's two
+  `app_private.plate_key` (20261013130000) is the SQL twin of this file's two
   functions: it resolves the plate a driver's app sends to one of our cars the
   way FahrtenbuchImportModal.buildCarMatches resolves a plate in an import.
 
