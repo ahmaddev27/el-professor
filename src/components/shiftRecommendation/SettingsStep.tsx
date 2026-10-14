@@ -1,8 +1,10 @@
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, formatEuroCents, formatNumber } from '../ui';
+import type { TranslationKey } from '../../i18n';
 import { useTranslation } from '../../contexts/LanguageContext';
 import type { DemandProfile, SettingsProblem, YearMonth } from '../../utils/shiftRecommendation';
 import type { ReferenceStats } from '../../utils/shiftRecommendationReference';
 import { ReferencePanel } from './ReferencePanel';
+import type { ScenarioField } from '../../utils/shiftRecommendationScenario';
 import {
   BLOCK_CHOICE_KEYS,
   BREAK_CHOICES,
@@ -45,6 +47,8 @@ interface Props {
   thresholdInvalid: boolean;
   /** The target text is not an amount (only matters in 'target' mode). */
   targetInvalid: boolean;
+  /** Scenario fields whose text is not a value; each is marked and the compute button stays off. */
+  scenarioInvalid: readonly ScenarioField[];
   /** What the chosen months look like; null until they are read. */
   reference: ReferenceStats | null;
   /** The month being planned, chosen in step 1. */
@@ -55,6 +59,12 @@ interface Props {
   onCompute: () => void;
 }
 
+const SHARE_FIELDS: { field: ScenarioField; label: TranslationKey; hint: TranslationKey }[] = [
+  { field: 'cancellationText', label: 'shiftrec.scenario.cancel.label', hint: 'shiftrec.scenario.cancel.hint' },
+  { field: 'tipText', label: 'shiftrec.scenario.tip.label', hint: 'shiftrec.scenario.tip.hint' },
+  { field: 'cashText', label: 'shiftrec.scenario.cash.label', hint: 'shiftrec.scenario.cash.hint' },
+];
+
 const HOURS_OF_DAY = Array.from({ length: 24 }, (_, i) => i);
 const EVIDENCE_CHOICES = [1, 2, 3, 4, 5];
 
@@ -63,7 +73,7 @@ export function SettingsStep(props: Props) {
   const { profile } = props;
   const usable = profile !== null && profile.status === 'ok';
   const vehicleCount = profile ? profile.vehicles.filter(v => props.selectedVehicles.has(v.vehicle)).length : 0;
-  const blocked = !usable || props.thresholdInvalid || props.targetInvalid || props.planProblems.length > 0 || vehicleCount === 0;
+  const blocked = !usable || props.thresholdInvalid || props.targetInvalid || props.scenarioInvalid.length > 0 || props.planProblems.length > 0 || vehicleCount === 0;
   const duration = (minutes: number) => t('shiftrec.duration', { value: formatDuration(minutes) });
 
   return (
@@ -252,6 +262,30 @@ export function SettingsStep(props: Props) {
               </Field>
             </div>
           </details>
+
+          <fieldset className="grid grid-cols-1 gap-4 rounded-surface border border-line bg-raised p-3">
+            <legend className="px-1 text-sm font-semibold text-fg">{t('shiftrec.scenario.title')}</legend>
+            <p className="text-[13px] text-fg-subtle">{t('shiftrec.scenario.intro')}</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                label={t('shiftrec.scenario.trips.label')}
+                hint={t('shiftrec.scenario.trips.hint')}
+                error={props.scenarioInvalid.includes('targetTripsText') ? t('shiftrec.scenario.trips.invalid') : undefined}
+              >
+                <Input inputMode="numeric" value={props.form.targetTripsText} onChange={e => props.onForm({ targetTripsText: e.target.value })} className="tabular-nums" />
+              </Field>
+              {SHARE_FIELDS.map(({ field, label, hint }) => (
+                <Field
+                  key={field}
+                  label={t(label)}
+                  hint={t(hint)}
+                  error={props.scenarioInvalid.includes(field) ? t('shiftrec.scenario.share.invalid') : undefined}
+                >
+                  <Input inputMode="decimal" value={props.form[field]} onChange={e => props.onForm({ [field]: e.target.value })} className="tabular-nums" />
+                </Field>
+              ))}
+            </div>
+          </fieldset>
 
           {props.planProblems.length > 0 ? (
             <Alert tone="caution">

@@ -103,6 +103,7 @@ describe('column picker boundary', () => {
       'roles',
       'salaries',
       'shiftRecommendation',
+      'shiftRecommendationDaily',
       'stundennachweisArchive',
       'users',
       'werkstatt',

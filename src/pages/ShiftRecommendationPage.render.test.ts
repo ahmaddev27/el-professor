@@ -130,7 +130,7 @@ describe('ShiftRecommendationPage', () => {
     // padding itself.
     expect(screen).toContain('Ziel nicht genau getroffen');
     expect(screen).toContain('Die nächste Stufe');
-    expect(screen).toContain('0 Schichten');
+    expect(screen).toContain('Blöcke (Schichten)0');
 
     await act(async () => { button(renderer.root, 'Diesen Plan zeigen').props.onClick(); });
     await settle();
