@@ -23,6 +23,7 @@ import {
   type TargetPlan,
   type YearMonth,
 } from '../utils/shiftRecommendation';
+import { defaultScenarioTexts, readScenario, type Scenario } from '../utils/shiftRecommendationScenario';
 import { referenceStats, type ReferenceStats, type ReferenceTripRow } from '../utils/shiftRecommendationReference';
 import {
   attempt,
@@ -69,6 +70,8 @@ interface Result {
   profile: DemandProfile;
   /** Set when the month was planned towards a revenue target. */
   targetPlan: TargetPlan | null;
+  /** What the operator entered beside the revenue target; the plan itself never reads it. */
+  scenario: Scenario;
 }
 
 const DEFAULT_ADVANCED: AdvancedSettings = {
@@ -203,7 +206,10 @@ export default function ShiftRecommendationPage() {
     }
     setBlockGap(gap);
     setLoaded(history);
-    setForm(defaultPlanForm(built.value.perMonth.revenuePerHourCents, built.value.perMonth.revenueCents));
+    setForm({
+      ...defaultPlanForm(built.value.perMonth.revenuePerHourCents, built.value.perMonth.revenueCents),
+      ...defaultScenarioTexts(history.reference),
+    });
     setVehicleSelection(new Set(built.value.vehicles.map(v => v.vehicle)));
     setResult(null);
     setComputeFailed(false);
@@ -215,17 +221,19 @@ export default function ShiftRecommendationPage() {
     if (!loaded || !profile) return;
     const vehicles = profile.vehicles.map(v => v.vehicle).filter(v => vehicleSelection.has(v));
     const targetCents = targetRevenueCents(form.targetText);
+    const { scenario, invalid } = readScenario(form, loaded.reference);
+    if (invalid.length > 0) return;
     if (form.mode === 'target') {
       if (targetCents === null) return;
       const outcome = attempt(() =>
         planForTarget({ profile, target: loaded.target, vehicles, holidays, settings: targetPlanSettingsFromForm(form), targetRevenueCents: targetCents }),
       );
-      finishCompute(outcome.ok ? { recommendation: outcome.value.recommendation, profile, targetPlan: outcome.value } : null);
+      finishCompute(outcome.ok ? { recommendation: outcome.value.recommendation, profile, targetPlan: outcome.value, scenario } : null);
       return;
     }
     if (!planSettings) return;
     const outcome = attempt(() => recommendShifts({ profile, target: loaded.target, vehicles, holidays, settings: planSettings }));
-    finishCompute(outcome.ok ? { recommendation: outcome.value, profile, targetPlan: null } : null);
+    finishCompute(outcome.ok ? { recommendation: outcome.value, profile, targetPlan: null, scenario } : null);
   };
 
   const finishCompute = (next: Result | null) => {
@@ -305,6 +313,7 @@ export default function ShiftRecommendationPage() {
           onToggleVehicle={vehicle => setVehicleSelection(current => toggle(current, vehicle))}
           thresholdInvalid={form.mode === 'threshold' && planSettings === null}
           targetInvalid={form.mode === 'target' && targetRevenueCents(form.targetText) === null}
+          scenarioInvalid={readScenario(form, loaded?.reference ?? null).invalid}
           reference={loaded?.reference ?? null}
           targetMonth={loaded?.target ?? null}
           planProblems={planProblems}
@@ -314,7 +323,7 @@ export default function ShiftRecommendationPage() {
         />
       ) : null}
       {step === 3 && result ? (
-        <ResultStep profile={result.profile} recommendation={result.recommendation} targetPlan={result.targetPlan}
+        <ResultStep profile={result.profile} recommendation={result.recommendation} targetPlan={result.targetPlan} scenario={result.scenario}
           onSwapTarget={() => setResult(current => swapResult(current))}
           onBack={() => setStep(2)} />
       ) : null}

@@ -17,6 +17,7 @@ import type { ExportOptions } from './excelExport';
 import { getHolidaysForYear } from './germanHolidays';
 import { parseGermanAmountToCents } from './money';
 import { plannableMonths, type PlanImportRow } from './monthlyPlanScreens';
+import { EMPTY_SCENARIO_TEXTS, type ScenarioTexts } from './shiftRecommendationScenario';
 import {
   DEFAULT_PLAN_SETTINGS,
   type Confidence,
@@ -152,7 +153,7 @@ export const MAX_SHIFTS_CHOICES = [1, 2, 3, 4] as const;
 export const SLOT_CHOICES = [15, 30, 60] as const;
 
 /** The plan form as the inputs hold it; the threshold stays text so a half-typed "25," survives. */
-export interface PlanForm {
+export interface PlanForm extends ScenarioTexts {
   /** How the month is planned: towards a revenue target (the threshold is searched) or from a threshold the operator names. */
   mode: PlanMode;
   /** Euro text, as typed; used in 'target' mode. */
@@ -208,6 +209,7 @@ export function defaultPlanForm(revenuePerHourCents: number | null, monthlyReven
     mode: 'target',
     targetText: defaultTargetText(monthlyRevenueCents),
     thresholdText: defaultThresholdText(revenuePerHourCents),
+    ...EMPTY_SCENARIO_TEXTS,
     ...DEFAULT_PLAN_SETTINGS,
   };
 }
