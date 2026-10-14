@@ -18,7 +18,7 @@ import {
   PageHeader,
 } from '../components/ui';
 import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildBelegeExportOptions, type ReceiptExportFilters } from '../utils/belegeExport';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { generateReceiptPdf } from '../utils/receiptPdf';
@@ -35,6 +35,7 @@ interface ConfirmModalState {
 
 const BelegePage: React.FC = () => {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const { user } = useAuth();
   // The company whose data this screen queries, which is the opened one
   // inside a platform context and the membership otherwise (plan 3.4b).
@@ -225,7 +226,7 @@ const BelegePage: React.FC = () => {
     Beleg the company had ever entered and stamped it "Gefilterte Auswahl".
   */
   const handleExportExcel = (rows: Receipt[], filters: ReceiptExportFilters) => {
-    exportTableToExcel(buildBelegeExportOptions(rows, filters, t));
+    exportPicker.table('belege', buildBelegeExportOptions(rows, filters, t));
   };
 
   const handleDownloadPdf = (filtered: Receipt[], filterInfo: PdfFilterInfo) => {

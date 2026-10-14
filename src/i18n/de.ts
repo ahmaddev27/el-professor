@@ -6505,6 +6505,16 @@ export const de = {
   'inc.uber.period.weekListLabel':  'Uber-Wochen, neueste zuerst',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'export.columns.confirm':     'Exportieren',
+  'export.columns.count':       '{selected} von {total} Spalten',
+  'export.columns.description': 'Nur die angehakten Spalten kommen in die Datei, in dieser Reihenfolge.',
+  'export.columns.empty':       'Wähle mindestens eine Spalte aus, sonst bliebe die Datei leer.',
+  'export.columns.emptySheet':  'Wähle für jedes Blatt mindestens eine Spalte aus. Ohne Auswahl: {sheet}.',
+  'export.columns.moveDown':    '{column} nach unten',
+  'export.columns.moveUp':      '{column} nach oben',
+  'export.columns.selectAll':   'Alle',
+  'export.columns.selectNone':  'Keine',
+  'export.columns.title':       'Spalten für den Export wählen',
   'inc.uber.replace.body':       'Für diese Fahrer und Wochen liegt schon ein Uber-Import vor. Wenn du ersetzt, wird der bisherige Uber-Import dieser Wochen gelöscht und durch die neuen Beträge ersetzt. Von Hand eingetragene Einträge werden nicht angefasst.',
   'inc.uber.replace.choice':     'Bisherigen Uber-Import dieser Wochen ersetzen',
   'inc.uber.replace.done.one':   '{count} früherer Uber-Eintrag wurde ersetzt.',

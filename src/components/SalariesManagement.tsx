@@ -22,7 +22,8 @@ import SalaryDetailsModal from './SalaryDetailsModal';
 import SalaryPeriodsModal from './SalaryPeriodsModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
-import { exportSalariesToExcel } from '../utils/excelExport';
+import { buildSalarySheets, salaryExportFilename } from '../utils/listExportSheets';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { findOverlappingSalaryPeriods, groupSalaryPeriodsByDriver } from '../utils/salaryPeriodOverlap';
 import { formatSalaryDue, formatStoredDate, salaryRowWriteRefusal } from '../utils/salaryRowEdit';
@@ -59,6 +60,7 @@ interface SalariesManagementProps {
 
 const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [salaries, setSalaries] = useState<Salary[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [calculations, setCalculations] = useState<SalaryCalculation[]>([]);
@@ -327,8 +329,13 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       warning(t('sal.export.noDataTitle'), t('sal.export.noDataMessage'));
       return;
     }
-    exportSalariesToExcel(calculations, periodStart, periodEnd);
-    success(t('sal.export.successTitle'), t('sal.export.successMessage'));
+    exportPicker.sheets(
+      'salaries',
+      salaryExportFilename(periodStart, periodEnd),
+      buildSalarySheets(calculations, periodStart, periodEnd),
+      // The toast waits for the file: the chooser can still be cancelled.
+      () => success(t('sal.export.successTitle'), t('sal.export.successMessage')),
+    );
   };
 
   const openStatusModal = (salary: SalaryCalculation, newStatus: 'paid' | 'unpaid') => {

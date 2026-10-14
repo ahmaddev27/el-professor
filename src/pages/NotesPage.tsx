@@ -3,7 +3,8 @@ import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, Che
 import { Alert, Button } from '../components/ui';
 import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
 import ConfirmationModal from '../components/ConfirmationModal';
-import { exportSheetsToExcel, type ExportOptions } from '../utils/excelExport';
+import type { ExportOptions } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
@@ -194,6 +195,7 @@ function noteDateLabel(note: Note, t: (k: TranslationKey, vars?: Record<string, 
 
 export function NotesPage() {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [notes, setNotes]           = useState<Note[]>([]);
   const [drivers, setDrivers]       = useState<Driver[]>([]);
   const [cars, setCars]             = useState<Car[]>([]);
@@ -587,7 +589,8 @@ export function NotesPage() {
       };
 
       const today = format(new Date(), 'yyyy-MM-dd');
-      exportSheetsToExcel(
+      exportPicker.sheets(
+        'notes',
         `Notizen_${today}.xlsx`,
         // The exclusions sheet is dropped when it would be empty, as it always
         // was: an empty sheet in a workbook reads as "nothing is excluded", which

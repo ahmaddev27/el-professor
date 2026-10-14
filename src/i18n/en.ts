@@ -6449,6 +6449,16 @@ export const en: PartialDictionary = {
   'inc.uber.period.weekListLabel':  'Uber weeks, newest first',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'export.columns.confirm':     'Export',
+  'export.columns.count':       '{selected} of {total} columns',
+  'export.columns.description': 'Only the ticked columns go into the file, in this order.',
+  'export.columns.empty':       'Choose at least one column, or the file would be empty.',
+  'export.columns.emptySheet':  'Choose at least one column for every sheet. Nothing chosen for: {sheet}.',
+  'export.columns.moveDown':    'Move {column} down',
+  'export.columns.moveUp':      'Move {column} up',
+  'export.columns.selectAll':   'All',
+  'export.columns.selectNone':  'None',
+  'export.columns.title':       'Choose the columns to export',
   'inc.uber.replace.body':       'An Uber import already exists for these drivers and weeks. If you replace it, the previous Uber import for these weeks is deleted and replaced by the new amounts. Entries made by hand are not touched.',
   'inc.uber.replace.choice':     'Replace the previous Uber import for these weeks',
   'inc.uber.replace.done.one':   '{count} earlier Uber entry was replaced.',

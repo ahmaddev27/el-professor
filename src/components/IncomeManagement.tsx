@@ -7,7 +7,8 @@ import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
 import { handleDatabaseError } from '../utils/errorHandler';
-import { exportIncomeToExcel } from '../utils/excelExport';
+import { buildIncomeSheets } from '../utils/listExportSheets';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { tallyTrips } from '../utils/incomeTrips';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
 import UberEarningsImportModal from './UberEarningsImportModal';
@@ -122,6 +123,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { t, tPlural } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
 
   useEffect(() => {
@@ -258,8 +260,13 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     // exportIncomeToExcel hard-codes its headers inside excelExport.ts rather
     // than taking them from here, so this workbook does not follow the UI
     // language. Nothing to pass; nothing to translate at this call site.
-    exportIncomeToExcel(filteredIncomes, fromDate, toDate);
-    success(t('inc.exportSuccess'), t('inc.exportSuccessBody'));
+    exportPicker.sheets(
+      'income',
+      'umsaetze',
+      buildIncomeSheets(filteredIncomes, fromDate, toDate),
+      // The toast waits for the file: the chooser can still be cancelled.
+      () => success(t('inc.exportSuccess'), t('inc.exportSuccessBody')),
+    );
   };
 
   const parseBatchAmount = (val: string) => {

@@ -6,7 +6,7 @@ import { usePlan } from '../contexts/PlanContext';
 import CarModal from './CarModal';
 import type { CarWithDrivers, TuevInfo, TuevStatus } from '../types/car';
 import { getTuevStatus } from '../types/car';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -123,6 +123,7 @@ export default function CarsManagement() {
   const { showToast } = useToast();
   const { planState } = usePlan();
   const { t, tPlural } = useTranslation();
+  const exportPicker = useColumnPickerExport();
 
   useEffect(() => {
     loadCars();
@@ -228,7 +229,7 @@ export default function CarsManagement() {
   };
 
   const handleExport = () => {
-    exportTableToExcel({
+    exportPicker.table('cars', {
       filename: `fahrzeuge_${new Date().toISOString().split('T')[0]}`,
       sheetTitle: t('fleet.carsSheetTitle'),
       moduleName: t('nav.cars'),

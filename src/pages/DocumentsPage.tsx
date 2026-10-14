@@ -12,11 +12,12 @@ import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachwei
 // function and cannot drift apart; both bodies are unchanged and every call
 // site below still reads exactly as it did.
 import {
-  exportArchiveMonthToExcel,
+  buildArchiveExportOptions,
   minsToDecimal,
   totalMins,
   type ArchiveExportLabels,
 } from '../utils/stundennachweisArchiveExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { tripAnalysisLinkShown } from '../components/navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -135,6 +136,7 @@ const DocumentsPage: React.FC = () => {
   const navigate = useNavigate();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { t, tPlural } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
   // Bumped when the dialog issues a receipt or attaches a signed copy, so the list reloads.
@@ -389,14 +391,14 @@ const DocumentsPage: React.FC = () => {
       // since #152, because that cell is the row's label and nothing else.
       totalsRow:           t('doc.archiveExportTotalsLine', { count: group.records.length }),
     };
-    exportArchiveMonthToExcel({
+    exportPicker.table('stundennachweisArchive', buildArchiveExportOptions({
       month: group.month,
       year: group.year,
       records: group.records,
       totalMinutes: group.totalMins,
       totalGross: group.totalGross,
       labels,
-    });
+    }));
   };
 
   // ── Presentation (phase 5) ────────────────────────────────────────────────

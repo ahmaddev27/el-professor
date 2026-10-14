@@ -6,7 +6,7 @@ import { getWeeksOfMonth, getWeekNumberForDate, type WeekOfMonth } from '../util
 import WerkstattCheckModal from '../components/WerkstattCheckModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { format } from 'date-fns';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
@@ -56,6 +56,7 @@ export function resolveWerkstattWeek(anchor: Date, weekNumber: number): WeekOfMo
 
 export default function WerkstattPage() {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [checks, setChecks] = useState<WerkstattCheck[]>([]);
   const [filteredChecks, setFilteredChecks] = useState<WerkstattCheck[]>([]);
   const [loading, setLoading] = useState(true);
@@ -215,7 +216,7 @@ export default function WerkstattPage() {
       filters.push(t('werkstatt.filterStatus', { value: labels[statusFilter] ?? statusFilter }));
     }
 
-    exportTableToExcel({
+    exportPicker.table('werkstatt', {
       filename: `werkstatt_${format(selectedMonth, 'yyyy-MM')}_Woche${selectedWeek}`,
       sheetTitle: t('werkstatt.checksTitle'),
       moduleName: t('nav.werkstatt'),

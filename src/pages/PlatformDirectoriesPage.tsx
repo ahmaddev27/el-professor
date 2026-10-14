@@ -20,7 +20,7 @@ import {
 } from '../lib/platformReadModels';
 import { fetchCompanies, fetchDrivers, fetchUsers, fetchVehicles } from '../lib/platformDirectoryClient';
 import { EMPTY_CELL, deCount, deDate } from '../lib/platformFormat';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import {
   buildDirectoryExport,
   type DirectoryExportLabels,
@@ -152,6 +152,7 @@ type AnyRow = PlatformVehicleRow | PlatformDriverRow | PlatformUserRow;
 const PlatformDirectoriesPage: React.FC = () => {
   const { platformCan } = useSuperAdmin();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const { showToast } = useToast();
   const exportChrome = useExportChrome();
   const canRead = platformCan('business.read');
@@ -306,7 +307,8 @@ const PlatformDirectoriesPage: React.FC = () => {
       // Three explicit calls: the builder's input is a discriminated union, and
       // widening it to pass `tab` as a variable would need the one cast this
       // whole seam is written without.
-      exportTableToExcel(
+      exportPicker.table(
+        `platformDirectory:${tab}`,
         tab === 'vehicles'
           ? buildDirectoryExport({ ...shared, tab: 'vehicles', rows: rows as PlatformVehicleRow[] })
           : tab === 'drivers'

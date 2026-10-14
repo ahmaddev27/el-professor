@@ -3,7 +3,7 @@ import { Info } from 'lucide-react';
 import { Alert, Button, KpiCard, formatEuroCents, formatNumber } from '../ui';
 import { useTranslation } from '../../contexts/LanguageContext';
 import type { TranslationKey } from '../../i18n';
-import { exportTableToExcel } from '../../utils/excelExport';
+import { useColumnPickerExport } from '../../contexts/ExportPickerContext';
 import type { DemandProfile, ShiftRecommendation } from '../../utils/shiftRecommendation';
 import {
   CONFIDENCE_KEYS,
@@ -34,6 +34,7 @@ const STATUS_KEYS: Record<Exclude<ShiftRecommendation['status'], 'ok'>, Translat
 /** Step 3. Every figure here is an estimate and is labelled so; nothing is saved. */
 export function ResultStep({ profile, recommendation, onBack }: Props) {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [vehicleFilter, setVehicleFilter] = useState('');
   const rows = useMemo(() => shiftRows(recommendation.shifts), [recommendation]);
   const vehicles = useMemo(() => recommendation.perVehicle.map(v => v.vehicle), [recommendation]);
@@ -59,7 +60,7 @@ export function ResultStep({ profile, recommendation, onBack }: Props) {
       confidences: { high: t(CONFIDENCE_KEYS.high), medium: t(CONFIDENCE_KEYS.medium), low: t(CONFIDENCE_KEYS.low) },
       holiday: t('shiftrec.shifts.holiday'),
     };
-    exportTableToExcel(shiftExportOptions(visible, recommendation.target, labels, vehicleFilter ? [vehicleFilter] : []));
+    exportPicker.table('shiftRecommendation', shiftExportOptions(visible, recommendation.target, labels, vehicleFilter ? [vehicleFilter] : []));
   };
 
   return (
