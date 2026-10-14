@@ -6485,4 +6485,12 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'inc.uber.err.partner.detail': 'Reidey hat die Anfrage abgelehnt ({reason}): {detail} Es wurde nichts übernommen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.monthHeading.one':   '{month} {year} · {count} Woche',
+  'inc.uber.monthHeading.other': '{month} {year} · {count} Wochen',
+  'inc.uber.monthWeeks':         'Enthält: {weeks}',
+  'inc.uber.tab.monthly':        'Monatlich',
+  'inc.uber.tab.weekly':         'Wöchentlich',
+  'inc.uber.tabsLabel':          'Ansicht der Vorschau',
 } as const;

@@ -17,6 +17,11 @@
  *
  * ## Dates are ISO strings and are never put through a `Date`
  *
+ * A date here names a calendar day, not a midnight: Uber's week is Monday 04:00
+ * to the next Monday 04:00 Europe/Berlin, and a segment `from`..`to` covers
+ * 04:00 on `from` to 04:00 on the day after `to`. Reidey applies the offset;
+ * nothing in this module does.
+ *
  * The business week is Monday to Sunday, and a weekday computed in the local
  * zone shifts on a DST night. Everything here is calendar arithmetic on
  * `YYYY-MM-DD` through `Date.UTC`, which has no daylight saving.
@@ -131,6 +136,13 @@ export const MAX_RANGE_DAYS = 31;
 /**
  * Cuts `from`..`to` (inclusive) at every Sunday, so each piece lies inside one
  * business week. The first and last piece may be shorter than a week.
+ *
+ * The dates are calendar days, but they are NOT midnights. Uber's week runs
+ * Monday 04:00 to the next Monday 04:00 (Europe/Berlin), so a segment
+ * `from`..`to` means "from 04:00 on `from` until 04:00 on the day AFTER `to`".
+ * The ISO dates stay as they are because Reidey takes `date_format:Y-m-d`;
+ * Reidey applies the 04:00 offset on its side. This function does only
+ * calendar arithmetic and knows nothing of the hour.
  */
 export function splitIntoBusinessWeeks(from: string, to: string): ParseOutcome<WeekSegment[]> {
   if (!isIsoDate(from) || !isIsoDate(to)) return { ok: false, problem: 'invalid_range' };

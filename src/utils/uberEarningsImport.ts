@@ -31,6 +31,7 @@
  * writes OUR `drivers` row's name. A name from Reidey is display text only.
  */
 import {
+  addDaysIso,
   centsToDecimal,
   readUnmatched,
   type UnmatchedEarner,
@@ -87,6 +88,27 @@ function localDate(iso: string): Date {
 /** `Woche N`, the screen's own week index (1-based within the business month). */
 export function weekNumberOf(segment: WeekSegment): number {
   return getWeekNumberForDate(localDate(segment.monday));
+}
+
+/** Uber's reporting week starts and ends at 04:00 Europe/Berlin, not at midnight. */
+export const UBER_WEEK_START_HOUR = 4;
+
+function germanDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+/**
+ * Uber's own window for a segment, as the screen prints it in brackets:
+ * `[05.10.2026 04:00 – 12.10.2026 04:00]`. The end is the day AFTER the
+ * segment's last day, because a segment `from`..`to` means "04:00 on `from` to
+ * 04:00 on the day after `to`". For a whole week that is Monday to the
+ * following Monday; a first or last piece cut by the owner's range ends sooner.
+ * Pure calendar arithmetic on ISO dates, so DST nights cannot move it.
+ */
+export function uberWindowLabel(segment: WeekSegment): string {
+  const time = `${String(UBER_WEEK_START_HOUR).padStart(2, '0')}:00`;
+  return `[${germanDate(segment.from)} ${time} – ${germanDate(addDaysIso(segment.to, 1))} ${time}]`;
 }
 
 /** The text written to `income.description`; `Woche \d+` must stay first. */
@@ -317,4 +339,66 @@ export function findExistingIncome(
     }
   }
   return found;
+}
+
+/** One business month of the import: its weeks and the figures summed over them. */
+export interface MonthGroup {
+  /** The month containing the weeks' Mondays. */
+  year: number;
+  /** 1-12. */
+  month: number;
+  weeks: Array<{ segment: WeekSegment; weekNumber: number; drivers: DriverPreview[] }>;
+  /** One line per driver, the sum of exactly the per-week lines in `weeks`. */
+  drivers: DriverPreview[];
+}
+
+/** Adds `line` onto `into` (same driver). The one place a preview line is summed. */
+function addPreview(into: DriverPreview, line: DriverPreview): void {
+  into.fareCents += line.fareCents;
+  into.promotionCents += line.promotionCents;
+  into.tipsCents += line.tipsCents;
+  into.cashCents += line.cashCents;
+  if (line.trips !== null) into.trips = (into.trips ?? 0) + line.trips;
+  into.differenceCents += line.differenceCents;
+  into.hasDifference = into.hasDifference || line.hasDifference;
+  into.rowCount += line.rowCount;
+}
+
+/** Sums per-driver lines of several weeks; the monthly view is built only from this. */
+export function sumPreviews(lines: readonly DriverPreview[]): DriverPreview[] {
+  const byDriver = new Map<string, DriverPreview>();
+  for (const line of lines) {
+    const known = byDriver.get(line.externalDriverId);
+    if (known) addPreview(known, line);
+    else byDriver.set(line.externalDriverId, { ...line });
+  }
+  return [...byDriver.values()];
+}
+
+/**
+ * Groups the weeks by business month (the month of the week's MONDAY, which is
+ * what gives Uber's four or five weeks a month). Each month's driver lines are
+ * `sumPreviews` of the very per-week lines returned beside them, so the two
+ * views cannot drift. Months and weeks come out in date order.
+ */
+export function groupByBusinessMonth(
+  weeks: readonly WeekEarnings[], links: DriverLinks,
+): MonthGroup[] {
+  const months = new Map<string, MonthGroup>();
+  const ordered = [...weeks].sort((a, b) => a.segment.from.localeCompare(b.segment.from));
+  for (const week of ordered) {
+    const [year, month] = week.segment.monday.split('-').map(Number);
+    const key = `${year}-${month}`;
+    const group = months.get(key) ?? { year, month, weeks: [], drivers: [] };
+    group.weeks.push({
+      segment: week.segment,
+      weekNumber: weekNumberOf(week.segment),
+      drivers: summarizeByDriver([week], links),
+    });
+    months.set(key, group);
+  }
+  for (const group of months.values()) {
+    group.drivers = sumPreviews(group.weeks.flatMap(w => w.drivers));
+  }
+  return [...months.values()];
 }

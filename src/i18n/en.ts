@@ -6429,4 +6429,12 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'inc.uber.err.partner.detail': 'Reidey refused the request ({reason}): {detail} Nothing was taken over.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.monthHeading.one':   '{month} {year} · {count} week',
+  'inc.uber.monthHeading.other': '{month} {year} · {count} weeks',
+  'inc.uber.monthWeeks':         'Contains: {weeks}',
+  'inc.uber.tab.monthly':        'Monthly',
+  'inc.uber.tab.weekly':         'Weekly',
+  'inc.uber.tabsLabel':          'Preview view',
 };
