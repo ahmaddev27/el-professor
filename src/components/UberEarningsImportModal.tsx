@@ -11,8 +11,9 @@ import {
   buildImportRows,
   findExistingIncome,
   findUnlinked,
+  groupByBusinessMonth,
   readPullAnswer,
-  summarizeByDriver,
+  uberWindowLabel,
   weekNumberOf,
   type DriverLinks,
   type ExistingIncome,
@@ -35,6 +36,10 @@ import {
   formatEuroCents,
   formatNumber,
   Input,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   type DataTableColumn,
 } from './ui';
 
@@ -44,6 +49,8 @@ interface Props {
   /** Called after the rows are written, so the screen reloads its list. */
   onImported: () => void;
 }
+
+type PreviewView = 'weekly' | 'monthly';
 
 type Stage = 'range' | 'pulling' | 'preview' | 'importing';
 
@@ -125,6 +132,12 @@ async function failureReason(error: unknown): Promise<string | null> {
   }
 }
 
+const MONTH_KEYS: readonly TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march', 'doc.month.april',
+  'doc.month.may', 'doc.month.june', 'doc.month.july', 'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
+];
+
 function lastBusinessWeek(): { from: string; to: string } {
   const monday = startOfWeek(subWeeks(new Date(), 1), { weekStartsOn: 1 });
   return { from: format(monday, 'yyyy-MM-dd'), to: format(addDays(monday, 6), 'yyyy-MM-dd') };
@@ -139,6 +152,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const [stage, setStage] = useState<Stage>('range');
   const [pulled, setPulled] = useState<Pulled | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [view, setView] = useState<PreviewView>('weekly');
   // A pull still in flight when the dialog closes must not open a preview later.
   const generation = useRef(0);
 
@@ -158,7 +172,10 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const manualWeeks = existingByWeek.filter(e => e.manualCount > 0);
   const importedWeeks = existingByWeek.filter(e => e.importedCount > 0);
   const blocking = useMemo(() => blockingEarners(unlinked, pulled?.unmatched ?? []), [unlinked, pulled]);
-  const preview = useMemo(() => (pulled ? summarizeByDriver(pulled.weeks, pulled.links) : []), [pulled]);
+  // The weekly view is read OUT of the monthly grouping, so the two can only
+  // ever show the same per-week figures.
+  const months = useMemo(() => (pulled ? groupByBusinessMonth(pulled.weeks, pulled.links) : []), [pulled]);
+  const weekly = useMemo(() => months.flatMap(m => m.weeks), [months]);
 
   const close = () => {
     generation.current += 1;
@@ -172,6 +189,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     const mine = ++generation.current;
     setStage('pulling');
     setProblem(null);
+    setView('weekly');
     try {
       const { data, error } = await supabase.functions.invoke('uber-earnings-pull', { body: { from, to } });
       if (mine !== generation.current) return;
@@ -234,7 +252,6 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
 
   // ── Presentation ──────────────────────────────────────────────────────────
 
-  const sum = (pick: (row: DriverPreview) => number) => preview.reduce((acc, row) => acc + pick(row), 0);
   const money = (cents: number) => <span className="tabular-nums">{formatEuroCents(cents)}</span>;
 
   const columns: DataTableColumn<DriverPreview>[] = [
@@ -295,7 +312,30 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     to: formatDate(e.segment.to),
     count: String(count),
   });
-  const weekLines = pulled?.weeks.map(w => `${t('inc.weekLabel', { week: weekNumberOf(w.segment) })}: ${formatDate(w.segment.from)} – ${formatDate(w.segment.to)}`) ?? [];
+  const weekHeading = (segment: WeekEarnings['segment'], week: number) =>
+    `${t('inc.weekLabel', { week })} ${uberWindowLabel(segment)}`;
+  const monthName = (month: number) => t(MONTH_KEYS[month - 1]!);
+
+  const previewTable = (rows: DriverPreview[], caption: string) => {
+    const sum = (pick: (row: DriverPreview) => number) => rows.reduce((acc, row) => acc + pick(row), 0);
+    return (
+      <DataTable
+        caption={caption}
+        columns={columns}
+        rows={rows}
+        getRowId={row => row.externalDriverId}
+        density="compact"
+        totals={{
+          driver: t('inc.sum'),
+          fare: money(sum(r => r.fareCents)),
+          promotion: money(sum(r => r.promotionCents)),
+          tips: money(sum(r => r.tipsCents)),
+          cash: money(sum(r => r.cashCents)),
+          difference: money(sum(r => r.differenceCents)),
+        }}
+      />
+    );
+  };
   const busy = stage === 'pulling' || stage === 'importing';
   const canConfirm = stage === 'preview' && rows.length > 0 && blocking.length === 0 && importedWeeks.length === 0;
 
@@ -331,8 +371,6 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
 
         {(stage === 'preview' || stage === 'importing') && pulled && (
           <div className="grid grid-cols-1 gap-4">
-            <p className="text-sm text-fg-muted">{weekLines.join(' · ')}</p>
-
             {blocking.length > 0 && (
               <Alert tone="critical" title={t('inc.uber.blockedTitle')}>
                 <p>{t('inc.uber.blockedBody')}</p>
@@ -378,21 +416,40 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
               <Alert tone="caution">{t('inc.uber.nothingToImport')}</Alert>
             )}
 
-            <DataTable
-              caption={t('inc.uber.previewCaption')}
-              columns={columns}
-              rows={preview}
-              getRowId={row => row.externalDriverId}
-              density="compact"
-              totals={{
-                driver: t('inc.sum'),
-                fare: money(sum(r => r.fareCents)),
-                promotion: money(sum(r => r.promotionCents)),
-                tips: money(sum(r => r.tipsCents)),
-                cash: money(sum(r => r.cashCents)),
-                difference: money(sum(r => r.differenceCents)),
-              }}
-            />
+            <Tabs value={view} onValueChange={value => setView(value as PreviewView)}>
+              <TabsList aria-label={t('inc.uber.tabsLabel')}>
+                <TabsTrigger value="weekly">{t('inc.uber.tab.weekly')}</TabsTrigger>
+                <TabsTrigger value="monthly">{t('inc.uber.tab.monthly')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="weekly" className="grid grid-cols-1 gap-6 pt-4">
+                {weekly.map(w => (
+                  <section key={w.segment.from} className="grid grid-cols-1 gap-2">
+                    <h3 className="text-sm font-semibold text-fg">{weekHeading(w.segment, w.weekNumber)}</h3>
+                    {previewTable(w.drivers, weekHeading(w.segment, w.weekNumber))}
+                  </section>
+                ))}
+              </TabsContent>
+              <TabsContent value="monthly" className="grid grid-cols-1 gap-6 pt-4">
+                {months.map(m => {
+                  const heading = tPlural(
+                    { one: 'inc.uber.monthHeading.one', other: 'inc.uber.monthHeading.other' },
+                    m.weeks.length,
+                    { month: monthName(m.month), year: String(m.year) },
+                  );
+                  return (
+                    <section key={`${m.year}-${m.month}`} className="grid grid-cols-1 gap-2">
+                      <h3 className="text-sm font-semibold text-fg">{heading}</h3>
+                      <p className="text-xs text-fg-subtle">
+                        {t('inc.uber.monthWeeks', {
+                          weeks: m.weeks.map(w => weekHeading(w.segment, w.weekNumber)).join(' · '),
+                        })}
+                      </p>
+                      {previewTable(m.drivers, heading)}
+                    </section>
+                  );
+                })}
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addDaysIso,
   centsToDecimal,
   isWeekSegment,
   mondayOf,
@@ -12,7 +13,9 @@ import {
   buildImportRows,
   findExistingIncome,
   findUnlinked,
+  groupByBusinessMonth,
   importDescription,
+  uberWindowLabel,
   readPullAnswer,
   summarizeByDriver,
   weekNumberOf,
@@ -294,5 +297,76 @@ describe('findExistingIncome: typed rows warn, imported rows refuse', () => {
     const idle = week('2026-10-06', '2026-10-11', '2026-10-05',
       [driverWire({ fare: '0.00', tips: '0.00', cash: '0.00', trips: null })]);
     expect(findExistingIncome([idle], links, [row()])).toEqual([]);
+  });
+});
+
+describe('uberWindowLabel: the window runs 04:00 to 04:00', () => {
+  const week = (monday: string) => ({ from: monday, to: addDaysIso(monday, 6), monday });
+  it('ends on the FOLLOWING Monday, not the Sunday', () => {
+    expect(uberWindowLabel(week('2026-10-05'))).toBe('[05.10.2026 04:00 – 12.10.2026 04:00]');
+  });
+  it('crosses a month end', () => {
+    expect(uberWindowLabel(week('2026-09-28'))).toBe('[28.09.2026 04:00 – 05.10.2026 04:00]');
+  });
+  it('crosses a year end', () => {
+    expect(uberWindowLabel(week('2026-12-28'))).toBe('[28.12.2026 04:00 – 04.01.2027 04:00]');
+  });
+  it('a piece cut by the chosen range ends the day after its own last day', () => {
+    expect(uberWindowLabel({ from: '2026-10-07', to: '2026-10-11', monday: '2026-10-05' }))
+      .toBe('[07.10.2026 04:00 – 12.10.2026 04:00]');
+  });
+});
+
+describe('groupByBusinessMonth', () => {
+  const links = { '1': { driverId: 'd1', driverName: 'Ahmed' } };
+  const driver = (id: string, fare: number, trips: number | null = 1, difference = 0) => ({
+    externalDriverId: id, uberDriverUuid: null, name: `Fahrer ${id}`,
+    fareCents: fare, promotionCents: 10, tipsCents: 5, cashCents: 100,
+    netOutstandingCents: 0, differenceCents: difference, trips,
+  });
+  const weekOf = (monday: string, drivers = [driver('1', 1000), driver('2', 500)]): WeekEarnings => ({
+    segment: { from: monday, to: addDaysIso(monday, 6), monday }, drivers,
+  });
+  const total = (lines: ReadonlyArray<{ fareCents: number; promotionCents: number; tipsCents: number; cashCents: number; differenceCents: number }>) =>
+    lines.reduce((a, l) => a + l.fareCents + l.promotionCents + l.tipsCents + l.cashCents + l.differenceCents, 0);
+
+  it('puts a week in the month of its MONDAY: 4 weeks in October 2026, 5 in November', () => {
+    const mondays = ['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26',
+      '2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23', '2026-11-30'];
+    const groups = groupByBusinessMonth(mondays.map(m => weekOf(m)), links);
+    expect(groups.map(g => [g.year, g.month, g.weeks.length])).toEqual([[2026, 10, 4], [2026, 11, 5]]);
+    expect(groups[0].weeks.map(w => w.weekNumber)).toEqual([1, 2, 3, 4]);
+    expect(groups[1].weeks.map(w => w.weekNumber)).toEqual([1, 2, 3, 4, 5]);
+  });
+  it('a week crossing the month end stays with the month of its Monday', () => {
+    const groups = groupByBusinessMonth([weekOf('2026-09-28'), weekOf('2026-10-05')], links);
+    expect(groups.map(g => [g.month, g.weeks.length])).toEqual([[9, 1], [10, 1]]);
+    expect(groups[0].weeks[0].weekNumber).toBe(weekNumberOf(weekOf('2026-09-28').segment));
+  });
+  it('a range starting mid-month yields a first month with fewer weeks and keeps the real numbering', () => {
+    const groups = groupByBusinessMonth([weekOf('2026-10-19'), weekOf('2026-10-26'), weekOf('2026-11-02')], links);
+    expect(groups[0].weeks.map(w => w.weekNumber)).toEqual([3, 4]);
+    expect(groups[1].weeks.map(w => w.weekNumber)).toEqual([1]);
+  });
+  it('the monthly figures are the sum of exactly the weekly ones, and both views total alike', () => {
+    const weeks = ['2026-10-05', '2026-10-12', '2026-11-02'].map((m, i) =>
+      weekOf(m, [driver('1', 1000 + i, 3, i === 1 ? 7 : 0), driver('2', 500 * (i + 1), null)]));
+    const groups = groupByBusinessMonth(weeks, links);
+    const weekly = weeks.flatMap(w => summarizeByDriver([w], links));
+    const monthly = groups.flatMap(g => g.drivers);
+    expect(total(monthly)).toBe(total(weekly));
+    expect(total(monthly)).toBe(total(summarizeByDriver(weeks, links)));
+    for (const g of groups) {
+      expect(g.drivers).toEqual(summarizeByDriver(g.weeks.map(w => weeks.find(x => x.segment.monday === w.segment.monday)!), links));
+    }
+    const october = groups[0].drivers.find(d => d.externalDriverId === '1')!;
+    expect(october.trips).toBe(6);
+    expect(october.hasDifference).toBe(true);
+    expect(groups[0].drivers.find(d => d.externalDriverId === '2')!.trips).toBeNull();
+  });
+  it('does not mutate the per-week lines when it sums them', () => {
+    const groups = groupByBusinessMonth([weekOf('2026-10-05'), weekOf('2026-10-12')], links);
+    expect(groups[0].weeks[0].drivers[0].fareCents).toBe(1000);
+    expect(groups[0].drivers[0].fareCents).toBe(2000);
   });
 });
