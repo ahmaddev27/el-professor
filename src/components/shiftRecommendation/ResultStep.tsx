@@ -4,7 +4,7 @@ import { Alert, Button, KpiCard, formatEuroCents, formatNumber } from '../ui';
 import { useTranslation } from '../../contexts/LanguageContext';
 import type { TranslationKey } from '../../i18n';
 import { useColumnPickerExport } from '../../contexts/ExportPickerContext';
-import type { DemandProfile, ShiftRecommendation } from '../../utils/shiftRecommendation';
+import type { DemandProfile, ShiftRecommendation, TargetPlan } from '../../utils/shiftRecommendation';
 import {
   CONFIDENCE_KEYS,
   MONTH_NAME_KEYS,
@@ -17,10 +17,15 @@ import {
 } from '../../utils/shiftRecommendationScreens';
 import { DemandHeatmap } from './DemandHeatmap';
 import { PerVehicleTable, ShiftTable } from './ShiftTables';
+import { TargetOutcome } from './TargetOutcome';
 
 interface Props {
   profile: DemandProfile;
   recommendation: ShiftRecommendation;
+  /** Set when the month was planned towards a target; null when the operator named the threshold. */
+  targetPlan: TargetPlan | null;
+  /** Show the plan on the other side of the target instead. */
+  onSwapTarget: () => void;
   onBack: () => void;
 }
 
@@ -32,7 +37,7 @@ const STATUS_KEYS: Record<Exclude<ShiftRecommendation['status'], 'ok'>, Translat
 };
 
 /** Step 3. Every figure here is an estimate and is labelled so; nothing is saved. */
-export function ResultStep({ profile, recommendation, onBack }: Props) {
+export function ResultStep({ profile, recommendation, targetPlan, onSwapTarget, onBack }: Props) {
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
   const [vehicleFilter, setVehicleFilter] = useState('');
@@ -73,6 +78,7 @@ export function ResultStep({ profile, recommendation, onBack }: Props) {
         <Alert tone="critical">{t(STATUS_KEYS[recommendation.status])}</Alert>
       ) : (
         <>
+          {targetPlan ? <TargetOutcome plan={targetPlan} onSwap={onSwapTarget} /> : null}
           <Kpis profile={profile} recommendation={recommendation} />
           {recommendation.totals.shifts === 0 ? <Alert tone="caution">{t('shiftrec.result.noShifts')}</Alert> : null}
           <DemandHeatmap profile={profile} thresholdCents={recommendation.settings.minRevenuePerHourCents} />

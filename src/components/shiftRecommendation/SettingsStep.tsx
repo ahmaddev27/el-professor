@@ -1,19 +1,26 @@
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, formatEuroCents, formatNumber } from '../ui';
 import { useTranslation } from '../../contexts/LanguageContext';
-import type { DemandProfile, SettingsProblem } from '../../utils/shiftRecommendation';
+import type { DemandProfile, SettingsProblem, YearMonth } from '../../utils/shiftRecommendation';
+import type { ReferenceStats } from '../../utils/shiftRecommendationReference';
+import { ReferencePanel } from './ReferencePanel';
 import {
+  BLOCK_CHOICE_KEYS,
   BREAK_CHOICES,
   EXCLUSION_KEYS,
   HOLIDAY_REGIONS,
   MAX_SHIFTS_CHOICES,
   MAX_SHIFT_CHOICES,
   MIN_SHIFT_CHOICES,
+  MONTH_NAME_KEYS,
+  OPERATIONAL_BLOCK_CHOICES,
+  OPERATIONAL_BREAK_CHOICES,
   PROBLEM_KEYS,
   REGION_KEYS,
   SLOT_CHOICES,
   exclusionRows,
   formatDuration,
   minutesToHours,
+  withCurrentChoice,
   type PlanForm,
 } from '../../utils/shiftRecommendationScreens';
 
@@ -36,6 +43,12 @@ interface Props {
   selectedVehicles: ReadonlySet<string>;
   onToggleVehicle: (vehicle: string) => void;
   thresholdInvalid: boolean;
+  /** The target text is not an amount (only matters in 'target' mode). */
+  targetInvalid: boolean;
+  /** What the chosen months look like; null until they are read. */
+  reference: ReferenceStats | null;
+  /** The month being planned, chosen in step 1. */
+  targetMonth: YearMonth | null;
   planProblems: readonly SettingsProblem[];
   computeFailed: boolean;
   onBack: () => void;
@@ -50,7 +63,7 @@ export function SettingsStep(props: Props) {
   const { profile } = props;
   const usable = profile !== null && profile.status === 'ok';
   const vehicleCount = profile ? profile.vehicles.filter(v => props.selectedVehicles.has(v.vehicle)).length : 0;
-  const blocked = !usable || props.thresholdInvalid || props.planProblems.length > 0 || vehicleCount === 0;
+  const blocked = !usable || props.thresholdInvalid || props.targetInvalid || props.planProblems.length > 0 || vehicleCount === 0;
   const duration = (minutes: number) => t('shiftrec.duration', { value: formatDuration(minutes) });
 
   return (
@@ -62,6 +75,7 @@ export function SettingsStep(props: Props) {
       ) : (
         <Coverage profile={profile} />
       )}
+      {props.reference ? <ReferencePanel stats={props.reference} /> : null}
 
       {usable ? (
         <Card>
@@ -100,47 +114,117 @@ export function SettingsStep(props: Props) {
 
       <Card>
         <CardHeader>
+          <CardTitle>{t('shiftrec.ops.title')}</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {props.targetMonth ? (
+              <Field label={t('shiftrec.ops.month')}>
+                <p className="text-sm font-semibold text-fg">
+                  {t(MONTH_NAME_KEYS[props.targetMonth.month - 1])} {props.targetMonth.year}
+                </p>
+              </Field>
+            ) : null}
+            <Field label={t('shiftrec.ops.maxBlock.label')} hint={t('shiftrec.ops.maxBlock.hint')}>
+              <NativeSelect value={props.form.maxShiftMinutes} onChange={e => props.onForm({ maxShiftMinutes: Number(e.target.value) })}>
+                {withCurrentChoice(OPERATIONAL_BLOCK_CHOICES, props.form.maxShiftMinutes).map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.custom
+                      ? t('shiftrec.ops.custom', { value: duration(option.value) })
+                      : t(BLOCK_CHOICE_KEYS[option.value as (typeof OPERATIONAL_BLOCK_CHOICES)[number]])}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label={t('shiftrec.ops.break.label')}>
+              <NativeSelect value={props.form.minBreakMinutes} onChange={e => props.onForm({ minBreakMinutes: Number(e.target.value) })}>
+                {withCurrentChoice(OPERATIONAL_BREAK_CHOICES, props.form.minBreakMinutes).map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.custom
+                      ? t('shiftrec.ops.custom', { value: t('shiftrec.minutes', { value: option.value }) })
+                      : t('shiftrec.minutes', { value: option.value })}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>{t('shiftrec.settings.title')}</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field
-              label={t('shiftrec.threshold.label')}
-              hint={
-                profile?.perMonth.revenuePerHourCents != null
-                  ? t('shiftrec.threshold.hint', { rate: formatEuroCents(profile.perMonth.revenuePerHourCents) })
-                  : undefined
-              }
-              error={props.thresholdInvalid ? t('shiftrec.threshold.invalid') : undefined}
-            >
-              <Input
-                inputMode="decimal"
-                value={props.form.thresholdText}
-                onChange={e => props.onForm({ thresholdText: e.target.value })}
-                className="tabular-nums"
-              />
-            </Field>
-            <Field label={t('shiftrec.maxShifts.label')}>
-              <NativeSelect value={props.form.maxShiftsPerVehiclePerDay} onChange={e => props.onForm({ maxShiftsPerVehiclePerDay: Number(e.target.value) })}>
-                {MAX_SHIFTS_CHOICES.map(n => <option key={n} value={n}>{n}</option>)}
+            <Field label={t('shiftrec.mode.label')}>
+              <NativeSelect value={props.form.mode} onChange={e => props.onForm({ mode: e.target.value as PlanForm['mode'] })}>
+                <option value="target">{t('shiftrec.mode.target')}</option>
+                <option value="threshold">{t('shiftrec.mode.threshold')}</option>
               </NativeSelect>
             </Field>
-            <Field label={t('shiftrec.shiftMin.label')}>
-              <NativeSelect value={props.form.minShiftMinutes} onChange={e => props.onForm({ minShiftMinutes: Number(e.target.value) })}>
-                {MIN_SHIFT_CHOICES.map(m => <option key={m} value={m}>{duration(m)}</option>)}
-              </NativeSelect>
-            </Field>
-            <Field label={t('shiftrec.shiftMax.label')} hint={t('shiftrec.shiftMax.hint')}>
-              <NativeSelect value={props.form.maxShiftMinutes} onChange={e => props.onForm({ maxShiftMinutes: Number(e.target.value) })}>
-                {MAX_SHIFT_CHOICES.map(m => <option key={m} value={m}>{duration(m)}</option>)}
-              </NativeSelect>
-            </Field>
-            <Field label={t('shiftrec.break.label')}>
-              <NativeSelect value={props.form.minBreakMinutes} onChange={e => props.onForm({ minBreakMinutes: Number(e.target.value) })}>
-                {BREAK_CHOICES.map(m => <option key={m} value={m}>{t('shiftrec.minutes', { value: m })}</option>)}
-              </NativeSelect>
-            </Field>
+            {props.form.mode === 'target' ? (
+              <Field
+                label={t('shiftrec.target.label')}
+                hint={
+                  profile && profile.perMonth.revenueCents > 0
+                    ? t('shiftrec.target.hint', { amount: formatEuroCents(profile.perMonth.revenueCents) })
+                    : undefined
+                }
+                error={props.targetInvalid ? t('shiftrec.target.invalid') : undefined}
+              >
+                <Input
+                  inputMode="decimal"
+                  value={props.form.targetText}
+                  onChange={e => props.onForm({ targetText: e.target.value })}
+                  className="tabular-nums"
+                />
+              </Field>
+            ) : (
+              <Field
+                label={t('shiftrec.threshold.label')}
+                hint={
+                  profile?.perMonth.revenuePerHourCents != null
+                    ? t('shiftrec.threshold.hint', { rate: formatEuroCents(profile.perMonth.revenuePerHourCents) })
+                    : undefined
+                }
+                error={props.thresholdInvalid ? t('shiftrec.threshold.invalid') : undefined}
+              >
+                <Input
+                  inputMode="decimal"
+                  value={props.form.thresholdText}
+                  onChange={e => props.onForm({ thresholdText: e.target.value })}
+                  className="tabular-nums"
+                />
+              </Field>
+            )}
           </div>
+
+          <details className="rounded-surface border border-line bg-raised p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-fg">{t('shiftrec.ops.free')}</summary>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label={t('shiftrec.maxShifts.label')}>
+                <NativeSelect value={props.form.maxShiftsPerVehiclePerDay} onChange={e => props.onForm({ maxShiftsPerVehiclePerDay: Number(e.target.value) })}>
+                  {MAX_SHIFTS_CHOICES.map(n => <option key={n} value={n}>{n}</option>)}
+                </NativeSelect>
+              </Field>
+              <Field label={t('shiftrec.shiftMin.label')}>
+                <NativeSelect value={props.form.minShiftMinutes} onChange={e => props.onForm({ minShiftMinutes: Number(e.target.value) })}>
+                  {MIN_SHIFT_CHOICES.map(m => <option key={m} value={m}>{duration(m)}</option>)}
+                </NativeSelect>
+              </Field>
+              <Field label={t('shiftrec.shiftMax.label')} hint={t('shiftrec.shiftMax.hint')}>
+                <NativeSelect value={props.form.maxShiftMinutes} onChange={e => props.onForm({ maxShiftMinutes: Number(e.target.value) })}>
+                  {MAX_SHIFT_CHOICES.map(m => <option key={m} value={m}>{duration(m)}</option>)}
+                </NativeSelect>
+              </Field>
+              <Field label={t('shiftrec.break.label')}>
+                <NativeSelect value={props.form.minBreakMinutes} onChange={e => props.onForm({ minBreakMinutes: Number(e.target.value) })}>
+                  {BREAK_CHOICES.map(m => <option key={m} value={m}>{t('shiftrec.minutes', { value: m })}</option>)}
+                </NativeSelect>
+              </Field>
+            </div>
+          </details>
 
           <details className="rounded-surface border border-line bg-raised p-3">
             <summary className="cursor-pointer text-sm font-semibold text-fg">{t('shiftrec.advanced.title')}</summary>

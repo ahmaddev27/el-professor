@@ -153,11 +153,48 @@ export const SLOT_CHOICES = [15, 30, 60] as const;
 
 /** The plan form as the inputs hold it; the threshold stays text so a half-typed "25," survives. */
 export interface PlanForm {
+  /** How the month is planned: towards a revenue target (the threshold is searched) or from a threshold the operator names. */
+  mode: PlanMode;
+  /** Euro text, as typed; used in 'target' mode. */
+  targetText: string;
   thresholdText: string;
   minShiftMinutes: number;
   maxShiftMinutes: number;
   maxShiftsPerVehiclePerDay: number;
   minBreakMinutes: number;
+}
+
+export type PlanMode = 'target' | 'threshold';
+
+/**
+ * The operational constraints as named choices (the generator's shapes): the
+ * longest block in minutes, and the break between two shifts. Each maps onto
+ * the engine's own setting and nothing is widened — 285 is "under five hours",
+ * and the 360-minute ceiling stays where `validatePlanSettings` puts it.
+ */
+export const OPERATIONAL_BLOCK_CHOICES = [240, 270, 285] as const;
+export const OPERATIONAL_BREAK_CHOICES = [30, 45, 60] as const;
+export const BLOCK_CHOICE_KEYS: Record<(typeof OPERATIONAL_BLOCK_CHOICES)[number], TranslationKey> = {
+  240: 'shiftrec.ops.block.240',
+  270: 'shiftrec.ops.block.270',
+  285: 'shiftrec.ops.block.285',
+};
+
+/** The named choices, plus the current value when it is not one of them (a free entry must stay visible). */
+export function withCurrentChoice(choices: readonly number[], current: number): { value: number; custom: boolean }[] {
+  const options = choices.map(value => ({ value, custom: false }));
+  return choices.includes(current) ? options : [...options, { value: current, custom: true }];
+}
+
+/** The target in cents, null when the text is not an amount ≥ 0. */
+export function targetRevenueCents(text: string): number | null {
+  return thresholdCents(text);
+}
+
+/** Whole euros of a month's revenue, as the text the target field starts with. */
+export function defaultTargetText(monthlyRevenueCents: number | null): string {
+  if (monthlyRevenueCents === null || !Number.isFinite(monthlyRevenueCents) || monthlyRevenueCents <= 0) return '';
+  return String(Math.round(monthlyRevenueCents / 100));
 }
 
 /** The whole euros under the history's average rate, as the text the field starts with. */
@@ -166,8 +203,13 @@ export function defaultThresholdText(revenuePerHourCents: number | null): string
   return String(Math.max(0, Math.floor(revenuePerHourCents / 100)));
 }
 
-export function defaultPlanForm(revenuePerHourCents: number | null): PlanForm {
-  return { thresholdText: defaultThresholdText(revenuePerHourCents), ...DEFAULT_PLAN_SETTINGS };
+export function defaultPlanForm(revenuePerHourCents: number | null, monthlyRevenueCents: number | null = null): PlanForm {
+  return {
+    mode: 'target',
+    targetText: defaultTargetText(monthlyRevenueCents),
+    thresholdText: defaultThresholdText(revenuePerHourCents),
+    ...DEFAULT_PLAN_SETTINGS,
+  };
 }
 
 /** null when the threshold is not an amount: the screen says so instead of planning with a guess. */
@@ -185,6 +227,19 @@ export function planSettingsFromForm(form: PlanForm): PlanSettings | null {
     minBreakMinutes: form.minBreakMinutes,
     maxShiftsPerVehiclePerDay: form.maxShiftsPerVehiclePerDay,
     minRevenuePerHourCents: threshold,
+  };
+}
+
+/**
+ * The settings without a threshold, for planning towards a target: the search
+ * chooses the threshold, so the form's threshold text is not read at all.
+ */
+export function targetPlanSettingsFromForm(form: PlanForm): Omit<PlanSettings, 'minRevenuePerHourCents'> {
+  return {
+    minShiftMinutes: form.minShiftMinutes,
+    maxShiftMinutes: form.maxShiftMinutes,
+    minBreakMinutes: form.minBreakMinutes,
+    maxShiftsPerVehiclePerDay: form.maxShiftsPerVehiclePerDay,
   };
 }
 
