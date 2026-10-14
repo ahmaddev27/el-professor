@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Loader2 } from 'lucide-react';
-import { addDays, format, startOfWeek, subWeeks } from 'date-fns';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -21,6 +20,22 @@ import {
   type WeekEarnings,
 } from '../utils/uberEarningsImport';
 import {
+  MAX_SELECTABLE_WEEKS,
+  defaultWeekRange,
+  groupWeeksByMonth,
+  isWeekSelected,
+  normalizePartnerReason,
+  rangeExceedsCap,
+  rangeForMonth,
+  rangeToDates,
+  rangeWeekCount,
+  recentUberMonths,
+  recentUberWeeks,
+  toggleWeek,
+  type UberMonth,
+  type WeekRange,
+} from '../utils/uberPeriods';
+import {
   Alert,
   Badge,
   Button,
@@ -31,11 +46,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Field,
   formatDate,
   formatEuroCents,
+  cn,
   formatNumber,
-  Input,
   Tabs,
   TabsContent,
   TabsList,
@@ -51,6 +65,10 @@ interface Props {
 }
 
 type PreviewView = 'weekly' | 'monthly';
+
+// The two ways to choose a period. Each keeps its own selection; only the open
+// tab's selection is pulled, and the line under the tabs says which.
+type PeriodTab = 'weekly' | 'monthly';
 
 type Stage = 'range' | 'pulling' | 'preview' | 'importing';
 
@@ -138,17 +156,23 @@ const MONTH_KEYS: readonly TranslationKey[] = [
   'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
 ];
 
-function lastBusinessWeek(): { from: string; to: string } {
-  const monday = startOfWeek(subWeeks(new Date(), 1), { weekStartsOn: 1 });
-  return { from: format(monday, 'yyyy-MM-dd'), to: format(addDays(monday, 6), 'yyyy-MM-dd') };
+const monthKeyOf = (m: { year: number; month: number }) => `${m.year}-${m.month}`;
+
+/** Why the chosen period cannot be pulled yet, or null. Said before any request is sent. */
+function periodProblemKey(tab: PeriodTab, range: WeekRange | null): TranslationKey | null {
+  if (!range) return tab === 'weekly' ? 'inc.uber.period.noWeek' : 'inc.uber.period.noMonth';
+  return rangeExceedsCap(range) ? 'inc.uber.period.tooMany' : null;
 }
 
 function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const { t, tPlural } = useTranslation();
   const { success } = useToast();
-  const initial = useMemo(lastBusinessWeek, []);
-  const [from, setFrom] = useState(initial.from);
-  const [to, setTo] = useState(initial.to);
+  const now = useMemo(() => new Date(), []);
+  const weekGroups = useMemo(() => groupWeeksByMonth(recentUberWeeks(now)), [now]);
+  const monthOptions = useMemo(() => recentUberMonths(now), [now]);
+  const [periodTab, setPeriodTab] = useState<PeriodTab>('weekly');
+  const [weekRange, setWeekRange] = useState<WeekRange | null>(() => defaultWeekRange(now));
+  const [monthKey, setMonthKey] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>('range');
   const [pulled, setPulled] = useState<Pulled | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -156,10 +180,16 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   // A pull still in flight when the dialog closes must not open a preview later.
   const generation = useRef(0);
 
+  const monthRange = useMemo(() => {
+    const month = monthOptions.find(m => monthKeyOf(m) === monthKey);
+    return month ? rangeForMonth(month) : null;
+  }, [monthOptions, monthKey]);
+  const range = periodTab === 'weekly' ? weekRange : monthRange;
+  const { from, to } = range ? rangeToDates(range) : { from: '', to: '' };
   const split = splitIntoBusinessWeeks(from, to);
-  const rangeProblem: TranslationKey | null = split.ok
-    ? null
-    : split.problem === 'range_too_long' ? 'inc.uber.err.rangeTooLong' : 'inc.uber.err.invalidRange';
+  const weekCount = rangeWeekCount(range);
+  const canPull = range !== null && !rangeExceedsCap(range) && split.ok;
+  const periodProblem = periodProblemKey(periodTab, range);
 
   const rows = useMemo(() => (pulled ? buildImportRows(pulled.weeks) : []), [pulled]);
   const unlinked = useMemo(() => (pulled ? findUnlinked(pulled.weeks, pulled.links) : []), [pulled]);
@@ -198,7 +228,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
       const reason = error ? await failureReason(error) : body?.reason ?? null;
       const read = error || reason ? null : readPullAnswer(data);
       if (!read) {
-        const partnerReason = reason === 'partner_refused' ? body?.partner_reason ?? '' : '';
+        const partnerReason = reason === 'partner_refused' ? normalizePartnerReason(body?.partner_reason ?? '') : '';
         // A reason we have no sentence for is shown with Reidey's own — `uber_error`
         // is its catch-all for "Uber answered with something other than 2xx, 401
         // or 403", so a 400 and a 429 arrive under one word and need different
@@ -316,6 +346,77 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     `${t('inc.weekLabel', { week })} ${uberWindowLabel(segment)}`;
   const monthName = (month: number) => t(MONTH_KEYS[month - 1]!);
 
+  const busy = stage === 'pulling' || stage === 'importing';
+  const rowClass = (selected: boolean) => cn(
+    'flex min-h-10 cursor-pointer items-center gap-3 rounded-control border px-3 py-2 text-sm [@media(pointer:coarse)]:min-h-11',
+    selected ? 'border-brand bg-brand-soft' : 'border-border bg-raised',
+  );
+  const inputClass = 'size-4 shrink-0 accent-brand [@media(pointer:coarse)]:size-5';
+
+  const weekPicker = (
+    <div className="grid grid-cols-1 gap-4">
+      <p className="text-xs text-fg-subtle">{t('inc.uber.period.weekHint')}</p>
+      <div role="group" aria-label={t('inc.uber.period.weekListLabel')} className="grid max-h-80 grid-cols-1 gap-4 overflow-y-auto pr-1">
+        {weekGroups.map(group => (
+          <section key={`${group.year}-${group.month}`} className="grid grid-cols-1 gap-2">
+            <h3 className="text-sm font-semibold text-fg">{`${monthName(group.month)} ${group.year}`}</h3>
+            {group.weeks.map(week => {
+              const selected = isWeekSelected(weekRange, week.segment.monday);
+              return (
+                <label key={week.segment.monday} className={rowClass(selected)}>
+                  <input
+                    type="checkbox"
+                    className={inputClass}
+                    checked={selected}
+                    disabled={busy}
+                    onChange={() => setWeekRange(toggleWeek(weekRange, week.segment.monday))}
+                  />
+                  <span className="font-medium text-fg">{t('inc.weekLabel', { week: week.weekNumber })}</span>
+                  <span className="min-w-0 text-fg-muted tabular-nums">{uberWindowLabel(week.segment)}</span>
+                  {week.running && <Badge tone="brand">{t('inc.uber.period.running')}</Badge>}
+                </label>
+              );
+            })}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+
+  const monthTitle = (m: UberMonth) => tPlural(
+    { one: 'inc.uber.monthHeading.one', other: 'inc.uber.monthHeading.other' },
+    m.weeks.length,
+    { month: monthName(m.month), year: String(m.year) },
+  );
+  const monthPicker = (
+    <div className="grid grid-cols-1 gap-4">
+      <p className="text-xs text-fg-subtle">{t('inc.uber.period.monthHint')}</p>
+      <div role="radiogroup" aria-label={t('inc.uber.period.monthListLabel')} className="grid max-h-80 grid-cols-1 gap-2 overflow-y-auto pr-1">
+        {monthOptions.map(m => {
+          const selected = monthKey === monthKeyOf(m);
+          return (
+            <label key={monthKeyOf(m)} className={rowClass(selected)}>
+              <input
+                type="radio"
+                name="uber-month"
+                className={inputClass}
+                checked={selected}
+                disabled={busy}
+                onChange={() => setMonthKey(monthKeyOf(m))}
+              />
+              <span className="font-medium text-fg">{monthTitle(m)}</span>
+              {m.completeCount < m.weeks.length && (
+                <Badge tone="caution">
+                  {t('inc.uber.period.monthProgress', { done: String(m.completeCount), total: String(m.weeks.length) })}
+                </Badge>
+              )}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const previewTable = (rows: DriverPreview[], caption: string) => {
     const sum = (pick: (row: DriverPreview) => number) => rows.reduce((acc, row) => acc + pick(row), 0);
     return (
@@ -336,7 +437,6 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
       />
     );
   };
-  const busy = stage === 'pulling' || stage === 'importing';
   const canConfirm = stage === 'preview' && rows.length > 0 && blocking.length === 0 && importedWeeks.length === 0;
 
   return (
@@ -352,18 +452,22 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
         {problem && <Alert tone="critical" title={t('inc.uber.errorTitle')}>{problem}</Alert>}
 
         {(stage === 'range' || stage === 'pulling') && (
-          <div className="grid gap-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label={t('inc.uber.from')} required>
-                <Input type="date" value={from} onChange={e => setFrom(e.target.value)} disabled={busy} />
-              </Field>
-              <Field label={t('inc.uber.to')} required error={rangeProblem ? t(rangeProblem) : undefined}>
-                <Input type="date" value={to} onChange={e => setTo(e.target.value)} disabled={busy} />
-              </Field>
-            </div>
-            {split.ok && (
+          <div className="grid grid-cols-1 gap-4">
+            <Tabs value={periodTab} onValueChange={value => setPeriodTab(value as PeriodTab)}>
+              <TabsList aria-label={t('inc.uber.period.tabsLabel')}>
+                <TabsTrigger value="weekly">{t('inc.uber.tab.weekly')}</TabsTrigger>
+                <TabsTrigger value="monthly">{t('inc.uber.tab.monthly')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="weekly" className="pt-4">{weekPicker}</TabsContent>
+              <TabsContent value="monthly" className="pt-4">{monthPicker}</TabsContent>
+            </Tabs>
+            {periodProblem ? (
+              <p role="alert" className="text-sm text-critical">
+                {t(periodProblem, { max: String(MAX_SELECTABLE_WEEKS), count: String(weekCount) })}
+              </p>
+            ) : (
               <p className="text-sm text-fg-muted">
-                {tPlural({ one: 'inc.uber.weeksCount.one', other: 'inc.uber.weeksCount.other' }, split.value.length)}
+                {tPlural({ one: 'inc.uber.weeksCount.one', other: 'inc.uber.weeksCount.other' }, weekCount)}
               </p>
             )}
           </div>
@@ -457,7 +561,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
           {(stage === 'range' || stage === 'pulling') && (
             <>
               <Button variant="secondary" onClick={close} disabled={busy}>{t('common.cancel')}</Button>
-              <Button onClick={pull} disabled={!split.ok || busy}>
+              <Button onClick={pull} disabled={!canPull || busy}>
                 {stage === 'pulling' ? <Loader2 aria-hidden className="animate-spin" /> : <Download aria-hidden />}
                 {stage === 'pulling' ? t('inc.uber.loading') : t('inc.uber.load')}
               </Button>
