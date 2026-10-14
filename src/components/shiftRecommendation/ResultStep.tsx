@@ -18,12 +18,16 @@ import {
 import { DemandHeatmap } from './DemandHeatmap';
 import { PerVehicleTable, ShiftTable } from './ShiftTables';
 import { TargetOutcome } from './TargetOutcome';
+import { DailyVehicleCard, TripCrossCheckAlert } from './ScenarioPanels';
+import { expectedRidesFor, type Scenario } from '../../utils/shiftRecommendationScenario';
 
 interface Props {
   profile: DemandProfile;
   recommendation: ShiftRecommendation;
   /** Set when the month was planned towards a target; null when the operator named the threshold. */
   targetPlan: TargetPlan | null;
+  /** What the operator entered beside the target; figures derived from it are estimates. */
+  scenario: Scenario;
   /** Show the plan on the other side of the target instead. */
   onSwapTarget: () => void;
   onBack: () => void;
@@ -37,7 +41,7 @@ const STATUS_KEYS: Record<Exclude<ShiftRecommendation['status'], 'ok'>, Translat
 };
 
 /** Step 3. Every figure here is an estimate and is labelled so; nothing is saved. */
-export function ResultStep({ profile, recommendation, targetPlan, onSwapTarget, onBack }: Props) {
+export function ResultStep({ profile, recommendation, targetPlan, scenario, onSwapTarget, onBack }: Props) {
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
   const [vehicleFilter, setVehicleFilter] = useState('');
@@ -79,10 +83,12 @@ export function ResultStep({ profile, recommendation, targetPlan, onSwapTarget, 
       ) : (
         <>
           {targetPlan ? <TargetOutcome plan={targetPlan} onSwap={onSwapTarget} /> : null}
-          <Kpis profile={profile} recommendation={recommendation} />
+          <Kpis profile={profile} recommendation={recommendation} scenario={scenario} />
+          <TripCrossCheckAlert scenario={scenario} referenceRevenueCents={targetPlan?.targetRevenueCents ?? recommendation.totals.expectedRevenueCents} />
           {recommendation.totals.shifts === 0 ? <Alert tone="caution">{t('shiftrec.result.noShifts')}</Alert> : null}
           <DemandHeatmap profile={profile} thresholdCents={recommendation.settings.minRevenuePerHourCents} />
           <PerVehicleTable rows={recommendation.perVehicle} />
+          <DailyVehicleCard recommendation={recommendation} scenario={scenario} />
           <ShiftTable
             rows={rows}
             vehicles={vehicles}
@@ -101,11 +107,13 @@ export function ResultStep({ profile, recommendation, targetPlan, onSwapTarget, 
   );
 }
 
-function Kpis({ profile, recommendation }: { profile: DemandProfile; recommendation: ShiftRecommendation }) {
+function Kpis({ profile, recommendation, scenario }: { profile: DemandProfile; recommendation: ShiftRecommendation; scenario: Scenario }) {
   const { t } = useTranslation();
   const hours = (minutes: number) => t('shiftrec.kpi.hours', { value: formatNumber(minutesToHours(minutes)) });
   const rate = (cents: number | null) => (cents === null ? t('shiftrec.kpi.none') : formatEuroCents(cents));
   const { totals, weakHistory } = recommendation;
+  const rides = expectedRidesFor(totals.expectedRevenueCents, scenario);
+  const fare = scenario.averageFareCents;
   return (
     <div className="grid grid-cols-1 gap-4">
       <KpiGroup title={t('shiftrec.kpi.historyTitle')}>
@@ -114,9 +122,15 @@ function Kpis({ profile, recommendation }: { profile: DemandProfile; recommendat
         <KpiCard label={t('shiftrec.kpi.rate')} value={rate(profile.perMonth.revenuePerHourCents)} />
       </KpiGroup>
       <KpiGroup title={t('shiftrec.kpi.planTitle')}>
-        <KpiCard label={t('shiftrec.kpi.shiftHours')} value={hours(totals.minutes)} caption={`${formatNumber(totals.shifts)} ${t('shiftrec.kpi.shifts')}`} />
+        <KpiCard label={t('shiftrec.kpi.blocks')} value={formatNumber(totals.shifts)} />
+        <KpiCard label={t('shiftrec.kpi.shiftHours')} value={hours(totals.minutes)} />
         <KpiCard label={t('shiftrec.kpi.expectedRevenue')} value={formatEuroCents(totals.expectedRevenueCents)} />
         <KpiCard label={t('shiftrec.kpi.expectedRate')} value={rate(totals.expectedRevenuePerHourCents)} />
+        <KpiCard
+          label={t('shiftrec.kpi.expectedRides')}
+          value={rides === null ? t('shiftrec.kpi.none') : formatNumber(rides)}
+          caption={fare === null ? t('shiftrec.kpi.ridesNoFare') : t('shiftrec.kpi.ridesBasis', { fare: formatEuroCents(fare) })}
+        />
       </KpiGroup>
       <KpiGroup title={t('shiftrec.kpi.weakTitle')}>
         <KpiCard label={t('shiftrec.kpi.vehicleHours')} value={hours(weakHistory.vehicleMinutesPerMonth)} />
