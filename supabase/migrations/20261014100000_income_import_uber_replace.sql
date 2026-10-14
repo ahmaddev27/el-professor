@@ -138,16 +138,25 @@ BEGIN
       RAISE EXCEPTION 'a period is not inside one week' USING ERRCODE = '22023', HINT = 'invalid_period';
     END IF;
 
-    -- Replace mode: the previous Uber rows for exactly the (driver, week start,
-    -- type) keys this payload is about go first. The statement is keyed on the
-    -- unique index's own columns; the company is the function's own, the source
-    -- is its own constant, and a driver key counts only through the confirmed
-    -- link below. Nothing here can match a row whose source is absent.
+    -- Replace mode: the previous Uber rows for the (driver, week start) pairs
+    -- this payload is about go first.
+    --
+    -- DELIBERATELY NOT KEYED ON `type`, although the unique index is. One pull
+    -- writes one row per driver per type per week, so a week's rows are one
+    -- artefact; a correction that drops a type -- tips fall to zero, so the new
+    -- payload carries no `trinkgeld` row -- would otherwise leave the old tip
+    -- standing beside corrected figures, and then the overlap check below would
+    -- refuse the whole call and the operator would have no way through. That is
+    -- the exact wall this mode exists to remove (owner, 14.10.2026: pulled
+    -- twice, 400 EUR then a corrected 500 EUR, "the new one only").
+    --
+    -- The company is the function's own, the source is its own constant, and a
+    -- driver key counts only through the confirmed link below. Nothing here can
+    -- match a row whose source is absent.
     IF p_replace THEN
       DELETE FROM public.income i
        USING (SELECT DISTINCT e->>'external_driver_id' AS driver_key,
-                              (e->>'period_start')::date AS period_start,
-                              e->>'type' AS row_type
+                              (e->>'period_start')::date AS period_start
                 FROM jsonb_array_elements(p_rows) e
                 JOIN public.partner_driver_links l
                   ON l.company_id = v_company AND l.partner = c_partner
@@ -156,8 +165,7 @@ BEGIN
        WHERE i.company_id = v_company
          AND i.source = c_source
          AND i.source_driver_key = k.driver_key
-         AND i.source_period_start = k.period_start
-         AND i.type = k.row_type;
+         AND i.source_period_start = k.period_start;
       GET DIAGNOSTICS v_deleted = ROW_COUNT;
     END IF;
 
@@ -272,10 +280,14 @@ BEGIN
      OR v_del NOT LIKE '%i.source = c_source%'
      OR v_del NOT LIKE '%i.source_driver_key = k.driver_key%'
      OR v_del NOT LIKE '%i.source_period_start = k.period_start%'
-     OR v_del NOT LIKE '%i.type = k.row_type%'
      OR v_del NOT LIKE '%l.status = ''linked''%'
      OR v_del NOT LIKE '%partner_driver_links%' THEN
-    RAISE EXCEPTION 'self-check: the replace delete lost a term of the unique index, the company, the source constant, or the confirmed link: %', v_del;
+    RAISE EXCEPTION 'self-check: the replace delete lost the company, the source constant, a key column or the confirmed link: %', v_del;
+  END IF;
+  -- And it must NOT come back keyed on the row type: that is what strands an
+  -- operator whose correction drops a type. See the delete's own comment.
+  IF v_del LIKE '%i.type%' THEN
+    RAISE EXCEPTION 'self-check: the replace delete is keyed on the row type again, which strands a correction that drops one: %', v_del;
   END IF;
   IF v_del ILIKE '%IS NULL%' OR v_del ILIKE '% OR %' OR v_del ILIKE '%coalesce%'
      OR v_del LIKE '%''source''%' THEN

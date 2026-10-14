@@ -18,16 +18,25 @@ describe('income_import_uber replace: the delete', () => {
     expect(body.indexOf('DELETE FROM')).toBeLessThan(body.indexOf('INSERT INTO public.income'));
   });
 
-  it('is keyed on every column of the unique index, with company and source from the function', () => {
+  it('is keyed on the company, the source constant and the driver-week, all from the function', () => {
     for (const term of [
       'i.company_id = v_company',
       'i.source = c_source',
       'i.source_driver_key = k.driver_key',
       'i.source_period_start = k.period_start',
-      'i.type = k.row_type',
     ]) {
       expect(deleteStatement).toContain(term);
     }
+  });
+
+  it('is NOT keyed on the row type, although the unique index is', () => {
+    // One pull writes one row per type per week, so a week's rows are one
+    // artefact. Keyed on the type, a correction that DROPS a type -- tips fall
+    // to zero, so the payload carries no `trinkgeld` row -- would leave the old
+    // tip standing beside corrected figures, the overlap check would refuse the
+    // whole call, and the operator would be stranded exactly where this mode is
+    // meant to let him through. The migration's own self-check refuses it too.
+    expect(deleteStatement).not.toContain('i.type');
   });
 
   it('resolves each driver key through a confirmed link of this company', () => {

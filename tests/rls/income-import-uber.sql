@@ -417,23 +417,30 @@ BEGIN
     _ui_call('50000000-0000-4000-8000-000000000001', _ui_replace(v_week)) || ' / ' || (SELECT count(*)::text FROM income),
     'ERR 42501 not_authorized / ' || (SELECT count(*)::text FROM income));
 
-  -- Atomicity: a week imported with two types, "replaced" by a payload that
-  -- carries only one. The leftover type still overlaps, so the call is refused,
-  -- and the delete that ran before the refusal is rolled back with it.
+  -- THE CASE THE WHOLE MODE EXISTS FOR, and the reason the delete is keyed on
+  -- (driver, week) and NOT on the type although the unique index is.
+  --
+  -- A week is imported with two types. Uber then corrects it and the tip falls
+  -- to zero, so the new payload carries only `umsatz`. Keyed on the type, the
+  -- old `trinkgeld` row would survive a correction that says it should not
+  -- exist, the overlap check below would then refuse the whole call, and the
+  -- operator would be stranded exactly where this mode was supposed to let him
+  -- through. One pull writes one row per type per week, so a week's rows are
+  -- one artefact and are replaced as one.
   PERFORM _ui_call(admin_a, _ui_import(jsonb_build_array(
       _ui_row('1002', 'umsatz',    '80.00', '2026-12-07', '2026-12-13', 2),
       _ui_row('1002', 'trinkgeld', '8.00',  '2026-12-07', '2026-12-13', 2))));
-  PERFORM _ui_rec(57, 'a replace that cannot complete leaves BOTH old rows standing (delete rolls back)',
+  PERFORM _ui_rec(57, 'a correction that DROPS a type goes through, and takes the dropped type with it',
     _ui_call(admin_a, _ui_replace(jsonb_build_array(
       _ui_row('1002', 'umsatz', '90.00', '2026-12-07', '2026-12-13', 2)))) || ' / ' ||
     (SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type) FROM income
       WHERE source = 'uber' AND source_driver_key = '1002' AND source_period_start = '2026-12-07'),
-    'ERR 23505 already_imported / trinkgeld:8.00 umsatz:80.00');
+    '{"ok": true, "deleted": 2, "drivers": 1, "inserted": 1} / umsatz:90.00');
 
-  PERFORM _ui_rec(58, 'a replace of a type the payload does not carry deletes only that type: the other waits',
+  PERFORM _ui_rec(58, 'so the tip Uber no longer reports is gone, not left standing beside corrected figures',
     (SELECT count(*)::text FROM income WHERE source = 'uber' AND source_driver_key = '1002'
         AND source_period_start = '2026-12-07' AND type = 'trinkgeld'),
-    '1');
+    '0');
 END $$;
 
 -- ─── 4. who may call it ─────────────────────────────────────────────────────
