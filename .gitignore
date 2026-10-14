@@ -52,3 +52,6 @@ e2e/playwright-report
 
 # Worktrees Claude Code agents create for parallel work.
 .claude/worktrees/
+
+# A reference file the owner shares into the repo root; never part of the product.
+FleetBook_*.html
