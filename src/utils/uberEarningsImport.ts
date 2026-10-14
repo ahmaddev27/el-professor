@@ -341,6 +341,42 @@ export function findExistingIncome(
   return found;
 }
 
+/**
+ * Whether the import may be confirmed. An earlier Uber import for the same
+ * weeks used to stop it for good; now it stops it until the operator has chosen
+ * to replace it. Nothing else changed: no rows, or a driver that cannot be
+ * placed, still block, and the typed-rows caution is not an input at all.
+ */
+export function canConfirmImport(input: {
+  rowCount: number;
+  blockingCount: number;
+  importedWeekCount: number;
+  replaceChosen: boolean;
+}): boolean {
+  if (input.rowCount === 0 || input.blockingCount > 0) return false;
+  return input.importedWeekCount === 0 || input.replaceChosen;
+}
+
+/**
+ * The arguments of `income_import_uber`. The replace flag is sent only when the
+ * operator chose it AND there is an earlier import to replace, so a stale tick
+ * can never turn an ordinary import into one that deletes.
+ */
+export function importRpcArgs(
+  rows: readonly IncomeImportRow[], importedWeekCount: number, replaceChosen: boolean,
+): { p_rows: IncomeImportRow[]; p_replace: boolean } {
+  return { p_rows: [...rows], p_replace: replaceChosen && importedWeekCount > 0 };
+}
+
+/** What the database answered; `deleted` is present only in replace mode. */
+export function readImportAnswer(
+  data: unknown, fallbackRows: number,
+): { inserted: number; drivers: number; deleted: number } {
+  const d = (data ?? {}) as { inserted?: unknown; drivers?: unknown; deleted?: unknown };
+  const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+  return { inserted: num(d.inserted, fallbackRows), drivers: num(d.drivers, 0), deleted: num(d.deleted, 0) };
+}
+
 /** One business month of the import: its weeks and the figures summed over them. */
 export interface MonthGroup {
   /** The month containing the weeks' Mondays. */

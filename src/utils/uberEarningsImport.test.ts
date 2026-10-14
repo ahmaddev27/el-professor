@@ -11,10 +11,13 @@ import {
 import {
   blockingEarners,
   buildImportRows,
+  canConfirmImport,
   findExistingIncome,
   findUnlinked,
   groupByBusinessMonth,
   importDescription,
+  importRpcArgs,
+  readImportAnswer,
   uberWindowLabel,
   readPullAnswer,
   summarizeByDriver,
@@ -368,5 +371,37 @@ describe('groupByBusinessMonth', () => {
     const groups = groupByBusinessMonth([weekOf('2026-10-05'), weekOf('2026-10-12')], links);
     expect(groups[0].weeks[0].drivers[0].fareCents).toBe(1000);
     expect(groups[0].drivers[0].fareCents).toBe(2000);
+  });
+});
+
+describe('replacing an earlier Uber import', () => {
+  const ok = { rowCount: 3, blockingCount: 0, importedWeekCount: 0, replaceChosen: false };
+
+  it('confirms an ordinary import with nothing already imported', () => {
+    expect(canConfirmImport(ok)).toBe(true);
+  });
+
+  it('holds an earlier import until the operator has chosen to replace it', () => {
+    expect(canConfirmImport({ ...ok, importedWeekCount: 2 })).toBe(false);
+    expect(canConfirmImport({ ...ok, importedWeekCount: 2, replaceChosen: true })).toBe(true);
+  });
+
+  it('never lets the choice override a driver that cannot be placed or an empty import', () => {
+    expect(canConfirmImport({ ...ok, importedWeekCount: 2, replaceChosen: true, blockingCount: 1 })).toBe(false);
+    expect(canConfirmImport({ ...ok, importedWeekCount: 2, replaceChosen: true, rowCount: 0 })).toBe(false);
+  });
+
+  it('sends the replace flag only when chosen AND there is something to replace', () => {
+    const rows = buildImportRows([]);
+    expect(importRpcArgs(rows, 2, true).p_replace).toBe(true);
+    expect(importRpcArgs(rows, 2, false).p_replace).toBe(false);
+    expect(importRpcArgs(rows, 0, true).p_replace).toBe(false);
+  });
+
+  it('reads the replaced count, and treats its absence as none', () => {
+    expect(readImportAnswer({ ok: true, inserted: 3, drivers: 1, deleted: 3 }, 9))
+      .toEqual({ inserted: 3, drivers: 1, deleted: 3 });
+    expect(readImportAnswer({ ok: true, inserted: 3, drivers: 1 }, 9).deleted).toBe(0);
+    expect(readImportAnswer(null, 9)).toEqual({ inserted: 9, drivers: 0, deleted: 0 });
   });
 });

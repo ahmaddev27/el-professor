@@ -6420,9 +6420,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'inc.uber.existingUnchecked': 'Existing entries could not be checked completely. Whether amounts were already entered for these weeks is unknown; they might be counted twice.',
-  'inc.uber.importedBody':      'An Uber import already exists for these drivers and weeks. The database does not allow a second one; nothing is written. Choose a period without these weeks.',
   'inc.uber.importedItem':      '{name} · {week} ({from} – {to}) · entries: {count}',
-  'inc.uber.importedTitle':     'Already imported: this import will be refused',
   'inc.uber.manualBody':        'The import does not change or delete them. Both sets stay, and the amounts add up: revenue, promotions, tips, cash and with them the salary basis. If the same amounts were already entered, they are counted twice. Check before importing.',
   'inc.uber.manualItem':        '{name} · {week} ({from} – {to}) · entries: {count}',
   'inc.uber.manualTitle':       'Warning: entries typed by hand already exist for these weeks',
@@ -6449,4 +6447,11 @@ export const en: PartialDictionary = {
   'inc.uber.period.tooMany':        'At most {max} weeks at once; {count} are chosen. Please choose fewer weeks.',
   'inc.uber.period.weekHint':       'The chosen weeks always form one continuous period; a skipped week is fetched too.',
   'inc.uber.period.weekListLabel':  'Uber weeks, newest first',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.replace.body':       'An Uber import already exists for these drivers and weeks. If you replace it, the previous Uber import for these weeks is deleted and replaced by the new amounts. Entries made by hand are not touched.',
+  'inc.uber.replace.choice':     'Replace the previous Uber import for these weeks',
+  'inc.uber.replace.done.one':   '{count} earlier Uber entry was replaced.',
+  'inc.uber.replace.done.other': '{count} earlier Uber entries were replaced.',
+  'inc.uber.replace.title':      'Already imported: replace it, or choose another period',
 };
