@@ -8,4 +8,5 @@ export {
 } from './settings';
 export { buildDemandProfile } from './profile';
 export { recommendShifts } from './recommend';
+export * from './target';
 export { hourlyGrid, type HourCell } from './hourly';

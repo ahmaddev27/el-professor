@@ -17,6 +17,11 @@ import {
   parseMonthKey,
   parsePlanningType,
   planSettingsFromForm,
+  OPERATIONAL_BLOCK_CHOICES,
+  defaultTargetText,
+  targetPlanSettingsFromForm,
+  targetRevenueCents,
+  withCurrentChoice,
   selectedHistory,
   shiftExportOptions,
   shiftRows,
@@ -140,6 +145,30 @@ describe('durations and the plan form', () => {
     const form = defaultPlanForm(3050);
     expect(planSettingsFromForm(form)?.minRevenuePerHourCents).toBe(3000);
     expect(planSettingsFromForm({ ...form, thresholdText: 'x' })).toBeNull();
+  });
+
+  it('starts in target mode with the average month of the history as the target', () => {
+    const form = defaultPlanForm(3050, 528240);
+    expect(form).toMatchObject({ mode: 'target', targetText: '5282' });
+    expect(defaultPlanForm(3050).targetText).toBe('');
+    expect(defaultTargetText(0)).toBe('');
+  });
+
+  it('reads the target as euros, and drops the threshold from the settings it plans with', () => {
+    expect(targetRevenueCents('25.000,50')).toBe(2500050);
+    expect(targetRevenueCents('x')).toBeNull();
+    const settings = targetPlanSettingsFromForm(defaultPlanForm(3050));
+    expect(Object.keys(settings).sort()).toEqual(['maxShiftMinutes', 'maxShiftsPerVehiclePerDay', 'minBreakMinutes', 'minShiftMinutes']);
+  });
+
+  it('maps the named block choices onto the engine limits, all under the six-hour ceiling', () => {
+    expect([...OPERATIONAL_BLOCK_CHOICES]).toEqual([240, 270, 285]);
+    expect(Math.max(...OPERATIONAL_BLOCK_CHOICES)).toBeLessThan(300);
+  });
+
+  it('keeps a free entry visible beside the named choices', () => {
+    expect(withCurrentChoice([240, 270, 285], 270)).toEqual([{ value: 240, custom: false }, { value: 270, custom: false }, { value: 285, custom: false }]);
+    expect(withCurrentChoice([240, 270, 285], 300)[3]).toEqual({ value: 300, custom: true });
   });
 
   it('falls back to the default gap unless the stored one is usable', () => {

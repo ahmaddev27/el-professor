@@ -58,6 +58,9 @@ function augustRows() {
           route_start: null,
           route_end: null,
           price_amount: '28.40',
+          cash_amount: day % 2 === 0 ? '28.40' : '0.00',
+          online_amount: day % 2 === 0 ? '0.00' : '28.40',
+          tip_amount: '1.00',
           is_canceled: false,
           source_status: 'abgeschlossen',
           source_row_index: rows.length + 2,
@@ -109,16 +112,35 @@ describe('ShiftRecommendationPage', () => {
     await settle();
     expect(world.loadTripRows).toHaveBeenCalledWith('company-1', 'imp-aug');
     expect(collect(renderer.root)).toContain('SG-AB 1');
+    // The reference period is measured from the rows: months, payment split, tips, cancellations.
+    const settings = collect(renderer.root);
+    expect(settings).toContain('Referenzzeitraum');
+    expect(settings).toContain('August 2026: 186 Zeilen');
+    expect(settings).toContain('Betriebliche Vorgaben');
+    expect(settings).toContain('Ziel-Umsatz für den Monat');
 
     await act(async () => { button(renderer.root, 'Empfehlung berechnen').props.onClick(); });
     await settle();
 
     const screen = collect(renderer.root);
     expect(screen).toContain('Empfohlene Schichten');
-    expect(screen).toMatch(/07:00 – 10:00/);
+    // Planned towards a target, so the screen says whether it got there.
+    // The history is one step: either both vehicles drive their window or neither does. The
+    // plan under the target is empty, says so in euros, and offers the step above rather than
+    // padding itself.
+    expect(screen).toContain('Ziel nicht genau getroffen');
+    expect(screen).toContain('Die nächste Stufe');
+    expect(screen).toContain('0 Schichten');
+
+    await act(async () => { button(renderer.root, 'Diesen Plan zeigen').props.onClick(); });
+    await settle();
+    const stepUp = collect(renderer.root);
+    expect(stepUp).toContain('Ziel überschritten (nächsthöhere Stufe)');
+    expect(stepUp).toContain('Die Stufe darunter');
+    expect(stepUp).toMatch(/07:00 – 10:00/);
     expect(screen).toContain('Betriebstag');
     // Every string came out of the dictionary: no raw key, no undefined, no NaN.
-    expect(screen).not.toMatch(/shiftrec\.|mplanType\.|undefined|NaN/);
+    expect(screen + stepUp).not.toMatch(/shiftrec\.|mplanType\.|undefined|NaN/);
   });
 
   it('says the imports could not be read rather than offering no month', async () => {
