@@ -162,9 +162,9 @@ describe('unmatched earners and the 31-day cap', () => {
     expect(readPullAnswer(answer)?.unmatched).toHaveLength(1);
     expect(readPullAnswer({ ...answer, unmatched: [{ trips: 1 }] })).toBeNull();
   });
-  it('31 days are accepted and 32 are refused', () => {
-    expect(splitIntoBusinessWeeks('2026-10-01', '2026-10-31').ok).toBe(true);
-    expect(splitIntoBusinessWeeks('2026-10-01', '2026-11-01')).toEqual({ ok: false, problem: 'range_too_long' });
+  it('38 days are accepted and 39 are refused', () => {
+    expect(splitIntoBusinessWeeks('2026-10-01', '2026-11-07').ok).toBe(true);
+    expect(splitIntoBusinessWeeks('2026-10-01', '2026-11-08')).toEqual({ ok: false, problem: 'range_too_long' });
   });
 });
 

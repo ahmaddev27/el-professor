@@ -130,8 +130,12 @@ export interface WeekSegment {
   monday: string;
 }
 
-/** The widest range one import may cover. Bounds the calls the function makes. */
-export const MAX_RANGE_DAYS = 31;
+/**
+ * The widest range one import may cover. The longest business month is 5 Uber
+ * weeks = 35 days; 38 leaves room for a partial piece at either end. It also
+ * caps the outbound calls at 6, because the function asks Reidey once per week.
+ */
+export const MAX_RANGE_DAYS = 38;
 
 /**
  * Cuts `from`..`to` (inclusive) at every Sunday, so each piece lies inside one
