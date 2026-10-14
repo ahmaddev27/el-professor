@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Info } from 'lucide-react';
 import { Alert, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, Button, formatNumber } from '../../ui';
 import { useTranslation } from '../../../contexts/LanguageContext';
-import { exportTableToExcel } from '../../../utils/excelExport';
+import { useColumnPickerExport } from '../../../contexts/ExportPickerContext';
 import {
   DEFAULT_RETURN_CHECK_SETTINGS,
   checkRideFromRow,
@@ -61,6 +61,7 @@ function guard<T>(label: string, run: () => T): { value: T | null; failed: boole
 /** The fourth Fahrtenanalyse tab. A list to review, never a verdict; nothing is stored. */
 export function ReturnCheckPanel({ tripRows, blockGapMinutes, baseForm, onBaseForm, savedBase, canSave, onSaveBase }: Props) {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const { latText, lonText, radiusKm, edited } = baseForm;
   const [vehicle, setVehicle] = useState('');
   const [placement, setPlacement] = useState<'' | ReviewPlacement>('');
@@ -129,7 +130,7 @@ export function ReturnCheckPanel({ tripRows, blockGapMinutes, baseForm, onBaseFo
       vehicle ? `${t('returncheck.review.vehicleFilter')}: ${vehicle}` : '',
       placement ? `${t('returncheck.review.placementFilter')}: ${t(PLACEMENT_KEYS[placement])}` : '',
     ].filter(Boolean);
-    exportTableToExcel(
+    exportPicker.table('returnCheckReview', 
       reviewExportOptions(
         visibleRows,
         {

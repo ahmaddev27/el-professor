@@ -22,7 +22,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { format } from 'date-fns';
 import { getWeeksOfMonth, getBusinessMonthRange, getBusinessWeeksForMonth } from '../utils/weekCalculations';
 import html2canvas from 'html2canvas';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { sendAbrechnungMail } from '../lib/sendDocumentClient';
 import {
   nothingToSend,
@@ -110,6 +110,7 @@ const MONTH_NAMES = [
 
 export function AbrechnungPage() {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [weeklyData, setWeeklyData] = useState<WeeklyAbrechnung[]>([]);
@@ -788,7 +789,7 @@ export function AbrechnungPage() {
     }
 
     try {
-      exportTableToExcel(buildAbrechnungExport({
+      exportPicker.table('abrechnung', buildAbrechnungExport({
         mode: viewMode,
         rows,
         totals,

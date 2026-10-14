@@ -35,7 +35,7 @@ import {
   wouldRemoveLastOwner,
 } from '../lib/platformStaffRoster';
 import { deDate, shortId } from '../lib/platformFormat';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildStaffExport } from '../lib/panelExports';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { berlinToday } from '../utils/salaryCashReceiptFlow';
@@ -161,6 +161,7 @@ const PlatformTeamPage: React.FC = () => {
   const { platformCan } = useSuperAdmin();
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
 
   const mayManage = platformCan('staff.manage');
@@ -316,7 +317,7 @@ const PlatformTeamPage: React.FC = () => {
    */
   const handleExport = () => {
     try {
-      exportTableToExcel(buildStaffExport({
+      exportPicker.table('platformTeam', buildStaffExport({
         rows: members,
         complete,
         today: berlinToday(),

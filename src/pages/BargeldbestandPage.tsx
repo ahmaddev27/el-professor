@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { cashLedgerInScope } from '../utils/salaryCashReceiptFlow';
@@ -116,6 +116,7 @@ const RECEIPT_LOOKUP_CHUNK = UUID_LOOKUP_CHUNK;
 
 export default function BargeldbestandPage() {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [totals, setTotals] = useState<CashLedgerTotals>(EMPTY_TOTALS);
   const [entries, setEntries] = useState<CashLedgerEntry[]>([]);
   const [filteredEntries, setFilteredEntries] = useState<CashLedgerEntry[]>([]);
@@ -341,7 +342,7 @@ export default function BargeldbestandPage() {
 
     const filteredTotals = summarizeCashLedger(filteredEntries);
 
-    exportTableToExcel({
+    exportPicker.table('cashBalance', {
       filename: `bargeldbestand_${selectedMonth}`,
       sheetTitle: t('nav.bargeldbestand'),
       moduleName: t('nav.bargeldbestand'),

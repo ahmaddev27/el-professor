@@ -17,7 +17,7 @@ import { fetchAuditPage } from '../lib/platformAuditClient';
 import { fetchCompanies } from '../lib/platformDirectoryClient';
 import type { PlatformCompanyRow } from '../lib/platformReadModels';
 import { EMPTY_CELL, deCount, deDateTime, shortId } from '../lib/platformFormat';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildAuditExport } from '../lib/panelExports';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useToast } from '../contexts/ToastContext';
@@ -101,6 +101,7 @@ const PlatformAuditPage: React.FC = () => {
   const { user } = useAuth();
   const { platformCan, isPlatformStaff } = useSuperAdmin();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const { showToast } = useToast();
   const exportChrome = useExportChrome();
 
@@ -192,7 +193,7 @@ const PlatformAuditPage: React.FC = () => {
    */
   const handleExport = () => {
     try {
-      exportTableToExcel(buildAuditExport({
+      exportPicker.table('platformAudit', buildAuditExport({
         rows,
         filters: [
           {

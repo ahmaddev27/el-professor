@@ -16,7 +16,7 @@ import {
   type ProfileRoleRow,
   type RoleRpcResult,
 } from '../lib/companyRoles';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildRolesExport } from '../utils/tableExportRows';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useToast } from '../contexts/ToastContext';
@@ -26,6 +26,7 @@ import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, PageHeader,
 
 const RolesManagement: React.FC = () => {
   const { t, tPlural } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
   const [roles, setRoles] = useState<RoleWithPermissions[]>([]);
   const [holders, setHolders] = useState<Record<string, number>>({});
@@ -213,7 +214,7 @@ const RolesManagement: React.FC = () => {
    */
   const handleExport = () => {
     try {
-      exportTableToExcel(buildRolesExport({
+      exportPicker.table('roles', buildRolesExport({
         companyRoles,
         templates,
         holders,

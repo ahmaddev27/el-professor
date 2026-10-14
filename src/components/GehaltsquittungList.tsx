@@ -41,7 +41,7 @@ import {
   type SalaryCashReceiptWithDriver,
 } from '../lib/salaryCashReceipts';
 import { toCents } from '../utils/money';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildGehaltsquittungExport } from '../utils/tableExportRows';
 import { useExportChrome } from '../hooks/useExportChrome';
 import {
@@ -87,6 +87,7 @@ export interface GehaltsquittungListProps {
 
 export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCreate }: GehaltsquittungListProps) {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
   const refusalMessage = useRefusalMessage();
   const { success } = useToast();
@@ -172,7 +173,7 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
   const handleExport = () => {
     const needle = query.trim();
     try {
-      exportTableToExcel(buildGehaltsquittungExport({
+      exportPicker.table('gehaltsquittungen', buildGehaltsquittungExport({
         rows,
         filterSummary: needle
           ? [t('ui.export.filterLine', { label: t('common.search'), value: needle }), t('gq.export.filterAll')]

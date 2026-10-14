@@ -22,7 +22,7 @@ import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildCompaniesExport } from '../lib/panelExports';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { berlinToday } from '../utils/salaryCashReceiptFlow';
@@ -1082,6 +1082,7 @@ export default function CompaniesPage() {
   const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -1237,7 +1238,7 @@ export default function CompaniesPage() {
    */
   const handleExport = () => {
     try {
-      exportTableToExcel(buildCompaniesExport({
+      exportPicker.table('companies', buildCompaniesExport({
         rows: filtered.map(company => ({
           name: company.name,
           slug: company.slug,

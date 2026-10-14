@@ -22,7 +22,7 @@ import { generateSubscriptionPdf, InvoicePdfData } from '../utils/subscriptionPd
 import { getInvoiceSeller } from '../lib/platformSettingsClient';
 import { invoiceSellerFields } from '../lib/platformSettings';
 import { Alert, Button } from '../components/ui';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import {
   buildInvoicesExport,
   buildSubscriptionsExport,
@@ -130,6 +130,7 @@ export default function SubscriptionBillingPage() {
   const canPricing = platformCan('pricing.manage');
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
 
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -335,7 +336,7 @@ export default function SubscriptionBillingPage() {
 
   const handleExportInvoices = () => {
     try {
-      exportTableToExcel(buildInvoicesExport({
+      exportPicker.table('platformInvoices', buildInvoicesExport({
         rows: invoices,
         // The summary is the database's own sum over the whole filtered set.
         // The builder puts it in the totals row only where the file holds that
@@ -377,7 +378,7 @@ export default function SubscriptionBillingPage() {
 
   const handleExportSubscriptions = () => {
     try {
-      exportTableToExcel(buildSubscriptionsExport({
+      exportPicker.table('platformSubscriptions', buildSubscriptionsExport({
         rows: subscriptions,
         activeCount: activeSubCount,
         scope: { pageIndex: subscriptionPage, total: subscriptionTotal, rowCount: subscriptions.length, pageSize: BILLING_PAGE_SIZE },
