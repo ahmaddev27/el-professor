@@ -6476,9 +6476,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'inc.uber.existingUnchecked': 'Bestehende Einträge konnten nicht vollständig geprüft werden. Ob für diese Wochen schon Beträge erfasst sind, ist unbekannt; es könnte doppelt gezählt werden.',
-  'inc.uber.importedBody':      'Für diese Fahrer und Wochen liegt schon ein Uber-Import vor. Die Datenbank lässt keinen zweiten zu; es wird nichts geschrieben. Wähle einen Zeitraum ohne diese Wochen.',
   'inc.uber.importedItem':      '{name} · {week} ({from} – {to}) · Einträge: {count}',
-  'inc.uber.importedTitle':     'Bereits importiert: dieser Import wird abgelehnt',
   'inc.uber.manualBody':        'Der Import ändert oder löscht sie nicht. Beide Einträge bleiben bestehen, und die Beträge addieren sich: Umsatz, Aktionen, Trinkgeld, Bargeld und damit die Gehaltsgrundlage. Wurden dieselben Beträge schon erfasst, werden sie doppelt gezählt. Prüfe das vor dem Import.',
   'inc.uber.manualItem':        '{name} · {week} ({from} – {to}) · Einträge: {count}',
   'inc.uber.manualTitle':       'Achtung: für diese Wochen gibt es schon von Hand erfasste Einträge',
@@ -6505,4 +6503,11 @@ export const de = {
   'inc.uber.period.tooMany':        'Höchstens {max} Wochen auf einmal; gewählt sind {count}. Bitte weniger Wochen wählen.',
   'inc.uber.period.weekHint':       'Die gewählten Wochen bilden immer einen zusammenhängenden Zeitraum; eine übersprungene Woche wird mit abgerufen.',
   'inc.uber.period.weekListLabel':  'Uber-Wochen, neueste zuerst',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.replace.body':       'Für diese Fahrer und Wochen liegt schon ein Uber-Import vor. Wenn du ersetzt, wird der bisherige Uber-Import dieser Wochen gelöscht und durch die neuen Beträge ersetzt. Von Hand eingetragene Einträge werden nicht angefasst.',
+  'inc.uber.replace.choice':     'Bisherigen Uber-Import dieser Wochen ersetzen',
+  'inc.uber.replace.done.one':   '{count} früherer Uber-Eintrag wurde ersetzt.',
+  'inc.uber.replace.done.other': '{count} frühere Uber-Einträge wurden ersetzt.',
+  'inc.uber.replace.title':      'Bereits importiert: ersetzen oder anderen Zeitraum wählen',
 } as const;

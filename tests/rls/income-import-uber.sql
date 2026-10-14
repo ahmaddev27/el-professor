@@ -20,6 +20,27 @@
 --    §5  the shape of a row is checked again by the database, and a failure
 --        halfway through the INSERT leaves nothing (atomicity).
 --
+--    §7  replace mode (20261014100000, owner 14.10.2026): the previous Uber rows
+--        for exactly the payload's (driver, week, type) are replaced, the figure
+--        is the NEW one only, and nothing else goes. The probes that matter:
+--          49  a hand-typed row (source NULL) for the SAME driver, week and type
+--              survives. It fires if the delete is keyed on the TEXT columns
+--              (driver_name, date, type) instead of the index's own, or widened
+--              with an OR: the typed 7,00 EUR row disappears, probe 49 reads
+--              `none` and the deleted count in probe 46 reads 4, not 3. Be exact
+--              about its limit: dropping `source = c_source` ALONE is not seen
+--              here, because `source_driver_key = k.driver_key` is also never
+--              true for a NULL key (income_source_shape ties the four columns
+--              together). That term is held by the migration's self-check and
+--              by src/utils/incomeImportReplace.test.ts, which read the text.
+--          51  company B's row with the SAME driver key and week survives (the
+--              `company_id = v_company` term).
+--          53  a pending link's rows survive and the call is refused before
+--              anything is deleted (the confirmed-link term).
+--    The order in the file is not the order of the numbers: §7 sits between §3
+--    and §4 because §4 opens platform contexts, after which a plain owner INSERT
+--    into income is refused by the write flag the context leaves behind.
+--
 --  Every refusal is read as `ERR <sqlstate> <hint>`. The gate (not_authorized)
 --  and the lookup (driver_not_linked) raise DIFFERENT hints on purpose, so a
 --  cell cannot read green because two refusals look alike.
@@ -120,6 +141,12 @@ $$;
 CREATE OR REPLACE FUNCTION _ui_import(p_rows jsonb) RETURNS text
 LANGUAGE sql IMMUTABLE AS $$
   SELECT format('SELECT income_import_uber(%L::jsonb)::text', p_rows::text)
+$$;
+
+/* The same call with the replace flag, named (true) or spelled out (false). */
+CREATE OR REPLACE FUNCTION _ui_replace(p_rows jsonb, p_flag boolean DEFAULT true) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT format('SELECT income_import_uber(%L::jsonb, %L::boolean)::text', p_rows::text, p_flag::text)
 $$;
 
 -- ─── fixtures (as the owner, so RLS does not apply) ─────────────────────────
@@ -269,6 +296,161 @@ BEGIN
     'ERR 22023 driver_not_linked 1003,9999');
 END $$;
 
+-- ─── 7. replace: the previous Uber rows go, the new ones stand ─────────────
+--
+-- Placed before section 4 on purpose (see the header). Everything the replace
+-- must NOT touch is seeded first, as the owner, then one replace is run and
+-- every bystander is read back.
+
+DO $$
+DECLARE
+  co_a constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  co_b constant uuid := 'c0000000-0000-4000-8000-00000000000b';
+BEGIN
+  -- A typed row for the SAME driver, week and type as the imported week: it has
+  -- source NULL and the index does not see it.
+  INSERT INTO income (description, amount, type, driver_name, date, company_id)
+  VALUES ('hand typed', 7.00, 'umsatz', E'Zoë  Müller', '2026-10-06', co_a);
+
+  -- Company B holds an Uber row with the SAME driver key and week as A's.
+  INSERT INTO income (description, amount, type, driver_name, date, company_id,
+                      source, source_period_start, source_period_end, source_driver_key)
+  VALUES ('Woche 1 - Uber', 9.00, 'umsatz', E'Zoë  Müller', '2026-10-05', co_b,
+          'uber', '2026-10-05', '2026-10-11', '1001');
+
+  -- Company B's row under its OWN key 2001, in a week of its own.
+  INSERT INTO income (description, amount, type, driver_name, date, company_id,
+                      source, source_period_start, source_period_end, source_driver_key)
+  VALUES ('Woche 5 - Uber', 5.50, 'umsatz', E'Zoë  Müller', '2026-09-28', co_b,
+          'uber', '2026-09-28', '2026-10-04', '2001');
+
+  -- A's own row under a key whose link is only PENDING.
+  INSERT INTO income (description, amount, type, driver_name, date, company_id,
+                      source, source_period_start, source_period_end, source_driver_key)
+  VALUES ('Woche 1 - Uber', 3.00, 'umsatz', 'Pending Person', '2026-10-05', co_a,
+          'uber', '2026-10-05', '2026-10-11', '1003');
+END $$;
+
+DO $$
+DECLARE
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  viewer_a constant uuid := 'a0000000-0000-4000-8000-000000000003';
+  v_week   jsonb := jsonb_build_array(
+      _ui_row('1001', 'umsatz',    '500.00', '2026-10-05', '2026-10-11', 1, 60),
+      _ui_row('1001', 'trinkgeld', '30.00',  '2026-10-05', '2026-10-11', 1),
+      _ui_row('1001', 'bargeld',   '200.00', '2026-10-05', '2026-10-11', 1));
+  v_all    integer := (SELECT count(*) FROM income);
+  v_answer text;
+BEGIN
+  PERFORM _ui_rec(42, 'WITHOUT the flag the corrected week is still refused, and nothing moved',
+    _ui_call(admin_a, _ui_import(v_week)) || ' / ' ||
+    (SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type) FROM income
+      WHERE source = 'uber' AND source_driver_key = '1001'
+        AND source_period_start = '2026-10-05' AND company_id = 'c0000000-0000-4000-8000-00000000000a'),
+    'ERR 23505 already_imported / bargeld:226.26 trinkgeld:28.00 umsatz:664.19');
+
+  PERFORM _ui_rec(43, 'an explicit false is the same refusal as no flag at all',
+    _ui_call(admin_a, _ui_replace(v_week, false)), 'ERR 23505 already_imported');
+
+  PERFORM _ui_rec(44, 'a NULL flag is refused, not read as true',
+    _ui_call(admin_a, format('SELECT income_import_uber(%L::jsonb, NULL)::text', v_week::text)),
+    'ERR 22023 invalid_request');
+
+  PERFORM _ui_rec(45, 'nothing was written or deleted by those three refusals',
+    (SELECT count(*)::text FROM income), v_all::text);
+
+  PERFORM _ui_rec(46, 'REPLACE: the three old rows go, the three new ones are written, and the count says 3',
+    _ui_call(admin_a, _ui_replace(v_week)) :: text,
+    '{"ok": true, "deleted": 3, "drivers": 1, "inserted": 3}');
+
+  PERFORM _ui_rec(47, 'the figure is the NEW one only (500, not 400 + 500), one row per type',
+    (SELECT string_agg(type || ':' || amount::text || ':' || coalesce(trip_count::text, '-'), ' ' ORDER BY type)
+       FROM income WHERE source = 'uber' AND source_driver_key = '1001'
+        AND source_period_start = '2026-10-05' AND company_id = 'c0000000-0000-4000-8000-00000000000a'),
+    'bargeld:200.00:- trinkgeld:30.00:- umsatz:500.00:60');
+
+  PERFORM _ui_rec(48, 'the replaced rows still carry OUR drivers row''s name, character for character',
+    (SELECT string_agg(DISTINCT driver_name, '|') FROM income
+      WHERE source = 'uber' AND source_driver_key = '1001' AND source_period_start = '2026-10-05'
+        AND company_id = 'c0000000-0000-4000-8000-00000000000a'),
+    E'Zoë  Müller');
+
+  PERFORM _ui_rec(49, 'a HAND-TYPED row of the same driver, week and type survives untouched',
+    coalesce((SELECT description || ':' || amount::text || ':' || coalesce(source, 'manual') FROM income
+               WHERE source IS NULL AND driver_name = E'Zoë  Müller' AND date = '2026-10-06'
+                 AND company_id = 'c0000000-0000-4000-8000-00000000000a'), 'none'),
+    'hand typed:7.00:manual');
+
+  PERFORM _ui_rec(50, 'the same driver''s OTHER week (10-12, imported earlier) was not touched',
+    (SELECT amount::text FROM income WHERE source = 'uber' AND source_driver_key = '1001'
+        AND source_period_start = '2026-10-12' AND company_id = 'c0000000-0000-4000-8000-00000000000a'),
+    '10.00');
+
+  PERFORM _ui_rec(51, 'company B''s row with the SAME driver key and week was not touched',
+    (SELECT amount::text FROM income WHERE source = 'uber' AND source_driver_key = '1001'
+        AND company_id = 'c0000000-0000-4000-8000-00000000000b'),
+    '9.00');
+
+  PERFORM _ui_rec(52, 'a week with nothing to replace reports deleted 0 and still inserts',
+    _ui_call(admin_a, _ui_replace(jsonb_build_array(
+      _ui_row('1002', 'umsatz', '20.00', '2026-11-09', '2026-11-15', 2)))) :: text,
+    '{"ok": true, "deleted": 0, "drivers": 1, "inserted": 1}');
+
+  -- A pending link is not a link: the call is refused BEFORE anything is deleted.
+  PERFORM _ui_rec(53, 'an unconfirmed key cannot delete through replace: refused, its row stands',
+    _ui_call(admin_a, _ui_replace(jsonb_build_array(
+      _ui_row('1003', 'umsatz', '1.00', '2026-10-05', '2026-10-11', 1)))) || ' / ' ||
+    (SELECT amount::text FROM income WHERE source_driver_key = '1003' AND company_id = 'c0000000-0000-4000-8000-00000000000a'),
+    'ERR 22023 driver_not_linked 1003 / 3.00');
+
+  PERFORM _ui_rec(54, 'another company''s key cannot delete through replace either',
+    _ui_call(admin_a, _ui_replace(jsonb_build_array(
+      _ui_row('2001', 'umsatz', '1.00', '2026-09-28', '2026-10-04', 5)))) || ' / ' ||
+    (SELECT amount::text FROM income WHERE source_driver_key = '2001' AND source_period_start = '2026-09-28'
+        AND company_id = 'c0000000-0000-4000-8000-00000000000b'),
+    'ERR 22023 driver_not_linked 2001 / 5.50');
+
+  PERFORM _ui_rec(55, 'a viewer is refused before anything is deleted',
+    _ui_call(viewer_a, _ui_replace(v_week)) || ' / ' || (SELECT count(*)::text FROM income),
+    'ERR 42501 not_authorized / ' || (SELECT count(*)::text FROM income));
+
+  PERFORM _ui_rec(56, 'a platform account with no context is refused before anything is deleted',
+    _ui_call('50000000-0000-4000-8000-000000000001', _ui_replace(v_week)) || ' / ' || (SELECT count(*)::text FROM income),
+    'ERR 42501 not_authorized / ' || (SELECT count(*)::text FROM income));
+
+  -- THE CASE THE WHOLE MODE EXISTS FOR, and the reason the delete is keyed on
+  -- (driver, week) and NOT on the type although the unique index is.
+  --
+  -- A week is imported with two types. Uber then corrects it and the tip falls
+  -- to zero, so the new payload carries only `umsatz`. Keyed on the type, the
+  -- old `trinkgeld` row would survive a correction that says it should not
+  -- exist, the overlap check below would then refuse the whole call, and the
+  -- operator would be stranded exactly where this mode was supposed to let him
+  -- through. One pull writes one row per type per week, so a week's rows are
+  -- one artefact and are replaced as one.
+  PERFORM _ui_call(admin_a, _ui_import(jsonb_build_array(
+      _ui_row('1002', 'umsatz',    '80.00', '2026-12-07', '2026-12-13', 2),
+      _ui_row('1002', 'trinkgeld', '8.00',  '2026-12-07', '2026-12-13', 2))));
+  -- The call and the state it leaves are recorded SEPARATELY, and that is not
+  -- cosmetic: the two operands of `||` have no guaranteed order of evaluation,
+  -- so an aggregate written beside `_ui_call(...)` can be planned against the
+  -- snapshot BEFORE the call. The earlier version of this probe did exactly
+  -- that and passed only while the call still failed and changed nothing.
+  v_answer := _ui_call(admin_a, _ui_replace(jsonb_build_array(
+    _ui_row('1002', 'umsatz', '90.00', '2026-12-07', '2026-12-13', 2))));
+  PERFORM _ui_rec(57, 'a correction that DROPS a type goes through: two rows out, one in',
+    v_answer, '{"ok": true, "deleted": 2, "drivers": 1, "inserted": 1}');
+  PERFORM _ui_rec(60, '...and that week now holds only the corrected figure',
+    coalesce((SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type) FROM income
+      WHERE source = 'uber' AND source_driver_key = '1002' AND source_period_start = '2026-12-07'), 'none'),
+    'umsatz:90.00');
+
+  PERFORM _ui_rec(58, 'so the tip Uber no longer reports is gone, not left standing beside corrected figures',
+    (SELECT count(*)::text FROM income WHERE source = 'uber' AND source_driver_key = '1002'
+        AND source_period_start = '2026-12-07' AND type = 'trinkgeld'),
+    '0');
+END $$;
+
 -- ─── 4. who may call it ─────────────────────────────────────────────────────
 
 DO $$
@@ -294,10 +476,10 @@ BEGIN
   PERFORM _ui_rec(20, 'anon cannot execute it',
     _ui_call(NULL, v_one), 'ERR 42501 (no hint)');
   PERFORM _ui_rec(21, 'the grants: authenticated yes, anon no, PUBLIC no',
-    (has_function_privilege('authenticated', 'public.income_import_uber(jsonb)', 'EXECUTE')::text || '/' ||
-     has_function_privilege('anon', 'public.income_import_uber(jsonb)', 'EXECUTE')::text || '/' ||
+    (has_function_privilege('authenticated', 'public.income_import_uber(jsonb, boolean)', 'EXECUTE')::text || '/' ||
+     has_function_privilege('anon', 'public.income_import_uber(jsonb, boolean)', 'EXECUTE')::text || '/' ||
      EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
-              WHERE p.oid = 'public.income_import_uber(jsonb)'::regprocedure AND a.grantee = 0)::text),
+              WHERE p.oid = 'public.income_import_uber(jsonb, boolean)'::regprocedure AND a.grantee = 0)::text),
     'true/false/false');
 
   -- Company B has its own driver 2001; A's 1001 is nobody's in B.
@@ -307,8 +489,12 @@ BEGIN
   PERFORM _ui_rec(23, 'and imports its own, under its own driver row''s name',
     _ui_call(admin_b, _ui_import(jsonb_build_array(_ui_row('2001', 'umsatz', '5.00', '2026-10-05', '2026-10-11', 1)))) :: text,
     '{"ok": true, "drivers": 1, "inserted": 1}');
+  -- Named by its own period: the replace section seeds another company-B row
+  -- for this same driver key in a different week, so an unscoped read of the
+  -- key matches more than one row and the subquery raises.
   PERFORM _ui_rec(24, 'the row landed in company B',
-    (SELECT company_id::text || ' ' || driver_name FROM income WHERE source = 'uber' AND source_driver_key = '2001'),
+    (SELECT company_id::text || ' ' || driver_name FROM income
+      WHERE source = 'uber' AND source_driver_key = '2001' AND source_period_start = '2026-10-05'),
     'c0000000-0000-4000-8000-00000000000b ' || E'Zoë  Müller');
 
   PERFORM _ui_rec(25, 'a platform account with no context has no company: refused',
@@ -321,6 +507,10 @@ BEGIN
     _ui_call(staff, 'SELECT get_active_company_id()::text', staff_s), co_a::text);
   PERFORM _ui_rec(27, 'a platform account inside a SUPPORT session is refused with its own reason',
     _ui_call(staff, v_one, staff_s), 'ERR 42501 platform_session_not_allowed');
+  PERFORM _ui_rec(59, 'and a REPLACE inside a support session is refused and deletes nothing',
+    _ui_call(staff, _ui_replace(jsonb_build_array(_ui_row('1001', 'umsatz', '1.00', '2026-10-05', '2026-10-11', 1))), staff_s)
+      || ' / ' || (SELECT count(*)::text FROM income WHERE source = 'uber'),
+    'ERR 42501 platform_session_not_allowed / ' || (SELECT count(*)::text FROM income WHERE source = 'uber'));
   PERFORM _ui_call(staff, 'SELECT platform_context_close(NULL)::text', staff_s);
   PERFORM _ui_call(staff, format($q$SELECT platform_context_open(%L, 'view')::text$q$, co_a), staff_s);
   PERFORM _ui_rec(28, 'and inside a VIEW session',

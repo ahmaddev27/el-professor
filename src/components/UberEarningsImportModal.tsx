@@ -8,9 +8,12 @@ import { addDaysIso, splitIntoBusinessWeeks, type UnmatchedEarner } from '../../
 import {
   blockingEarners,
   buildImportRows,
+  canConfirmImport,
   findExistingIncome,
   findUnlinked,
   groupByBusinessMonth,
+  importRpcArgs,
+  readImportAnswer,
   readPullAnswer,
   uberWindowLabel,
   weekNumberOf,
@@ -177,6 +180,8 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const [pulled, setPulled] = useState<Pulled | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [view, setView] = useState<PreviewView>('weekly');
+  // The operator's choice to replace an earlier Uber import. Never carried over: a new pull asks again.
+  const [replaceChosen, setReplaceChosen] = useState(false);
   // A pull still in flight when the dialog closes must not open a preview later.
   const generation = useRef(0);
 
@@ -212,6 +217,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     setStage('range');
     setPulled(null);
     setProblem(null);
+    setReplaceChosen(false);
     onClose();
   };
 
@@ -220,6 +226,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     setStage('pulling');
     setProblem(null);
     setView('weekly');
+    setReplaceChosen(false);
     try {
       const { data, error } = await supabase.functions.invoke('uber-earnings-pull', { body: { from, to } });
       if (mine !== generation.current) return;
@@ -262,7 +269,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const confirm = async () => {
     setStage('importing');
     setProblem(null);
-    const { data, error } = await supabase.rpc('income_import_uber', { p_rows: rows });
+    const { data, error } = await supabase.rpc('income_import_uber', importRpcArgs(rows, importedWeeks.length, replaceChosen));
     if (error) {
       const hint = (error as { hint?: string }).hint ?? '';
       const key = IMPORT_HINT_KEYS[hint] ?? 'inc.uber.err.generic';
@@ -271,10 +278,13 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
       setStage('preview');
       return;
     }
-    const result = data as { inserted?: number; drivers?: number } | null;
+    const result = readImportAnswer(data, rows.length);
+    const replaced = result.deleted > 0
+      ? ` ${tPlural({ one: 'inc.uber.replace.done.one', other: 'inc.uber.replace.done.other' }, result.deleted)}`
+      : '';
     success(
       t('inc.uber.doneTitle'),
-      t('inc.uber.doneBody', { rows: String(result?.inserted ?? rows.length), drivers: String(result?.drivers ?? 0) }),
+      t('inc.uber.doneBody', { rows: String(result.inserted), drivers: String(result.drivers) }) + replaced,
     );
     onImported();
     close();
@@ -437,7 +447,12 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
       />
     );
   };
-  const canConfirm = stage === 'preview' && rows.length > 0 && blocking.length === 0 && importedWeeks.length === 0;
+  const canConfirm = stage === 'preview' && canConfirmImport({
+    rowCount: rows.length,
+    blockingCount: blocking.length,
+    importedWeekCount: importedWeeks.length,
+    replaceChosen,
+  });
 
   return (
     <Dialog open={isOpen} onOpenChange={open => { if (!open && !busy) close(); }}>
@@ -490,8 +505,8 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
               </Alert>
             )}
             {importedWeeks.length > 0 && (
-              <Alert tone="critical" title={t('inc.uber.importedTitle')}>
-                <p>{t('inc.uber.importedBody')}</p>
+              <Alert tone="caution" title={t('inc.uber.replace.title')}>
+                <p>{t('inc.uber.replace.body')}</p>
                 <ul className="mt-2 list-disc pl-5">
                   {importedWeeks.map(e => (
                     <li key={`i-${e.driverName}-${e.segment.from}`}>
@@ -499,6 +514,16 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
                     </li>
                   ))}
                 </ul>
+                <label className={cn(rowClass(replaceChosen), 'mt-3')}>
+                  <input
+                    type="checkbox"
+                    className={inputClass}
+                    checked={replaceChosen}
+                    disabled={busy}
+                    onChange={event => setReplaceChosen(event.target.checked)}
+                  />
+                  <span className="font-medium text-fg">{t('inc.uber.replace.choice')}</span>
+                </label>
               </Alert>
             )}
             {manualWeeks.length > 0 && (
