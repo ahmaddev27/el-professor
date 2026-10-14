@@ -340,6 +340,7 @@ DECLARE
       _ui_row('1001', 'trinkgeld', '30.00',  '2026-10-05', '2026-10-11', 1),
       _ui_row('1001', 'bargeld',   '200.00', '2026-10-05', '2026-10-11', 1));
   v_all    integer := (SELECT count(*) FROM income);
+  v_answer text;
 BEGIN
   PERFORM _ui_rec(42, 'WITHOUT the flag the corrected week is still refused, and nothing moved',
     _ui_call(admin_a, _ui_import(v_week)) || ' / ' ||
@@ -430,12 +431,19 @@ BEGIN
   PERFORM _ui_call(admin_a, _ui_import(jsonb_build_array(
       _ui_row('1002', 'umsatz',    '80.00', '2026-12-07', '2026-12-13', 2),
       _ui_row('1002', 'trinkgeld', '8.00',  '2026-12-07', '2026-12-13', 2))));
-  PERFORM _ui_rec(57, 'a correction that DROPS a type goes through, and takes the dropped type with it',
-    _ui_call(admin_a, _ui_replace(jsonb_build_array(
-      _ui_row('1002', 'umsatz', '90.00', '2026-12-07', '2026-12-13', 2)))) || ' / ' ||
-    (SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type) FROM income
-      WHERE source = 'uber' AND source_driver_key = '1002' AND source_period_start = '2026-12-07'),
-    '{"ok": true, "deleted": 2, "drivers": 1, "inserted": 1} / umsatz:90.00');
+  -- The call and the state it leaves are recorded SEPARATELY, and that is not
+  -- cosmetic: the two operands of `||` have no guaranteed order of evaluation,
+  -- so an aggregate written beside `_ui_call(...)` can be planned against the
+  -- snapshot BEFORE the call. The earlier version of this probe did exactly
+  -- that and passed only while the call still failed and changed nothing.
+  v_answer := _ui_call(admin_a, _ui_replace(jsonb_build_array(
+    _ui_row('1002', 'umsatz', '90.00', '2026-12-07', '2026-12-13', 2))));
+  PERFORM _ui_rec(57, 'a correction that DROPS a type goes through: two rows out, one in',
+    v_answer, '{"ok": true, "deleted": 2, "drivers": 1, "inserted": 1}');
+  PERFORM _ui_rec(60, '...and that week now holds only the corrected figure',
+    coalesce((SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type) FROM income
+      WHERE source = 'uber' AND source_driver_key = '1002' AND source_period_start = '2026-12-07'), 'none'),
+    'umsatz:90.00');
 
   PERFORM _ui_rec(58, 'so the tip Uber no longer reports is gone, not left standing beside corrected figures',
     (SELECT count(*)::text FROM income WHERE source = 'uber' AND source_driver_key = '1002'
@@ -481,8 +489,12 @@ BEGIN
   PERFORM _ui_rec(23, 'and imports its own, under its own driver row''s name',
     _ui_call(admin_b, _ui_import(jsonb_build_array(_ui_row('2001', 'umsatz', '5.00', '2026-10-05', '2026-10-11', 1)))) :: text,
     '{"ok": true, "drivers": 1, "inserted": 1}');
+  -- Named by its own period: the replace section seeds another company-B row
+  -- for this same driver key in a different week, so an unscoped read of the
+  -- key matches more than one row and the subquery raises.
   PERFORM _ui_rec(24, 'the row landed in company B',
-    (SELECT company_id::text || ' ' || driver_name FROM income WHERE source = 'uber' AND source_driver_key = '2001'),
+    (SELECT company_id::text || ' ' || driver_name FROM income
+      WHERE source = 'uber' AND source_driver_key = '2001' AND source_period_start = '2026-10-05'),
     'c0000000-0000-4000-8000-00000000000b ' || E'Zoë  Müller');
 
   PERFORM _ui_rec(25, 'a platform account with no context has no company: refused',
