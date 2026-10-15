@@ -136,6 +136,9 @@ Deno.serve(async (req: Request) => {
         driver_mails_sent: report.driver_mails_sent, driver_mails_failed: report.driver_mails_failed,
         manager_summaries_sent: report.manager_summaries_sent,
         manager_summaries_failed: report.manager_summaries_failed,
+        reminders_due: report.reminders_due,
+        reminder_mails_sent: report.reminder_mails_sent,
+        reminder_mails_failed: report.reminder_mails_failed,
       }));
       return respond({ ok: true, job, ...report });
     }
