@@ -15,7 +15,7 @@ import {
   mondayOf,
   type WeekSegment,
 } from '../../supabase/functions/_shared/uber-earnings-core';
-import { UBER_WEEK_START_HOUR, weekNumberOf } from './uberEarningsImport';
+import { UBER_WEEK_START_HOUR, uberWindowLabel, weekNumberOf } from './uberEarningsImport';
 
 /** Half a year of weeks: enough to catch up on a missed month, short enough to scroll. */
 export const UBER_WEEKS_BACK = 26;
@@ -180,4 +180,108 @@ export function rangeToDates(range: WeekRange): { from: string; to: string } {
  */
 export function normalizePartnerReason(reason: string): string {
   return /^range_exceeds_\d+_days$/.test(reason) ? 'range_too_long' : reason;
+}
+
+// ── Days ────────────────────────────────────────────────────────────────────
+// A day is Uber's operating day: 04:00 on that date to 04:00 the next. A daily
+// pick is only a shorter `from`..`to`; the pull still cuts it at business weeks
+// and asks Reidey once per piece, so nothing below changes the protocol.
+
+/** Six weeks of days: the daily list is for catching up on the last stretch. */
+export const UBER_DAYS_BACK = 42;
+
+/** The pull's own cap, in days, because a daily range is not a whole number of weeks. */
+export const MAX_SELECTABLE_DAYS = MAX_RANGE_DAYS;
+
+export interface UberDay {
+  /** ISO date of the operating day. */
+  date: string;
+  /** The Monday of the business week the day lies in, and that week's `Woche N`. */
+  monday: string;
+  weekNumber: number;
+  /** The business month (1-12) and year: those of the Monday, not of the day. */
+  year: number;
+  month: number;
+  /** Not yet over: the operating day ends at 04:00 the next calendar day. */
+  running: boolean;
+}
+
+/** A contiguous run of days, first and last inclusive. */
+export interface DayRange {
+  first: string;
+  last: string;
+}
+
+function toDay(date: string, runningDay: string): UberDay {
+  const monday = mondayOf(date);
+  const [year, month] = monday.split('-').map(Number);
+  const segment: WeekSegment = { from: monday, to: addDaysIso(monday, 6), monday };
+  return { date, monday, weekNumber: weekNumberOf(segment), year, month, running: date === runningDay };
+}
+
+/** The running day plus `back` finished ones, newest first. */
+export function recentUberDays(now: Date, back: number = UBER_DAYS_BACK): UberDay[] {
+  const current = uberDayOf(now);
+  return Array.from({ length: back + 1 }, (_, i) => toDay(addDaysIso(current, -i), current));
+}
+
+export interface DayWeekGroup { monday: string; weekNumber: number; days: UberDay[] }
+export interface DayMonthGroup { year: number; month: number; weeks: DayWeekGroup[] }
+
+/** Months, then the weeks inside them, then days, in the order the days are given. */
+export function groupDaysByMonthAndWeek(days: readonly UberDay[]): DayMonthGroup[] {
+  const months: DayMonthGroup[] = [];
+  for (const day of days) {
+    let month = months[months.length - 1];
+    if (!month || month.year !== day.year || month.month !== day.month) {
+      month = { year: day.year, month: day.month, weeks: [] };
+      months.push(month);
+    }
+    let week = month.weeks[month.weeks.length - 1];
+    if (!week || week.monday !== day.monday) {
+      week = { monday: day.monday, weekNumber: day.weekNumber, days: [] };
+      month.weeks.push(week);
+    }
+    week.days.push(day);
+  }
+  return months;
+}
+
+/** The most recent finished day: what the daily chooser opens on. */
+export function defaultDayRange(now: Date): DayRange {
+  const day = addDaysIso(uberDayOf(now), -1);
+  return { first: day, last: day };
+}
+
+/** The same click rules as `toggleWeek`, one day at a time. */
+export function toggleDay(range: DayRange | null, date: string): DayRange | null {
+  if (!range) return { first: date, last: date };
+  if (date < range.first) return { first: date, last: range.last };
+  if (date > range.last) return { first: range.first, last: date };
+  if (range.first === range.last) return null;
+  if (date === range.first) return { first: addDaysIso(range.first, 1), last: range.last };
+  if (date === range.last) return { first: range.first, last: addDaysIso(range.last, -1) };
+  return { first: date, last: date };
+}
+
+export function isDaySelected(range: DayRange | null, date: string): boolean {
+  return range !== null && date >= range.first && date <= range.last;
+}
+
+export function rangeDayCount(range: DayRange | null): number {
+  return range ? diffDaysIso(range.first, range.last) + 1 : 0;
+}
+
+export function dayRangeExceedsCap(range: DayRange | null): boolean {
+  return rangeDayCount(range) > MAX_SELECTABLE_DAYS;
+}
+
+/** The `from` / `to` of a daily pick: the days themselves, no week arithmetic. */
+export function dayRangeToDates(range: DayRange): { from: string; to: string } {
+  return { from: range.first, to: range.last };
+}
+
+/** `[06.10.2026 04:00 – 07.10.2026 04:00]` for one operating day. */
+export function uberDayWindowLabel(day: UberDay): string {
+  return uberWindowLabel({ from: day.date, to: day.date, monday: day.monday });
 }

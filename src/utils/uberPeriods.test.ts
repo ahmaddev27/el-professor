@@ -14,6 +14,15 @@ import {
   recentUberWeeks,
   toggleWeek,
   uberDayOf,
+  recentUberDays,
+  groupDaysByMonthAndWeek,
+  defaultDayRange,
+  toggleDay,
+  isDaySelected,
+  rangeDayCount,
+  dayRangeExceedsCap,
+  dayRangeToDates,
+  uberDayWindowLabel,
 } from './uberPeriods';
 
 // Wednesday 14.10.2026, noon in Berlin: the running week starts Monday 12.10.
@@ -139,5 +148,80 @@ describe('normalizePartnerReason', () => {
     expect(normalizePartnerReason('range_too_long')).toBe('range_too_long');
     expect(normalizePartnerReason('no_proxy')).toBe('no_proxy');
     expect(normalizePartnerReason('range_exceeds_days')).toBe('range_exceeds_days');
+  });
+});
+
+describe('daily periods', () => {
+  const days = recentUberDays(WED, 42);
+
+  it('lists the running Uber day first, then 42 finished ones, newest first', () => {
+    expect(days).toHaveLength(43);
+    expect(days[0]!.date).toBe('2026-10-14');
+    expect(days[0]!.running).toBe(true);
+    expect(days.slice(1).every(d => !d.running)).toBe(true);
+    expect(days[1]!.date).toBe('2026-10-13');
+  });
+
+  it('the day before 04:00 is still yesterday\'s operating day', () => {
+    expect(recentUberDays(new Date('2026-10-14T00:30:00Z'), 0)[0]!.date).toBe('2026-10-13'); // 02:30 CEST
+  });
+
+  it('a day carries its week\'s Monday, number and business month', () => {
+    expect(days[0]!).toMatchObject({ monday: '2026-10-12', weekNumber: 2, year: 2026, month: 10 });
+    // Sunday 11.10. belongs to the week of Monday 05.10.
+    const sunday = days.find(d => d.date === '2026-10-11')!;
+    expect(sunday).toMatchObject({ monday: '2026-10-05', weekNumber: 1 });
+    // 01.-04.10. lie in the week of Monday 28.09., which is September's.
+    const thursday = days.find(d => d.date === '2026-10-01')!;
+    expect(thursday).toMatchObject({ monday: '2026-09-28', year: 2026, month: 9 });
+  });
+
+  it('groups under business months and weeks by the Monday, not the calendar month', () => {
+    const groups = groupDaysByMonthAndWeek(days);
+    const october = groups[0]!;
+    expect([october.year, october.month]).toEqual([2026, 10]);
+    expect(october.weeks.map(w => [w.monday, w.days.length])).toEqual([['2026-10-12', 3], ['2026-10-05', 7]]);
+    const september = groups[1]!;
+    expect(september.weeks[0]!.monday).toBe('2026-09-28');
+    expect(september.weeks[0]!.days.map(d => d.date)).toContain('2026-10-01');
+    expect(groups.reduce((n, m) => n + m.weeks.reduce((k, w) => k + w.days.length, 0), 0)).toBe(days.length);
+  });
+
+  it('opens on the last finished day', () => {
+    expect(defaultDayRange(WED)).toEqual({ first: '2026-10-13', last: '2026-10-13' });
+  });
+
+  it('toggles like the weekly tab: contiguous, gap included', () => {
+    let r = toggleDay(null, '2026-10-10');
+    expect(r).toEqual({ first: '2026-10-10', last: '2026-10-10' });
+    r = toggleDay(r, '2026-10-13');
+    expect(r).toEqual({ first: '2026-10-10', last: '2026-10-13' });
+    expect(toggleDay(r, '2026-10-13')).toEqual({ first: '2026-10-10', last: '2026-10-12' });
+    expect(toggleDay(r, '2026-10-11')).toEqual({ first: '2026-10-11', last: '2026-10-11' });
+    expect(toggleDay({ first: '2026-10-10', last: '2026-10-10' }, '2026-10-10')).toBeNull();
+    expect(isDaySelected(r, '2026-10-12')).toBe(true);
+    expect(isDaySelected(r, '2026-10-14')).toBe(false);
+  });
+
+  it('counts days and applies the pull\'s own cap of MAX_RANGE_DAYS', () => {
+    const edge = { first: '2026-09-01', last: '2026-10-08' }; // 38 days
+    expect(rangeDayCount(edge)).toBe(MAX_RANGE_DAYS);
+    expect(dayRangeExceedsCap(edge)).toBe(false);
+    expect(dayRangeExceedsCap({ first: '2026-09-01', last: '2026-10-09' })).toBe(true);
+    expect(dayRangeExceedsCap(null)).toBe(false);
+  });
+
+  it('a daily range is sent as the days themselves and the pull cuts it at weeks', () => {
+    const { from, to } = dayRangeToDates({ first: '2026-10-09', last: '2026-10-13' });
+    expect([from, to]).toEqual(['2026-10-09', '2026-10-13']);
+    const split = splitIntoBusinessWeeks(from, to);
+    expect(split.ok && split.value.map(s => [s.from, s.to, s.monday])).toEqual([
+      ['2026-10-09', '2026-10-11', '2026-10-05'],
+      ['2026-10-12', '2026-10-13', '2026-10-12'],
+    ]);
+  });
+
+  it('prints the day\'s window in the weeks\' bracket style', () => {
+    expect(uberDayWindowLabel(days[1]!)).toBe('[13.10.2026 04:00 – 14.10.2026 04:00]');
   });
 });
