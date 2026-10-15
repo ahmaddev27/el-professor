@@ -14,7 +14,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SQL = readFileSync(
-  path.resolve(__dirname, '../../supabase/migrations/20261015100000_partner_fleet_import.sql'),
+  path.resolve(__dirname, '../../supabase/migrations/20261015110000_partner_fleet_import.sql'),
   'utf8',
 );
 
