@@ -33,8 +33,8 @@
     7. paging       total is the whole filtered set, items are the page, and
                     two pages of the same list do not overlap. The audit list
                     pages by its (occurred_at, id) cursor
-    8. scope        audit.read reads every actor's rows; any other active role
-                    reads its own, and naming another actor is a refusal
+    8. scope        audit.read reads every actor's rows, and since 15.10.2026 all
+                    four roles hold it (D3); a company admin is refused
     9. namespace    platform_audit_record refuses the platform_read. namespace
                     the database writes itself
    10. plans        EXPLAIN ANALYZE of each statement on seeded data: no scan
@@ -409,8 +409,7 @@ DECLARE
   v_got    jsonb;
 BEGIN
   -- companies.read: all four roles. business.read: not billing. audit.read:
-  -- owner only (open decision D3) — the audit list still answers ok for any
-  -- active role, with its own rows, which section 8 checks.
+  -- all four roles (D3, answered 15.10.2026), which section 8 checks.
   FOR p IN
     SELECT * FROM (VALUES
       ('owner',         '3b000000-0000-4000-8000-000000000001'::uuid, true,  true),
@@ -795,7 +794,9 @@ DECLARE
   owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
   support  constant uuid := '3b000000-0000-4000-8000-000000000002';
   readonly constant uuid := '3b000000-0000-4000-8000-000000000004';
+  billing  constant uuid := '3b000000-0000-4000-8000-000000000003';
   admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  k        integer;
   v        jsonb;
   p1       jsonb;
   p2       jsonb;
@@ -814,17 +815,23 @@ BEGIN
   PERFORM _rm_ok('audit.read: the rows carry the actor''s address and the company name',
     (SELECT bool_or((i ->> 'actor_email') IS NOT NULL) FROM jsonb_array_elements(v -> 'items') i));
 
-  v := _rm_json(support, 'SELECT platform_audit_list(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,100)::text');
-  PERFORM _rm_ok('without audit.read: the scope is own, and every row is the caller''s',
-    (v ->> 'scope') = 'own'
-    AND jsonb_array_length(v -> 'items') > 0
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i
-                     WHERE i ->> 'actor_user_id' IS DISTINCT FROM support::text));
-  PERFORM _rm_ok('without audit.read: naming another actor is a refusal, not a filter',
-    NOT (_rm_json(support, format('SELECT platform_audit_list(%L)::text', owner)) ->> 'ok')::boolean
-    AND (_rm_json(support, format('SELECT platform_audit_list(%L)::text', support)) ->> 'scope') = 'own');
-  PERFORM _rm_ok('read_only reads its own rows too (open decision D3 keeps the whole log with the owner)',
-    (_rm_json(readonly, 'SELECT platform_audit_list()::text') ->> 'scope') = 'own');
+  -- D3 was answered on 15.10.2026: every active role holds audit.read, so
+  -- none of the four is confined to its own rows any more. The 'own' scope of
+  -- platform_audit_list is reachable by no role today; it stays in the
+  -- function as the fallback for a role a later matrix gives no audit.read.
+  FOR k IN 1..3 LOOP
+    v := _rm_json((ARRAY[support, billing, readonly])[k],
+                  'SELECT platform_audit_list(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,100)::text');
+    PERFORM _rm_ok(format('audit.read: %s reads the whole log, other actors'' rows included',
+                          (ARRAY['support', 'billing', 'read_only'])[k]),
+      (v ->> 'scope') = 'all'
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') x WHERE x ->> 'actor_user_id' = owner::text)
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') x WHERE x ->> 'actor_user_id' = support::text));
+  END LOOP;
+  PERFORM _rm_ok('audit.read: naming another actor is a filter for a role that holds it',
+    (_rm_json(readonly, format('SELECT platform_audit_list(%L)::text', owner)) ->> 'scope') = 'all'
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(_rm_json(readonly, format('SELECT platform_audit_list(%L)::text', owner)) -> 'items') x
+                     WHERE x ->> 'actor_user_id' IS DISTINCT FROM owner::text));
   PERFORM _rm_ok('a company admin reads no audit row at all',
     NOT (_rm_json(admin_a, 'SELECT platform_audit_list()::text') ->> 'ok')::boolean);
 
