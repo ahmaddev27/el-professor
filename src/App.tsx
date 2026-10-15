@@ -20,6 +20,7 @@ import OverviewPage from './pages/OverviewPage';
 import AccountPage from './pages/AccountPage';
 import BelegePage from './pages/BelegePage';
 import FahrerPage from './pages/FahrerPage';
+import DataImportPage from './pages/DataImportPage';
 import CarsPage from './pages/CarsPage';
 import UmsaetzePage from './pages/UmsaetzePage';
 import FixkostenPage from './pages/FixkostenPage';
@@ -636,6 +637,7 @@ function App() {
                 <Route path="overview"       element={<OverviewPage />} />
                 <Route path="belege"         element={<BelegePage />} />
                 <Route path="fahrer"         element={<FahrerPage />} />
+                <Route path="datenimport"    element={<DataImportPage />} />
                 <Route path="cars"           element={<CarsPage />} />
                 <Route path="umsaetze"       element={<UmsaetzePage />} />
                 <Route path="fixkosten"      element={<FixkostenPage />} />

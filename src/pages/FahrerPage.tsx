@@ -12,6 +12,7 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { Alert, Button, DataTable, KpiCard, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { PartnerLinkProposals } from '../components/partner/PartnerLinkProposals';
+import { FleetImportShortcut } from '../components/partner/FleetImportShortcut';
 
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
@@ -154,6 +155,7 @@ const FahrerPage: React.FC = () => {
       </TabsList>
 
       <TabsContent value="own">
+    <FleetImportShortcut empty={drivers.length === 0} />
     <DriversManagement
       drivers={drivers}
       onAddDriver={handleAddDriver}
