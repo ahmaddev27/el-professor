@@ -56,6 +56,7 @@ import { openPartnerToken } from '../_shared/partner-token-seal.ts'
 import {
   parseEarningsBody,
   splitIntoBusinessWeeks,
+  splitIntoDays,
   type UberDriverEarnings,
   type UnmatchedEarner,
   type WeekSegment,
@@ -114,13 +115,17 @@ Deno.serve(async (req: Request) => {
   const authorization = req.headers.get('Authorization') ?? ''
   if (authorization === '') return respond({ ok: false, reason: 'not_authorized' }, 401)
 
-  let requested: { from?: unknown; to?: unknown }
+  let requested: { from?: unknown; to?: unknown; granularity?: unknown }
   try {
     requested = await req.json()
   } catch {
     return respond({ ok: false, reason: 'invalid_range' }, 400)
   }
-  const split = splitIntoBusinessWeeks(String(requested?.from), String(requested?.to))
+  // `granularity: 'day'` is the backfill's: one segment per day, three at most.
+  // Anything else is the weekly pull exactly as before.
+  const split = requested?.granularity === 'day'
+    ? splitIntoDays(String(requested?.from), String(requested?.to))
+    : splitIntoBusinessWeeks(String(requested?.from), String(requested?.to))
   if (!split.ok) return respond({ ok: false, reason: split.problem }, 400)
   const segments = split.value
 

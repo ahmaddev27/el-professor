@@ -29,6 +29,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 > **15.10.2026, outside the step count:** a company administrator can now list several addresses per kind of company mail (Einstellungen, tab Verbindungen; `notification_recipients`). A kind with no address falls back to the single company address, then to the administrators.
 > 15.10.2026: the capability matrix now gives `support` `companies.lifecycle` (D2) and all four staff roles `audit.read` (D3), by the owner's answers; see HANDOFF.md.
+> **15.10.2026 (branch `feat/one-button-fleet-import`, not merged):** the data import at `/datenimport` is one button that brings in drivers, vehicles and all Uber earnings from the first day, day by day, resumable. Details in HANDOFF.md.
 
 `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰` **46 of 46 steps · 100%**
 

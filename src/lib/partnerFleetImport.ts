@@ -10,6 +10,7 @@
  * which is a claim.
  */
 import type { TranslationKey } from '../i18n';
+import type { BackfillProgress, EarningsOutcome } from './uberBackfill';
 
 export type ImportScope = 'drivers' | 'vehicles';
 
@@ -98,4 +99,85 @@ export function parseImportResult(data: unknown, scope: ImportScope): ImportResu
     };
   });
   return { created, linked, skipped };
+}
+
+// ── One button, every leg (14.10.2026) ──────────────────────────────────────
+//
+// The legs run in this order and each is independent: a leg that fails is
+// recorded and the next one still runs. What a leg does (the pull, then the
+// import RPC, and how each answer is read) is the former card's `run`, moved
+// here unchanged so a test can drive it.
+
+export const IMPORT_LEGS: readonly ImportScope[] = ['drivers', 'vehicles'];
+
+export const IMPORT_RPC: Record<ImportScope, string> = {
+  drivers: 'partner_drivers_import',
+  vehicles: 'partner_vehicles_import',
+};
+
+export type LegOutcome =
+  | { scope: ImportScope; status: 'done'; seen: number; result: ImportResult }
+  | { scope: ImportScope; status: 'failed'; reason: TranslationKey }
+  /** The partner does not offer this yet. Not a failure of the data or the click. */
+  | { scope: ImportScope; status: 'unavailable'; reason: TranslationKey };
+
+export interface ImportDeps {
+  pull(scope: ImportScope): Promise<{ data: unknown; error: unknown }>;
+  importRpc(rpc: string): Promise<{ data: unknown; error: unknown }>;
+}
+
+export async function runImportLeg(scope: ImportScope, deps: ImportDeps): Promise<LegOutcome> {
+  try {
+    const pulled = await deps.pull(scope);
+    if (pulled.error) throw pulled.error;
+    const answer = pulled.data as { ok?: boolean; reason?: string; seen?: number } | null;
+    if (!answer?.ok) {
+      const reason = pullReasonKey(answer?.reason);
+      return answer?.reason === 'vehicles_unavailable'
+        ? { scope, status: 'unavailable', reason }
+        : { scope, status: 'failed', reason };
+    }
+    const imported = await deps.importRpc(IMPORT_RPC[scope]);
+    if (imported.error) {
+      return { scope, status: 'failed', reason: importErrorKey((imported.error as { hint?: unknown }).hint) };
+    }
+    const result = parseImportResult(imported.data, scope);
+    return result
+      ? { scope, status: 'done', seen: answer.seen ?? 0, result }
+      : { scope, status: 'failed', reason: 'import.error.importGeneric' };
+  } catch {
+    return { scope, status: 'failed', reason: 'import.error.pullGeneric' };
+  }
+}
+
+export type EarningsLeg = { scope: 'earnings'; earnings: EarningsOutcome };
+export type FleetOutcome = LegOutcome | EarningsLeg;
+
+/** Runs the earnings leg; progress goes to `report`. */
+export type EarningsRunner = (report: (p: BackfillProgress) => void) => Promise<EarningsOutcome>;
+
+/**
+ * Sequential on purpose: one request at a time against the partner and the
+ * database. Drivers come first because the earnings are written against the
+ * driver links they create; a leg that failed does not stop the next one.
+ */
+export async function runFleetImport(
+  deps: ImportDeps, earnings?: EarningsRunner, report: (p: BackfillProgress) => void = () => {},
+): Promise<FleetOutcome[]> {
+  const outcomes: FleetOutcome[] = [];
+  for (const scope of IMPORT_LEGS) outcomes.push(await runImportLeg(scope, deps));
+  if (earnings) outcomes.push({ scope: 'earnings', earnings: await earnings(report) });
+  return outcomes;
+}
+
+function legSucceeded(o: FleetOutcome): boolean {
+  if (o.scope !== 'earnings') return o.status === 'done';
+  return o.earnings.status === 'done' || o.earnings.status === 'nothing';
+}
+
+/** `success` only when every leg imported; anything else is never reported as one. */
+export function overallStatus(outcomes: readonly FleetOutcome[]): 'success' | 'partial' | 'failed' {
+  const done = outcomes.filter(legSucceeded).length;
+  if (done === outcomes.length && done > 0) return 'success';
+  return done > 0 ? 'partial' : 'failed';
 }
