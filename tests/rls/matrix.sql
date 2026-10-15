@@ -1218,7 +1218,7 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'mx', 'mx-v1')$q$, NULL,
   $q$INSERT INTO partner_vehicle_links (company_id, partner, external_vehicle_id)
      VALUES ({co}, 'mx', 'mx-v2')$q$,
-  $q$proposed_plate = proposed_plate$q$);
+  $q$proposed_plate = proposed_plate$q$),
 -- The daily Uber pull's schedule and its record (20261015130000): the
 -- abrechnung_schedules / abrechnung_deliveries shapes exactly, one table for
 -- each, so the cells below are theirs. The runs have SELECT for the company and
