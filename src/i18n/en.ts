@@ -6554,8 +6554,6 @@ export const en: PartialDictionary = {
   'import.doneBody':                  '{seen} fetched: {created} newly created, {linked} linked to existing, {skipped} not taken over.',
   'import.doneTitle':                 'Import finished',
   'import.drivers.title':             'Drivers',
-  'import.earnings.action':           'Go to Umsätze',
-  'import.earnings.body':             'Import the Uber earnings on the Umsätze page once the drivers are linked.',
   'import.earnings.title':            'Earnings',
   'import.error.importGeneric':       'The import could not be completed. Please check the list before trying again.',
   'import.error.notAuthorized':       'You are not allowed to import.',

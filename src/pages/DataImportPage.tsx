@@ -6,12 +6,13 @@
  * is the connection, which belongs above all of them. The Fahrer and Fahrzeuge
  * pages link here; Einstellungen keeps the connection card for later changes.
  *
- * Earnings are not rebuilt: the Uber earnings import lives on the Umsätze page
- * and this screen links to it.
+ * Earnings are one of the legs of the single button, not a link away: this page
+ * is the "a new company clicks once" screen, so a card sending the operator to
+ * Umsätze for earnings contradicted the button beside it. The Umsätze page
+ * keeps its own importer for a chosen period, which is a different job.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Loader2, Wallet } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -98,22 +99,6 @@ export default function DataImportPage() {
         <FleetImportCard connected={connected} mayImport={mayImport} />
       )}
 
-      <Card>
-        <CardHeader>
-          <div className="min-w-0">
-            <CardTitle as="h2">
-              <span className="inline-flex items-center gap-2">
-                <Wallet className="size-4" aria-hidden />
-                {t('import.earnings.title')}
-              </span>
-            </CardTitle>
-            <CardDescription>{t('import.earnings.body')}</CardDescription>
-          </div>
-          <Button asChild variant="secondary">
-            <Link to="/umsaetze">{t('import.earnings.action')}</Link>
-          </Button>
-        </CardHeader>
-      </Card>
     </div>
   );
 }
