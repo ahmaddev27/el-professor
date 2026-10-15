@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Save,
   Building2,
@@ -22,11 +23,12 @@ import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { PartnerConnectCard } from '../components/partner/PartnerConnectCard';
 import { useTranslation } from '../contexts/LanguageContext';
-import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, buttonVariants, cn } from '../components/ui';
+import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger, buttonVariants, cn } from '../components/ui';
 import { controlFrameClass } from '../components/ui/Input';
 import AbrechnungScheduleCard from '../components/AbrechnungScheduleCard';
 import NotificationAddressCard from '../components/NotificationAddressCard';
 import UberPullScheduleCard from '../components/UberPullScheduleCard';
+import { DEFAULT_SETTINGS_TAB, SETTINGS_FORM_TABS, parseSettingsTab } from '../utils/settingsTabs';
 
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -329,6 +331,10 @@ const SettingsPage: React.FC = () => {
   // message) the whole form is a disabled fieldset under a note, where it used
   // to be an editable form whose save the database refuses since 3.13a
   // (owner's answer, 22.09.2026). The handlers are the same either way.
+  //
+  // Tabs (15.10.2026) only regroup what is drawn below: the sections moved into
+  // four tabs, the open one lives in `?tab=`, and the preview follows the tabs it
+  // previews. The form is still one form with one save.
 
   const textArea = cn(controlFrameClass, 'h-auto py-2 leading-relaxed [@media(pointer:coarse)]:h-auto');
 
@@ -345,6 +351,8 @@ const SettingsPage: React.FC = () => {
     );
   };
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   if (loading) {
     return (
       <div role="status" className="flex items-center justify-center py-8 font-ui">
@@ -353,6 +361,99 @@ const SettingsPage: React.FC = () => {
       </div>
     );
   }
+
+  const activeTab = parseSettingsTab(searchParams.get('tab'));
+  const selectTab = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === DEFAULT_SETTINGS_TAB) next.delete('tab');
+    else next.set('tab', parseSettingsTab(value));
+    setSearchParams(next, { replace: true });
+  };
+
+  const previewColumn = (
+            <div className="lg:col-span-1">
+              <Card className="lg:sticky lg:top-6">
+                <CardHeader className="justify-start gap-2">
+                  <Eye aria-hidden className="size-5 text-brand-text" />
+                  <CardTitle>{t('common.preview')}</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  {/* Logo Preview */}
+                  {logoPreview && (
+                    <div className="text-center">
+                      <img
+                        src={logoPreview}
+                        alt={t('settings.logo')}
+                        className="mx-auto h-16 object-contain"
+                      />
+                    </div>
+                  )}
+
+                  {/* Company Name */}
+                  <div className="text-center">
+                    <p className="text-lg font-semibold text-fg">{formData.company_name}</p>
+                    {formData.slogan && (
+                      <p className="mt-1 text-sm text-fg-subtle">{formData.slogan}</p>
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 border-t border-line pt-4 text-sm">
+                    {/* Address */}
+                    {(formData.street || formData.city) && (
+                      <div>
+                        <p className="font-medium text-fg-muted">{t('settings.addressLabel')}</p>
+                        <p className="text-fg-subtle">
+                          {formData.street} {formData.house_number}
+                          {formData.street && <br />}
+                          {formData.postal_code} {formData.city}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Contact */}
+                    {(formData.email || formData.phone) && (
+                      <div className="min-w-0">
+                        <p className="font-medium text-fg-muted">{t('settings.contactLabel')}</p>
+                        {formData.email && <p className="break-all text-fg-subtle">{formData.email}</p>}
+                        {formData.phone && <p className="text-fg-subtle">{formData.phone}</p>}
+                      </div>
+                    )}
+
+                    {/* Banking */}
+                    {formData.iban && (
+                      <div>
+                        <p className="font-medium text-fg-muted">{t('settings.bankLabel')}</p>
+                        {formData.bank_name && <p className="text-fg-subtle">{formData.bank_name}</p>}
+                        <p className="font-mono text-xs text-fg-subtle">{formData.iban}</p>
+                      </div>
+                    )}
+
+                    {/* Legal */}
+                    {(formData.vat_id || formData.tax_number) && (
+                      <div>
+                        <p className="font-medium text-fg-muted">{t('settings.legalLabel')}</p>
+                        {formData.vat_id && (
+                          <p className="text-xs text-fg-subtle">{t('settings.preview.vatId', { value: formData.vat_id })}</p>
+                        )}
+                        {formData.tax_number && (
+                          <p className="text-xs text-fg-subtle">{t('settings.preview.taxNumber', { value: formData.tax_number })}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+  );
+
+  // The preview sits beside the tabs that fill in what it shows (identity,
+  // contact, address, bank, legal) and is left out of the others.
+  const formTab = (main: React.ReactNode, withPreview: boolean) => (
+    <div className={cn('grid grid-cols-1 gap-6', withPreview && 'lg:grid-cols-3')}>
+      <div className={cn('grid grid-cols-1 content-start gap-6', withPreview && 'lg:col-span-2')}>{main}</div>
+      {withPreview && previewColumn}
+    </div>
+  );
 
   return (
     <div className="grid grid-cols-1 gap-6 font-ui">
@@ -364,11 +465,21 @@ const SettingsPage: React.FC = () => {
         </Alert>
       )}
 
+      <Tabs value={activeTab} onValueChange={selectTab} className="grid min-w-0 grid-cols-1 gap-6">
+        {/* The list scrolls sideways inside itself, so four tabs never widen the page at 375 px. */}
+        <TabsList aria-label={t('settings.tabs.label')}>
+          <TabsTrigger value="company">{t('settings.tab.company')}</TabsTrigger>
+          <TabsTrigger value="legal">{t('settings.tab.legal')}</TabsTrigger>
+          <TabsTrigger value="operations">{t('settings.tab.operations')}</TabsTrigger>
+          <TabsTrigger value="connections">{t('settings.tab.connections')}</TabsTrigger>
+        </TabsList>
+
+        {SETTINGS_FORM_TABS.includes(activeTab) && (
       <form onSubmit={handleSubmit}>
         <fieldset disabled={companyScope.readOnly} className="m-0 grid min-w-0 grid-cols-1 gap-6 border-0 p-0">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {/* Main Form Column */}
-            <div className="grid grid-cols-1 content-start gap-6 lg:col-span-2">
+          <TabsContent value="company">
+            {formTab((
+              <>
               {/* Company Logo */}
               {section(Upload, t('settings.logo'), (
                 <div className="grid gap-4">
@@ -576,24 +687,13 @@ const SettingsPage: React.FC = () => {
                 </div>
               ))}
 
-              {/* Operations */}
-              {section(Users, t('settings.operations'), (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Field label={t('settings.field.driversPerCar')} hint={t('settings.field.driversPerCarHint', { n: driversPerCar })} id="settings-drivers-per-car">
-                    <NativeSelect
-                      id="settings-drivers-per-car"
-                      aria-describedby="settings-drivers-per-car-hint"
-                      value={driversPerCar}
-                      onChange={(e) => setDriversPerCar(Number(e.target.value))}
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                </div>
-              ))}
+              </>
+            ), true)}
+          </TabsContent>
 
+          <TabsContent value="legal">
+            {formTab((
+              <>
               {/* Legal Data */}
               {section(FileText, t('settings.legal'), (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -667,11 +767,31 @@ const SettingsPage: React.FC = () => {
                 </div>
               ))}
 
-              {/* Reidey (M1). Its own file, so this page keeps its 2 inline
-                  styles and 6 colours in the ratchet's baseline. */}
-              {section(Link2, t('partner.connect.title'), (
-                <PartnerConnectCard companyId={companyId} />
+              </>
+            ), true)}
+          </TabsContent>
+
+          <TabsContent value="operations">
+            {formTab((
+              <>
+              {/* Operations */}
+              {section(Users, t('settings.operations'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.driversPerCar')} hint={t('settings.field.driversPerCarHint', { n: driversPerCar })} id="settings-drivers-per-car">
+                    <NativeSelect
+                      id="settings-drivers-per-car"
+                      aria-describedby="settings-drivers-per-car-hint"
+                      value={driversPerCar}
+                      onChange={(e) => setDriversPerCar(Number(e.target.value))}
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                </div>
               ))}
+
 
               {/* Document Defaults */}
               {section(FileText, t('settings.documents'), (
@@ -704,83 +824,9 @@ const SettingsPage: React.FC = () => {
                   </Field>
                 </div>
               ))}
-            </div>
-
-            {/* Preview Column */}
-            <div className="lg:col-span-1">
-              <Card className="lg:sticky lg:top-6">
-                <CardHeader className="justify-start gap-2">
-                  <Eye aria-hidden className="size-5 text-brand-text" />
-                  <CardTitle>{t('common.preview')}</CardTitle>
-                </CardHeader>
-                <CardContent className="grid gap-4">
-                  {/* Logo Preview */}
-                  {logoPreview && (
-                    <div className="text-center">
-                      <img
-                        src={logoPreview}
-                        alt={t('settings.logo')}
-                        className="mx-auto h-16 object-contain"
-                      />
-                    </div>
-                  )}
-
-                  {/* Company Name */}
-                  <div className="text-center">
-                    <p className="text-lg font-semibold text-fg">{formData.company_name}</p>
-                    {formData.slogan && (
-                      <p className="mt-1 text-sm text-fg-subtle">{formData.slogan}</p>
-                    )}
-                  </div>
-
-                  <div className="grid gap-3 border-t border-line pt-4 text-sm">
-                    {/* Address */}
-                    {(formData.street || formData.city) && (
-                      <div>
-                        <p className="font-medium text-fg-muted">{t('settings.addressLabel')}</p>
-                        <p className="text-fg-subtle">
-                          {formData.street} {formData.house_number}
-                          {formData.street && <br />}
-                          {formData.postal_code} {formData.city}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Contact */}
-                    {(formData.email || formData.phone) && (
-                      <div className="min-w-0">
-                        <p className="font-medium text-fg-muted">{t('settings.contactLabel')}</p>
-                        {formData.email && <p className="break-all text-fg-subtle">{formData.email}</p>}
-                        {formData.phone && <p className="text-fg-subtle">{formData.phone}</p>}
-                      </div>
-                    )}
-
-                    {/* Banking */}
-                    {formData.iban && (
-                      <div>
-                        <p className="font-medium text-fg-muted">{t('settings.bankLabel')}</p>
-                        {formData.bank_name && <p className="text-fg-subtle">{formData.bank_name}</p>}
-                        <p className="font-mono text-xs text-fg-subtle">{formData.iban}</p>
-                      </div>
-                    )}
-
-                    {/* Legal */}
-                    {(formData.vat_id || formData.tax_number) && (
-                      <div>
-                        <p className="font-medium text-fg-muted">{t('settings.legalLabel')}</p>
-                        {formData.vat_id && (
-                          <p className="text-xs text-fg-subtle">{t('settings.preview.vatId', { value: formData.vat_id })}</p>
-                        )}
-                        {formData.tax_number && (
-                          <p className="text-xs text-fg-subtle">{t('settings.preview.taxNumber', { value: formData.tax_number })}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
+              </>
+            ), false)}
+          </TabsContent>
 
           {/* Action Buttons */}
           <div className="flex justify-end gap-3 rounded-surface border border-line bg-raised p-4 shadow-raised">
@@ -802,11 +848,23 @@ const SettingsPage: React.FC = () => {
           </div>
         </fieldset>
       </form>
+        )}
 
-      {/* Its own row and its own save, so it sits beside the form, not in it. */}
-      <NotificationAddressCard readOnly={companyScope.readOnly} />
-      <AbrechnungScheduleCard readOnly={companyScope.readOnly} />
-      <UberPullScheduleCard readOnly={companyScope.readOnly} />
+        {/* Each of these has its own row and its own save, so none sits in the form above. */}
+        <TabsContent value="connections" className="grid grid-cols-1 gap-6">
+          <fieldset disabled={companyScope.readOnly} className="m-0 grid min-w-0 grid-cols-1 gap-6 border-0 p-0">
+              {/* Reidey (M1). Its own file, so this page keeps its 2 inline
+                  styles and 6 colours in the ratchet's baseline. */}
+              {section(Link2, t('partner.connect.title'), (
+                <PartnerConnectCard companyId={companyId} />
+              ))}
+
+          </fieldset>
+          <NotificationAddressCard readOnly={companyScope.readOnly} />
+          <AbrechnungScheduleCard readOnly={companyScope.readOnly} />
+          <UberPullScheduleCard readOnly={companyScope.readOnly} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
