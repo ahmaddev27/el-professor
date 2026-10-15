@@ -347,7 +347,8 @@ END $$;
 DO $$
 DECLARE
   -- Plan 3.A, restated here independently of app_private.platform_capability_matrix().
-  -- support has no companies.lifecycle (D2) and read_only no audit.read (D3).
+  -- D2 and D3 were answered on 15.10.2026: support holds companies.lifecycle,
+  -- and all four roles hold audit.read.
   c record;
   p record;
   v_want boolean;
@@ -359,7 +360,7 @@ BEGIN
     ('business.read',         true,  true,  false, true),
     ('support.session',       true,  true,  false, false),
     ('company_users.manage',  true,  true,  false, false),
-    ('companies.lifecycle',   true,  false, false, false),
+    ('companies.lifecycle',   true,  true,  false, false),
     ('companies.hard_delete', true,  false, false, false),
     ('billing.manage',        true,  false, true,  false),
     ('pricing.manage',        true,  false, true,  false),
@@ -367,7 +368,7 @@ BEGIN
     ('settings.read',         true,  false, true,  true),
     ('settings.manage',       true,  false, false, false),
     ('metrics.read',          true,  false, true,  true),
-    ('audit.read',            true,  false, false, false),
+    ('audit.read',            true,  true,  true,  true),
     ('staff.manage',          true,  false, false, false);
 
   PERFORM _pa_ok('the restated matrix and app_private.platform_capability_matrix() hold the same pairs',
