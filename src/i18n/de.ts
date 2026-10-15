@@ -6610,8 +6610,6 @@ export const de = {
   'import.doneBody':                  '{seen} abgerufen: {created} neu angelegt, {linked} mit Vorhandenem verknüpft, {skipped} nicht übernommen.',
   'import.doneTitle':                 'Import abgeschlossen',
   'import.drivers.title':             'Fahrer',
-  'import.earnings.action':           'Zu den Umsätzen',
-  'import.earnings.body':             'Die Uber-Umsätze importieren Sie auf der Umsätze-Seite, nachdem die Fahrer verknüpft sind.',
   'import.earnings.title':            'Umsätze',
   'import.error.importGeneric':       'Der Import konnte nicht abgeschlossen werden. Bitte prüfen Sie die Liste, bevor Sie es erneut versuchen.',
   'import.error.notAuthorized':       'Keine Berechtigung zum Importieren.',

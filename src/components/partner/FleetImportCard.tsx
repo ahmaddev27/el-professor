@@ -1,5 +1,6 @@
 /**
- * The fleet import: one button, every leg (drivers, then vehicles).
+ * The fleet import: one button, every leg (drivers, then vehicles, then the
+ * whole Uber earnings history day by day — `runEarningsBackfill`).
  *
  * Each leg does both halves in order (`runImportLeg`, partnerFleetImport.ts). It asks `partner-pull` to store the
  * partner's list as proposals, then asks the database to turn the proposals
