@@ -6698,4 +6698,11 @@ export const en: PartialDictionary = {
   'settings.notifyRecipients.saveFailed':  'Address not saved',
   'settings.notifyRecipients.saveFailedBody': 'The change could not be saved.',
   'settings.notifyRecipients.title':       'Recipients per notification',
+  'sa.dash.statusConfirm.confirm':      'Change status',
+  'sa.dash.statusConfirm.description':  '{name}: change status from "{from}" to "{to}". Depending on the status, the company\'s users lose access.',
+  'sa.dash.statusConfirm.title':        'Change status?',
+  'sa.dash.suspendConfirm.description': '{name} will be suspended. All of the company\'s users lose access to the app. The data is kept.',
+  'sa.lifecycle.failedTitle':           'Action not carried out',
+  'sa.subs.confirmCancel.description':  'The invoice will be cancelled. The access period it granted is voided; the customer may lose access.',
+  'sa.subs.confirmUnpaid.description':  'The invoice becomes open again. The access period it granted goes back to the rule for unpaid invoices.',
 };

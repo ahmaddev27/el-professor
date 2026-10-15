@@ -6754,4 +6754,11 @@ export const de = {
   'settings.notifyRecipients.saveFailed':  'Adresse nicht gespeichert',
   'settings.notifyRecipients.saveFailedBody': 'Die Änderung konnte nicht gespeichert werden.',
   'settings.notifyRecipients.title':       'Empfänger je Benachrichtigung',
+  'sa.dash.statusConfirm.confirm':      'Status ändern',
+  'sa.dash.statusConfirm.description':  '{name}: Status von „{from}“ auf „{to}“ ändern. Je nach Status verlieren die Benutzer des Unternehmens den Zugang.',
+  'sa.dash.statusConfirm.title':        'Status ändern?',
+  'sa.dash.suspendConfirm.description': '{name} wird gesperrt. Alle Benutzer des Unternehmens verlieren den Zugang zur App. Die Daten bleiben erhalten.',
+  'sa.lifecycle.failedTitle':           'Aktion nicht ausgeführt',
+  'sa.subs.confirmCancel.description':  'Die Rechnung wird storniert. Der durch sie gewährte Zugangszeitraum wird ungültig; der Kunde kann dadurch den Zugang verlieren.',
+  'sa.subs.confirmUnpaid.description':  'Die Rechnung wird wieder offen. Der Zugangszeitraum, den sie gewährt hat, richtet sich wieder nach der Regel für unbezahlte Rechnungen.',
 } as const;
