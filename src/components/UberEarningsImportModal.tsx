@@ -23,8 +23,19 @@ import {
   type WeekEarnings,
 } from '../utils/uberEarningsImport';
 import {
+  MAX_SELECTABLE_DAYS,
   MAX_SELECTABLE_WEEKS,
+  dayRangeExceedsCap,
+  dayRangeToDates,
+  defaultDayRange,
   defaultWeekRange,
+  groupDaysByMonthAndWeek,
+  isDaySelected,
+  rangeDayCount,
+  recentUberDays,
+  toggleDay,
+  uberDayWindowLabel,
+  type DayRange,
   groupWeeksByMonth,
   isWeekSelected,
   normalizePartnerReason,
@@ -69,9 +80,9 @@ interface Props {
 
 type PreviewView = 'weekly' | 'monthly';
 
-// The two ways to choose a period. Each keeps its own selection; only the open
+// The three ways to choose a period. Each keeps its own selection; only the open
 // tab's selection is pulled, and the line under the tabs says which.
-type PeriodTab = 'weekly' | 'monthly';
+type PeriodTab = 'daily' | 'weekly' | 'monthly';
 
 type Stage = 'range' | 'pulling' | 'preview' | 'importing';
 
@@ -162,18 +173,34 @@ const MONTH_KEYS: readonly TranslationKey[] = [
 const monthKeyOf = (m: { year: number; month: number }) => `${m.year}-${m.month}`;
 
 /** Why the chosen period cannot be pulled yet, or null. Said before any request is sent. */
-function periodProblemKey(tab: PeriodTab, range: WeekRange | null): TranslationKey | null {
+function periodProblemKey(
+  tab: PeriodTab, range: WeekRange | null, dayRange: DayRange | null,
+): TranslationKey | null {
+  if (tab === 'daily') {
+    if (!dayRange) return 'inc.uber.period.noDay';
+    return dayRangeExceedsCap(dayRange) ? 'inc.uber.period.tooManyDays' : null;
+  }
   if (!range) return tab === 'weekly' ? 'inc.uber.period.noWeek' : 'inc.uber.period.noMonth';
   return rangeExceedsCap(range) ? 'inc.uber.period.tooMany' : null;
 }
 
+/** 'Di.' / 'Tue': display only, from the ISO date itself so no time zone moves it. */
+function weekdayShort(iso: string, language: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'de-DE', { weekday: 'short', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(y!, m! - 1, d!)));
+}
+
 function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
-  const { t, tPlural } = useTranslation();
+  const { t, tPlural, language } = useTranslation();
   const { success } = useToast();
   const now = useMemo(() => new Date(), []);
   const weekGroups = useMemo(() => groupWeeksByMonth(recentUberWeeks(now)), [now]);
   const monthOptions = useMemo(() => recentUberMonths(now), [now]);
-  const [periodTab, setPeriodTab] = useState<PeriodTab>('weekly');
+  const dayGroups = useMemo(() => groupDaysByMonthAndWeek(recentUberDays(now)), [now]);
+  // Daily is the default (owner, 15.10.2026): the day is the finest unit Uber reports.
+  const [periodTab, setPeriodTab] = useState<PeriodTab>('daily');
+  const [dayRange, setDayRange] = useState<DayRange | null>(() => defaultDayRange(now));
   const [weekRange, setWeekRange] = useState<WeekRange | null>(() => defaultWeekRange(now));
   const [monthKey, setMonthKey] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>('range');
@@ -190,11 +217,19 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     return month ? rangeForMonth(month) : null;
   }, [monthOptions, monthKey]);
   const range = periodTab === 'weekly' ? weekRange : monthRange;
-  const { from, to } = range ? rangeToDates(range) : { from: '', to: '' };
+  // A daily pick is a shorter range, not a different protocol: the pull below
+  // cuts it at business weeks all the same.
+  const { from, to } = periodTab === 'daily'
+    ? (dayRange ? dayRangeToDates(dayRange) : { from: '', to: '' })
+    : (range ? rangeToDates(range) : { from: '', to: '' });
   const split = splitIntoBusinessWeeks(from, to);
   const weekCount = rangeWeekCount(range);
-  const canPull = range !== null && !rangeExceedsCap(range) && split.ok;
-  const periodProblem = periodProblemKey(periodTab, range);
+  const dayCount = rangeDayCount(dayRange);
+  const chosen = periodTab === 'daily'
+    ? dayRange !== null && !dayRangeExceedsCap(dayRange)
+    : range !== null && !rangeExceedsCap(range);
+  const canPull = chosen && split.ok;
+  const periodProblem = periodProblemKey(periodTab, range, dayRange);
 
   const rows = useMemo(() => (pulled ? buildImportRows(pulled.weeks) : []), [pulled]);
   const unlinked = useMemo(() => (pulled ? findUnlinked(pulled.weeks, pulled.links) : []), [pulled]);
@@ -272,7 +307,10 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     const { data, error } = await supabase.rpc('income_import_uber', importRpcArgs(rows, importedWeeks.length, replaceChosen));
     if (error) {
       const hint = (error as { hint?: string }).hint ?? '';
-      const key = IMPORT_HINT_KEYS[hint] ?? 'inc.uber.err.generic';
+      // A day inside an already imported period is the likeliest refusal of a daily import.
+      const key = hint === 'already_imported' && periodTab === 'daily'
+        ? 'inc.uber.err.alreadyImportedDaily'
+        : IMPORT_HINT_KEYS[hint] ?? 'inc.uber.err.generic';
       const detail = hint === 'driver_not_linked' ? (error as { details?: string }).details : undefined;
       setProblem(detail ? `${t(key)} (${detail})` : t(key));
       setStage('preview');
@@ -362,6 +400,44 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     selected ? 'border-brand bg-brand-soft' : 'border-border bg-raised',
   );
   const inputClass = 'size-4 shrink-0 accent-brand [@media(pointer:coarse)]:size-5';
+
+  const dayPicker = (
+    <div className="grid grid-cols-1 gap-4">
+      <p className="text-xs text-fg-subtle">{t('inc.uber.period.dayHint')}</p>
+      <p className="text-xs text-fg-subtle">{t('inc.uber.period.dayWrites')}</p>
+      <div role="group" aria-label={t('inc.uber.period.dayListLabel')} className="grid max-h-80 grid-cols-1 gap-4 overflow-y-auto pr-1">
+        {dayGroups.map(month => (
+          <section key={`${month.year}-${month.month}`} className="grid grid-cols-1 gap-3">
+            <h3 className="text-sm font-semibold text-fg">{`${monthName(month.month)} ${month.year}`}</h3>
+            {month.weeks.map(week => (
+              <div key={week.monday} className="grid grid-cols-1 gap-2">
+                <h4 className="text-xs font-medium text-fg-muted">{t('inc.weekLabel', { week: week.weekNumber })}</h4>
+                {week.days.map(day => {
+                  const selected = isDaySelected(dayRange, day.date);
+                  return (
+                    <label key={day.date} className={rowClass(selected)}>
+                      <input
+                        type="checkbox"
+                        className={inputClass}
+                        checked={selected}
+                        disabled={busy}
+                        onChange={() => setDayRange(toggleDay(dayRange, day.date))}
+                      />
+                      <span className="font-medium text-fg tabular-nums">
+                        {`${weekdayShort(day.date, language)} ${formatDate(day.date)}`}
+                      </span>
+                      <span className="min-w-0 text-fg-muted tabular-nums">{uberDayWindowLabel(day)}</span>
+                      {day.running && <Badge tone="brand">{t('inc.uber.period.running')}</Badge>}
+                    </label>
+                  );
+                })}
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
 
   const weekPicker = (
     <div className="grid grid-cols-1 gap-4">
@@ -470,19 +546,26 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
           <div className="grid grid-cols-1 gap-4">
             <Tabs value={periodTab} onValueChange={value => setPeriodTab(value as PeriodTab)}>
               <TabsList aria-label={t('inc.uber.period.tabsLabel')}>
+                <TabsTrigger value="daily">{t('inc.uber.tab.daily')}</TabsTrigger>
                 <TabsTrigger value="weekly">{t('inc.uber.tab.weekly')}</TabsTrigger>
                 <TabsTrigger value="monthly">{t('inc.uber.tab.monthly')}</TabsTrigger>
               </TabsList>
+              <TabsContent value="daily" className="pt-4">{dayPicker}</TabsContent>
               <TabsContent value="weekly" className="pt-4">{weekPicker}</TabsContent>
               <TabsContent value="monthly" className="pt-4">{monthPicker}</TabsContent>
             </Tabs>
             {periodProblem ? (
               <p role="alert" className="text-sm text-critical">
-                {t(periodProblem, { max: String(MAX_SELECTABLE_WEEKS), count: String(weekCount) })}
+                {t(periodProblem, {
+                  max: String(periodTab === 'daily' ? MAX_SELECTABLE_DAYS : MAX_SELECTABLE_WEEKS),
+                  count: String(periodTab === 'daily' ? dayCount : weekCount),
+                })}
               </p>
             ) : (
               <p className="text-sm text-fg-muted">
-                {tPlural({ one: 'inc.uber.weeksCount.one', other: 'inc.uber.weeksCount.other' }, weekCount)}
+                {periodTab === 'daily'
+                  ? tPlural({ one: 'inc.uber.daysCount.one', other: 'inc.uber.daysCount.other' }, dayCount)
+                  : tPlural({ one: 'inc.uber.weeksCount.one', other: 'inc.uber.weeksCount.other' }, weekCount)}
               </p>
             )}
           </div>

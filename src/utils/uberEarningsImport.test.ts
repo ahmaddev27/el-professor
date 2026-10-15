@@ -405,3 +405,28 @@ describe('replacing an earlier Uber import', () => {
     expect(readImportAnswer(null, 9)).toEqual({ inserted: 9, drivers: 0, deleted: 0 });
   });
 });
+
+describe('a day as an import piece', () => {
+  const day: WeekEarnings = {
+    segment: { from: '2026-10-07', to: '2026-10-07', monday: '2026-10-05' },
+    drivers: [{
+      externalDriverId: '139', uberDriverUuid: 'u-1', name: 'Ahmed Hemaid', fareCents: 10000, promotionCents: 0,
+      tipsCents: 0, cashCents: 0, netOutstandingCents: 0, differenceCents: 0, trips: 4,
+    }],
+  };
+  it('carries its own date and period, and the week number of the Monday\'s week', () => {
+    const [row] = buildImportRows([day]);
+    expect(row).toMatchObject({
+      date: '2026-10-07', period_start: '2026-10-07', period_end: '2026-10-07',
+      week: 1, description: 'Woche 1 - Uber', type: 'umsatz',
+    });
+  });
+  it('is the same row a week would write, only with a one-day period', () => {
+    const week: WeekEarnings = { ...day, segment: { from: '2026-10-05', to: '2026-10-11', monday: '2026-10-05' } };
+    const [dayRow] = buildImportRows([day]);
+    const [weekRow] = buildImportRows([week]);
+    expect(dayRow!.week).toBe(weekRow!.week);
+    expect(dayRow!.description).toBe(weekRow!.description);
+    expect(weekRow!.period_end).toBe('2026-10-11');
+  });
+});

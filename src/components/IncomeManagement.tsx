@@ -12,6 +12,7 @@ import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { tallyTrips } from '../utils/incomeTrips';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
 import UberEarningsImportModal from './UberEarningsImportModal';
+import IncomeGroupedList from './IncomeGroupedList';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -34,6 +35,9 @@ import {
   KpiCard,
   NativeSelect,
   PageHeader,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   Tooltip,
   type DataTableColumn,
 } from './ui';
@@ -79,6 +83,8 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [uberImportOpen, setUberImportOpen] = useState(false);
+  // Grouped (month, week, day, driver) is the way in; the flat list stays for editing a row.
+  const [listView, setListView] = useState<'grouped' | 'flat'>('grouped');
 
   // ── Batch add form state ───────────────────────────────────────────────────
   const [batchForm, setBatchForm] = useState({
@@ -1167,18 +1173,32 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           </section>
         )}
 
-        <DataTable
-          caption={t('inc.tableCaption')}
-          columns={columns}
-          rows={filteredIncomes}
-          getRowId={income => income.id}
-          error={loadFailed}
-          rowActions={anyRowWritable || editingId ? rowActions : undefined}
-          rowActionsLabel={t('inc.tableActions')}
-          emptyState={
-            <EmptyState size="sm" icon={Users} title={t('inc.noEntries')} action={addButton('sm')} />
-          }
-        />
+        <Tabs value={listView} onValueChange={value => setListView(value as 'grouped' | 'flat')}>
+          <TabsList variant="segmented" aria-label={t('inc.group.viewLabel')}>
+            <TabsTrigger value="grouped">{t('inc.group.viewGrouped')}</TabsTrigger>
+            <TabsTrigger value="flat">{t('inc.group.viewFlat')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {/* The grouped list is drawn only from a successful load that has rows:
+            a failed load or no entries is the table's own error / empty state,
+            so grouping can never show an empty group or a 0,00 € total. */}
+        {listView === 'grouped' && !loadFailed && filteredIncomes.length > 0 ? (
+          <IncomeGroupedList rows={filteredIncomes} />
+        ) : (
+          <DataTable
+            caption={t('inc.tableCaption')}
+            columns={columns}
+            rows={filteredIncomes}
+            getRowId={income => income.id}
+            error={loadFailed}
+            rowActions={anyRowWritable || editingId ? rowActions : undefined}
+            rowActionsLabel={t('inc.tableActions')}
+            emptyState={
+              <EmptyState size="sm" icon={Users} title={t('inc.noEntries')} action={addButton('sm')} />
+            }
+          />
+        )}
 
         <p className="flex items-start gap-2 text-[13px] text-fg-muted">
           <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
