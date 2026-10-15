@@ -27,6 +27,7 @@ import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, 
 import { controlFrameClass } from '../components/ui/Input';
 import AbrechnungScheduleCard from '../components/AbrechnungScheduleCard';
 import NotificationAddressCard from '../components/NotificationAddressCard';
+import NotificationRecipientsCard from '../components/NotificationRecipientsCard';
 import UberPullScheduleCard from '../components/UberPullScheduleCard';
 import { DEFAULT_SETTINGS_TAB, SETTINGS_FORM_TABS, parseSettingsTab } from '../utils/settingsTabs';
 
@@ -861,6 +862,7 @@ const SettingsPage: React.FC = () => {
 
           </fieldset>
           <NotificationAddressCard readOnly={companyScope.readOnly} />
+          <NotificationRecipientsCard readOnly={companyScope.readOnly} />
           <AbrechnungScheduleCard readOnly={companyScope.readOnly} />
           <UberPullScheduleCard readOnly={companyScope.readOnly} />
         </TabsContent>

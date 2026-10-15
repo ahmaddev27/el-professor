@@ -28,6 +28,7 @@ vi.mock('../contexts/SuperAdminContext', () => ({
 vi.mock('../components/partner/PartnerConnectCard', () => ({ PartnerConnectCard: () => 'MARKER-PARTNER' }));
 vi.mock('../components/AbrechnungScheduleCard', () => ({ default: () => 'MARKER-ABRECHNUNG' }));
 vi.mock('../components/NotificationAddressCard', () => ({ default: () => 'MARKER-NOTIFY' }));
+vi.mock('../components/NotificationRecipientsCard', () => ({ default: () => 'MARKER-RECIPIENTS' }));
 vi.mock('../components/UberPullScheduleCard', () => ({ default: () => 'MARKER-UBER' }));
 vi.mock('../contexts/LanguageContext', async () => {
   const { translate, translatePlural } = await import('../i18n');
@@ -90,7 +91,7 @@ describe('SettingsPage tabs', () => {
 
   it('draws the connections tab: the four cards, and no company form to save', async () => {
     const text = collect((await open('/settings?tab=connections')).root);
-    for (const word of ['MARKER-PARTNER', 'MARKER-NOTIFY', 'MARKER-ABRECHNUNG', 'MARKER-UBER']) expect(text).toContain(word);
+    for (const word of ['MARKER-PARTNER', 'MARKER-NOTIFY', 'MARKER-ABRECHNUNG', 'MARKER-UBER', 'MARKER-RECIPIENTS']) expect(text).toContain(word);
     expect(text).not.toContain('Zurücksetzen');
   });
 

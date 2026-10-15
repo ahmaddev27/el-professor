@@ -468,6 +468,19 @@ BEGIN
     AND (r.after_value -> 'values' -> 'personalnummer') = c_red
     AND (r.after_value -> 'values' -> 'gender') = c_red);
 
+  -- A recipient list entry (20261015140000): the address is copied in the
+  -- clear, which is the decision the migration header records.
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  INSERT INTO notification_recipients (company_id, notification_type, email)
+  VALUES (co_x, 'manager_summary', 'sw-recipient@example.com');
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('recipients: a support session''s insert is recorded once, and the address is by value',
+    _sw_rows(v_mark) = 1 AND _sw_rows(v_mark, 'support_write.notification_recipients.insert') = 1
+    AND (SELECT (l.after_value -> 'values' ->> 'email') = 'sw-recipient@example.com'
+                AND l.company_id = co_x
+           FROM app_private.platform_audit_log l WHERE l.id > v_mark));
+
   -- UPDATE of one row
   v_mark := _sw_mark();
   PERFORM _sw_as(u_o, s_o);

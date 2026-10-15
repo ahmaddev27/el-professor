@@ -345,7 +345,7 @@ async function runManagerSummary(
     item.manager_summary = 'no_rows';
     return;
   }
-  const recipients = await loadRecipients(ctx.admin, plan.companyId, ctx.now);
+  const recipients = await loadRecipients(ctx.admin, plan.companyId, ctx.now, 'manager_summary');
   if (recipients === null) {
     item.manager_summary = 'lookup_failed';
     return;

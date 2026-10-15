@@ -24,7 +24,10 @@
  *
  * ─── Who receives it ─────────────────────────────────────────────────────────
  *
- * `selectNotificationRecipients` in notification-mail.ts, which is
+ * Per kind of notice, in order (`chooseCompanyRecipients`): the addresses the
+ * administrator listed for that kind (`notification_recipients`), else the
+ * company's single notification address, else the administrators below.
+ * The administrators are `selectNotificationRecipients` in notification-mail.ts, which is
  * `selectActivationCodeRecipients`' company branch: the company's active admin
  * profiles that are not platform staff, with a confirmed, undeleted, unbanned
  * GoTrue account, and nobody when there are none. A company with no such
@@ -37,7 +40,13 @@ import { sendMail } from './mail.ts';
 import { loadMailDeliverySettings } from './mail-template.ts';
 import { logFailure } from './otp-core.ts';
 import type { CompanyAdminCandidate } from './activation-code-mail.ts';
-import { chooseCompanyRecipients, storedNotificationAddress } from './notification-recipients.ts';
+import {
+  addressesForKind,
+  chooseCompanyRecipients,
+  needsAdministrators,
+  storedNotificationAddress,
+  type RecipientKind,
+} from './notification-recipients.ts';
 import {
   TUEV_SOON_DAYS,
   selectNotifications,
@@ -130,20 +139,22 @@ export async function runNotificationJob(
       report.planned += planned.length;
 
       // Loaded once per company that has something due, and only then: it costs
-      // one getUserById per admin profile. `null` is a failed lookup, which is
-      // not the same as "this company has no admins": nothing is claimed, so
-      // the next run tries again. An empty array is the real answer and is
-      // claimed and settled, so the job does not come back every night for an
-      // address that does not exist.
-      const recipients = await loadRecipients(admin, company.company_id, now);
-      if (recipients === null) {
+      // one getUserById per admin profile, and none for a company whose kinds
+      // all have a listed address. `null` is a failed lookup, which is not the
+      // same as "this company has no admins": nothing is claimed, so the next
+      // run tries again. An empty array is the real answer and is claimed and
+      // settled, so the job does not come back every night for an address that
+      // does not exist. Each item is delivered to the recipients of ITS kind.
+      const kinds = [...new Set(planned.map((item) => item.type))];
+      const byKind = await loadRecipientsByKind(admin, company.company_id, now, kinds);
+      if (byKind === null) {
         report.lookup_failed += 1;
         report.planned -= planned.length;
         continue;
       }
 
       for (const item of planned) {
-        await deliverOne(admin, mode, item, recipients, appUrl, settings.senderName, report);
+        await deliverOne(admin, mode, item, byKind.get(item.type) ?? [], appUrl, settings.senderName, report);
       }
     }
 
@@ -262,30 +273,41 @@ async function settle(
 }
 
 /**
- * The company's mail recipients, or `null` when the lookup failed: its notification
- * address when it has set one, otherwise its admins who can receive mail.
+ * The recipients of each of these kinds of company mail, or `null` when the
+ * lookup failed. Per kind: the addresses the administrator listed for it,
+ * otherwise the company's single notification address, otherwise its admins who
+ * can receive mail (the precedence is `chooseCompanyRecipients`).
  *
- * The same two steps as activation-code-delivery.ts: the active admin profiles
- * from PostgREST, then one `getUserById` each, because whether an account is
- * confirmed, banned or deleted is GoTrue's and PostgREST does not serve it. A
- * company has one or two admins.
+ * The admin step is the same two steps as activation-code-delivery.ts: the
+ * active admin profiles from PostgREST, then one `getUserById` each, because
+ * whether an account is confirmed, banned or deleted is GoTrue's and PostgREST
+ * does not serve it. It runs at most once per call, and not at all when every
+ * kind is covered by a list or by the single address.
  *
- * The two empty answers are told apart deliberately. `[]` means the company has
- * no admin who could receive mail — a real answer, so the notification is
- * claimed and settled as unsent and never looked at again. `null` means we do
- * not know, so nothing is claimed and the next run asks again; a transient
- * GoTrue failure must not silently burn a TÜV warning.
+ * The two empty answers are told apart deliberately. `[]` for a kind means the
+ * company has no one who could receive that mail, a real answer, so the
+ * notification is claimed and settled as unsent and never looked at again.
+ * `null` means we do not know, so nothing is claimed and the next run asks
+ * again; a transient GoTrue failure must not silently burn a TÜV warning.
  */
-export async function loadRecipients(
+export async function loadRecipientsByKind(
   admin: SupabaseClient,
   companyId: string,
   now: Date,
-): Promise<string[] | null> {
+  kinds: readonly RecipientKind[],
+): Promise<Map<RecipientKind, string[]> | null> {
   try {
-    // The company's own address replaces the administrators (choice (a) in
-    // notification-recipients.ts). It is read first, so a company that has one
-    // costs no GoTrue lookups, and a failed read is `null` (unknown, claim
-    // nothing) rather than a silent fall back to the administrators.
+    // Both reads come first, so a company that has named its recipients costs
+    // no GoTrue lookups, and a failed read is `null` (unknown, claim nothing)
+    // rather than a silent fall back to the administrators.
+    const { data: rows, error: rowsError } = await admin
+      .from('notification_recipients')
+      .select('notification_type, email')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true });
+    if (rowsError) throw new Error(`recipients lookup failed (${rowsError.code ?? 'unknown'})`);
+
     const { data: settings, error: settingsError } = await admin
       .from('company_settings')
       .select('notification_email')
@@ -293,43 +315,67 @@ export async function loadRecipients(
       .maybeSingle();
     if (settingsError) throw new Error(`settings lookup failed (${settingsError.code ?? 'unknown'})`);
     const configured = storedNotificationAddress(settings?.notification_email);
-    if (configured) return chooseCompanyRecipients({ configured, admins: [] });
+    const listedRows = rows ?? [];
 
-    const { data, error } = await admin
-      .from('user_profiles')
-      .select('user_id, role, status, is_super_admin')
-      .eq('company_id', companyId)
-      .eq('role', 'admin')
-      .eq('status', 'active');
-    if (error) throw new Error(`admin lookup failed (${error.code ?? 'unknown'})`);
+    const admins = needsAdministrators({ kinds, rows: listedRows, configured })
+      ? await loadAdministratorAddresses(admin, companyId, now)
+      : [];
 
-    const candidates = await Promise.all((data ?? []).map(
-      async (profile: Record<string, unknown>): Promise<CompanyAdminCandidate | null> => {
-        const { data: found, error: userError } =
-          await admin.auth.admin.getUserById(profile.user_id as string);
-        if (userError || !found.user) return null;
-        return {
-          email: found.user.email ?? null,
-          role: (profile.role as string) ?? null,
-          status: (profile.status as string) ?? null,
-          isSuperAdmin: (profile.is_super_admin as boolean) ?? null,
-          emailConfirmedAt: found.user.email_confirmed_at ?? null,
-          bannedUntil: found.user.banned_until ?? null,
-          deletedAt: found.user.deleted_at ?? null,
-        };
-      },
-    ));
-
-    return chooseCompanyRecipients({
-      configured: null,
-      admins: selectNotificationRecipients({
-        companyId,
-        companyAdmins: candidates.filter((c): c is CompanyAdminCandidate => c !== null),
-        now,
-      }),
-    });
+    return new Map(kinds.map((kind) => [kind, chooseCompanyRecipients({
+      listed: addressesForKind(listedRows, kind),
+      configured,
+      admins,
+    })]));
   } catch (err) {
     logFailure(FN, 'recipients', { ...LOG_CONTEXT, company_id: companyId }, err);
     return null;
   }
+}
+
+/** One kind's recipients; the manager summary of abrechnung-delivery.ts asks this way. */
+export async function loadRecipients(
+  admin: SupabaseClient,
+  companyId: string,
+  now: Date,
+  kind: RecipientKind,
+): Promise<string[] | null> {
+  const byKind = await loadRecipientsByKind(admin, companyId, now, [kind]);
+  return byKind === null ? null : (byKind.get(kind) ?? []);
+}
+
+async function loadAdministratorAddresses(
+  admin: SupabaseClient,
+  companyId: string,
+  now: Date,
+): Promise<string[]> {
+  const { data, error } = await admin
+    .from('user_profiles')
+    .select('user_id, role, status, is_super_admin')
+    .eq('company_id', companyId)
+    .eq('role', 'admin')
+    .eq('status', 'active');
+  if (error) throw new Error(`admin lookup failed (${error.code ?? 'unknown'})`);
+
+  const candidates = await Promise.all((data ?? []).map(
+    async (profile: Record<string, unknown>): Promise<CompanyAdminCandidate | null> => {
+      const { data: found, error: userError } =
+        await admin.auth.admin.getUserById(profile.user_id as string);
+      if (userError || !found.user) return null;
+      return {
+        email: found.user.email ?? null,
+        role: (profile.role as string) ?? null,
+        status: (profile.status as string) ?? null,
+        isSuperAdmin: (profile.is_super_admin as boolean) ?? null,
+        emailConfirmedAt: found.user.email_confirmed_at ?? null,
+        bannedUntil: found.user.banned_until ?? null,
+        deletedAt: found.user.deleted_at ?? null,
+      };
+    },
+  ));
+
+  return selectNotificationRecipients({
+    companyId,
+    companyAdmins: candidates.filter((c): c is CompanyAdminCandidate => c !== null),
+    now,
+  });
 }

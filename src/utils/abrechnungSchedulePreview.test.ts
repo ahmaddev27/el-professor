@@ -64,6 +64,7 @@ const answer = (over: Partial<SchedulePreviewAnswer> = {}): SchedulePreviewAnswe
   manager_recipients: 1,
   manager_claimed: false,
   manager_via_address: false,
+  manager_via_list: false,
   ...over,
 });
 
