@@ -12,7 +12,7 @@ import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { tallyTrips } from '../utils/incomeTrips';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
 import UberEarningsImportModal from './UberEarningsImportModal';
-import IncomeGroupedList from './IncomeGroupedList';
+import IncomeGroupedList, { type IncomeLevel } from './IncomeGroupedList';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -49,6 +49,8 @@ interface IncomeManagementProps {
 type DatePreset = 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
 type IncomeType = 'bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen';
+// The Umsätze list: one grouping level, or the plain table that edits a row.
+type IncomeListView = IncomeLevel | 'flat';
 
 // Values hold TranslationKeys: these maps are module-level and t() is a hook
 // value, so every consumer resolves them at the call site.
@@ -83,8 +85,8 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [uberImportOpen, setUberImportOpen] = useState(false);
-  // Grouped (month, week, day, driver) is the way in; the flat list stays for editing a row.
-  const [listView, setListView] = useState<'grouped' | 'flat'>('grouped');
+  // Day, week or month (each with its drivers) is the way in; the flat list stays for editing a row.
+  const [listView, setListView] = useState<IncomeListView>('week');
 
   // ── Batch add form state ───────────────────────────────────────────────────
   const [batchForm, setBatchForm] = useState({
@@ -1173,9 +1175,11 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           </section>
         )}
 
-        <Tabs value={listView} onValueChange={value => setListView(value as 'grouped' | 'flat')}>
+        <Tabs value={listView} onValueChange={value => setListView(value as IncomeListView)}>
           <TabsList variant="segmented" aria-label={t('inc.group.viewLabel')}>
-            <TabsTrigger value="grouped">{t('inc.group.viewGrouped')}</TabsTrigger>
+            <TabsTrigger value="day">{t('inc.group.viewDay')}</TabsTrigger>
+            <TabsTrigger value="week">{t('inc.group.viewWeek')}</TabsTrigger>
+            <TabsTrigger value="month">{t('inc.group.viewMonth')}</TabsTrigger>
             <TabsTrigger value="flat">{t('inc.group.viewFlat')}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -1183,8 +1187,8 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         {/* The grouped list is drawn only from a successful load that has rows:
             a failed load or no entries is the table's own error / empty state,
             so grouping can never show an empty group or a 0,00 € total. */}
-        {listView === 'grouped' && !loadFailed && filteredIncomes.length > 0 ? (
-          <IncomeGroupedList rows={filteredIncomes} />
+        {listView !== 'flat' && !loadFailed && filteredIncomes.length > 0 ? (
+          <IncomeGroupedList rows={filteredIncomes} level={listView} />
         ) : (
           <DataTable
             caption={t('inc.tableCaption')}

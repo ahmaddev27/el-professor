@@ -1,19 +1,31 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import {
+  driversOfMonth,
+  driversOfWeek,
+  flattenDays,
+  flattenWeeks,
   groupIncome,
-  type DayGroup,
+  weekEndOf,
+  type DriverGroup,
   type GroupableIncome,
   type IncomeTotals,
-  type MonthGroup,
-  type WeekGroup,
 } from '../utils/incomeGrouping';
 import { Alert, formatDate, formatEuroCents } from './ui';
 
+export type IncomeLevel = 'day' | 'week' | 'month';
+
+const LEVEL_KEY = {
+  day: 'inc.group.viewDay',
+  week: 'inc.group.viewWeek',
+  month: 'inc.group.viewMonth',
+} as const satisfies Record<IncomeLevel, TranslationKey>;
+
 interface Props {
   rows: readonly GroupableIncome[];
+  level: IncomeLevel;
 }
 
 const MONTH_KEYS: readonly TranslationKey[] = [
@@ -31,14 +43,30 @@ function weekdayShort(iso: string, language: string): string {
 
 const money = (cents: number) => <span className="tabular-nums">{formatEuroCents(cents)}</span>;
 
+/** One list entry: what the row is called, and the drivers behind it. */
+interface Entry {
+  key: string;
+  title: ReactNode;
+  subtitle: ReactNode;
+  totals: IncomeTotals;
+  drivers: DriverGroup[];
+}
+
+// Summe is always a column; the four parts are columns from lg up and sit
+// under the name below it, so a phone never scrolls sideways.
+const CELL = 'px-3 py-2 text-right align-middle tabular-nums whitespace-nowrap';
+const PART_CELL = `${CELL} hidden text-fg-muted lg:table-cell`;
+
 /**
- * Month → week → day → driver, every level but the driver folding. The figures
- * are the grouping's own cents, never recomputed here, so a level cannot
- * disagree with the one below it. The caller withholds this whole list when the
- * load failed; a group that could not be read says so instead of a total.
+ * The Umsätze list at one level: day, week or month. The figures are the
+ * grouping's own cents (`groupIncome`, and `sumTotals` for the driver rows of
+ * a week or month), never added up here, so a level cannot disagree with the
+ * one below it. The caller withholds this whole list when the load failed; a
+ * group that could not be read says so instead of a total.
  */
-export function IncomeGroupedList({ rows }: Props) {
+export function IncomeGroupedList({ rows, level }: Props) {
   const { t, tPlural, language } = useTranslation();
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const grouped = useMemo(() => {
     try {
       return groupIncome(rows);
@@ -47,80 +75,139 @@ export function IncomeGroupedList({ rows }: Props) {
     }
   }, [rows]);
 
+  const entries = useMemo<Entry[]>(() => {
+    if (grouped === null) return [];
+    const weekTitle = (week: { weekNumber: number }) => t('inc.weekLabel', { week: week.weekNumber });
+    const weekRange = (monday: string) => `${formatDate(monday)} – ${formatDate(weekEndOf(monday))}`;
+    if (level === 'month') {
+      return grouped.map(month => ({
+        key: `m-${month.year}-${month.month}`,
+        title: `${t(MONTH_KEYS[month.month - 1]!)} ${month.year}`,
+        subtitle: null,
+        totals: month.totals,
+        drivers: driversOfMonth(month),
+      }));
+    }
+    if (level === 'week') {
+      return flattenWeeks(grouped).map(week => ({
+        key: `w-${week.monday}`,
+        title: weekTitle(week),
+        subtitle: <span className="tabular-nums">{weekRange(week.monday)}</span>,
+        totals: week.totals,
+        drivers: driversOfWeek(week),
+      }));
+    }
+    return flattenDays(grouped).map(({ day, week }) => ({
+      key: `d-${week.monday}-${day.date ?? 'week'}`,
+      title: day.date === null ? (
+        <span title={t('inc.group.weekLevelHint')}>{t('inc.group.weekLevel')}</span>
+      ) : (
+        <span className="tabular-nums">{`${weekdayShort(day.date, language)} ${formatDate(day.date)}`}</span>
+      ),
+      subtitle: day.date === null
+        ? <span className="tabular-nums">{`${weekTitle(week)} · ${weekRange(week.monday)}`}</span>
+        : weekTitle(week),
+      totals: day.totals,
+      drivers: day.drivers,
+    }));
+  }, [grouped, level, t, language]);
+
   if (grouped === null) {
     return <Alert tone="critical" title={t('inc.group.unreadableTitle')}>{t('inc.group.unreadable')}</Alert>;
   }
 
-  const figures = (totals: IncomeTotals) => (
-    <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-0.5 text-[13px] text-fg-muted">
-      <span className="hidden md:inline">{t('inc.nettoFahrpreis')} {money(totals.umsatzCents)}</span>
-      <span className="hidden md:inline">{t('inc.typeAktionen')} {money(totals.aktionenCents)}</span>
-      <span className="hidden lg:inline">{t('inc.typeTrinkgeld')} {money(totals.trinkgeldCents)}</span>
-      <span className="hidden lg:inline">{t('inc.typeBargeld')} {money(totals.bargeldCents)}</span>
-      <span className="text-sm font-semibold text-fg">{t('inc.sum')} {money(totals.sumCents)}</span>
+  const toggle = (key: string) => setOpen(prev => {
+    const next = new Set(prev);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  });
+
+  const parts = (totals: IncomeTotals) => (
+    <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-fg-muted lg:hidden">
+      <span>{t('inc.nettoFahrpreis')} {money(totals.umsatzCents)}</span>
+      <span>{t('inc.typeAktionen')} {money(totals.aktionenCents)}</span>
+      <span>{t('inc.typeTrinkgeld')} {money(totals.trinkgeldCents)}</span>
+      <span>{t('inc.typeBargeld')} {money(totals.bargeldCents)}</span>
     </span>
   );
 
-  const fold = (title: ReactNode, totals: IncomeTotals, children: ReactNode, open: boolean, level: 0 | 1 | 2) => (
-    <details open={open} className="group rounded-control border border-border bg-raised">
-      <summary
-        className={
-          'flex min-h-10 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 '
-          + '[&::-webkit-details-marker]:hidden [@media(pointer:coarse)]:min-h-11 '
-          + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus'
-        }
-      >
-        <ChevronRight aria-hidden className="size-4 shrink-0 text-fg-subtle transition-transform group-open:rotate-90" />
-        <span className={level === 0 ? 'font-semibold text-fg' : level === 1 ? 'font-medium text-fg' : 'text-sm font-medium text-fg'}>
-          {title}
-        </span>
-        <span className="text-xs text-fg-subtle">
-          {tPlural({ one: 'inc.group.entries.one', other: 'inc.group.entries.other' }, totals.rowCount)}
-        </span>
-        <span className="ml-auto">{figures(totals)}</span>
-      </summary>
-      <div className="grid grid-cols-1 gap-2 border-t border-border p-2">{children}</div>
-    </details>
+  const figureCells = (totals: IncomeTotals, strong: boolean) => (
+    <>
+      <td className={PART_CELL}>{formatEuroCents(totals.umsatzCents)}</td>
+      <td className={PART_CELL}>{formatEuroCents(totals.aktionenCents)}</td>
+      <td className={PART_CELL}>{formatEuroCents(totals.trinkgeldCents)}</td>
+      <td className={PART_CELL}>{formatEuroCents(totals.bargeldCents)}</td>
+      <td className={`${CELL} ${strong ? 'text-[15px] font-semibold text-fg' : 'text-fg'}`}>
+        {formatEuroCents(totals.sumCents)}
+      </td>
+    </>
   );
 
-  const dayView = (day: DayGroup) => fold(
-    day.date === null ? (
-      <span title={t('inc.group.weekLevelHint')}>{t('inc.group.weekLevel')}</span>
-    ) : (
-      <span className="tabular-nums">{`${weekdayShort(day.date, language)} ${formatDate(day.date)}`}</span>
-    ),
-    day.totals,
-    <ul className="grid grid-cols-1 gap-1">
-      {day.drivers.map(driver => (
-        <li key={driver.driverName} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1">
-          <span className="text-sm text-fg">{driver.driverName}</span>
-          <span className="ml-auto">{figures(driver.totals)}</span>
-        </li>
-      ))}
-    </ul>,
-    false,
-    2,
-  );
-
-  const weekView = (week: WeekGroup, open: boolean) => fold(
-    `${t('inc.weekLabel', { week: week.weekNumber })} · ${formatDate(week.monday)}`,
-    week.totals,
-    week.days.map(day => <div key={`${week.monday}-${day.date ?? 'week'}`}>{dayView(day)}</div>),
-    open,
-    1,
-  );
-
-  const monthView = (month: MonthGroup, open: boolean) => fold(
-    `${t(MONTH_KEYS[month.month - 1]!)} ${month.year}`,
-    month.totals,
-    month.weeks.map((week, i) => <div key={week.monday}>{weekView(week, open && i === 0)}</div>),
-    open,
-    0,
-  );
+  const entryRows = (entry: Entry) => {
+    const isOpen = open.has(entry.key);
+    const panelId = `inc-${entry.key}`;
+    return (
+      <tbody key={entry.key} className="border-t border-border">
+        <tr className={isOpen ? 'bg-sunken' : undefined}>
+          <th scope="row" className="p-0 text-left font-normal">
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              aria-controls={panelId}
+              onClick={() => toggle(entry.key)}
+              className={
+                'flex min-h-12 w-full items-start gap-2 px-3 py-2 text-left [@media(pointer:coarse)]:min-h-14 '
+                + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus'
+              }
+            >
+              <ChevronRight
+                aria-hidden
+                className={`mt-1 size-4 shrink-0 text-fg-subtle transition-transform ${isOpen ? 'rotate-90' : ''}`}
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-medium text-fg">{entry.title}</span>
+                <span className="text-xs text-fg-muted">
+                  {entry.subtitle}
+                  {entry.subtitle ? ' · ' : ''}
+                  {tPlural({ one: 'inc.group.entries.one', other: 'inc.group.entries.other' }, entry.totals.rowCount)}
+                </span>
+                {isOpen && parts(entry.totals)}
+              </span>
+            </button>
+          </th>
+          {figureCells(entry.totals, true)}
+        </tr>
+        {isOpen && entry.drivers.map((driver, i) => (
+          <tr key={driver.driverName} id={i === 0 ? panelId : undefined} className="bg-sunken">
+            <td className="py-2 pl-9 pr-3 align-top">
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm text-fg">{driver.driverName}</span>
+                {parts(driver.totals)}
+              </span>
+            </td>
+            {figureCells(driver.totals, false)}
+          </tr>
+        ))}
+      </tbody>
+    );
+  };
 
   return (
-    <div className="grid grid-cols-1 gap-3">
-      {grouped.map((month, i) => <div key={`${month.year}-${month.month}`}>{monthView(month, i === 0)}</div>)}
+    <div className="overflow-hidden rounded-control border border-border bg-raised">
+      <table className="w-full border-collapse text-sm">
+        <caption className="sr-only">{t('inc.group.viewLabel')}</caption>
+        <thead>
+          <tr className="text-xs text-fg-muted">
+            <th scope="col" className="px-3 py-2 text-left font-medium">{t(LEVEL_KEY[level])}</th>
+            <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.nettoFahrpreis')}</th>
+            <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.typeAktionen')}</th>
+            <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.typeTrinkgeld')}</th>
+            <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.typeBargeld')}</th>
+            <th scope="col" className={`${CELL} font-medium`}>{t('inc.sum')}</th>
+          </tr>
+        </thead>
+        {entries.map(entryRows)}
+      </table>
     </div>
   );
 }
