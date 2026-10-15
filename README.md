@@ -27,6 +27,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 > Last update: **13.10.2026**. A step counts once it is merged into `staging` and verified there.
 
+> **15.10.2026, outside the step count:** a company administrator can now list several addresses per kind of company mail (Einstellungen, tab Verbindungen; `notification_recipients`). A kind with no address falls back to the single company address, then to the administrators.
+
 `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰` **46 of 46 steps · 100%**
 
 The headline is the Progress column below, added up: 6+7+3+13+3+5+3+1+5 of 6+7+3+13+3+5+3+1+5. It is derived from the table rather than kept by hand, which is how it once came to read "36 of 40" over a column already summing to 37 of 41 — and, on 01.10.2026, how the monthly plan sat at 3/5 for nine merged PRs after both of its open items had landed. **No step is out since 04.10.2026**, when Google sign-in went live on production — ahead of the Impressum and privacy text that were named as its precondition, which are still empty.
