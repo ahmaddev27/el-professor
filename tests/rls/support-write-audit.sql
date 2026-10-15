@@ -728,7 +728,7 @@ BEGIN
   -- The support session (section 3's, on company X): the company's settings.
   v_mark := _sw_mark();
   PERFORM _sw_as(u_o, s_o);
-  UPDATE company_settings SET company_name = 'SW X renamed', iban = 'DE00000000000000000099' WHERE company_id = co_x;
+  UPDATE company_settings SET company_name = 'SW X renamed', iban = 'DE00000000000000000099', notification_email = 'sw-notify@example.com' WHERE company_id = co_x;
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   PERFORM _sw_reset();
   PERFORM _sw_ok('shell, support: the session updates the settings of the company it opened', v_rows = 1);
@@ -750,6 +750,8 @@ BEGIN
     AND (r.after_value -> 'values' -> 'iban') = c_red
     AND position('DE000000000000000000' IN r.after_value::text) = 0
     AND NOT ((r.after_value -> 'values') ? 'city'));
+  PERFORM _sw_ok('shell, support: the notification address is recorded like the other contact columns (20261015100000), by value',
+    (r.after_value -> 'values' ->> 'notification_email') = 'sw-notify@example.com');
 
   -- Delete and insert again: the session holds companies.hard_delete, and the
   -- row comes back through the insert policy's support branch.

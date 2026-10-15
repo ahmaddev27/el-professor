@@ -37,6 +37,7 @@ import { sendMail } from './mail.ts';
 import { loadMailDeliverySettings } from './mail-template.ts';
 import { logFailure } from './otp-core.ts';
 import type { CompanyAdminCandidate } from './activation-code-mail.ts';
+import { chooseCompanyRecipients, storedNotificationAddress } from './notification-recipients.ts';
 import {
   TUEV_SOON_DAYS,
   selectNotifications,
@@ -261,7 +262,8 @@ async function settle(
 }
 
 /**
- * The company's admins who can receive mail, or `null` when the lookup failed.
+ * The company's mail recipients, or `null` when the lookup failed: its notification
+ * address when it has set one, otherwise its admins who can receive mail.
  *
  * The same two steps as activation-code-delivery.ts: the active admin profiles
  * from PostgREST, then one `getUserById` each, because whether an account is
@@ -280,6 +282,19 @@ export async function loadRecipients(
   now: Date,
 ): Promise<string[] | null> {
   try {
+    // The company's own address replaces the administrators (choice (a) in
+    // notification-recipients.ts). It is read first, so a company that has one
+    // costs no GoTrue lookups, and a failed read is `null` (unknown, claim
+    // nothing) rather than a silent fall back to the administrators.
+    const { data: settings, error: settingsError } = await admin
+      .from('company_settings')
+      .select('notification_email')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (settingsError) throw new Error(`settings lookup failed (${settingsError.code ?? 'unknown'})`);
+    const configured = storedNotificationAddress(settings?.notification_email);
+    if (configured) return chooseCompanyRecipients({ configured, admins: [] });
+
     const { data, error } = await admin
       .from('user_profiles')
       .select('user_id, role, status, is_super_admin')
@@ -305,10 +320,13 @@ export async function loadRecipients(
       },
     ));
 
-    return selectNotificationRecipients({
-      companyId,
-      companyAdmins: candidates.filter((c): c is CompanyAdminCandidate => c !== null),
-      now,
+    return chooseCompanyRecipients({
+      configured: null,
+      admins: selectNotificationRecipients({
+        companyId,
+        companyAdmins: candidates.filter((c): c is CompanyAdminCandidate => c !== null),
+        now,
+      }),
     });
   } catch (err) {
     logFailure(FN, 'recipients', { ...LOG_CONTEXT, company_id: companyId }, err);

@@ -303,6 +303,7 @@ const PreviewBody: React.FC<{ next: NextOccurrence; answer: SchedulePreviewAnswe
         ? t('settings.abrSchedule.preview.manager.claimed')
         : t('settings.abrSchedule.preview.manager.noOne');
     }
+    if (answer.manager_via_address) return t('settings.abrSchedule.preview.manager.goesAddress');
     return tPlural({
       one: 'settings.abrSchedule.preview.manager.goesOne',
       other: 'settings.abrSchedule.preview.manager.goesOther',
