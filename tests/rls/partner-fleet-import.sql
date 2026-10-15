@@ -302,15 +302,27 @@ DECLARE
   co_a constant uuid := 'c0000000-0000-4000-8000-00000000000a';
   v_active integer;
   v_limit integer;
+  v_per_car integer;
 BEGIN
   SELECT count(*) INTO v_active FROM drivers WHERE company_id = co_a AND status IS DISTINCT FROM 'inactive';
-  -- The limit is twice the car limit, so make room for exactly one more.
-  IF v_active % 2 = 0 THEN
-    INSERT INTO drivers (company_id, name) VALUES (co_a, 'Filler Driver');
+
+  -- The limit is subscription_car_limit x drivers_per_car_limit, and
+  -- drivers_per_car_limit DEFAULTS TO 4, not 2 (20260607123609). The first
+  -- version of this block assumed 2, so the limit it set was twice the one it
+  -- meant and all three drivers fitted -- the probe reported a product defect
+  -- that was its own arithmetic. Read the company's own factor and pad up to a
+  -- multiple of it, so exactly one slot is left whatever the column says.
+  -- It lives on company_settings, not companies, and enforce_driver_limit
+  -- falls back to 4 when that row is absent -- so read it the way the
+  -- trigger does rather than from the table the car limit sits on.
+  SELECT COALESCE((SELECT drivers_per_car_limit FROM company_settings WHERE company_id = co_a), 4)
+    INTO v_per_car;
+  WHILE (v_active + 1) % v_per_car <> 0 LOOP
+    INSERT INTO drivers (company_id, name) VALUES (co_a, 'Filler Driver ' || v_active);
     v_active := v_active + 1;
-  END IF;
+  END LOOP;
   v_limit := v_active + 1;
-  UPDATE companies SET subscription_car_limit = v_limit / 2 WHERE id = co_a;
+  UPDATE companies SET subscription_car_limit = v_limit / v_per_car WHERE id = co_a;
 
   INSERT INTO partner_driver_links (id, company_id, partner, external_driver_id, proposed_name, partner_removed_at)
   VALUES ('2f000000-0000-4000-8000-000000003001', co_a, 'reidey', '3001', 'Lena Limit', NULL),
@@ -323,7 +335,7 @@ BEGIN
         FROM (SELECT partner_drivers_import() AS x) s$q$),
     '2/1');
   PERFORM _fi_rec(25, 'the company''s limit was not raised',
-    (SELECT subscription_car_limit::text FROM companies WHERE id = co_a), (v_limit / 2)::text);
+    (SELECT subscription_car_limit::text FROM companies WHERE id = co_a), (v_limit / v_per_car)::text);
   PERFORM _fi_rec(26, 'and the one that did not fit was not created',
     (SELECT count(*)::text FROM drivers WHERE name = 'Lars Limit'), '0');
 END $$;
