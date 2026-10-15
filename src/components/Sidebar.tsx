@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Users, DollarSign, Plus,
   Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
   StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
-  Database, ListChecks,
+  Database, ListChecks, Download,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from './BrandLogo';
@@ -17,6 +17,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { LegalLinks } from './legal/LegalLinks';
 import { ADMIN_BASE } from '../lib/adminGate';
 import { cn } from './ui';
+import { FLEET_IMPORT_PATH } from './partner/FleetImportShortcut';
 
 interface SidebarProps {
   isSupportAdmin: boolean;
@@ -59,6 +60,7 @@ const NAV_ITEMS: NavItem[] = [
 const ADMIN_ITEMS: NavItem[] = [
   { path: '/users',          icon: UserCog,    labelKey: 'nav.users',         feature: 'rollen_nutzer' },
   { path: '/roles',          icon: Shield,     labelKey: 'nav.roles',         feature: 'rollen_nutzer' },
+  { path: FLEET_IMPORT_PATH, icon: Download,   labelKey: 'import.title',      feature: 'overview' },
   { path: '/datensicherung', icon: Database,   labelKey: 'bill.backup.title', feature: 'overview' },
   { path: '/billing',        icon: CreditCard, labelKey: 'nav.billing',       feature: 'overview' },
   { path: '/settings',       icon: Settings,   labelKey: 'nav.settings',      feature: 'overview' },

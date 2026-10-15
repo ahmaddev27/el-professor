@@ -37,6 +37,7 @@ import { ADMIN_BASE } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { engineText } from '../i18n/engineMessage';
+import { FleetImportPrompt } from '../components/partner/FleetImportPrompt';
 
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -534,6 +535,9 @@ const OverviewPage: React.FC = () => {
       {!isSuperAdmin && (
         <PlanStatusCard planState={planState} effectivePlan={effectivePlan} />
       )}
+
+      {/* ── Fleet import: only for an empty company whose counts were read ── */}
+      {!isSuperAdmin && <FleetImportPrompt />}
 
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
