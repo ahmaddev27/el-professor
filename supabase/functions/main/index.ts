@@ -110,7 +110,9 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // service key, never by the browser; it is deliberately not public, and it
   // compares the bearer against SUPABASE_SERVICE_ROLE_KEY itself, because the
   // check above admits any signed-in customer's token.
-  ['notify-expiries', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
+  // Also opens the sealed Reidey token for the scheduled Uber pull (15.10.2026),
+  // so it holds the seal key and the endpoint, and not the pepper PARTNER_ENV adds.
+  ['notify-expiries', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV, 'PARTNER_SEAL_KEY', 'PARTNER_REIDEY_BASE_URL']],
   // Google sign-in: calls the oauth_* RPCs as service_role for the signed-in
   // caller. Needs a session, so it is deliberately not in PUBLIC_FUNCTIONS.
   ['oauth-account', [...BASE_ENV, ...SERVICE_ENV]],

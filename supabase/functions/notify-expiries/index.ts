@@ -17,7 +17,13 @@
  * functions that skips their own authorization, which is worse than a line in
  * two lists.
  *
- * ─── Two jobs, one door ──────────────────────────────────────────────────────
+ * ─── Three jobs, one door ────────────────────────────────────────────────────
+ *
+ * `{"job":"uber_pull"}` is the scheduled Uber earnings pull for the operating day
+ * that has just completed (`_shared/uber-pull-delivery.ts`). It rides the ten-minute
+ * tick that already runs the other jobs: no host change, no new function. It
+ * opens the sealed Reidey token, so this function's environment names
+ * PARTNER_SEAL_KEY and PARTNER_REIDEY_BASE_URL in `main/index.ts`.
  *
  * `{"job":"abrechnung"}` runs the scheduled weekly Abrechnung (drivers' mails and
  * the managers' summary, `_shared/abrechnung-delivery.ts`). It is a second job
@@ -51,6 +57,7 @@ import { corsFor } from '../_shared/http.ts';
 import { logFailure } from '../_shared/otp-core.ts';
 import { runNotificationJob, type NotificationRunMode } from '../_shared/notification-delivery.ts';
 import { runAbrechnungJob } from '../_shared/abrechnung-delivery.ts';
+import { runUberPullJob } from '../_shared/uber-pull-delivery.ts';
 
 const FN = 'notify-expiries';
 
@@ -81,14 +88,14 @@ function bearer(req: Request): string | null {
  * notifications keeps working unchanged. `mode` is `dry_run` for anything that
  * is not exactly `send`, and an unreadable body is a dry run of the default job.
  */
-type JobName = 'expiries' | 'abrechnung';
+type JobName = 'expiries' | 'abrechnung' | 'uber_pull';
 async function requestOf(req: Request): Promise<{ job: JobName | 'unknown'; mode: NotificationRunMode }> {
   try {
     const body = await req.json();
     const fields = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
     const mode = fields.mode === 'send' ? 'send' : 'dry_run';
     if (fields.job === undefined) return { job: 'expiries', mode };
-    if (fields.job === 'expiries' || fields.job === 'abrechnung') return { job: fields.job, mode };
+    if (fields.job === 'expiries' || fields.job === 'abrechnung' || fields.job === 'uber_pull') return { job: fields.job, mode };
     return { job: 'unknown', mode: 'dry_run' };
   } catch {
     return { job: 'expiries', mode: 'dry_run' };
@@ -125,6 +132,18 @@ Deno.serve(async (req: Request) => {
       serviceKey,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
+
+    if (job === 'uber_pull') {
+      const report = await runUberPullJob(admin, mode);
+      // The run's shape for the cron line's log. No name and no amount appears in it.
+      console.log(JSON.stringify({
+        level: 'info', fn: FN, step: 'run', job, mode,
+        companies_scanned: report.companies_scanned, companies_due: report.companies_due,
+        claimed: report.claimed, imported: report.imported, replaced: report.replaced,
+        already_claimed: report.already_claimed, failed: report.failed,
+      }));
+      return respond({ ok: true, job, ...report });
+    }
 
     if (job === 'abrechnung') {
       const report = await runAbrechnungJob(admin, mode);

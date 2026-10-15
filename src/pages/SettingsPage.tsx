@@ -26,6 +26,7 @@ import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, 
 import { controlFrameClass } from '../components/ui/Input';
 import AbrechnungScheduleCard from '../components/AbrechnungScheduleCard';
 import NotificationAddressCard from '../components/NotificationAddressCard';
+import UberPullScheduleCard from '../components/UberPullScheduleCard';
 
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -805,6 +806,7 @@ const SettingsPage: React.FC = () => {
       {/* Its own row and its own save, so it sits beside the form, not in it. */}
       <NotificationAddressCard readOnly={companyScope.readOnly} />
       <AbrechnungScheduleCard readOnly={companyScope.readOnly} />
+      <UberPullScheduleCard readOnly={companyScope.readOnly} />
     </div>
   );
 };

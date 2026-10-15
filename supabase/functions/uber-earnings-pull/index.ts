@@ -8,9 +8,14 @@
  * - **The token.** Opened here and nowhere else the screen can reach, sent to
  *   the one validated destination, never logged, never returned, not even in an
  *   error. `partner_sealed_token` is service_role's alone.
- * - **By a button, not a schedule.** The owner's decision of 13.10.2026: no cron
- *   caller. This needs a session, and the session decides the company; a body
- *   field never does.
+ * - **This function is the button; the schedule is another door.** The owner
+ *   decided on 13.10.2026 that nothing would run by itself, and REVERSED that on
+ *   15.10.2026: Uber's completed operating day (04:00 to 04:00 Europe/Berlin) is
+ *   now also pulled daily by `{"job":"uber_pull"}` on `notify-expiries`
+ *   (`_shared/uber-pull-delivery.ts`, `income_import_uber_system`). That job has
+ *   no session, so it reads the company from its own claim and not from here.
+ *   THIS function is unchanged and still needs a session: the session decides
+ *   the company, a body field never does, and it still writes nothing.
  *
  * ## Why it writes nothing
  *
