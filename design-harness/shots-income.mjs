@@ -25,7 +25,10 @@ const tab = name => async page => {
 };
 const openFirst = name => async page => {
   await tab(name)(page);
-  await page.locator('button[aria-expanded="false"]').first().click();
+  // Scoped to the list's own table: a bare page-wide locator takes the top
+  // bar's language switcher, which is also an aria-expanded button, so the
+  // shot captured an open language menu and no open row.
+  await page.locator('table button[aria-expanded="false"]').first().click();
   await page.waitForTimeout(200);
 };
 
