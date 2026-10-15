@@ -1218,7 +1218,29 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'mx', 'mx-v1')$q$, NULL,
   $q$INSERT INTO partner_vehicle_links (company_id, partner, external_vehicle_id)
      VALUES ({co}, 'mx', 'mx-v2')$q$,
-  $q$proposed_plate = proposed_plate$q$);
+  $q$proposed_plate = proposed_plate$q$),
+-- The daily Uber pull's schedule and its record (20261015130000): the
+-- abrechnung_schedules / abrechnung_deliveries shapes exactly, one table for
+-- each, so the cells below are theirs. The runs have SELECT for the company and
+-- the job's SECURITY DEFINER functions as their only writer.
+(70, 'uber_pull_schedules', $q$company_id = {co}$q$,
+  $q$INSERT INTO uber_pull_schedules (company_id, run_time) VALUES ({co}, '06:00')$q$,
+  $q$DELETE FROM uber_pull_schedules WHERE company_id = {co}$q$,
+  $q$INSERT INTO uber_pull_schedules (company_id, run_time) VALUES ({co}, '06:00')$q$,
+  $q$run_time = run_time$q$),
+-- The day differs per side on purpose. uber_pull_runs_once is UNIQUE on
+-- (company_id, day_key, pass), so with one day for both companies the MOVE
+-- probe collided with the row already standing in the other company -- and it
+-- collided for the OWNER too, which makes it a malformed statement rather than
+-- a refusal. A probe the owner cannot make measures nothing. {s} is the letter
+-- a or b, not a digit, so the side is carried in a CASE over it rather than
+-- pasted into the date -- '2099-01-0a' is not a date.
+(71, 'uber_pull_runs', $q$id = {id}$q$,
+  $q$INSERT INTO uber_pull_runs (id, company_id, day_key, pass)
+     VALUES ({id}, {co}, CASE '{s}' WHEN 'a' THEN DATE '2099-01-04' ELSE DATE '2099-01-05' END, 'first')$q$, NULL,
+  $q$INSERT INTO uber_pull_runs (company_id, day_key, pass)
+     VALUES ({co}, DATE '2098-01-06', 'first')$q$,
+  $q$detail = detail$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1278,6 +1300,11 @@ INSERT INTO _mx_move VALUES
 ('abrechnung_schedules',                 $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM abrechnung_schedules WHERE company_id = {other_co}$q$, 'Y', 'one schedule per company'),
 ('abrechnung_deliveries',                $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- One schedule per company, so B's own row is dropped first; the runs' key
+-- names the company, so A's probe row collides with nothing of B's.
+('uber_pull_schedules',                  $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM uber_pull_schedules WHERE company_id = {other_co}$q$, 'Y', 'one schedule per company'),
+('uber_pull_runs',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
 ('partner_vehicle_links',                $q$company_id = {other_co}$q$,
@@ -1931,7 +1958,20 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('abrechnung_deliveries',          'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('abrechnung_deliveries',          'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('abrechnung_deliveries',          'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
-('abrechnung_deliveries',          'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL);
+('abrechnung_deliveries',          'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+-- 20261015100000. The schedule is abrechnung_schedules' cells and the runs are
+-- abrechnung_deliveries': an administrator writes the first, the job's
+-- functions alone write the second, and anon's column is a missing GRANT.
+('uber_pull_schedules',            'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('uber_pull_schedules',            'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('uber_pull_schedules',            'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('uber_pull_schedules',            'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('uber_pull_schedules',            'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+('uber_pull_runs',                 'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('uber_pull_runs',                 'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('uber_pull_runs',                 'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('uber_pull_runs',                 'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('uber_pull_runs',                 'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -2005,7 +2045,9 @@ UPDATE _mx_expected x
      -- what this adds for them is the SELECT line -- which cannot be left as
      -- copied from `super`, because a context is exactly what makes the
      -- company's rows readable.
-     'abrechnung_schedules', 'abrechnung_deliveries');
+     'abrechnung_schedules', 'abrechnung_deliveries',
+     -- 20261015100000: the same shape and the same two triggers
+     'uber_pull_schedules', 'uber_pull_runs');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
@@ -3660,6 +3702,22 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PPPPPPP', NULL),
     ('abrechnung_delivery_settle(a delivery of A)',
      $q$SELECT abrechnung_delivery_settle({ref:abrechnung_deliveries}, true, 1)::text$q$,
+     'PPPPPPP', NULL),
+    -- The daily Uber pull (20261015100000): all four are service_role's alone.
+    -- A client that could call the writer would put income rows into a company
+    -- with no person, no role gate and no preview; one that could call the claim
+    -- would mark a day as pulled. Behaviour: tests/rls/uber-daily-pull.sql.
+    ('uber_pull_candidates(any company)',
+     $q$SELECT uber_pull_candidates(1, NULL)::text$q$,
+     'PPPPPPP', NULL),
+    ('uber_pull_claim(company A)',
+     $q$SELECT uber_pull_claim({co}, current_date - 1, 'first')::text$q$,
+     'PPPPPPP', NULL),
+    ('uber_pull_settle(a run of A)',
+     $q$SELECT uber_pull_settle({ref:uber_pull_runs}, 'failed', NULL, 0)::text$q$,
+     'PPPPPPP', NULL),
+    ('income_import_uber_system(no run)',
+     $q$SELECT income_import_uber_system(gen_random_uuid(), '[]'::jsonb)::text$q$,
      'PPPPPPP', NULL),
     -- The fifth is the screen's, so `authenticated` holds EXECUTE: it is
     -- STABLE and reads only through get_active_company_id(), so a caller with
