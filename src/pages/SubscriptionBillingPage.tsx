@@ -21,7 +21,7 @@ import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import { generateSubscriptionPdf, InvoicePdfData } from '../utils/subscriptionPdf';
 import { getInvoiceSeller } from '../lib/platformSettingsClient';
 import { invoiceSellerFields } from '../lib/platformSettings';
-import { Alert, Button } from '../components/ui';
+import { Alert, Button, ConfirmDialog } from '../components/ui';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import {
   buildInvoicesExport,
@@ -181,6 +181,7 @@ export default function SubscriptionBillingPage() {
 
   // Modals
   const [markPaidInvoice, setMarkPaidInvoice] = useState<PlatformInvoiceRow | null>(null);
+  const [invoiceConfirm, setInvoiceConfirm] = useState<{ kind: 'unpaid' | 'cancel'; invoice: PlatformInvoiceRow } | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -555,7 +556,7 @@ export default function SubscriptionBillingPage() {
                   style={{ color: 'var(--warning)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  onClick={() => { setOpen(false); handleMarkUnpaid(inv); }}
+                  onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'unpaid', invoice: inv }); }}
                 >
                   <XCircle size={14} /> {t('sa.subs.actionMarkUnpaid')}
                 </button>
@@ -565,7 +566,7 @@ export default function SubscriptionBillingPage() {
                   style={{ color: 'var(--danger)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  onClick={() => { setOpen(false); handleCancel(inv); }}
+                  onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'cancel', invoice: inv }); }}
                 >
                   <XCircle size={14} /> {t('sa.subs.actionCancel')}
                 </button>
@@ -1019,6 +1020,18 @@ export default function SubscriptionBillingPage() {
       )}
 
       {/* Modals */}
+      <ConfirmDialog
+        open={invoiceConfirm !== null}
+        onClose={() => setInvoiceConfirm(null)}
+        onConfirm={() => {
+          if (!invoiceConfirm) return;
+          if (invoiceConfirm.kind === 'cancel') void handleCancel(invoiceConfirm.invoice);
+          else void handleMarkUnpaid(invoiceConfirm.invoice);
+        }}
+        title={t(invoiceConfirm?.kind === 'cancel' ? 'sa.subs.actionCancel' : 'sa.subs.actionMarkUnpaid')}
+        description={t(invoiceConfirm?.kind === 'cancel' ? 'sa.subs.confirmCancel.description' : 'sa.subs.confirmUnpaid.description')}
+        confirmLabel={t(invoiceConfirm?.kind === 'cancel' ? 'sa.subs.actionCancel' : 'sa.subs.actionMarkUnpaid')}
+      />
       {markPaidInvoice && (
         <MarkPaidModal
           invoice={markPaidInvoice}

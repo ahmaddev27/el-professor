@@ -177,6 +177,8 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
   const meta = LIFECYCLE_META[action];
   const [confirmText, setConfirmText] = useState('');
   const [busy, setBusy] = useState(false);
+  // A refusal stays inside the modal: a toast behind an open overlay is easy to miss.
+  const [failure, setFailure] = useState<string | null>(null);
 
   const needsTyping = meta.dangerLevel === 'critical';
   const canConfirm = needsTyping ? confirmText.trim() === company.name.trim() : true;
@@ -194,8 +196,12 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
   const handleConfirm = async () => {
     if (!canConfirm) return;
     setBusy(true);
+    setFailure(null);
     try {
       await onConfirm();
+    } catch (err: any) {
+      // callPlatformRpc throws the sentence the database wrote; a PostgREST error is not an Error but carries .message.
+      setFailure(err?.message || t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -260,6 +266,10 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
                 {t('sa.lifecycle.criticalWarning')}
               </p>
             </div>
+          )}
+
+          {failure && (
+            <Alert tone="critical" title={t('sa.lifecycle.failedTitle')}>{failure}</Alert>
           )}
         </div>
 

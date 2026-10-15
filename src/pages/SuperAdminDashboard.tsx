@@ -25,7 +25,7 @@ import { contextRefusalMessage } from '../lib/supportSession';
 import { ADMIN_BASE, TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import { subscriptionIsActive } from '../utils/planState';
-import { Alert } from '../components/ui';
+import { Alert, ConfirmDialog } from '../components/ui';
 import type { CompanyStatus } from '../contexts/AuthContext';
 import type { TranslationKey } from '../i18n';
 
@@ -380,6 +380,8 @@ export default function SuperAdminDashboard() {
   const [rejectModal, setRejectModal] = useState<{ company: CompanyRow } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [manualSubModal, setManualSubModal] = useState<CompanyRow | null>(null);
+  const [statusConfirm, setStatusConfirm] = useState<{ company: CompanyRow; status: CompanyStatus } | null>(null);
+  const [suspendConfirm, setSuspendConfirm] = useState<CompanyRow | null>(null);
   // The per-company counts as last read. Kept between loads so the minute tick
   // and the reload after each action reuse them instead of reading them again.
   const companyCounts = useRef<CompanyCounts>(UNKNOWN_COMPANY_COUNTS);
@@ -962,7 +964,7 @@ export default function SuperAdminDashboard() {
                             </span>
                             {canLifecycle && ap === 'approved' && !suspended && (
                               <button
-                                onClick={() => handleSuspendApproval(c)}
+                                onClick={() => setSuspendConfirm(c)}
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
                                 style={{ borderColor: 'var(--border)', color: 'var(--text-tertiary)' }}
                                 onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--danger)'); (e.currentTarget.style.color = 'var(--danger)'); }}
@@ -1409,7 +1411,7 @@ export default function SuperAdminDashboard() {
                       <select
                         value={c.status}
                         disabled={!canLifecycle}
-                        onChange={e => handleStatusChange(c, e.target.value as CompanyStatus)}
+                        onChange={e => setStatusConfirm({ company: c, status: e.target.value as CompanyStatus })}
                         className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
                         style={{
                           background: STATUS_CFG[c.status]?.bg ?? 'var(--bg-muted)',
@@ -1447,7 +1449,7 @@ export default function SuperAdminDashboard() {
                     <div className="flex items-center gap-1 justify-end">
                       {readsAsTrial(c) && c.trial_end && (
                         <button
-                          hidden={!canBilling}
+                          hidden={!canLifecycle}
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
                           className="p-1.5 rounded-lg transition-colors"
@@ -1619,6 +1621,28 @@ export default function SuperAdminDashboard() {
       </>}
 
     </div>
+
+    {/* Confirmations for the two one-click state changes of this screen. */}
+    <ConfirmDialog
+      open={statusConfirm !== null}
+      onClose={() => setStatusConfirm(null)}
+      onConfirm={() => { if (statusConfirm) void handleStatusChange(statusConfirm.company, statusConfirm.status); }}
+      title={t('sa.dash.statusConfirm.title')}
+      description={statusConfirm ? t('sa.dash.statusConfirm.description', {
+        name: statusConfirm.company.name,
+        from: STATUS_CFG[statusConfirm.company.status]?.label ? t(STATUS_CFG[statusConfirm.company.status].label) : statusConfirm.company.status,
+        to: STATUS_CFG[statusConfirm.status]?.label ? t(STATUS_CFG[statusConfirm.status].label) : statusConfirm.status,
+      }) : ''}
+      confirmLabel={t('sa.dash.statusConfirm.confirm')}
+    />
+    <ConfirmDialog
+      open={suspendConfirm !== null}
+      onClose={() => setSuspendConfirm(null)}
+      onConfirm={() => { if (suspendConfirm) void handleSuspendApproval(suspendConfirm); }}
+      title={t('sa.lifecycle.suspend.title')}
+      description={suspendConfirm ? t('sa.dash.suspendConfirm.description', { name: suspendConfirm.name }) : ''}
+      confirmLabel={t('sa.lifecycle.suspend.confirm')}
+    />
 
     {/* ── Reject Modal ──────────────────────────────────────────────────────── */}
     {rejectModal && (
