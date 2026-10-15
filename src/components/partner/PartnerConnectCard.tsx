@@ -75,9 +75,11 @@ const REASON_KEYS: Record<string, TranslationKey> = {
 
 interface PartnerConnectCardProps {
   companyId: string | null;
+  /** Called after a token was accepted, for a page that depends on the connection. */
+  onChanged?: () => void;
 }
 
-export function PartnerConnectCard({ companyId }: PartnerConnectCardProps) {
+export function PartnerConnectCard({ companyId, onChanged }: PartnerConnectCardProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { canEdit } = useCompanyScope();
@@ -146,6 +148,7 @@ export function PartnerConnectCard({ companyId }: PartnerConnectCardProps) {
         ? t('partner.connect.connectedTo', { name: answer.fleet_name })
         : t('partner.connect.connected'));
       await load();
+      onChanged?.();
     } catch {
       showToast('error', t('partner.connect.error.generic'));
     } finally {

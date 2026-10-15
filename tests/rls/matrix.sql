@@ -1210,7 +1210,15 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'manager_summary', {co}, '2099-01-04')$q$, NULL,
   $q$INSERT INTO abrechnung_deliveries (company_id, kind, target_id, period_key)
      VALUES ({co}, 'manager_summary', {co}, '2098-01-06')$q$,
-  $q$recipient_count = recipient_count$q$);
+  $q$recipient_count = recipient_count$q$),
+-- The fleet import's links (20261015100000): partner_receipt_submissions' shape,
+-- SELECT for the company and the SECURITY DEFINER functions as the only writers.
+(69, 'partner_vehicle_links', $q$id = {id}$q$,
+  $q$INSERT INTO partner_vehicle_links (id, company_id, partner, external_vehicle_id)
+     VALUES ({id}, {co}, 'mx', 'mx-v1')$q$, NULL,
+  $q$INSERT INTO partner_vehicle_links (company_id, partner, external_vehicle_id)
+     VALUES ({co}, 'mx', 'mx-v2')$q$,
+  $q$proposed_plate = proposed_plate$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1272,6 +1280,8 @@ INSERT INTO _mx_move VALUES
 ('abrechnung_deliveries',                $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
+('partner_vehicle_links',                $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM partner_vehicle_links WHERE company_id = {other_co} AND partner = 'mx' AND external_vehicle_id = 'mx-v1'$q$, 'Y', 'the external id names the company'),
 ('fahrtenbuch_imports',                  $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('fahrtenbuch_trips',                    $q$company_id = {other_co}$q$, NULL, 'T', 'protect_fahrtenbuch_immutable_fields refuses it even for the owner'),
 ('fahrtenbuch_assignment_audit',         $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
@@ -1899,6 +1909,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('partner_note_submissions',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_note_submissions',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_note_submissions',       'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_vehicle_links',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_vehicle_links',          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
+('partner_vehicle_links',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_vehicle_links',          'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_vehicle_links',          'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 -- 20261003120000. The schedule: read by the company, written only by its
 -- administrator -- company_settings' cells plus a DELETE the administrator
 -- holds. anon reads nothing at all, this migration having revoked it, so its
@@ -2076,6 +2091,11 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('partner_note_submissions',     'U', 'TT', '..'),
     ('partner_note_submissions',     'D', 'TT', '..'),
     ('partner_note_submissions',     'M', '..', '..'),
+    ('partner_vehicle_links',        'S', 'Y.', 'Y.'),
+    ('partner_vehicle_links',        'I', 'TT', 'RR'),
+    ('partner_vehicle_links',        'U', 'TT', '..'),
+    ('partner_vehicle_links',        'D', 'TT', '..'),
+    ('partner_vehicle_links',        'M', '..', '..'),
     ('roles',                    'S', 'Y.', 'Y.'),
     ('roles',                    'I', 'TT', 'YR'),
     ('roles',                    'U', 'TT', 'Y.'),
@@ -3586,6 +3606,21 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('partner_pull_record(company A)',
      $q$SELECT partner_pull_record('c0000000-0000-4000-8000-00000000000a', 'mx') ->> 'ok'$q$,
      'PPPPPPP', NULL),
+    ('partner_vehicle_roster_apply(empty page)',
+     $q$SELECT partner_vehicle_roster_apply('c0000000-0000-4000-8000-00000000000a', 'mx', '[]'::jsonb) ->> 'seen'$q$,
+     'PPPPPPP', NULL),
+    -- The fleet import (20261015100000). Administrator only, unlike the Uber
+    -- earnings import: an editor is refused by the gate (T). Company B's
+    -- administrator is a legitimate caller with nothing pending, so it reads Y
+    -- and the cell measures the gate and not the lookup. A platform account is
+    -- refused with no context (no company, T) and with one
+    -- (platform_session_not_allowed, T).
+    ('partner_drivers_import(administrator)',
+     $q$SELECT partner_drivers_import() ->> 'ok'$q$,
+     'PTTTYYT', NULL),
+    ('partner_vehicles_import(administrator)',
+     $q$SELECT partner_vehicles_import() ->> 'ok'$q$,
+     'PTTTYYT', NULL),
 
     -- M4's door (20261008140000). It is service_role's. The two reviewer
     -- decisions that used to sit beside it were dropped by 20261013110000: a
@@ -3749,7 +3784,10 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('abrechnung_schedule_preview(a week)',                          'NY'),
     -- Refused in both modes, with its own reason: importing a customer's
     -- earnings from the customer's own partner connection is not an agent's act.
-    ('income_import_uber(confirmed link of A)',                       'TT')
+    ('income_import_uber(confirmed link of A)',                       'TT'),
+    -- Refused in both modes with the same reason as the earnings import.
+    ('partner_drivers_import(administrator)',                         'TT'),
+    ('partner_vehicles_import(administrator)',                        'TT')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3786,7 +3824,9 @@ BEGIN
       ('record_cash_movement(company A)'),
       ('issue_salary_cash_receipt(no payment)'),
       ('abrechnung_schedule_preview(a week)'),
-      ('income_import_uber(confirmed link of A)')
+      ('income_import_uber(confirmed link of A)'),
+      ('partner_drivers_import(administrator)'),
+      ('partner_vehicles_import(administrator)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

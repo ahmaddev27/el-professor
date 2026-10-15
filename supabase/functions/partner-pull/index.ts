@@ -43,6 +43,7 @@ import {
   partnerEndpoint,
 } from '../_shared/partner-endpoint.ts'
 import { openPartnerToken } from '../_shared/partner-token-seal.ts'
+import { endpointIsMissing, pullScopeSpec } from '../_shared/partner-pull-scope.ts'
 
 const PARTNER = 'reidey'
 const PER_PAGE = 100
@@ -71,6 +72,12 @@ Deno.serve(async (req: Request) => {
     return respond({ ok: false, reason: 'method_not_allowed' }, 405)
   }
 
+  // `{}` or no body is the roster pull every earlier caller sends. Only the
+  // word `vehicles` selects anything else (fleet import).
+  let body: unknown = null
+  try { body = await req.json() } catch { /* an empty body is the default */ }
+  const spec = pullScopeSpec(body)
+
   const authorization = req.headers.get('Authorization') ?? ''
   if (authorization === '') return respond({ ok: false, reason: 'not_authorized' }, 401)
 
@@ -97,7 +104,7 @@ Deno.serve(async (req: Request) => {
   if (!companyId) return respond({ ok: false, reason: 'not_authorized' }, 403)
 
   const permitted = await asCaller.rpc('current_role_permits', {
-    p_page: 'drivers', p_need_edit: true,
+    p_page: spec.page, p_need_edit: true,
   })
   if (permitted.error || permitted.data !== true) {
     return respond({ ok: false, reason: 'not_authorized' }, 403)
@@ -143,7 +150,7 @@ Deno.serve(async (req: Request) => {
     let page = 1
     let pages = 1
     while (page <= pages && page <= MAX_PAGES) {
-      const url = new URL(`${endpoint.origin}/api/v1/elprofessor/fleet/drivers`)
+      const url = new URL(`${endpoint.origin}${spec.path}`)
       url.searchParams.set('per_page', String(PER_PAGE))
       url.searchParams.set('page', String(page))
 
@@ -164,6 +171,10 @@ Deno.serve(async (req: Request) => {
         await stamp('token_rejected')
         return respond({ ok: false, reason: 'token_rejected' }, 200)
       }
+      if (spec.scope === 'vehicles' && endpointIsMissing(answer.status)) {
+        // Not stamped: a missing route says nothing about the token.
+        return respond({ ok: false, reason: 'vehicles_unavailable' }, 200)
+      }
       if (!answer.ok) {
         await stamp(`HTTP ${answer.status}`)
         return respond({ ok: false, reason: 'partner_unavailable' }, 502)
@@ -177,8 +188,8 @@ Deno.serve(async (req: Request) => {
 
       // The page goes to the database as it arrived. Reading the fields here
       // would be a second place that decides what a roster row means.
-      const applied = await admin.rpc('partner_roster_apply', {
-        p_company_id: companyId, p_partner: PARTNER, p_drivers: drivers,
+      const applied = await admin.rpc(spec.rpc, {
+        p_company_id: companyId, p_partner: PARTNER, [spec.rpcArgument]: drivers,
       })
       if (applied.error) {
         await stamp('apply_failed')
@@ -201,7 +212,7 @@ Deno.serve(async (req: Request) => {
     }
 
     await stamp()
-    return respond({ ok: true, ...totals, truncated: page > MAX_PAGES })
+    return respond({ ok: true, scope: spec.scope, ...totals, truncated: page > MAX_PAGES })
   } catch {
     await stamp('unreachable')
     return respond({ ok: false, reason: 'partner_unavailable' }, 502)
