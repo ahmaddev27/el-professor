@@ -19,7 +19,6 @@ export interface ImportPromptInput {
 
 export function shouldShowImportPrompt({ mayImport, drivers, vehicles }: ImportPromptInput): boolean {
   if (!mayImport) return false;
-
   if (drivers.status !== 'ok' || vehicles.status !== 'ok') return false;
   return drivers.count === 0 && vehicles.count === 0;
 }
