@@ -39,8 +39,8 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   // The directories read every company's vehicles, drivers and users through
   // the audited read models, which ask for business.read.
   { path: '/admin/verzeichnisse',    icon: Library,          labelKey: 'admin.nav.directories', requires: 'business.read' },
-  // audit.read reads the whole log. Every other active role reads its own rows,
-  // but the entry follows the capability the page is for.
+  // audit.read reads the whole log; all four roles hold it since 15.10.2026 (D3).
+  // The entry follows the capability the page is for.
   { path: '/admin/protokoll',        icon: ScrollText,       labelKey: 'admin.nav.audit',       requires: 'audit.read' },
   // Viewing needs settings.read; saving needs pricing.manage or settings.manage,
   // and the page and the database decide that per key.

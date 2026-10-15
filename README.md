@@ -28,6 +28,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 > Last update: **13.10.2026**. A step counts once it is merged into `staging` and verified there.
 
 > **15.10.2026, outside the step count:** a company administrator can now list several addresses per kind of company mail (Einstellungen, tab Verbindungen; `notification_recipients`). A kind with no address falls back to the single company address, then to the administrators.
+> 15.10.2026: the capability matrix now gives `support` `companies.lifecycle` (D2) and all four staff roles `audit.read` (D3), by the owner's answers; see HANDOFF.md.
 
 `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰` **46 of 46 steps · 100%**
 

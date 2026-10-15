@@ -28,8 +28,9 @@ import { Button } from '../components/ui';
  * Protokoll — who read what, and who changed what (plan 3.B / 3.G).
  *
  * `platform_audit_log` is append-only and `platform_audit_list` is the only way
- * to read it. `audit.read` reads the whole log — today the owner (open decision
- * D3) — and every other active staff role reads the rows it is the actor of.
+ * to read it. `audit.read` reads the whole log — all four staff roles hold it
+ * since 15.10.2026 (decision D3, answered) — and a role without it would read
+ * only the rows it is the actor of.
  * The answer says which, so the screen says so too rather than letting a
  * support account believe the platform was quiet.
  *
