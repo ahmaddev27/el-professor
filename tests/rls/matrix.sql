@@ -1240,7 +1240,18 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, CASE '{s}' WHEN 'a' THEN DATE '2099-01-04' ELSE DATE '2099-01-05' END, 'first')$q$, NULL,
   $q$INSERT INTO uber_pull_runs (company_id, day_key, pass)
      VALUES ({co}, DATE '2098-01-06', 'first')$q$,
-  $q$detail = detail$q$);
+  $q$detail = detail$q$),
+-- Who receives which company notice (20261015140000): the abrechnung_schedules
+-- shape, an administrator writes and everyone in the company reads. The probe
+-- address carries the side because the row is unique on the company, the kind
+-- and the lower-cased address; the insert probe uses a different address so it
+-- never collides with the fixture.
+(72, 'notification_recipients', $q$id = {id}$q$,
+  $q$INSERT INTO notification_recipients (id, company_id, notification_type, email)
+     VALUES ({id}, {co}, 'manager_summary', 'mx-{s}@firma.example')$q$, NULL,
+  $q$INSERT INTO notification_recipients (company_id, notification_type, email)
+     VALUES ({co}, 'manager_summary', 'mx-new@firma.example')$q$,
+  $q$email = email$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1305,6 +1316,8 @@ INSERT INTO _mx_move VALUES
 ('uber_pull_schedules',                  $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM uber_pull_schedules WHERE company_id = {other_co}$q$, 'Y', 'one schedule per company'),
 ('uber_pull_runs',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- The side's own address differs, so A's row moved into B collides with nothing.
+('notification_recipients',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
 ('partner_vehicle_links',                $q$company_id = {other_co}$q$,
@@ -1971,7 +1984,14 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('uber_pull_runs',                 'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('uber_pull_runs',                 'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('uber_pull_runs',                 'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
-('uber_pull_runs',                 'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL);
+('uber_pull_runs',                 'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+-- 20261015140000. abrechnung_schedules' cells exactly: an administrator writes,
+-- every member reads, anon's column is a missing GRANT.
+('notification_recipients',        'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('notification_recipients',        'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('notification_recipients',        'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('notification_recipients',        'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('notification_recipients',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -2047,7 +2067,9 @@ UPDATE _mx_expected x
      -- company's rows readable.
      'abrechnung_schedules', 'abrechnung_deliveries',
      -- 20261015100000: the same shape and the same two triggers
-     'uber_pull_schedules', 'uber_pull_runs');
+     'uber_pull_schedules', 'uber_pull_runs',
+     -- 20261015140000: the same shape and the same two triggers
+     'notification_recipients');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
