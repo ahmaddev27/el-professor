@@ -95,10 +95,7 @@ export default function DataImportPage() {
           {t('partner.connect.loadFailedBody')}
         </Alert>
       ) : (
-        <>
-          <FleetImportCard scope="drivers" connected={connected} mayImport={mayImport} />
-          <FleetImportCard scope="vehicles" connected={connected} mayImport={mayImport} />
-        </>
+        <FleetImportCard connected={connected} mayImport={mayImport} />
       )}
 
       <Card>

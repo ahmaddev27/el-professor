@@ -164,6 +164,27 @@ export function splitIntoBusinessWeeks(from: string, to: string): ParseOutcome<W
   return { ok: true, value: segments };
 }
 
+/**
+ * The most days one DAILY pull may cover. The function asks Reidey once per day
+ * with a 15 s timeout each, and the edge runtime ends a worker at 60 s
+ * (`workerTimeoutMs` in `main/index.ts`), so three calls are the most that fit
+ * even when every one of them times out. The backfill asks again for the next
+ * three; nothing is lost by asking in small pieces.
+ */
+export const MAX_DAY_MODE_DAYS = 3;
+
+/** Cuts `from`..`to` (inclusive) into single days, each inside its own business week. */
+export function splitIntoDays(from: string, to: string): ParseOutcome<WeekSegment[]> {
+  if (!isIsoDate(from) || !isIsoDate(to)) return { ok: false, problem: 'invalid_range' };
+  if (diffDaysIso(from, to) < 0) return { ok: false, problem: 'invalid_range' };
+  if (diffDaysIso(from, to) + 1 > MAX_DAY_MODE_DAYS) return { ok: false, problem: 'range_too_long' };
+  const segments: WeekSegment[] = [];
+  for (let day = from; diffDaysIso(day, to) >= 0; day = addDaysIso(day, 1)) {
+    segments.push({ from: day, to: day, monday: mondayOf(day) });
+  }
+  return { ok: true, value: segments };
+}
+
 /** A segment is acceptable when it is one stretch inside one business week. */
 export function isWeekSegment(value: unknown): value is { from: string; to: string } {
   if (typeof value !== 'object' || value === null) return false;

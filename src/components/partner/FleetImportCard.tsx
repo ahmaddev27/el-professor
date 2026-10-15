@@ -1,7 +1,7 @@
 /**
- * One pull-and-create card of the fleet import: drivers or vehicles.
+ * The fleet import: one button, every leg (drivers, then vehicles).
  *
- * The button does both halves in order. It asks `partner-pull` to store the
+ * Each leg does both halves in order (`runImportLeg`, partnerFleetImport.ts). It asks `partner-pull` to store the
  * partner's list as proposals, then asks the database to turn the proposals
  * into drivers or cars (linking to what already exists, never duplicating it).
  * There is no confirmation step: the owner's decision of 14.10.2026 is that the
@@ -9,89 +9,64 @@
  *
  * ## Four states, and a failure is never a zero
  *
- * idle, running, done (with the counts the database returned) and failed (with
- * a translated reason). An answer that does not carry its counts is a failure,
- * see `parseImportResult`: "0 created" is a claim, and the screen must not make
- * it on the strength of a missing field.
+ * idle, running and finished, where each leg is done (with the counts the
+ * database returned), unavailable (the partner does not offer it yet) or failed
+ * (with a translated reason). A failing leg never stops the next one, and the
+ * overall result is a success only when every leg imported. An answer that does
+ * not carry its counts is a failure, see `parseImportResult`: "0 created" is a
+ * claim, and the screen must not make it on the strength of a missing field.
  */
-import { useState } from 'react';
-import { CarFront, Loader2, Users } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Download, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTranslation } from '../../contexts/LanguageContext';
 import {
-  importErrorKey,
-  parseImportResult,
-  pullReasonKey,
+  overallStatus,
+  runFleetImport,
   skipReasonKey,
-  type ImportResult,
+  type FleetOutcome,
+  type ImportDeps,
   type ImportScope,
+  type LegOutcome,
 } from '../../lib/partnerFleetImport';
-import type { TranslationKey } from '../../i18n';
-import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui';
+import { runEarningsBackfill, type BackfillProgress, type EarningsOutcome } from '../../lib/uberBackfill';
+import { supabaseBackfillDeps } from '../../lib/uberBackfillDeps';
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, formatDate } from '../ui';
 
 /** Past this the list says how many more there are. */
 const SKIPPED_SHOWN = 20;
 
-type DoneState = { kind: 'done'; seen: number; result: ImportResult };
-
 type State =
   | { kind: 'idle' }
-  | { kind: 'running' }
-  | DoneState
-  | { kind: 'failed'; reason: TranslationKey };
+  | { kind: 'running'; progress: BackfillProgress | null }
+  | { kind: 'finished'; outcomes: FleetOutcome[] };
 
 interface FleetImportCardProps {
-  scope: ImportScope;
   /** Connected to the partner. Without it the button explains instead of failing. */
   connected: boolean;
   /** An administrator outside a read-only context; the database decides again. */
   mayImport: boolean;
 }
 
-const COPY = {
-  drivers: {
-    title: 'import.drivers.title',
-    body: 'import.drivers.body',
-    action: 'import.drivers.action',
-    Icon: Users,
-    rpc: 'partner_drivers_import',
-  },
-  vehicles: {
-    title: 'import.vehicles.title',
-    body: 'import.vehicles.body',
-    action: 'import.vehicles.action',
-    Icon: CarFront,
-    rpc: 'partner_vehicles_import',
-  },
-} as const;
+const LEG_TITLE = { drivers: 'import.drivers.title', vehicles: 'import.vehicles.title' } as const;
 
-export function FleetImportCard({ scope, connected, mayImport }: FleetImportCardProps) {
+const DEPS: ImportDeps = {
+  pull: scope => supabase.functions.invoke('partner-pull', { body: { scope } }),
+  importRpc: async rpc => await supabase.rpc(rpc, { p_partner: 'reidey' }),
+};
+
+export function FleetImportCard({ connected, mayImport }: FleetImportCardProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<State>({ kind: 'idle' });
-  const copy = COPY[scope];
+
+  const stopRequested = useRef(false);
 
   const run = async () => {
-    setState({ kind: 'running' });
-    try {
-      const pulled = await supabase.functions.invoke('partner-pull', { body: { scope } });
-      if (pulled.error) throw pulled.error;
-      const answer = pulled.data as { ok?: boolean; reason?: string; seen?: number } | null;
-      if (!answer?.ok) {
-        setState({ kind: 'failed', reason: pullReasonKey(answer?.reason) });
-        return;
-      }
-      const imported = await supabase.rpc(copy.rpc, { p_partner: 'reidey' });
-      if (imported.error) {
-        setState({ kind: 'failed', reason: importErrorKey((imported.error as { hint?: unknown }).hint) });
-        return;
-      }
-      const result = parseImportResult(imported.data, scope);
-      setState(result
-        ? { kind: 'done', seen: answer.seen ?? 0, result }
-        : { kind: 'failed', reason: 'import.error.importGeneric' });
-    } catch {
-      setState({ kind: 'failed', reason: 'import.error.pullGeneric' });
-    }
+    stopRequested.current = false;
+    setState({ kind: 'running', progress: null });
+    const report = (progress: BackfillProgress) => setState({ kind: 'running', progress });
+    const earnings = (r: typeof report) => runEarningsBackfill(supabaseBackfillDeps(() => stopRequested.current), r);
+    setState({ kind: 'finished', outcomes: await runFleetImport(DEPS, earnings, report) });
   };
 
   const running = state.kind === 'running';
@@ -102,14 +77,14 @@ export function FleetImportCard({ scope, connected, mayImport }: FleetImportCard
         <div className="min-w-0">
           <CardTitle as="h2">
             <span className="inline-flex items-center gap-2">
-              <copy.Icon className="size-4" aria-hidden />
-              {t(copy.title)}
+              <Download className="size-4" aria-hidden />
+              {t('import.all.title')}
             </span>
           </CardTitle>
-          <CardDescription>{t(copy.body)}</CardDescription>
+          <CardDescription>{t('import.all.body')}</CardDescription>
         </div>
         <Button onClick={() => void run()} loading={running} disabled={running || !connected || !mayImport}>
-          {t(copy.action)}
+          {t('import.all.action')}
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -119,36 +94,114 @@ export function FleetImportCard({ scope, connected, mayImport }: FleetImportCard
           <p className="text-sm text-fg-muted">{t('import.adminOnly')}</p>
         ) : null}
 
-        {running ? (
-          <div role="status" className="flex items-center gap-2 text-sm text-fg-muted">
+        {state.kind === 'running' ? (
+          <div role="status" className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
             <Loader2 className="size-4 animate-spin" aria-hidden />
-            {t('import.running')}
+            {progressText(state.progress, t)}
+            {state.progress ? (
+              <Button variant="secondary" size="sm" onClick={() => { stopRequested.current = true; }}>
+                {t('import.stop')}
+              </Button>
+            ) : null}
           </div>
         ) : null}
 
-        {state.kind === 'failed' ? (
-          <Alert tone="critical" title={t('import.failedTitle')}>{t(state.reason)}</Alert>
-        ) : null}
-
-        {state.kind === 'done' ? <ImportOutcome scope={scope} done={state} /> : null}
+        {state.kind === 'finished' ? <Outcomes outcomes={state.outcomes} /> : null}
       </CardContent>
     </Card>
   );
 }
 
-function ImportOutcome({ scope, done }: { scope: ImportScope; done: DoneState }) {
+function Outcomes({ outcomes }: { outcomes: FleetOutcome[] }) {
   const { t } = useTranslation();
-  const { result } = done;
+  const overall = overallStatus(outcomes);
+  return (
+    <div className="space-y-3">
+      {overall === 'success' ? (
+        <Alert tone="positive" title={t('import.doneTitle')} />
+      ) : overall === 'partial' ? (
+        <Alert tone="caution" title={t('import.partialTitle')}>{t('import.partialBody')}</Alert>
+      ) : (
+        <Alert tone="critical" title={t('import.failedTitle')} />
+      )}
+      {outcomes.map(outcome => <LegOutcomeView key={outcome.scope} outcome={outcome} />)}
+    </div>
+  );
+}
+
+type Translate = ReturnType<typeof useTranslation>['t'];
+
+function progressText(progress: BackfillProgress | null, t: Translate): string {
+  if (!progress) return t('import.running');
+  if (progress.phase === 'looking') return t('import.earnings.looking', { weeks: String(progress.weeksChecked) });
+  return t('import.earnings.importing', {
+    from: formatDate(progress.day), to: formatDate(progress.last), rows: String(progress.rows),
+  });
+}
+
+function EarningsView({ outcome }: { outcome: EarningsOutcome }) {
+  const { t } = useTranslation();
+  const title = t('import.earnings.title');
+  const body = earningsBody(outcome, t);
+  const tone = outcome.status === 'done' || outcome.status === 'nothing' ? 'positive'
+    : outcome.status === 'unavailable' ? 'neutral' : outcome.status === 'stopped' ? 'caution' : 'critical';
+  return <Alert tone={tone} title={title}>{body}</Alert>;
+}
+
+function earningsBody(o: EarningsOutcome, t: Translate): string {
+  switch (o.status) {
+    case 'done':
+      return o.resumed && o.days === 0
+        ? t('import.earnings.upToDate', { to: formatDate(o.to) })
+        : t('import.earnings.done', {
+          from: formatDate(o.from), to: formatDate(o.to), days: String(o.days), rows: String(o.rows),
+        });
+    case 'nothing': return t('import.earnings.nothing');
+    case 'unavailable': return t(o.reason);
+    case 'stopped':
+      return o.through
+        ? t('import.earnings.stoppedAfter', { through: formatDate(o.through), rows: String(o.rows) })
+        : t('import.earnings.stoppedNone');
+    case 'failed': {
+      const reason = o.reason === 'import.earnings.blocked'
+        ? t(o.reason, { names: o.detail ?? '' })
+        : `${t(o.reason)}${o.detail ? ` (${o.detail})` : ''}`;
+      return o.through
+        ? t('import.earnings.failedAfter', {
+          through: formatDate(o.through), rows: String(o.rows), reason,
+        })
+        : t('import.earnings.failedNone', { reason });
+    }
+  }
+}
+
+function LegOutcomeView({ outcome }: { outcome: FleetOutcome }) {
+  const { t } = useTranslation();
+  if (outcome.scope === 'earnings') return <EarningsView outcome={outcome.earnings} />;
+  const title = t(LEG_TITLE[outcome.scope]);
+  if (outcome.status === 'unavailable') {
+    return <Alert tone="neutral" title={title}>{t(outcome.reason)}</Alert>;
+  }
+  if (outcome.status === 'failed') {
+    return <Alert tone="critical" title={title}>{t(outcome.reason)}</Alert>;
+  }
+  return <ImportOutcome scope={outcome.scope} title={title} seen={outcome.seen} result={outcome.result} />;
+}
+
+function ImportOutcome({ scope, title, seen, result }: {
+  scope: ImportScope; title: string; seen: number; result: Extract<LegOutcome, { status: 'done' }>['result'];
+}) {
+  const { t } = useTranslation();
   const shown = result.skipped.slice(0, SKIPPED_SHOWN);
   const nothing = result.created + result.linked + result.skipped.length === 0;
 
   return (
     <div className="space-y-3">
-      <Alert tone={nothing ? 'neutral' : 'positive'} title={t('import.doneTitle')}>
+      <Alert tone={nothing ? 'neutral' : 'positive'} title={title}>
         {nothing
-          ? t('import.nothingNew', { seen: String(done.seen) })
+          ? t('import.nothingNew', { seen: String(seen) })
           : t('import.doneBody', {
-              seen: String(done.seen),
+              seen: String(seen),
               created: String(result.created),
               linked: String(result.linked),
               skipped: String(result.skipped.length),
