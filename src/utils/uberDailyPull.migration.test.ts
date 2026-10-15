@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 // that the human path would not. The kit (tests/rls/uber-daily-pull.sql) proves
 // the behaviour; this holds the shape where the kit cannot run on a developer
 // machine, the way incomeImportReplace.test.ts does for the button.
-const MIGRATION = path.resolve(__dirname, '../../supabase/migrations/20261015100000_uber_daily_pull.sql');
+const MIGRATION = path.resolve(__dirname, '../../supabase/migrations/20261015130000_uber_daily_pull.sql');
 const sql = readFileSync(MIGRATION, 'utf8');
 const from = sql.indexOf('CREATE OR REPLACE FUNCTION public.income_import_uber_system');
 const body = sql.slice(from, sql.indexOf('COMMENT ON FUNCTION public.income_import_uber_system'));
