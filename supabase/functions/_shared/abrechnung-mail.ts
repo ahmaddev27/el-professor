@@ -323,3 +323,81 @@ export function renderAbrechnungSummaryMail(input: AbrechnungSummaryInput): Rend
     }),
   };
 }
+
+const REMINDER_NOTE = 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres '
+  + 'Unternehmens erstellt. Sie ist eine Erinnerung, keine Rechnung und keine '
+  + 'Zahlungsaufforderung.';
+
+export interface ReminderMailInput {
+  driverName: string;
+  companyName: string;
+  periodLabel: string;
+  periodRange: string;
+  /** `HH:MM`, Europe/Berlin: when the Abrechnung goes out. */
+  sendTime: string;
+  appUrl: string;
+}
+
+/**
+ * The reminder sent shortly before the weekly Abrechnung: this driver has
+ * recorded neither cash nor a cash receipt for the week.
+ *
+ * It states **no amount, on purpose**. The figures are exactly what is
+ * incomplete, and a confident number in a reminder would be wrong. It says what
+ * the mail is about (which week), what is missing, and when the Abrechnung goes
+ * out, and it says that a driver with nothing to hand in can ignore it, because
+ * the rule behind it is deliberately plain and will sometimes reach someone who
+ * did nothing wrong. No link: there is nothing to open, and a driver has no
+ * account here.
+ */
+export function renderReminderMail(input: ReminderMailInput): RenderedMail {
+  const { driverName, companyName, periodLabel, periodRange, sendTime } = input;
+  const origin = appOrigin(input.appUrl);
+  const clock = `${sendTime} Uhr`;
+
+  const missing = 'Für diese Woche hast du bisher weder Bargeld noch Barbelege '
+    + 'erfasst.';
+  const when = `Um ${clock} verschickt ${companyName} die Abrechnung für diese Woche `
+    + 'automatisch per E-Mail. Wenn du noch etwas einzutragen hast, mach das bitte '
+    + `vor ${clock}, sonst fehlt es in den Zahlen.`;
+  const ignore = 'Hast du nichts abzugeben oder einzutragen, kannst du diese '
+    + 'E-Mail einfach ignorieren.';
+
+  const bodyHtml =
+    `<p style="margin:0 0 16px;">Hallo ${escapeHtml(driverName)},</p>`
+    + `<p style="margin:0 0 16px;">das ist eine Erinnerung zur Abrechnung für ${escapeHtml(periodLabel)} `
+    + `(${escapeHtml(periodRange)}).</p>`
+    + `<p style="margin:0 0 16px;">${escapeHtml(missing)}</p>`
+    + `<p style="margin:0 0 16px;">${escapeHtml(when)}</p>`
+    + `<p style="margin:0;">${escapeHtml(ignore)}</p>`;
+
+  const bodyText = [
+    `Hallo ${driverName},`,
+    '',
+    `das ist eine Erinnerung zur Abrechnung für ${periodLabel} (${periodRange}).`,
+    '',
+    missing,
+    '',
+    when,
+    '',
+    ignore,
+  ].join('\n');
+
+  return {
+    // No figure in it, and nothing a lock screen should not show.
+    subject: `Erinnerung: Abrechnung ${periodLabel} – ${companyName}`,
+    html: renderEmailHtml({
+      logoUrl: `${origin}/email-templates/logo.png`,
+      eyebrow: companyName,
+      heading: 'Erinnerung zur Abrechnung',
+      preheader: `Die Abrechnung für ${periodRange} geht um ${clock} raus`,
+      bodyHtml,
+      noteHtml: escapeHtml(REMINDER_NOTE),
+    }),
+    text: renderEmailText({
+      heading: 'Erinnerung zur Abrechnung',
+      bodyText,
+      noteText: REMINDER_NOTE,
+    }),
+  };
+}

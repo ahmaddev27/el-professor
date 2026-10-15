@@ -3653,6 +3653,11 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('abrechnung_delivery_claim(company A)',
      $q$SELECT abrechnung_delivery_claim({co}, 'manager_summary', {co}, '2097-01-07')::text$q$,
      'PPPPPPP', NULL),
+    -- The reminder's facts (20261015100000): the same boundary as week_figures,
+    -- for the same reason.
+    ('abrechnung_reminder_facts(company A)',
+     $q$SELECT abrechnung_reminder_facts({co}, '2026-09-28')::text$q$,
+     'PPPPPPP', NULL),
     ('abrechnung_delivery_settle(a delivery of A)',
      $q$SELECT abrechnung_delivery_settle({ref:abrechnung_deliveries}, true, 1)::text$q$,
      'PPPPPPP', NULL),

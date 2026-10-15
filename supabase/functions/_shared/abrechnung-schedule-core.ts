@@ -33,6 +33,19 @@ import type { AbrechnungFigures } from './abrechnung-mail.ts';
 /** How long after its moment an occurrence may still be sent. */
 export const GRACE_MINUTES = 12 * 60;
 
+/** The reminder's lead, in minutes before the driver mail. The column's CHECK is the same range. */
+export const REMINDER_LEAD_DEFAULT_MINUTES = 60;
+export const REMINDER_LEAD_MIN_MINUTES = 15;
+export const REMINDER_LEAD_MAX_MINUTES = 720;
+
+/**
+ * How long after its own moment a reminder may still go out. A reminder that is
+ * late is worth less every minute (its point is to leave time to enter the data),
+ * and the cron ticks every ten minutes, so thirty minutes is three chances. The
+ * window also never runs past the driver mail's moment: see `dueReminder`.
+ */
+export const REMINDER_WINDOW_MINUTES = 30;
+
 const MINUTE = 60_000;
 
 /** One company from `abrechnung_schedule_candidates`. */
@@ -47,6 +60,9 @@ export interface ScheduleCompany {
   send_time: string;
   armed_at: string;
   sent: ReadonlyArray<{ kind: string; target_id: string; period_key: string }>;
+  /** Remind a driver who has recorded nothing, `reminder_lead_minutes` before the driver mail. */
+  reminder_enabled: boolean;
+  reminder_lead_minutes: number;
 }
 
 /** One row of `abrechnung_week_figures`. */
@@ -164,6 +180,61 @@ export function dueOccurrence(
   return { due: { occurrenceDay, weekMonday: addDays(mondayOfOccurrence, -7) } };
 }
 
+export interface DueReminder {
+  /** The Berlin day of the driver mail this reminder precedes. */
+  mainDay: string;
+  /** The Monday of the completed week the figures are about, `YYYY-MM-DD`. */
+  weekMonday: string;
+}
+
+export type ReminderNotDueReason = 'invalid_schedule' | 'not_in_window' | 'before_armed';
+
+/**
+ * The reminder that is due now, or the reason there is none.
+ *
+ * A reminder moment is the driver mail's moment minus `reminder_lead_minutes`.
+ * It is due from that moment for `REMINDER_WINDOW_MINUTES`, and **never at or
+ * after the driver mail's own moment**, so the window cannot run into the mail
+ * it warns about. (That is the clock's half; the claim's half, which holds even
+ * when the clock is wrong, is `abrechnung_delivery_claim`.) The mail's moment can
+ * lie on the next Berlin day when the lead crosses midnight, so today and
+ * tomorrow are both candidates. Like `dueOccurrence`, a reminder never fires for
+ * a moment before `armed_at`.
+ */
+export function dueReminder(
+  schedule: Pick<ScheduleCompany, 'weekday' | 'send_time' | 'armed_at' | 'reminder_lead_minutes'>,
+  now: Date,
+): { due: DueReminder } | { due: null; reason: ReminderNotDueReason } {
+  const sendMinutes = parseSendTime(schedule.send_time);
+  const armed = Date.parse(schedule.armed_at);
+  const lead = schedule.reminder_lead_minutes;
+  if (sendMinutes === null || !Number.isInteger(schedule.weekday)
+      || schedule.weekday < 0 || schedule.weekday > 6 || Number.isNaN(armed)
+      || !Number.isInteger(lead)
+      || lead < REMINDER_LEAD_MIN_MINUTES || lead > REMINDER_LEAD_MAX_MINUTES) {
+    return { due: null, reason: 'invalid_schedule' };
+  }
+
+  const today = berlinParts(now);
+  const nowWall = wall(today.day, today.minutes);
+  const armedParts = berlinParts(new Date(armed));
+  const armedWall = wall(armedParts.day, armedParts.minutes);
+
+  let armedOut = false;
+  for (const offset of [0, 1]) {
+    if ((today.dow + offset) % 7 !== schedule.weekday) continue;
+    const mainDay = addDays(today.day, offset);
+    const mainWall = wall(mainDay, sendMinutes);
+    const reminderWall = mainWall - lead;
+    const windowEnd = Math.min(reminderWall + REMINDER_WINDOW_MINUTES, mainWall);
+    if (nowWall < reminderWall || nowWall >= windowEnd) continue;
+    if (reminderWall <= armedWall) { armedOut = true; continue; }
+    const mondayOfMain = addDays(mainDay, -((schedule.weekday + 6) % 7));
+    return { due: { mainDay, weekMonday: addDays(mondayOfMain, -7) } };
+  }
+  return { due: null, reason: armedOut ? 'before_armed' : 'not_in_window' };
+}
+
 const MONTH_NAMES = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
@@ -227,6 +298,44 @@ export function planCompany(company: ScheduleCompany, now: Date): ScheduledPlan 
     driverMail: company.driver_mail_enabled,
     managerSummary: company.manager_summary_enabled && !summaryClaimed,
     claimedDriverIds,
+  };
+}
+
+/** What one company needs doing for the reminder right now. */
+export interface ReminderPlan {
+  companyId: string;
+  companyName: string;
+  weekMonday: string;
+  /** `HH:MM`, the moment the driver mail goes out, Europe/Berlin. */
+  sendTime: string;
+  /**
+   * Drivers who already have this week's reminder OR this week's driver mail
+   * claimed. The second half is the rule that a reminder never follows the mail;
+   * the claim enforces it again.
+   */
+  coveredDriverIds: ReadonlySet<string>;
+}
+
+/** The reminder plan for one company, or null when none is due (or it is off). */
+export function planReminder(company: ScheduleCompany, now: Date): ReminderPlan | null {
+  // The reminder warns about the driver mail, so it needs that mail to be on.
+  if (!company.reminder_enabled || !company.driver_mail_enabled) return null;
+  const result = dueReminder(company, now);
+  if (result.due === null) return null;
+  const { weekMonday } = result.due;
+
+  const covered = new Set(
+    company.sent
+      .filter((s) => s.period_key === weekMonday
+        && (s.kind === 'driver_abrechnung' || s.kind === 'driver_reminder'))
+      .map((s) => s.target_id),
+  );
+  return {
+    companyId: company.company_id,
+    companyName: (company.company_name ?? '').trim() || '—',
+    weekMonday,
+    sendTime: company.send_time.slice(0, 5),
+    coveredDriverIds: covered,
   };
 }
 

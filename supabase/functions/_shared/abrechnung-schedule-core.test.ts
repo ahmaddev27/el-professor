@@ -13,6 +13,9 @@ import {
   addDays,
   berlinParts,
   dueOccurrence,
+  dueReminder,
+  REMINDER_WINDOW_MINUTES,
+  planReminder,
   figuresOfRow,
   parseSendTime,
   planCompany,
@@ -35,6 +38,7 @@ function schedule(patch: Partial<ScheduleCompany> = {}): ScheduleCompany {
     company_id: COMPANY, company_name: 'Test A',
     driver_mail_enabled: true, manager_summary_enabled: true,
     weekday: 1, send_time: '08:00', armed_at: LONG_AGO, sent: [],
+    reminder_enabled: true, reminder_lead_minutes: 60,
     ...patch,
   };
 }
@@ -225,5 +229,87 @@ describe('planDriverMails', () => {
     const plan = planDriverMails([row()], new Set([DRIVER_A]));
     expect(plan.sendable).toEqual([]);
     expect(plan.alreadyClaimed).toEqual(['Ahmed Hemaid']);
+  });
+});
+
+// ─── The reminder ───────────────────────────────────────────────────────────
+
+/** A Berlin (CEST, UTC+2) wall time on 2026-09-28, the Monday of the schedule above. */
+const mondayAt = (hhmm: string) => new Date(`2026-09-28T${hhmm}:00+02:00`);
+
+describe('dueReminder', () => {
+  it('is due from its own moment, one lead before the driver mail, for the week the mail covers', () => {
+    const result = dueReminder(schedule(), mondayAt('07:00'));
+    expect(result).toEqual({ due: { mainDay: '2026-09-28', weekMonday: '2026-09-21' } });
+    expect(dueReminder(schedule(), mondayAt('07:29')).due).not.toBeNull();
+  });
+
+  it('is not due before its moment', () => {
+    expect(dueReminder(schedule(), mondayAt('06:59'))).toEqual({ due: null, reason: 'not_in_window' });
+  });
+
+  it('is not due after its window, so a late cron sends nothing stale', () => {
+    expect(REMINDER_WINDOW_MINUTES).toBe(30);
+    expect(dueReminder(schedule(), mondayAt('07:30'))).toEqual({ due: null, reason: 'not_in_window' });
+  });
+
+  it('never runs into the driver mail: the window ends at the mail, whatever the lead', () => {
+    // 15 minutes lead: the window would be 30 minutes long but the mail is at 08:00.
+    const s = schedule({ reminder_lead_minutes: 15 });
+    expect(dueReminder(s, mondayAt('07:59')).due).not.toBeNull();
+    expect(dueReminder(s, mondayAt('08:00'))).toEqual({ due: null, reason: 'not_in_window' });
+    expect(dueReminder(s, mondayAt('08:05'))).toEqual({ due: null, reason: 'not_in_window' });
+  });
+
+  it('crosses midnight: a mail at 00:30 is warned on the evening before', () => {
+    // Mail Monday 00:30, lead 60: the reminder is Sunday 23:30 Berlin.
+    const s = schedule({ send_time: '00:30' });
+    const sunday = new Date('2026-09-27T23:30:00+02:00');
+    expect(dueReminder(s, sunday)).toEqual({ due: { mainDay: '2026-09-28', weekMonday: '2026-09-21' } });
+  });
+
+  it('never fires for a moment before the schedule was armed', () => {
+    const armedAfterReminderMoment = schedule({ armed_at: '2026-09-28T05:10:00.000Z' }); // 07:10 Berlin, after the 07:00 moment
+    expect(dueReminder(armedAfterReminderMoment, mondayAt('07:20')))
+      .toEqual({ due: null, reason: 'before_armed' });
+  });
+
+  it.each([14, 721, 60.5, Number.NaN])('refuses a lead of %s', (lead) => {
+    expect(dueReminder(schedule({ reminder_lead_minutes: lead }), mondayAt('07:00')))
+      .toEqual({ due: null, reason: 'invalid_schedule' });
+  });
+});
+
+describe('planReminder', () => {
+  const week = '2026-09-21';
+
+  it('is null when the reminder is off, or the driver mail it warns about is off', () => {
+    expect(planReminder(schedule({ reminder_enabled: false }), mondayAt('07:00'))).toBeNull();
+    expect(planReminder(schedule({ driver_mail_enabled: false }), mondayAt('07:00'))).toBeNull();
+  });
+
+  it('carries the mail time and the week, and nobody is covered on an empty record', () => {
+    const plan = planReminder(schedule(), mondayAt('07:00'));
+    expect(plan).toMatchObject({ weekMonday: week, sendTime: '08:00', companyId: COMPANY });
+    expect(plan?.coveredDriverIds.size).toBe(0);
+  });
+
+  it('never fires once that week driver mail is claimed for the driver', () => {
+    const plan = planReminder(schedule({
+      sent: [{ kind: 'driver_abrechnung', target_id: DRIVER_A, period_key: week }],
+    }), mondayAt('07:00'));
+    expect(plan?.coveredDriverIds.has(DRIVER_A)).toBe(true);
+    expect(plan?.coveredDriverIds.has(DRIVER_B)).toBe(false);
+  });
+
+  it('counts this week reminder as covered, and no other week claim', () => {
+    const plan = planReminder(schedule({
+      sent: [
+        { kind: 'driver_reminder', target_id: DRIVER_A, period_key: week },
+        { kind: 'driver_abrechnung', target_id: DRIVER_B, period_key: '2026-09-14' },
+        { kind: 'manager_summary', target_id: COMPANY, period_key: week },
+      ],
+    }), mondayAt('07:00'));
+    expect([...plan!.coveredDriverIds]).toEqual([DRIVER_A]);
   });
 });
