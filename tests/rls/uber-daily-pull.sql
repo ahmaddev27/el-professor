@@ -175,9 +175,9 @@ BEGIN
   ] LOOP
     v_n := v_n + 1;
     PERFORM _ud_rec(100 + v_n, 'anon cannot execute function ' || v_n,
-      _ud_call('anon', v_fn), 'ERR 42501 (no hint)');
+      _ud_call('anon', v_fn), 'ERR 42501%', true);
     PERFORM _ud_rec(110 + v_n, 'an administrator cannot execute function ' || v_n,
-      _ud_call(admin_a, v_fn), 'ERR 42501 (no hint)');
+      _ud_call(admin_a, v_fn), 'ERR 42501%', true);
   END LOOP;
 
   PERFORM _ud_rec(120, 'service_role can execute the writer (an unknown run is a returned refusal)',
@@ -186,10 +186,10 @@ BEGIN
   -- The runs are the job's: a client cannot write them, whoever it is.
   PERFORM _ud_rec(121, 'an administrator cannot insert a run',
     _ud_call(admin_a, format($q$INSERT INTO uber_pull_runs (company_id, day_key, pass) VALUES (%L, %L, 'first') RETURNING 'x'$q$, co_a, _ud_day())),
-    'ERR 42501 (no hint)');
+    'ERR 42501%', true);
   PERFORM _ud_rec(122, 'nor can the service role write the table directly (functions only)',
     _ud_call('service', format($q$INSERT INTO uber_pull_runs (company_id, day_key, pass) VALUES (%L, %L, 'first') RETURNING 'x'$q$, co_a, _ud_day())),
-    'ERR 42501 (no hint)');
+    'ERR 42501%', true);
 
   -- The schedule: an administrator of the company writes it, nobody else.
   PERFORM _ud_rec(123, 'an administrator of A writes A''s schedule',
@@ -276,6 +276,7 @@ DO $$
 DECLARE
   co_a constant uuid := 'c0000000-0000-4000-8000-00000000000a';
   v_run text;
+  v_settled text;
   v_before integer;
 BEGIN
   -- An earlier import for driver 1002 whose period COVERS the day: a weekly
@@ -294,10 +295,19 @@ BEGIN
     (SELECT count(*)::text FROM income WHERE company_id = co_a AND source = 'uber'), v_before::text);
   PERFORM _ud_rec(403, 'the claim stays open for the job to settle with the reason',
     (SELECT (settled_at IS NULL)::text FROM uber_pull_runs WHERE id = v_run::uuid), 'true');
-  PERFORM _ud_rec(404, 'the job settles it as already_imported and the screen can read it',
-    _ud_call('service', format($q$SELECT uber_pull_settle(%L::uuid, 'already_imported', 'already_imported', 0)::text$q$, v_run))
-      || ' ' || (SELECT outcome FROM uber_pull_runs WHERE id = v_run::uuid),
-    'true already_imported');
+  -- The call and the state it leaves are recorded SEPARATELY. The two operands
+  -- of `||` have no guaranteed order of evaluation, so an aggregate written
+  -- beside _ud_call can be planned against the snapshot BEFORE the call --
+  -- here the outcome was still NULL, and one NULL swallowed the whole string,
+  -- so the probe reported no value at all rather than a wrong one. The same
+  -- shape was found and fixed in tests/rls/income-import-uber.sql.
+  v_settled := _ud_call('service',
+    format($q$SELECT uber_pull_settle(%L::uuid, 'already_imported', 'already_imported', 0)::text$q$, v_run));
+  PERFORM _ud_rec(404, 'the job settles it as already_imported',
+    v_settled, 'true');
+  PERFORM _ud_rec(406, '...and the screen can read that outcome',
+    coalesce((SELECT outcome FROM uber_pull_runs WHERE id = v_run::uuid), '<null>'),
+    'already_imported');
 
   -- Past the function, the INDEX still refuses the exact key (the human path's backstop).
   PERFORM _ud_rec(405, 'the unique index refuses the duplicate key even with the writer bypassed',
@@ -445,7 +455,7 @@ BEGIN
     _ud_call(admin_a, 'SELECT income_import_uber(' || v_rows || ')::text'),
     'ERR 23505 already_imported');
   PERFORM _ud_rec(703, 'anon still cannot execute the human function',
-    _ud_call('anon', 'SELECT income_import_uber(' || v_rows || ')::text'), 'ERR 42501 (no hint)');
+    _ud_call('anon', 'SELECT income_import_uber(' || v_rows || ')::text'), 'ERR 42501%', true);
   PERFORM _ud_rec(704, 'and a session with no company is still not authorized',
     _ud_call('2f000000-0000-4000-8000-0000000000ff', 'SELECT income_import_uber(' || v_rows || ')::text'),
     'ERR 42501 not_authorized');

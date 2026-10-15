@@ -1228,9 +1228,16 @@ INSERT INTO _mx_spec VALUES
   $q$DELETE FROM uber_pull_schedules WHERE company_id = {co}$q$,
   $q$INSERT INTO uber_pull_schedules (company_id, run_time) VALUES ({co}, '06:00')$q$,
   $q$run_time = run_time$q$),
+-- The day differs per side on purpose. uber_pull_runs_once is UNIQUE on
+-- (company_id, day_key, pass), so with one day for both companies the MOVE
+-- probe collided with the row already standing in the other company -- and it
+-- collided for the OWNER too, which makes it a malformed statement rather than
+-- a refusal. A probe the owner cannot make measures nothing. {s} is the letter
+-- a or b, not a digit, so the side is carried in a CASE over it rather than
+-- pasted into the date -- '2099-01-0a' is not a date.
 (71, 'uber_pull_runs', $q$id = {id}$q$,
   $q$INSERT INTO uber_pull_runs (id, company_id, day_key, pass)
-     VALUES ({id}, {co}, DATE '2099-01-04', 'first')$q$, NULL,
+     VALUES ({id}, {co}, CASE '{s}' WHEN 'a' THEN DATE '2099-01-04' ELSE DATE '2099-01-05' END, 'first')$q$, NULL,
   $q$INSERT INTO uber_pull_runs (company_id, day_key, pass)
      VALUES ({co}, DATE '2098-01-06', 'first')$q$,
   $q$detail = detail$q$);
