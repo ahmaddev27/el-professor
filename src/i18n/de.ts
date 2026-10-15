@@ -6642,7 +6642,6 @@ export const de = {
   'inc.group.unreadable':              'Mindestens ein Betrag ist nicht lesbar. Es werden keine Summen gezeigt; bitte die Ansicht „Liste“ öffnen.',
   'inc.group.unreadableTitle':         'Gruppierung nicht möglich',
   'inc.group.viewFlat':                'Liste',
-  'inc.group.viewGrouped':             'Gruppiert',
   'inc.group.viewLabel':               'Ansicht der Umsätze',
   'inc.group.weekLevel':               'Ganze Woche (ohne Tag)',
   'inc.group.weekLevelHint':           'Aus einem Wochenimport: Der Betrag gehört zur Woche und wird nicht auf Tage verteilt.',
@@ -6777,4 +6776,7 @@ export const de = {
   'import.earnings.stoppedNone':     'Angehalten, bevor Umsätze importiert wurden.',
   'import.earnings.upToDate':        'Die Umsätze sind auf dem neuesten Stand (bis {to}).',
   'import.stop':                     'Anhalten',
+  'inc.group.viewDay':   'Tag',
+  'inc.group.viewMonth': 'Monat',
+  'inc.group.viewWeek':  'Woche',
 } as const;

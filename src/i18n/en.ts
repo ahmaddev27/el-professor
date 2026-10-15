@@ -6586,7 +6586,6 @@ export const en: PartialDictionary = {
   'inc.group.unreadable':              'At least one amount is unreadable. No totals are shown; please open the "List" view.',
   'inc.group.unreadableTitle':         'Cannot group',
   'inc.group.viewFlat':                'List',
-  'inc.group.viewGrouped':             'Grouped',
   'inc.group.viewLabel':               'Income view',
   'inc.group.weekLevel':               'Whole week (no day)',
   'inc.group.weekLevelHint':           'From a weekly import: the amount belongs to the week and is not spread over days.',
@@ -6721,4 +6720,7 @@ export const en: PartialDictionary = {
   'import.earnings.stoppedNone':     'Stopped before any earnings were imported.',
   'import.earnings.upToDate':        'Earnings are up to date (through {to}).',
   'import.stop':                     'Stop',
+  'inc.group.viewDay':   'Day',
+  'inc.group.viewMonth': 'Month',
+  'inc.group.viewWeek':  'Week',
 };

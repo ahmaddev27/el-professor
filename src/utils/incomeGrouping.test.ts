@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   groupIncome,
+  driversOfMonth,
+  driversOfWeek,
+  flattenDays,
+  flattenWeeks,
   isWeekLevelRow,
   sumTotals,
+  weekEndOf,
   type GroupableIncome,
   type IncomeTotals,
 } from './incomeGrouping';
@@ -132,5 +137,35 @@ describe('groupIncome: totals agree at every level', () => {
 
   it('refuses an amount it cannot read instead of counting it as zero', () => {
     expect(() => groupIncome([row({ date: '2026-10-07', driver_name: 'A', amount: Number.NaN })])).toThrow(RangeError);
+  });
+});
+
+describe('views over the grouping', () => {
+  const months = groupIncome(ROWS);
+
+  it('weekEndOf is the Sunday of the week', () => {
+    expect(weekEndOf('2026-10-12')).toBe('2026-10-18');
+    expect(weekEndOf('2026-12-28')).toBe('2027-01-03');
+  });
+
+  it('flattenDays lists every day once, newest first, with its week', () => {
+    const entries = flattenDays(months);
+    expect(entries.map(e => e.day.date)).toEqual(['2026-10-13', '2026-10-12', null, '2026-10-01', '2026-09-29']);
+    expect(entries.map(e => e.week.monday)).toEqual(['2026-10-12', '2026-10-12', '2026-10-05', '2026-09-28', '2026-09-28']);
+  });
+
+  it('flattenWeeks keeps the weeks of every month', () => {
+    expect(flattenWeeks(months).map(w => w.monday)).toEqual(['2026-10-12', '2026-10-05', '2026-09-28']);
+  });
+
+  it('a week and a month add their drivers to the level above, to the cent', () => {
+    for (const month of months) {
+      const drivers = driversOfMonth(month);
+      expect(keys(sumTotals(drivers.map(d => d.totals)))).toEqual(keys(month.totals));
+      for (const week of month.weeks) {
+        expect(keys(sumTotals(driversOfWeek(week).map(d => d.totals)))).toEqual(keys(week.totals));
+      }
+    }
+    expect(driversOfMonth(months[0]!).map(d => d.driverName)).toEqual(['Ahmed', 'Bilal']);
   });
 });

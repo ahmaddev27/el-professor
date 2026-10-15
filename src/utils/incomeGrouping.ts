@@ -150,3 +150,42 @@ export function groupIncome(rows: readonly GroupableIncome[]): MonthGroup[] {
     return { year: year!, month: month!, totals: sumTotals(weeks.map(w => w.totals)), weeks };
   });
 }
+
+// ── Views over the grouping (the Umsätze list's day / week / month tabs) ──────
+// None of these adds a row's amount: they re-order the groups `groupIncome`
+// built, and merge driver groups with `sumTotals`, the one place cents are added.
+
+/** The Sunday that closes a business week, from its Monday. Display only. */
+export function weekEndOf(monday: string): string {
+  const [y, m, d] = monday.split('-').map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + 6)).toISOString().slice(0, 10);
+}
+
+export interface DayEntry { day: DayGroup; week: WeekGroup }
+
+/** Every day of every week, newest first (a month never splits a week). */
+export function flattenDays(months: readonly MonthGroup[]): DayEntry[] {
+  return months.flatMap(month => month.weeks.flatMap(week => week.days.map(day => ({ day, week }))));
+}
+
+/** Every week, newest first. */
+export function flattenWeeks(months: readonly MonthGroup[]): WeekGroup[] {
+  return months.flatMap(month => month.weeks);
+}
+
+/** One group per driver over several days, totals added with `sumTotals`. */
+export function mergeDriverGroups(days: readonly DayGroup[]): DriverGroup[] {
+  const byDriver = new Map<string, DriverGroup[]>();
+  for (const day of days) for (const driver of day.drivers) bucket(byDriver, driver.driverName, driver);
+  return [...byDriver.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, 'de'))
+    .map(([driverName, list]) => ({
+      driverName,
+      totals: sumTotals(list.map(d => d.totals)),
+      rows: list.flatMap(d => d.rows),
+    }));
+}
+
+export const driversOfWeek = (week: WeekGroup): DriverGroup[] => mergeDriverGroups(week.days);
+export const driversOfMonth = (month: MonthGroup): DriverGroup[] =>
+  mergeDriverGroups(month.weeks.flatMap(week => week.days));
