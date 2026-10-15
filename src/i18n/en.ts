@@ -6662,4 +6662,11 @@ export const en: PartialDictionary = {
   'settings.uberPull.time':                'Time of day',
   'settings.uberPull.timeHint':            'German time (Europe/Berlin). The Uber day ends at 04:00.',
   'settings.uberPull.title':               'Pull Uber earnings daily',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.tab.company':     'Company',
+  'settings.tab.connections': 'Connections & schedules',
+  'settings.tab.legal':       'Legal & bank',
+  'settings.tab.operations':  'Operations & documents',
+  'settings.tabs.label':      'Settings sections',
 };

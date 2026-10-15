@@ -6718,4 +6718,11 @@ export const de = {
   'settings.uberPull.time':                'Uhrzeit',
   'settings.uberPull.timeHint':            'Deutsche Zeit (Europe/Berlin). Der Uber-Tag endet um 04:00 Uhr.',
   'settings.uberPull.title':               'Uber-Umsätze täglich holen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.tab.company':     'Unternehmen',
+  'settings.tab.connections': 'Verbindungen & Zeitpläne',
+  'settings.tab.legal':       'Rechtliches & Bank',
+  'settings.tab.operations':  'Betrieb & Dokumente',
+  'settings.tabs.label':      'Bereiche der Einstellungen',
 } as const;
