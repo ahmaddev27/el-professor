@@ -690,6 +690,40 @@ BEGIN
 
   PERFORM _pk_ok('notification address: the policies on company_settings are still exactly the four',
     (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'company_settings') = 4);
+
+  -- The recipient rule is written TWICE -- once in notification-recipients.ts,
+  -- which decides who is actually mailed, and once in SQL inside
+  -- abrechnung_schedule_preview, which is what the settings card SHOWS. The
+  -- migration's self-check only asserts that the body names the two columns;
+  -- a body that names them and still answers the old way would pass it. These
+  -- two probes assert the ANSWER, so the screen cannot promise one thing while
+  -- the job does another.
+  -- Two probes on what the settings card SHOWS, because the recipient rule is
+  -- written twice: once in notification-recipients.ts, which decides who is
+  -- mailed, and once in SQL inside abrechnung_schedule_preview. The migration's
+  -- self-check only asserts that the body NAMES the two columns; a body that
+  -- names them and still answers the old way would pass it.
+  --
+  -- The block seeds both rows it depends on, as the owner. The first version of
+  -- these probes assumed they were there: company_settings had no row for this
+  -- company, so the UPDATE matched nothing, and with no schedule row the
+  -- preview answers `schedule: null` with every count at zero. Both times the
+  -- probe measured its own missing fixture rather than the product.
+  INSERT INTO company_settings (company_id) VALUES (co_a) ON CONFLICT (company_id) DO NOTHING;
+  INSERT INTO abrechnung_schedules (company_id, manager_summary_enabled, weekday, send_time)
+  VALUES (co_a, true, 1, '08:00')
+  ON CONFLICT (company_id) DO UPDATE SET manager_summary_enabled = true;
+
+  UPDATE company_settings SET notification_email = NULL WHERE company_id = co_a;
+  PERFORM _pk_ok('notification address: with none set the preview does not claim an address',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_address'$q$) = 'false');
+
+  UPDATE company_settings SET notification_email = 'buero@firma.example' WHERE company_id = co_a;
+  PERFORM _pk_ok('notification address: with one set the preview says so',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_address'$q$) = 'true');
+  PERFORM _pk_ok('notification address: …and it names exactly one recipient, not the administrators',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_recipients'$q$) = '1');
+  UPDATE company_settings SET notification_email = NULL WHERE company_id = co_a;
 END $$;
 
 ROLLBACK;
