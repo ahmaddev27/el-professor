@@ -635,4 +635,61 @@ BEGIN
     v_wrong IS NULL);
 END $$;
 
+-- ─── 7. company_settings.notification_email (20261015100000) ────────────────
+--
+-- The address the company's own mail is sent to. It lives on a table whose
+-- policies this migration did not touch, so what is claimed is exactly that:
+-- the existing administrator gate covers the new column, an editor and a viewer
+-- are refused, another company's row is out of reach, and the CHECK admits NULL
+-- and an address and refuses an empty string, because NULL is the one
+-- representation of "not set". The support-session record of a write to the
+-- column is in support-write-audit.sql, beside the other company_settings writes.
+
+DO $$
+DECLARE
+  co_a    constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  co_b    constant uuid := 'c0000000-0000-4000-8000-00000000000b';
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  editor  constant uuid := 'a0000000-0000-4000-8000-000000000002';
+  viewer  constant uuid := 'a0000000-0000-4000-8000-000000000003';
+  admin_b constant uuid := 'b0000000-0000-4000-8000-000000000001';
+  v_set   text := format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L',
+                         'buero@firma.example', co_a);
+BEGIN
+  PERFORM _pk_ok('notification address: the company administrator writes it',
+    _pk_try(admin_a, v_set) = 'rows 1');
+  PERFORM _pk_ok('notification address: …and clears it back to NULL',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = NULL WHERE company_id = %L', co_a)) = 'rows 1');
+  PERFORM _pk_ok('notification address: an editor may not write it',
+    _pk_try(editor, v_set) = 'rows 0');
+  PERFORM _pk_ok('notification address: a viewer may not write it',
+    _pk_try(viewer, v_set) = 'rows 0');
+  PERFORM _pk_ok('notification address: an editor may not create the row by upsert either',
+    _pk_try(editor, format('INSERT INTO company_settings (company_id, notification_email) VALUES (%L, %L) ON CONFLICT (company_id) DO UPDATE SET notification_email = EXCLUDED.notification_email',
+                           co_a, 'buero@firma.example')) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('notification address: an editor and a viewer still read it',
+    _pk_try(editor, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_a)) = '1'
+    AND _pk_try(viewer, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_a)) = '1');
+
+  PERFORM _pk_ok('notification address: another company''s administrator reaches nothing of company A',
+    _pk_try(admin_b, v_set) = 'rows 0');
+  PERFORM _pk_ok('notification address: …nor can company A''s administrator write company B''s row',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L',
+                            'buero@firma.example', co_b)) = 'rows 0');
+  PERFORM _pk_ok('notification address: company B''s row is still unset after all of the above',
+    (SELECT notification_email IS NULL FROM company_settings WHERE company_id = co_b)
+    AND (SELECT notification_email IS NULL FROM company_settings WHERE company_id = co_a));
+
+  PERFORM _pk_ok('notification address: the CHECK refuses an empty string, so NULL is the only "not set"',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', '', co_a)) LIKE 'ERR 23514%');
+  PERFORM _pk_ok('notification address: the CHECK refuses text with no @',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', 'kein-at.de', co_a)) LIKE 'ERR 23514%');
+  PERFORM _pk_ok('notification address: the CHECK refuses two @ and whitespace',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', 'a@@b.de', co_a)) LIKE 'ERR 23514%'
+    AND _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', 'a b@c.de', co_a)) LIKE 'ERR 23514%');
+
+  PERFORM _pk_ok('notification address: the policies on company_settings are still exactly the four',
+    (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'company_settings') = 4);
+END $$;
+
 ROLLBACK;

@@ -71,6 +71,8 @@ export interface SchedulePreviewAnswer {
   drivers: DriverBuckets;
   manager_recipients: number;
   manager_claimed: boolean;
+  /** The company has a notification address, so the summary goes there, not to administrators. */
+  manager_via_address: boolean;
 }
 
 const BUCKET_KEYS: ReadonlyArray<keyof DriverBuckets> = [
@@ -106,6 +108,7 @@ export function parsePreviewAnswer(data: unknown): SchedulePreviewAnswer | null 
     drivers: drivers as unknown as DriverBuckets,
     manager_recipients: d.manager_recipients,
     manager_claimed: d.manager_claimed === true,
+    manager_via_address: d.manager_via_address === true,
   };
 }
 

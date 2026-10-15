@@ -6601,4 +6601,22 @@ export const de = {
   'shiftrec.scenario.trips.hint':    'Leer lassen, dann passiert nichts. Mit Angabe prüft die Seite, ob die Fahrtenzahl zum Umsatzziel passt (Fahrten × Ø Fahrpreis).',
   'shiftrec.scenario.trips.invalid': 'Bitte eine ganze Zahl ab 1 eingeben oder das Feld leeren.',
   'shiftrec.scenario.trips.label':   'Ziel-Fahrtenzahl (optional)',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.preview.manager.goesAddress': 'Übersicht geht an die hinterlegte Benachrichtigungsadresse.',
+  'settings.notifyAddress.description':    'An diese Adresse sendet El-Professor die E-Mails an das Unternehmen: die Wochenübersicht der Abrechnung sowie die Hinweise zu TÜV-Terminen und zum Testzeitraum. Fahrer erhalten ihre Abrechnung weiterhin an ihre eigene Adresse.',
+  'settings.notifyAddress.effect.address': 'Die Mails gehen nur an {address}, nicht an die Administratoren. Bei einer falschen Adresse kommen sie nirgends an.',
+  'settings.notifyAddress.effect.admins':  'Keine Adresse hinterlegt: Die Mails gehen an die Administratoren des Unternehmens.',
+  'settings.notifyAddress.hint':           'Leer lassen, um die Mails an die Administratoren des Unternehmens zu senden.',
+  'settings.notifyAddress.invalid':        'Das ist keine gültige E-Mail-Adresse.',
+  'settings.notifyAddress.label':          'E-Mail-Adresse',
+  'settings.notifyAddress.loadFailed':     'Die Adresse konnte nicht geladen werden.',
+  'settings.notifyAddress.placeholder':    'buero@beispiel.de',
+  'settings.notifyAddress.retry':          'Erneut laden',
+  'settings.notifyAddress.saveFailed':     'Adresse nicht gespeichert',
+  'settings.notifyAddress.saveFailedBody': 'Die Adresse konnte nicht gespeichert werden.',
+  'settings.notifyAddress.saved':          'Adresse gespeichert',
+  'settings.notifyAddress.savedBody':      'Die Benachrichtigungen des Unternehmens gehen ab jetzt an diese Einstellung.',
+  'settings.notifyAddress.title':          'E-Mail-Adresse für Benachrichtigungen',
+  'settings.notifyAddress.unsaved':        'Noch nicht gespeichert.',
 } as const;

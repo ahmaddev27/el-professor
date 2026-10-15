@@ -6545,4 +6545,22 @@ export const en: PartialDictionary = {
   'shiftrec.scenario.trips.hint':    'Leave empty and nothing happens. If given, the page checks whether the ride count fits the revenue target (rides × mean fare).',
   'shiftrec.scenario.trips.invalid': 'Enter a whole number from 1, or clear the field.',
   'shiftrec.scenario.trips.label':   'Target number of rides (optional)',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.preview.manager.goesAddress': 'The summary goes to the saved notification address.',
+  'settings.notifyAddress.description':    'El-Professor sends the company\'s emails to this address: the weekly Abrechnung summary and the notices about TÜV dates and the trial period. Drivers still receive their Abrechnung at their own address.',
+  'settings.notifyAddress.effect.address': 'The emails go only to {address}, not to the administrators. If the address is wrong they arrive nowhere.',
+  'settings.notifyAddress.effect.admins':  'No address set: the emails go to the company\'s administrators.',
+  'settings.notifyAddress.hint':           'Leave empty to send the emails to the company\'s administrators.',
+  'settings.notifyAddress.invalid':        'That is not a valid email address.',
+  'settings.notifyAddress.label':          'Email address',
+  'settings.notifyAddress.loadFailed':     'The address could not be loaded.',
+  'settings.notifyAddress.placeholder':    'office@example.com',
+  'settings.notifyAddress.retry':          'Reload',
+  'settings.notifyAddress.saveFailed':     'Address not saved',
+  'settings.notifyAddress.saveFailedBody': 'The address could not be saved.',
+  'settings.notifyAddress.saved':          'Address saved',
+  'settings.notifyAddress.savedBody':      'The company\'s notifications now follow this setting.',
+  'settings.notifyAddress.title':          'Notification email address',
+  'settings.notifyAddress.unsaved':        'Not saved yet.',
 };
