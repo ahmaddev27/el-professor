@@ -8,6 +8,9 @@ import {
   completedOperatingDay,
   dueOccurrence,
   isFailure,
+  isGap,
+  planDay,
+  unmatchedNotes,
   outcomeOfRefusal,
   planCompany,
   runningOperatingDay,
@@ -148,6 +151,14 @@ describe('what is claimed', () => {
       .toEqual([{ day: '2026-10-14', pass: 'first' }]);
   });
 
+  it('rechecks a day that was imported with a gap too', () => {
+    const gapped = [{ day_key: '2026-10-13', pass: 'first', outcome: 'imported_with_gap' }];
+    expect(planCompany(company({ replace_corrections: true, runs: gapped }), NOW)?.tasks).toEqual([
+      { day: '2026-10-14', pass: 'first' },
+      { day: '2026-10-13', pass: 'recheck' },
+    ]);
+  });
+
   it('plans nothing when nothing is due', () => {
     expect(planCompany(company(), berlin('2026-10-15T21:00:00', '+02:00'))).toBeNull();
   });
@@ -203,9 +214,52 @@ describe('outcomes', () => {
     expect(isFailure(null)).toBe(true);
   });
 
+  it('a gap is neither a success nor a failure, and only it is a gap', () => {
+    expect(isFailure('imported_with_gap')).toBe(false);
+    expect(isGap('imported_with_gap')).toBe(true);
+    expect(isGap('imported')).toBe(false);
+    expect(isGap(null)).toBe(false);
+  });
+
   it('maps a writer refusal to the outcome a person reads', () => {
     expect(outcomeOfRefusal('already_imported')).toBe('already_imported');
     expect(outcomeOfRefusal('driver_not_linked')).toBe('blocked_unlinked');
     expect(outcomeOfRefusal('anything else')).toBe('refused');
+  });
+});
+
+
+describe('a day with an earner Reidey could not place', () => {
+  const day = '2026-10-14';
+  const sent = (id: string, fare: number): UberDriverEarnings => ({
+    externalDriverId: id, uberDriverUuid: null, name: 'N' + id, fareCents: fare, promotionCents: 0,
+    tipsCents: 0, cashCents: 0, netOutstandingCents: 0, trips: 3, differenceCents: 0,
+  });
+  const nobody = { name: 'Nobody Known', uberDriverUuid: null, trips: 12 };
+  const linked = new Set(['1', '2']);
+
+  it('still has the matched earners\' rows to write', () => {
+    const plan = planDay(day, [sent('1', 1000), sent('2', 2000)], [nobody], linked);
+    expect(plan.unlinked).toBe(0);
+    expect(plan.rows.map((r) => r.external_driver_id)).toEqual(['1', '2']);
+  });
+
+  it('carries the unmatched earner to the run\'s record, with the trip count', () => {
+    const plan = planDay(day, [sent('1', 1000)], [nobody, nobody], linked);
+    expect(plan.unmatched).toEqual([{ name: 'Nobody Known', trips: 12 }]);
+  });
+
+  it('records a day of only unmatched earners as a gap, and an empty day as nothing', () => {
+    expect(planDay(day, [], [nobody], linked)).toMatchObject({ rows: [], emptyOutcome: 'imported_with_gap' });
+    expect(planDay(day, [], [], linked)).toMatchObject({ rows: [], emptyOutcome: 'nothing_to_import' });
+  });
+
+  it('keeps stopping the day for an earner who has money and no link', () => {
+    expect(planDay(day, [sent('1', 1000), sent('9', 500)], [nobody], linked).unlinked).toBe(1);
+  });
+
+  it('records each earner once and at most 200', () => {
+    const many = Array.from({ length: 250 }, (_, i) => ({ name: 'E' + i, uberDriverUuid: 'u' + i, trips: null }));
+    expect(unmatchedNotes(many)).toHaveLength(200);
   });
 });

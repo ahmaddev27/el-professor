@@ -6696,4 +6696,11 @@ export const en: PartialDictionary = {
   'import.earnings.gapBody':  'Reidey cannot match these Uber earners to any of its own drivers, so it sends no earnings for them. Nothing was imported for them and their earnings are missing: {names}.',
   'import.earnings.gapEntry': '{name} (trips: {trips})',
   'import.earnings.gapTitle': 'No earnings for these drivers',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.uberPull.outcome.imported_with_gap': 'Imported, with a gap',
+  'settings.uberPull.runs.gapBody':        'No earnings arrived for the Uber drivers named, because Reidey cannot match them to a driver. The earnings of every other driver that day are imported.',
+  'settings.uberPull.runs.gapNames':       'No earnings for: {names}',
+  'settings.uberPull.runs.gapOne':         'One day was imported with a gap',
+  'settings.uberPull.runs.gapOther':       '{count} days were imported with a gap',
 };

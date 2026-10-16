@@ -140,7 +140,7 @@ Deno.serve(async (req: Request) => {
         level: 'info', fn: FN, step: 'run', job, mode,
         companies_scanned: report.companies_scanned, companies_due: report.companies_due,
         claimed: report.claimed, imported: report.imported, replaced: report.replaced,
-        already_claimed: report.already_claimed, failed: report.failed,
+        already_claimed: report.already_claimed, gaps: report.gaps, failed: report.failed,
       }));
       return respond({ ok: true, job, ...report });
     }

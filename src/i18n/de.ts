@@ -6752,4 +6752,11 @@ export const de = {
   'import.earnings.gapBody':  'Reidey kann diese Uber-Fahrer keinem eigenen Fahrer zuordnen und sendet deshalb keine Umsätze für sie. Für sie wurde nichts importiert, ihre Umsätze fehlen: {names}.',
   'import.earnings.gapEntry': '{name} (Fahrten: {trips})',
   'import.earnings.gapTitle': 'Keine Umsätze für diese Fahrer',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.uberPull.outcome.imported_with_gap': 'Eingetragen, mit Lücke',
+  'settings.uberPull.runs.gapBody':        'Für die genannten Uber-Fahrer kamen keine Umsätze an, weil Reidey sie keinem Fahrer zuordnen kann. Die Umsätze aller anderen Fahrer dieses Tages sind eingetragen.',
+  'settings.uberPull.runs.gapNames':       'Keine Umsätze für: {names}',
+  'settings.uberPull.runs.gapOne':         'Ein Tag wurde mit Lücke eingetragen',
+  'settings.uberPull.runs.gapOther':       '{count} Tage wurden mit Lücke eingetragen',
 } as const;

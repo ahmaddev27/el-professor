@@ -502,6 +502,92 @@ BEGIN
       'SELECT (count(*) > 0)::text FROM uber_pull_runs WHERE company_id = ' || quote_literal(co_a)), 'true');
 END $$;
 
+-- ─── 9. a day with an earner Reidey could not place (20261016130000) ────────
+--
+--  The earner sends no money, so the day is written for the others and the
+--  earner is recorded on the run. Two terms, read by separate probes:
+--    the ROWS: the matched earner's rows are in the table (902, 903);
+--    the NAMES: the earner is on the run, and the run says gap (904, 905, 906).
+
+DO $$
+DECLARE
+  co_a    constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  admin_a constant text := 'a0000000-0000-4000-8000-000000000001';
+  admin_b constant text := 'b0000000-0000-4000-8000-000000000001';
+  v_run   text;
+  v_only  text;
+  v_noted text;
+  v_sys   text;
+BEGIN
+  v_run := _ud_claim(co_a, _ud_day(9));
+  v_noted := _ud_call('service', format(
+    $q$SELECT uber_pull_note_unmatched(%L::uuid,
+         '[{"name": " Nobody Known ", "trips": 12, "extra": "dropped"}, {"name": "Second Person", "trips": null}]'::jsonb)::text$q$, v_run));
+  PERFORM _ud_rec(901, 'the names are recorded on the open claim',
+    v_noted, 'true');
+
+  v_sys := _ud_sys(v_run, jsonb_build_array(
+    _ud_row('1001', 'umsatz', '100.00', _ud_day(9), 5),
+    _ud_row('1001', 'trinkgeld', '4.00', _ud_day(9))));
+  PERFORM _ud_rec(902, 'ROWS: the matched earner''s day is written although unmatched earners exist',
+    v_sys, '%"ok": true%"inserted": 2%', true);
+  PERFORM _ud_rec(903, 'ROWS: and the income table holds them under our driver''s name',
+    (SELECT count(*)::text || ' ' || min(driver_name) FROM income
+      WHERE company_id = co_a AND source = 'uber' AND date = _ud_day(9)),
+    E'2 Zoë  Müller');
+
+  PERFORM _ud_rec(904, 'NAMES: the run settled as a gap, in the same call, with its rows',
+    (SELECT outcome || ' ' || rows_written || ' ' || (settled_at IS NOT NULL)::text
+       FROM uber_pull_runs WHERE id = v_run::uuid),
+    'imported_with_gap 2 true');
+  PERFORM _ud_rec(905, 'NAMES: the earners are on the run: trimmed, two keys only, trips kept or null',
+    coalesce((SELECT unmatched::text FROM uber_pull_runs WHERE id = v_run::uuid), '<null>'),
+    '[{"name": "Nobody Known", "trips": 12}, {"name": "Second Person", "trips": null}]');
+  PERFORM _ud_rec(906, 'NAMES: the company''s own administrator reads them, another company''s reads nothing',
+    _ud_call(admin_a, format($q$SELECT jsonb_array_length(unmatched)::text FROM uber_pull_runs WHERE id = %L$q$, v_run))
+    || ' / ' ||
+    _ud_call(admin_b, format($q$SELECT jsonb_array_length(unmatched)::text FROM uber_pull_runs WHERE id = %L$q$, v_run)),
+    '2 / null');
+
+  -- A day with nothing to write but an earner without earnings.
+  v_only := _ud_claim(co_a, _ud_day(9), 'recheck');
+  PERFORM _ud_rec(907, 'a gap cannot be settled for a claim that carries no names',
+    _ud_call('service', format($q$SELECT uber_pull_settle(%L::uuid, 'imported_with_gap', NULL, 0)::text$q$, v_only)),
+    'false');
+  PERFORM _ud_call('service', format(
+    $q$SELECT uber_pull_note_unmatched(%L::uuid, '[{"name": "Only Person", "trips": 3}]'::jsonb)::text$q$, v_only));
+  PERFORM _ud_rec(908, 'with names it settles, and writes no rows',
+    _ud_call('service', format($q$SELECT uber_pull_settle(%L::uuid, 'imported_with_gap', NULL, 0)::text$q$, v_only)),
+    'true');
+  PERFORM _ud_rec(909, '...as a gap with 0 rows',
+    coalesce((SELECT outcome || ' ' || rows_written FROM uber_pull_runs WHERE id = v_only::uuid), '<null>'),
+    'imported_with_gap 0');
+
+  PERFORM _ud_rec(910, 'names cannot be noted on a settled claim',
+    _ud_call('service', format($q$SELECT uber_pull_note_unmatched(%L::uuid, '[{"name": "Late", "trips": 1}]'::jsonb)::text$q$, v_run)),
+    'false');
+  PERFORM _ud_rec(911, 'a malformed entry is refused',
+    _ud_call('service', format($q$SELECT uber_pull_note_unmatched(%L::uuid, '[{"name": ""}]'::jsonb)::text$q$, v_only)),
+    'ERR 22023 (no hint)');
+  PERFORM _ud_rec(912, 'so is a payload that is not an array',
+    _ud_call('service', format($q$SELECT uber_pull_note_unmatched(%L::uuid, '{"name": "x"}'::jsonb)::text$q$, v_only)),
+    'ERR 22023 (no hint)');
+  PERFORM _ud_rec(913, 'and more than 200 entries',
+    _ud_call('service', format($q$SELECT uber_pull_note_unmatched(%L::uuid,
+       (SELECT jsonb_agg(jsonb_build_object('name', 'p' || g)) FROM generate_series(1, 201) g))::text$q$, v_only)),
+    'ERR 22023 (no hint)');
+  PERFORM _ud_rec(914, 'anon cannot note',
+    _ud_call('anon', format($q$SELECT uber_pull_note_unmatched(%L::uuid, '[]'::jsonb)::text$q$, v_only)),
+    'ERR 42501%', true);
+  PERFORM _ud_rec(915, 'an administrator cannot note',
+    _ud_call(admin_a, format($q$SELECT uber_pull_note_unmatched(%L::uuid, '[]'::jsonb)::text$q$, v_only)),
+    'ERR 42501%', true);
+
+  PERFORM _ud_rec(916, 'the outcome set admits the gap and still refuses an unknown value',
+    _ud_call('owner', format($q$UPDATE uber_pull_runs SET outcome = 'bogus' WHERE id = %L RETURNING 'x'$q$, v_run)),
+    'ERR 23514 uber_pull_runs_outcome_check');
+END $$;
+
 -- ─── result ────────────────────────────────────────────────────────────────
 
 DO $$
