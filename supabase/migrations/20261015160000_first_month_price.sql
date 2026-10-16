@@ -519,6 +519,10 @@ DECLARE
   v_book      jsonb;
   v_answer    jsonb;
   v_alien     jsonb;
+  v_literal   jsonb;
+  v_row       record;
+  v_per_car   numeric;
+  v_first     numeric;
   v_seed      jsonb;
   v_seller    jsonb;
   v_impressum jsonb;
@@ -603,8 +607,11 @@ BEGIN
   --    setting still passes its own validator (which also catches a
   --    restatement that dropped another file's key).
   v_book := app_private.platform_setting_value('price_book');
-  IF (v_book ->> 'first_month_cents')::integer IS DISTINCT FROM 20000 THEN
-    RAISE EXCEPTION '20261015160000 self-check: the stored price book does not carry the first month at 20000 cents';
+  -- The seed above adds 20000 only where the key is absent; an operator may
+  -- have saved another figure, so the stored one is judged by the validator
+  -- below, never by its value.
+  IF NOT (v_book ? 'first_month_cents') THEN
+    RAISE EXCEPTION '20261015160000 self-check: the stored price book does not carry the first month';
   END IF;
 
   SELECT string_agg(format('%s: %s', s.key, app_private.platform_settings_problem(s.key, s.value)), ', ')
@@ -651,26 +658,40 @@ BEGIN
     RAISE EXCEPTION '20261015160000 self-check: the price_book validator does not judge as this file states';
   END IF;
 
-  -- 5. The engines. With the flag false the book prices per car exactly as
-  --    before (six of the forty-two numbers 20260916150000 pins), with it true
-  --    one flat figure whatever the plan, the cars or the cycle, and a book
-  --    without the figure has no first month.
-  IF public.compute_plan_price('basic', 1, 'monthly') IS DISTINCT FROM 20
-     OR public.compute_plan_price('premium', 5, 'monthly') IS DISTINCT FROM 350
-     OR public.compute_plan_price('premium', 5, 'monthly', false) IS DISTINCT FROM 350
-     OR public.compute_plan_price('basic', 6, 'yearly') IS DISTINCT FROM 1231.2
-     OR public.compute_plan_price('advanced', 11, 'monthly') IS DISTINCT FROM 396
-     OR public.compute_plan_price('premium', 25, 'yearly') IS DISTINCT FROM 17010
-     OR public.compute_plan_price('basic', NULL, 'monthly') IS DISTINCT FROM 20
-     OR public.compute_plan_price('basic', -3, 'monthly') IS DISTINCT FROM 20
-     OR public.compute_plan_price('gold', 1, 'weekly') IS DISTINCT FROM 20 THEN
+  -- 5. The engines. None of this reads a number out of the stored book: that
+  --    is an operator's data (staging's has no fleet tiers at all), and a
+  --    release must not be refused because somebody saved other prices. The
+  --    absolute figures are asked of a LITERAL book, passed to the formula
+  --    directly; what is asked of the stored book are relationships that hold
+  --    for any book.
+  v_literal := '{"price_per_car_cents": {"basic": 2000, "advanced": 4000, "premium": 7000},
+                 "fleet_discount_tiers": [{"min_cars": 6, "percent": 5}, {"min_cars": 11, "percent": 10}],
+                 "yearly_discount_percent": 10}'::jsonb;
+
+  -- 5a. With the flag false the formula prices per car exactly as before
+  --     (eight of the numbers 20260916150000 pins, edge cases included).
+  IF app_private.price_book_price(v_literal, 'basic', 1, 'monthly') IS DISTINCT FROM 20
+     OR app_private.price_book_price(v_literal, 'premium', 5, 'monthly') IS DISTINCT FROM 350
+     OR app_private.price_book_price(v_literal, 'premium', 5, 'monthly', false) IS DISTINCT FROM 350
+     OR app_private.price_book_price(v_literal, 'basic', 6, 'yearly') IS DISTINCT FROM 1231.2
+     OR app_private.price_book_price(v_literal, 'advanced', 11, 'monthly') IS DISTINCT FROM 396
+     OR app_private.price_book_price(v_literal, 'premium', 25, 'yearly') IS DISTINCT FROM 17010
+     OR app_private.price_book_price(v_literal, 'basic', NULL, 'monthly') IS DISTINCT FROM 20
+     OR app_private.price_book_price(v_literal, 'basic', -3, 'monthly') IS DISTINCT FROM 20
+     OR app_private.price_book_price(v_literal, 'gold', 1, 'weekly') IS DISTINCT FROM 20 THEN
     RAISE EXCEPTION '20261015160000 self-check: the price book no longer prices per car as it did';
   END IF;
 
-  IF public.compute_plan_price('premium', 5, 'monthly', true) IS DISTINCT FROM 200
-     OR public.compute_plan_price('basic', 1, 'yearly', true) IS DISTINCT FROM 200
-     OR public.compute_plan_price('advanced', 40, 'monthly', true) IS DISTINCT FROM 200
-     OR public.compute_plan_price('gold', NULL, NULL, true) IS DISTINCT FROM 200 THEN
+  -- 5b. With the flag true and a book that names the figure: that figure,
+  --     whatever the plan, the cars or the cycle. A book that does not: per car.
+  v_literal := v_literal || '{"first_month_cents": 20000}';
+  IF app_private.price_book_price(v_literal, 'premium', 5, 'monthly', true) IS DISTINCT FROM 200
+     OR app_private.price_book_price(v_literal, 'basic', 1, 'yearly', true) IS DISTINCT FROM 200
+     OR app_private.price_book_price(v_literal, 'advanced', 40, 'monthly', true) IS DISTINCT FROM 200
+     OR app_private.price_book_price(v_literal, 'gold', NULL, NULL, true) IS DISTINCT FROM 200
+     OR app_private.price_book_price(v_literal, 'premium', 5, 'monthly', false) IS DISTINCT FROM 350
+     OR app_private.price_book_price(v_literal, 'basic', 6, 'yearly') IS DISTINCT FROM 1231.2
+     OR app_private.price_book_price(v_literal - 'first_month_cents', 'premium', 5, 'monthly', true) IS DISTINCT FROM 350 THEN
     RAISE EXCEPTION '20261015160000 self-check: the first invoice is not the flat price whatever the plan, cars and cycle';
   END IF;
 
@@ -685,17 +706,36 @@ BEGIN
     RAISE EXCEPTION '20261015160000 self-check: the flat price is not read from the book it is asked of';
   END IF;
 
-  -- 6. The invoice amount, in cents: the flat figure first, then per car, a
-  --    yearly company in twelve parts, a cancelled-out book without the figure
-  --    per car even for the first invoice.
-  IF app_private.invoice_amount_cents(v_book, 'premium', 5, 'monthly', true)  IS DISTINCT FROM 20000
-     OR app_private.invoice_amount_cents(v_book, 'premium', 5, 'yearly',  true)  IS DISTINCT FROM 20000
-     OR app_private.invoice_amount_cents(v_book, 'premium', 5, 'monthly', false) IS DISTINCT FROM 35000
-     OR app_private.invoice_amount_cents(v_book, 'premium', 5, 'yearly',  false) IS DISTINCT FROM 31500
-     OR app_private.invoice_amount_cents(v_book, 'basic', 6, 'yearly', false)    IS DISTINCT FROM 10260
-     OR app_private.invoice_amount_cents(v_book - 'first_month_cents', 'premium', 5, 'monthly', true) IS DISTINCT FROM 35000
-     OR app_private.invoice_amount_cents(v_book - 'first_month_cents', 'premium', 5, 'yearly', true)  IS DISTINCT FROM 31500
-     OR app_private.invoice_amount_cents(v_book, 'premium', 5, 'monthly', NULL)  IS DISTINCT FROM 35000 THEN
+  -- 5c. The public function reads the stored book and nothing else, whatever
+  --     that book holds: it must agree with the formula applied to it, the
+  --     three-argument call with the flag false, and the flag true with the
+  --     stored figure (or per car when the book names none).
+  FOR v_row IN
+    SELECT p.plan, c.cars, y.cycle
+      FROM unnest(ARRAY['basic', 'advanced', 'premium', 'gold', NULL]) AS p(plan),
+           unnest(ARRAY[1, 3, 5, 6, 11, 25, 0, NULL]::integer[]) AS c(cars),
+           unnest(ARRAY['monthly', 'yearly', 'weekly', NULL]) AS y(cycle)
+  LOOP
+    v_per_car := app_private.price_book_price(v_book, v_row.plan, v_row.cars, v_row.cycle);
+    v_first   := coalesce((v_book ->> 'first_month_cents')::numeric * 0.01, v_per_car);
+    IF public.compute_plan_price(v_row.plan, v_row.cars, v_row.cycle) IS DISTINCT FROM v_per_car
+       OR public.compute_plan_price(v_row.plan, v_row.cars, v_row.cycle, false) IS DISTINCT FROM v_per_car
+       OR public.compute_plan_price(v_row.plan, v_row.cars, v_row.cycle, true) IS DISTINCT FROM v_first THEN
+      RAISE EXCEPTION '20261015160000 self-check: compute_plan_price(%, %, %) does not follow the stored book', v_row.plan, v_row.cars, v_row.cycle;
+    END IF;
+  END LOOP;
+
+  -- 6. The invoice amount, in cents, asked of the literal book: the flat figure
+  --    first, then per car, a yearly company in twelve parts, a book without the
+  --    figure per car even for the first invoice.
+  IF app_private.invoice_amount_cents(v_literal, 'premium', 5, 'monthly', true)  IS DISTINCT FROM 20000
+     OR app_private.invoice_amount_cents(v_literal, 'premium', 5, 'yearly',  true)  IS DISTINCT FROM 20000
+     OR app_private.invoice_amount_cents(v_literal, 'premium', 5, 'monthly', false) IS DISTINCT FROM 35000
+     OR app_private.invoice_amount_cents(v_literal, 'premium', 5, 'yearly',  false) IS DISTINCT FROM 31500
+     OR app_private.invoice_amount_cents(v_literal, 'basic', 6, 'yearly', false)    IS DISTINCT FROM 10260
+     OR app_private.invoice_amount_cents(v_literal - 'first_month_cents', 'premium', 5, 'monthly', true) IS DISTINCT FROM 35000
+     OR app_private.invoice_amount_cents(v_literal - 'first_month_cents', 'premium', 5, 'yearly', true)  IS DISTINCT FROM 31500
+     OR app_private.invoice_amount_cents(v_literal, 'premium', 5, 'monthly', NULL)  IS DISTINCT FROM 35000 THEN
     RAISE EXCEPTION '20261015160000 self-check: invoice_amount_cents does not decide an amount as this file states';
   END IF;
 
