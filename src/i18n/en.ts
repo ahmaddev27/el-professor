@@ -6679,4 +6679,8 @@ export const en: PartialDictionary = {
   'admin.settings.firstMonthHint':    'A flat price for each company\'s first invoice, whatever its plan or number of cars. From the second invoice on, the price per car applies. Leave empty for no flat price.',
   'bill.invoice.quoteFailed':         'The amounts could not be calculated. Nothing will be created.',
   'bill.invoice.quoteHint':           'A company\'s first invoice is raised at the flat first-month price, every later one at the price list per car.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sa.dash.billedUnavailable': 'The invoice amount is only visible with the billing right, or could not be read.',
+  'sa.dash.firstInvoice':      'First invoice (flat)',
 };

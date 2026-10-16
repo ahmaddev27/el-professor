@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { fetchCompanies } from '../lib/platformDirectoryClient';
+import { fetchInvoiceQuotes } from '../lib/platformBillingClient';
+import type { PlatformInvoiceQuote } from '../lib/platformBilling';
 import { collectCompanyCounts, UNKNOWN_COMPANY_COUNTS, type CompanyCounts } from '../lib/platformReadModels';
 import { driversAllowance } from '../lib/panelFigures';
 import {
@@ -303,6 +305,26 @@ export default function SuperAdminDashboard() {
   // and the reload after each action reuse them instead of reading them again.
   const companyCounts = useRef<CompanyCounts>(UNKNOWN_COMPANY_COUNTS);
 
+  /*
+    What this month's invoice costs per company, from platform_invoice_quotes —
+    the same figure GenerateInvoicesModal inserts (a company's first invoice is
+    a flat price, later ones the price book per car). Keyed by company here; the
+    RPC keys by subscription. 'unavailable' covers a refusal and a failed read
+    alike and prints a dash, never a computed guess. One audited read row per
+    call, so it is read on opening and on the refresh button, never on the tick.
+  */
+  type QuoteState = { status: 'loading' } | { status: 'unavailable' }
+    | { status: 'ok'; byCompany: Map<string, PlatformInvoiceQuote> };
+  const [quotes, setQuotes] = useState<QuoteState>({ status: 'loading' });
+  const loadQuotes = useCallback(async () => {
+    const now = new Date();
+    const result = await fetchInvoiceQuotes(now.getMonth() + 1, now.getFullYear()).catch(() => null);
+    if (!result) { setQuotes({ status: 'unavailable' }); return; }
+    const byCompany = new Map<string, PlatformInvoiceQuote>();
+    result.forEach(q => byCompany.set(q.companyId, q));
+    setQuotes({ status: 'ok', byCompany });
+  }, []);
+
   /**
    * `silent` keeps the page on screen while it reloads. `readCounts` reads the
    * per-company counts again, which writes one audit row per page — so only the
@@ -433,6 +455,12 @@ export default function SuperAdminDashboard() {
 
   // Opening the page is a deliberate read, so it reads the counts.
   useEffect(() => { load(false, true); }, [load]);
+
+  // Only a role holding billing.manage may read the quotes; the others are
+  // never asked (the database would refuse and write a `denied` row).
+  useEffect(() => {
+    if (canBilling) loadQuotes(); else setQuotes({ status: 'unavailable' });
+  }, [canBilling, loadQuotes]);
 
   // Auto-refresh every 60s — and never the counts, which cost an
   // audit row a page.
@@ -625,7 +653,7 @@ export default function SuperAdminDashboard() {
         <div className="flex items-center gap-2 flex-wrap">
           {/* The one reload besides opening the page that reads the counts again. */}
           <button
-            onClick={() => load(true, true)}
+            onClick={() => { load(true, true); if (canBilling) loadQuotes(); }}
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
@@ -1161,11 +1189,29 @@ export default function SuperAdminDashboard() {
                   <td className="px-4 py-3">
                     {(() => {
                       const bp = calcPricing(priceBook, c.plan ?? 'basic', c.subscription_car_limit, c.billing_cycle);
+                      // No quote for a company means no active subscription, so
+                      // nothing is invoiced and the list price stands. Only once
+                      // the quotes are known — otherwise a dash, not a guess.
+                      if (quotes.status !== 'ok') {
+                        return (
+                          <p className="text-xs text-fg-subtle"
+                             title={quotes.status === 'loading' ? undefined : t('sa.dash.billedUnavailable')}>
+                            –
+                          </p>
+                        );
+                      }
+                      const quote = quotes.byCompany.get(c.id);
+                      const monthly = quote ? quote.amountCents / 100 : bp.monthlyEquivalent;
                       return (
                         <div>
                           <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-                            {fmtPrice(bp.monthlyEquivalent)} €<span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('sa.dash.perMonthShort')}</span>
+                            {fmtPrice(monthly)} €<span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('sa.dash.perMonthShort')}</span>
                           </p>
+                          {quote?.firstInvoice && (
+                            <p className="text-[10px] text-fg-subtle">
+                              {t('sa.dash.firstInvoice')}
+                            </p>
+                          )}
                           {c.billing_cycle === 'yearly' && (
                             <p className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
                               {fmtPrice(bp.finalTotal)} €{t('sa.dash.perYearShort')}
