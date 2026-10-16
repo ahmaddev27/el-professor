@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **16.10.2026 (branch `fix/google-signup-existing-account`, not merged):** an account with no company can register one through Google even when it was created as an e-mail account (for example after its company was deleted). The registration no longer requires the Google-signup marker, which GoTrue never writes when it links Google to an existing address; every other refusal (blocked, unconfirmed, no Google identity, platform staff, already in a company) is kept. Migration `20261016160000_google_registration_without_marker.sql`. Details in HANDOFF.md.
+>
 > **16.10.2026 (branch `feat/delete-company-completely`, not merged):** a platform owner can delete a company completely from the panel - its data, every login account (so the addresses can be used again), its files and its partner connection - after a preview counted by the same database function that carries the deletion out. Platform staff accounts are never deleted. Details in HANDOFF.md.
 n_15.10.2026: the Umsätze list has Tag / Woche / Monat / Liste tabs (PR against `staging`); figures still come from `groupIncome`._
 
