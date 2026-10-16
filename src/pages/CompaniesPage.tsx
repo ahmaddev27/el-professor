@@ -9,6 +9,12 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
+import {
+  deleteCompanyCompletely,
+  fetchDeletionPreview,
+  IncompleteDeletionError,
+} from '../lib/platformCompanyDeletion';
+import { CompanyDeletionPreview, type PreviewState } from '../components/CompanyDeletionPreview';
 import { fetchCompanies, fetchUsers } from '../lib/platformDirectoryClient';
 import { platformReadRefusalKey } from '../lib/platformReadModels';
 import { contextRefusalMessage } from '../lib/supportSession';
@@ -180,7 +186,26 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
   const [failure, setFailure] = useState<string | null>(null);
 
   const needsTyping = meta.dangerLevel === 'critical';
-  const canConfirm = needsTyping ? confirmText.trim() === company.name.trim() : true;
+
+  // The complete deletion shows what it will remove before it asks for the name,
+  // counted by the same database function that then carries it out. Confirming
+  // waits for it: a name typed against a preview that never loaded is a
+  // deletion of something the operator was not shown.
+  const [preview, setPreview] = useState<PreviewState>({ status: 'loading' });
+  useEffect(() => {
+    if (action !== 'hardDelete') return;
+    let current = true;
+    setPreview({ status: 'loading' });
+    fetchDeletionPreview(company.id)
+      .then(p => { if (current) setPreview({ status: 'ready', preview: p }); })
+      .catch((err: unknown) => {
+        if (current) setPreview({ status: 'failed', message: err instanceof Error ? err.message : t('common.error') });
+      });
+    return () => { current = false; };
+  }, [action, company.id, t]);
+
+  const previewReady = action !== 'hardDelete' || preview.status === 'ready';
+  const canConfirm = (needsTyping ? confirmText.trim() === company.name.trim() : true) && previewReady;
 
   const borderColor = meta.dangerLevel === 'critical'
     ? 'var(--danger)'
@@ -241,6 +266,8 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
           </div>
 
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{t(meta.description)}</p>
+
+          {action === 'hardDelete' && <CompanyDeletionPreview state={preview} />}
 
           {needsTyping && (
             <div>
@@ -1181,10 +1208,26 @@ export default function CompaniesPage() {
     }
 
     if (action === 'hardDelete') {
-      // CASCADE delete handles all related rows
-      const { error } = await supabase.from('companies').delete().eq('id', company.id);
-      if (error) throw error;
-      showToast('success', t('sa.companies.toast.hardDeleted', { name: company.name }));
+      // Not a direct delete any more: login accounts and stored files cannot be
+      // removed from the browser, and the open-context guard needs the caller's
+      // own token. See platformCompanyDeletion.ts.
+      try {
+        const outcome = await deleteCompanyCompletely(company.id, company.name);
+        showToast('success', t('sa.deletion.done', {
+          name: company.name, rows: outcome.rowsTotal, accounts: outcome.accountsDeleted,
+        }));
+      } catch (err) {
+        // The company is gone but a clean-up step did not finish: say what
+        // remains, refresh the list, and do not leave the operator on a company
+        // that no longer exists.
+        if (err instanceof IncompleteDeletionError) {
+          showToast('error', err.message);
+          setViewingCompany(null);
+          await loadCompanies();
+          return;
+        }
+        throw err;
+      }
       setViewingCompany(null);
     }
 
