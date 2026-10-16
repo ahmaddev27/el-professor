@@ -3916,14 +3916,11 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('partner_drivers_import(administrator)',                         'TT'),
     ('partner_vehicles_import(administrator)',                        'TT'),
     ('partner_earners_resolve(administrator)',                        'TT'),
-<<<<<<< HEAD
-    ('uber_import_undo(administrator, dry run)',                       'TT')
-=======
+    ('uber_import_undo(administrator, dry run)',                       'TT'),
     -- An open context of either mode makes the guard on companies refuse the
     -- delete (company_delete_context_open), and the function answers it as a
     -- sentence: success false, so N, not an exception.
     ('platform_company_delete(company marked deleted, its name)',     'NN')
->>>>>>> 2d97b81 (feat(platform): delete a company completely, accounts and files included)
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3964,11 +3961,8 @@ BEGIN
       ('partner_drivers_import(administrator)'),
       ('partner_vehicles_import(administrator)'),
       ('partner_earners_resolve(administrator)'),
-<<<<<<< HEAD
-      ('uber_import_undo(administrator, dry run)')
-=======
+      ('uber_import_undo(administrator, dry run)'),
       ('platform_company_delete(company marked deleted, its name)')
->>>>>>> 2d97b81 (feat(platform): delete a company completely, accounts and files included)
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
