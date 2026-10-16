@@ -62,11 +62,21 @@ const VERIFY_TIMEOUT_MS = 10_000
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsFor(req) })
 
-  const respond = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), {
+  const respond = (body: unknown, status = 200) => {
+    // This function used to log nothing at all, so a refused connection left no
+    // trace on either side: the operator saw one sentence and the container
+    // showed nothing to read. Every refusal is recorded here, at the one place
+    // all of them pass through. The reason is a fixed code and the body never
+    // carries the token, so nothing secret is written.
+    const reason = (body as { ok?: boolean; reason?: string } | null)?.reason
+    if (reason !== undefined) {
+      console.log(JSON.stringify({ level: 'info', fn: 'partner-connect', status, reason }))
+    }
+    return new Response(JSON.stringify(body), {
       status,
       headers: { ...corsFor(req), 'Content-Type': 'application/json' },
     })
+  }
 
   if (req.method !== 'POST') {
     return respond({ ok: false, reason: 'method_not_allowed' }, 405)

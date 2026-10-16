@@ -71,6 +71,9 @@ const REASON_KEYS: Record<string, TranslationKey> = {
   endpoint_private_host: 'partner.connect.error.notConfigured',
   endpoint_unexpected_port: 'partner.connect.error.notConfigured',
   endpoint_has_path: 'partner.connect.error.notConfigured',
+  // Answered with 500, so before the body was read off the thrown error this
+  // reached the operator as the generic sentence and named nothing.
+  server_error: 'partner.connect.error.serverError',
 };
 
 interface PartnerConnectCardProps {
@@ -125,6 +128,23 @@ export function PartnerConnectCard({ companyId, onChanged }: PartnerConnectCardP
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * The answer body behind a non-2xx. supabase-js wraps it in a
+   * `FunctionsHttpError` whose `context` is the untouched `Response`, so the
+   * reason the function named is still there — it is only the throw that hid
+   * it. A body that cannot be read is null, and the caller falls back to the
+   * generic sentence, which is then true rather than a default.
+   */
+  const reasonFromError = async (error: unknown): Promise<unknown> => {
+    const response = (error as { context?: unknown })?.context;
+    if (!(response instanceof Response)) return null;
+    try {
+      return await response.clone().json();
+    } catch {
+      return null;
+    }
+  };
+
   const connect = async () => {
     const token = tokenField.current?.value.trim() ?? '';
     if (token === '') {
@@ -136,8 +156,14 @@ export function PartnerConnectCard({ companyId, onChanged }: PartnerConnectCardP
       const { data, error } = await supabase.functions.invoke('partner-connect', {
         body: { token },
       });
-      if (error) throw error;
-      const answer = data as { ok?: boolean; reason?: string; fleet_name?: string | null };
+      // The function answers its named reasons with real status codes —
+      // `partner_unavailable` and `fleet_unidentified` as 502, `server_error`
+      // as 500 — and `functions.invoke` throws on any non-2xx. Reading only
+      // `data` therefore threw away exactly the reasons worth reading, and
+      // every one of them reached the operator as "could not be established".
+      // So the body is read off the thrown error too.
+      const answer = (error ? await reasonFromError(error) : data) as
+        { ok?: boolean; reason?: string; fleet_name?: string | null } | null;
       if (!answer?.ok) {
         const key = answer?.reason ? REASON_KEYS[answer.reason] : undefined;
         showToast('error', key ? t(key) : t('partner.connect.error.generic'));
