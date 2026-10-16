@@ -17,6 +17,11 @@ interface World {
   manual: { value: number };
   stateReadable: { value: boolean };
   unlinked: { value: boolean };
+  /** Once the database has linked the earner, the next pull carries the link. */
+  linkMade: { value: boolean };
+  unmatched: { value: string[] };
+  resolveCalls: Array<Array<{ externalDriverId: string; name: string }>>;
+  resolveAnswer: { value: 'created' | 'skipped' | 'refused' };
 }
 
 function world(dataStart: string | null = DATA_START): World {
@@ -28,6 +33,10 @@ function world(dataStart: string | null = DATA_START): World {
     manual: { value: 0 },
     stateReadable: { value: true },
     unlinked: { value: false },
+    linkMade: { value: false },
+    unmatched: { value: [] as string[] },
+    resolveCalls: [] as World['resolveCalls'],
+    resolveAnswer: { value: 'created' as World['resolveAnswer']['value'] },
   };
   const driver = (fare: number) => ({
     externalDriverId: '7', uberDriverUuid: null, name: 'Anna', fareCents: fare,
@@ -50,8 +59,17 @@ function world(dataStart: string | null = DATA_START): World {
         }
         return { segment: seg, drivers: fare > 0 ? [driver(fare)] : [] };
       });
-      const links: Record<string, { driverId: string; driverName: string }> = w.unlinked.value ? {} : { '7': { driverId: 'd1', driverName: 'Anna' } };
-      return { ok: true, weeks, links, unmatched: [] };
+      const noLink = w.unlinked.value && !w.linkMade.value;
+      const links: Record<string, { driverId: string; driverName: string }> = noLink ? {} : { '7': { driverId: 'd1', driverName: 'Anna' } };
+      const unmatched = w.unmatched.value.map(name => ({ name, uberDriverUuid: null, trips: null }));
+      return { ok: true, weeks, links, unmatched };
+    },
+    resolve: async earners => {
+      w.resolveCalls.push(earners);
+      if (w.resolveAnswer.value === 'refused') return { ok: false, reason: 'inc.uber.err.notAuthorized' };
+      if (w.resolveAnswer.value === 'skipped') return { ok: true, created: [], linked: [], skipped: earners.map(e => e.name) };
+      w.linkMade.value = true;
+      return { ok: true, created: earners.map(e => e.name), linked: [], skipped: [] };
     },
     write: async rows => {
       const start = rows.map(r => r.period_start).sort().reverse()[0] as string;
@@ -135,12 +153,50 @@ describe('runEarningsBackfill', () => {
     expect(x.income).toHaveLength(0);
   });
 
-  it('stops on an unlinked driver and names the reason, writing nothing for that piece', async () => {
+  it('gives an unlinked earner a named home and carries on, reporting the driver it made', async () => {
     const x = world();
     x.unlinked.value = true;
     const out = await runEarningsBackfill(x.deps);
-    expect(out).toMatchObject({ status: 'failed', reason: 'import.earnings.blocked', detail: 'Anna', through: null });
+    expect(out).toMatchObject({ status: 'done', created: ['Anna'], linked: [] });
+    // One call: the link it made is in every later pull, so Anna is created once.
+    expect(x.resolveCalls).toEqual([[{ externalDriverId: '7', name: 'Anna' }]]);
+    expect(x.income).toHaveLength(diffDaysIso(DATA_START, THROUGH) + 1);
+  });
+
+  it('stops, names the earner and writes nothing when no driver can be made for them', async () => {
+    const x = world();
+    x.unlinked.value = true;
+    x.resolveAnswer.value = 'skipped';
+    const out = await runEarningsBackfill(x.deps);
+    expect(out).toMatchObject({ status: 'failed', reason: 'import.earnings.unresolved', detail: 'Anna', through: null });
     expect(x.income).toHaveLength(0);
+  });
+
+  it('stops on a refused resolve with that reason, writing nothing', async () => {
+    const x = world();
+    x.unlinked.value = true;
+    x.resolveAnswer.value = 'refused';
+    const out = await runEarningsBackfill(x.deps);
+    expect(out).toMatchObject({ status: 'failed', reason: 'inc.uber.err.notAuthorized', through: null });
+    expect(x.income).toHaveLength(0);
+  });
+
+  it('still stops on an earner Reidey cannot place, and creates no driver on the way', async () => {
+    const x = world();
+    x.unlinked.value = true; // an unlinked earner in the same piece must not be created either
+    x.unmatched.value = ['Nobody Known'];
+    const out = await runEarningsBackfill(x.deps);
+    expect(out).toMatchObject({ status: 'failed', reason: 'import.earnings.unmatched', detail: 'Nobody Known', created: [] });
+    expect(x.resolveCalls).toHaveLength(0);
+    expect(x.income).toHaveLength(0);
+  });
+
+  it('keeps the drivers it created in the report when a later piece fails', async () => {
+    const x = world();
+    x.unlinked.value = true;
+    x.failWriteAt.value = '2026-07-01';
+    const out = await runEarningsBackfill(x.deps);
+    expect(out).toMatchObject({ status: 'failed', created: ['Anna'] });
   });
 
   it('can be stopped between pieces and then resumed', async () => {

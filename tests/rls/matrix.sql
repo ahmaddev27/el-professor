@@ -3693,6 +3693,12 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('partner_vehicles_import(administrator)',
      $q$SELECT partner_vehicles_import() ->> 'ok'$q$,
      'PTTTYYT', NULL),
+    -- The earnings import's driver resolve (20261016110000). The same gate as
+    -- the fleet import above, so the same row; an empty list is a legitimate
+    -- call for company B's administrator, so that cell measures the gate.
+    ('partner_earners_resolve(administrator)',
+     $q$SELECT partner_earners_resolve('reidey', '[]'::jsonb) ->> 'ok'$q$,
+     'PTTTYYT', NULL),
 
     -- M4's door (20261008140000). It is service_role's. The two reviewer
     -- decisions that used to sit beside it were dropped by 20261013110000: a
@@ -3880,7 +3886,8 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('income_import_uber(confirmed link of A)',                       'TT'),
     -- Refused in both modes with the same reason as the earnings import.
     ('partner_drivers_import(administrator)',                         'TT'),
-    ('partner_vehicles_import(administrator)',                        'TT')
+    ('partner_vehicles_import(administrator)',                        'TT'),
+    ('partner_earners_resolve(administrator)',                        'TT')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3919,7 +3926,8 @@ BEGIN
       ('abrechnung_schedule_preview(a week)'),
       ('income_import_uber(confirmed link of A)'),
       ('partner_drivers_import(administrator)'),
-      ('partner_vehicles_import(administrator)')
+      ('partner_vehicles_import(administrator)'),
+      ('partner_earners_resolve(administrator)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

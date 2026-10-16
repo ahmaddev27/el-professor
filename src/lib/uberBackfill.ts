@@ -33,6 +33,24 @@
  * overlap check stay the only judges of a duplicate. It does not start when the
  * company already has hand-typed income, because the import does not refuse
  * those and both sets would then stand, doubling the salary basis.
+ *
+ * ## An earner nobody linked gets a named home; an earner Reidey cannot place does not
+ *
+ * Two causes used to stop the import alike, and they are different things:
+ *
+ * - `unlinked_here`: Reidey sent the earner's money under its own driver id and
+ *   we hold no link for that id (typically a driver who left the fleet and so is
+ *   not in the roster the driver import reads, which can therefore never link
+ *   them). The money exists and has an address. `deps.resolve` links the driver
+ *   of the company with the same name, or creates an INACTIVE one, and the
+ *   import goes on; every driver it created is reported on the outcome.
+ * - `unmatched_at_reidey`: Reidey could not resolve the Uber earner to any
+ *   driver of its own, so it sends NO money and no id for them. There is
+ *   nothing to attach to a driver, and creating one would only hide that the
+ *   earnings are missing. This still stops the import, named.
+ *
+ * The unmatched check comes first, so a run that is going to stop creates no
+ * driver on the way.
  */
 import type { TranslationKey } from '../i18n';
 import {
@@ -42,11 +60,11 @@ import {
 } from '../../supabase/functions/_shared/uber-earnings-core';
 import { completedOperatingDay } from '../../supabase/functions/_shared/uber-pull-core';
 import {
-  blockingEarners,
   buildImportRows,
   findUnlinked,
   type DriverLinks,
   type IncomeImportRow,
+  type UnlinkedDriver,
   type WeekEarnings,
 } from '../utils/uberEarningsImport';
 
@@ -65,6 +83,25 @@ export type WriteResult =
   | { ok: true; inserted: number }
   | { ok: false; reason: TranslationKey; detail?: string };
 
+/** What `partner_earners_resolve` did for the earners it was given. */
+export type ResolveResult =
+  | {
+    ok: true;
+    /** Drivers the call created (inactive), by the name now stored. */
+    created: string[];
+    /** Drivers of the company the earners were linked to by name. */
+    linked: string[];
+    /** Earners it could not place, with the name the partner gave. */
+    skipped: string[];
+  }
+  | { ok: false; reason: TranslationKey; detail?: string };
+
+/** The drivers an import made or matched on its own, for the operator to check. */
+export interface ResolvedDrivers {
+  created: string[];
+  linked: string[];
+}
+
 export interface BackfillState {
   /** Newest `source_period_end` of an Uber row, or null for none. */
   latestEnd: string | null;
@@ -78,6 +115,7 @@ export interface BackfillDeps {
   readState(): Promise<BackfillState | null>;
   pull(from: string, to: string, granularity: 'week' | 'day'): Promise<PullResult>;
   write(rows: IncomeImportRow[]): Promise<WriteResult>;
+  resolve(earners: UnlinkedDriver[]): Promise<ResolveResult>;
   sleep(ms: number): Promise<void>;
   shouldStop(): boolean;
 }
@@ -87,16 +125,18 @@ export type BackfillProgress =
   | { phase: 'importing'; day: string; last: string; rows: number };
 
 export type EarningsOutcome =
-  | { status: 'done'; from: string; to: string; days: number; rows: number; resumed: boolean }
+  | ({ status: 'done'; from: string; to: string; days: number; rows: number; resumed: boolean } & ResolvedDrivers)
   | { status: 'nothing' }
   /** Not started, on purpose: the company has income of its own. */
   | { status: 'unavailable'; reason: TranslationKey }
-  | { status: 'stopped'; through: string | null; rows: number }
-  | {
+  | ({ status: 'stopped'; through: string | null; rows: number } & ResolvedDrivers)
+  | ({
     status: 'failed'; reason: TranslationKey; detail?: string;
     /** Last day that is safely in the table, or null when nothing was written. */
     through: string | null; rows: number;
-  };
+  } & ResolvedDrivers);
+
+const NONE: ResolvedDrivers = { created: [], linked: [] };
 
 const PAUSE_MS = 300;
 
@@ -112,12 +152,12 @@ async function findStart(
   let earliest: string | null = null;
   let empty = 0;
   for (let checked = 0; empty < PROBE_EMPTY_WEEKS && checked < MAX_PROBE_WEEKS; checked++) {
-    if (deps.shouldStop()) return { ok: false, outcome: { status: 'stopped', through: null, rows: 0 } };
+    if (deps.shouldStop()) return { ok: false, outcome: { status: 'stopped', through: null, rows: 0, ...NONE } };
     report({ phase: 'looking', weeksChecked: checked });
     const sunday = addDaysIso(monday, 6);
     const pulled = await deps.pull(monday, sunday > through ? through : sunday, 'week');
     if (!pulled.ok) {
-      return { ok: false, outcome: { status: 'failed', reason: pulled.reason, detail: pulled.detail, through: null, rows: 0 } };
+      return { ok: false, outcome: { status: 'failed', reason: pulled.reason, detail: pulled.detail, through: null, rows: 0, ...NONE } };
     }
     if (hasEarnings(pulled.weeks, pulled.unmatched)) { earliest = monday; empty = 0; } else empty++;
     monday = addDaysIso(monday, -7);
@@ -130,7 +170,7 @@ export async function runEarningsBackfill(
   deps: BackfillDeps, report: (p: BackfillProgress) => void = () => {},
 ): Promise<EarningsOutcome> {
   const state = await deps.readState();
-  if (!state) return { status: 'failed', reason: 'import.earnings.stateUnreadable', through: null, rows: 0 };
+  if (!state) return { status: 'failed', reason: 'import.earnings.stateUnreadable', through: null, rows: 0, ...NONE };
   const through = completedOperatingDay(deps.now());
   const resumed = state.latestEnd !== null;
   let start: string | null;
@@ -143,7 +183,7 @@ export async function runEarningsBackfill(
     start = found.start;
     if (start === null) return { status: 'nothing' };
   }
-  if (start > through) return { status: 'done', from: through, to: through, days: 0, rows: 0, resumed };
+  if (start > through) return { status: 'done', from: through, to: through, days: 0, rows: 0, resumed, ...NONE };
   return importDays(deps, start, through, resumed, report);
 }
 
@@ -154,31 +194,56 @@ async function importDays(
   let done: string | null = null;
   let rowCount = 0;
   let days = 0;
+  const drivers: ResolvedDrivers = { created: [], linked: [] };
   for (let day = start; day <= through; day = addDaysIso(day, DAYS_PER_PIECE)) {
-    if (deps.shouldStop()) return { status: 'stopped', through: done, rows: rowCount };
+    if (deps.shouldStop()) return { status: 'stopped', through: done, rows: rowCount, ...drivers };
     const reach = addDaysIso(day, DAYS_PER_PIECE - 1);
     const last = reach > through ? through : reach;
     report({ phase: 'importing', day, last, rows: rowCount });
-    const piece = await importPiece(deps, day, last);
-    if (!piece.ok) return { status: 'failed', reason: piece.reason, detail: piece.detail, through: done, rows: rowCount };
+    const piece = await importPiece(deps, day, last, drivers);
+    if (!piece.ok) {
+      return { status: 'failed', reason: piece.reason, detail: piece.detail, through: done, rows: rowCount, ...drivers };
+    }
     rowCount += piece.rows;
     days += piece.days;
     done = last;
     await deps.sleep(PAUSE_MS);
   }
-  return { status: 'done', from: start, to: through, days, rows: rowCount, resumed };
+  return { status: 'done', from: start, to: through, days, rows: rowCount, resumed, ...drivers };
 }
 
 type Piece =
   | { ok: true; rows: number; days: number }
   | { ok: false; reason: TranslationKey; detail?: string };
 
-async function importPiece(deps: BackfillDeps, from: string, to: string): Promise<Piece> {
+/**
+ * Gives the earners with no link a driver and records what that made. A driver
+ * created here stays created even when a later piece fails, so it is added to
+ * `drivers` the moment the database answers.
+ */
+async function placeUnlinked(
+  deps: BackfillDeps, unlinked: UnlinkedDriver[], drivers: ResolvedDrivers,
+): Promise<Extract<Piece, { ok: false }> | null> {
+  const resolved = await deps.resolve(unlinked);
+  if (!resolved.ok) return resolved;
+  drivers.created.push(...resolved.created);
+  drivers.linked.push(...resolved.linked);
+  if (resolved.skipped.length === 0) return null;
+  return { ok: false, reason: 'import.earnings.unresolved', detail: resolved.skipped.join(', ') };
+}
+
+async function importPiece(
+  deps: BackfillDeps, from: string, to: string, drivers: ResolvedDrivers,
+): Promise<Piece> {
   const pulled = await deps.pull(from, to, 'day');
   if (!pulled.ok) return pulled;
-  const blocking = blockingEarners(findUnlinked(pulled.weeks, pulled.links), pulled.unmatched);
-  if (blocking.length > 0) {
-    return { ok: false, reason: 'import.earnings.blocked', detail: blocking.map(b => b.name).join(', ') };
+  if (pulled.unmatched.length > 0) {
+    return { ok: false, reason: 'import.earnings.unmatched', detail: pulled.unmatched.map(u => u.name).join(', ') };
+  }
+  const unlinked = findUnlinked(pulled.weeks, pulled.links);
+  if (unlinked.length > 0) {
+    const refused = await placeUnlinked(deps, unlinked, drivers);
+    if (refused) return refused;
   }
   const rows = buildImportRows(pulled.weeks);
   const days = pulled.weeks.length;

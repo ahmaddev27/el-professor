@@ -6712,7 +6712,6 @@ export const de = {
   'import.partialTitle': 'Teilweise importiert',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'import.earnings.blocked':         'Diese Fahrer sind noch nicht verknüpft: {names}. Verknüpfen Sie sie und klicken Sie erneut; der Import macht dort weiter.',
   'import.earnings.done':            'Umsätze vom {from} bis {to}: {days} Tage geprüft, {rows} Zeilen angelegt.',
   'import.earnings.failedAfter':     'Umsätze bis {through} sind importiert ({rows} Zeilen). Danach ging es nicht weiter: {reason} Ein weiterer Klick macht dort weiter.',
   'import.earnings.failedNone':      'Es wurden noch keine Umsätze importiert: {reason} Ein weiterer Klick versucht es erneut.',
@@ -6740,4 +6739,12 @@ export const de = {
   'sa.dash.billedUnavailable': 'Der Rechnungsbetrag ist nur mit dem Recht Abrechnung sichtbar oder konnte nicht gelesen werden.',
   'sa.dash.firstInvoice':      'Erstrechnung (Pauschale)',
   'partner.connect.error.serverError': 'Beim Verbinden ist auf unserer Seite ein Fehler aufgetreten. Es wurde nichts gespeichert — bitte erneut versuchen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.earnings.createdBody':  'Diese Fahrer standen nicht in Ihrer Fahrerliste, aber in den Uber-Umsätzen. Der Import hat sie als inaktive Fahrer angelegt, damit die Umsätze einen Namen haben: {names}. Bitte prüfen Sie sie auf der Fahrer-Seite.',
+  'import.earnings.createdTitle': 'Vom Import angelegte Fahrer',
+  'import.earnings.linkedBody':   'Diese Uber-Fahrer wurden über den Namen mit Fahrern verknüpft, die Sie schon hatten: {names}.',
+  'import.earnings.linkedTitle':  'Mit vorhandenen Fahrern verknüpft',
+  'import.earnings.unmatched':    'Reidey kann diese Uber-Fahrer keinem eigenen Fahrer zuordnen und sendet deshalb keine Umsätze für sie: {names}. Dafür wurde nichts importiert. Lassen Sie sie bei Reidey zuordnen und klicken Sie erneut; der Import macht dort weiter.',
+  'import.earnings.unresolved':   'Für diese Fahrer konnte kein Fahrer angelegt oder verknüpft werden: {names}. Der Name fehlt oder gehört schon zu einem anderen Reidey-Fahrer. Prüfen Sie die Fahrer und klicken Sie erneut; der Import macht dort weiter.',
 } as const;
