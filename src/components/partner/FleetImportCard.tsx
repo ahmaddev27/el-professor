@@ -30,7 +30,7 @@ import {
   type ImportScope,
   type LegOutcome,
 } from '../../lib/partnerFleetImport';
-import { runEarningsBackfill, type BackfillProgress, type EarningsOutcome } from '../../lib/uberBackfill';
+import { runEarningsBackfill, type BackfillProgress, type EarningsOutcome, type UnmatchedGap } from '../../lib/uberBackfill';
 import { supabaseBackfillDeps } from '../../lib/uberBackfillDeps';
 import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, formatDate } from '../ui';
 
@@ -145,12 +145,18 @@ function EarningsView({ outcome }: { outcome: EarningsOutcome }) {
   const title = t('import.earnings.title');
   const body = earningsBody(outcome, t);
   const tone = outcome.status === 'done' || outcome.status === 'nothing' ? 'positive'
-    : outcome.status === 'unavailable' ? 'neutral' : outcome.status === 'stopped' ? 'caution' : 'critical';
+    : outcome.status === 'unavailable' ? 'neutral'
+    : outcome.status === 'stopped' || outcome.status === 'gap' ? 'caution' : 'critical';
   const drivers = outcome.status === 'done' || outcome.status === 'stopped' || outcome.status === 'failed'
-    ? outcome : null;
+    || outcome.status === 'gap' ? outcome : null;
   return (
     <div className="space-y-3">
       <Alert tone={tone} title={title}>{body}</Alert>
+      {drivers && drivers.unmatched.length > 0 ? (
+        <Alert tone="critical" title={t('import.earnings.gapTitle')}>
+          {t('import.earnings.gapBody', { names: drivers.unmatched.map(g => gapEntry(g, t)).join(', ') })}
+        </Alert>
+      ) : null}
       {drivers && drivers.created.length > 0 ? (
         <Alert tone="caution" title={t('import.earnings.createdTitle')}>
           {t('import.earnings.createdBody', { names: drivers.created.join(', ') })}
@@ -165,8 +171,17 @@ function EarningsView({ outcome }: { outcome: EarningsOutcome }) {
   );
 }
 
+/** `Name` or `Name (trips: 12)`: the count is Reidey's, shown only when it sent one. */
+function gapEntry(gap: UnmatchedGap, t: Translate): string {
+  return gap.trips === null ? gap.name : t('import.earnings.gapEntry', { name: gap.name, trips: String(gap.trips) });
+}
+
 function earningsBody(o: EarningsOutcome, t: Translate): string {
   switch (o.status) {
+    case 'gap':
+      return t('import.earnings.gap', {
+        from: formatDate(o.from), to: formatDate(o.to), days: String(o.days), rows: String(o.rows),
+      });
     case 'done':
       return o.resumed && o.days === 0
         ? t('import.earnings.upToDate', { to: formatDate(o.to) })
@@ -180,7 +195,7 @@ function earningsBody(o: EarningsOutcome, t: Translate): string {
         ? t('import.earnings.stoppedAfter', { through: formatDate(o.through), rows: String(o.rows) })
         : t('import.earnings.stoppedNone');
     case 'failed': {
-      const reason = o.reason === 'import.earnings.unmatched' || o.reason === 'import.earnings.unresolved'
+      const reason = o.reason === 'import.earnings.unresolved'
         ? t(o.reason, { names: o.detail ?? '' })
         : `${t(o.reason)}${o.detail ? ` (${o.detail})` : ''}`;
       return o.through

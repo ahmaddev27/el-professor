@@ -6745,6 +6745,11 @@ export const de = {
   'import.earnings.createdTitle': 'Vom Import angelegte Fahrer',
   'import.earnings.linkedBody':   'Diese Uber-Fahrer wurden über den Namen mit Fahrern verknüpft, die Sie schon hatten: {names}.',
   'import.earnings.linkedTitle':  'Mit vorhandenen Fahrern verknüpft',
-  'import.earnings.unmatched':    'Reidey kann diese Uber-Fahrer keinem eigenen Fahrer zuordnen und sendet deshalb keine Umsätze für sie: {names}. Dafür wurde nichts importiert. Lassen Sie sie bei Reidey zuordnen und klicken Sie erneut; der Import macht dort weiter.',
   'import.earnings.unresolved':   'Für diese Fahrer konnte kein Fahrer angelegt oder verknüpft werden: {names}. Der Name fehlt oder gehört schon zu einem anderen Reidey-Fahrer. Prüfen Sie die Fahrer und klicken Sie erneut; der Import macht dort weiter.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.earnings.gap':      'Umsätze vom {from} bis {to} importiert, aber mit Lücke: {days} Tage geprüft, {rows} Zeilen angelegt. Für die unten genannten Fahrer kamen keine Umsätze an.',
+  'import.earnings.gapBody':  'Reidey kann diese Uber-Fahrer keinem eigenen Fahrer zuordnen und sendet deshalb keine Umsätze für sie. Für sie wurde nichts importiert, ihre Umsätze fehlen: {names}.',
+  'import.earnings.gapEntry': '{name} (Fahrten: {trips})',
+  'import.earnings.gapTitle': 'Keine Umsätze für diese Fahrer',
 } as const;

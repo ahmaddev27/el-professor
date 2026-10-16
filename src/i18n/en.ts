@@ -6689,6 +6689,11 @@ export const en: PartialDictionary = {
   'import.earnings.createdTitle': 'Drivers created by the import',
   'import.earnings.linkedBody':   'These Uber earners were linked by name to drivers you already had: {names}.',
   'import.earnings.linkedTitle':  'Linked to existing drivers',
-  'import.earnings.unmatched':    'Reidey cannot match these Uber earners to any of its own drivers, so it sends no earnings for them: {names}. Nothing was imported for them. Have them matched at Reidey and click again; the import carries on from there.',
   'import.earnings.unresolved':   'No driver could be created or linked for these earners: {names}. The name is missing or already belongs to another Reidey driver. Check the drivers and click again; the import carries on from there.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.earnings.gap':      'Earnings from {from} to {to} imported, but with a gap: {days} days checked, {rows} rows created. No earnings arrived for the drivers named below.',
+  'import.earnings.gapBody':  'Reidey cannot match these Uber earners to any of its own drivers, so it sends no earnings for them. Nothing was imported for them and their earnings are missing: {names}.',
+  'import.earnings.gapEntry': '{name} (trips: {trips})',
+  'import.earnings.gapTitle': 'No earnings for these drivers',
 };

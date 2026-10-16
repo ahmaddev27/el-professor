@@ -47,10 +47,17 @@
  * - `unmatched_at_reidey`: Reidey could not resolve the Uber earner to any
  *   driver of its own, so it sends NO money and no id for them. There is
  *   nothing to attach to a driver, and creating one would only hide that the
- *   earnings are missing. This still stops the import, named.
+ *   earnings are missing. They used to stop the run, which protected nothing
+ *   (no money was ever in play for them) and withheld every matched driver's
+ *   history for good when the earner had left the fleet. Owner, 16.10.2026:
+ *   the earnings must be pulled. So the run imports what Reidey sent and the
+ *   outcome carries these earners (`unmatched`, with their trip counts) and the
+ *   status `gap`, which is never a clean success: the money for them did not
+ *   arrive and the operator is told so by name. Like the created drivers, the
+ *   list survives a later piece failing.
  *
- * The unmatched check comes first, so a run that is going to stop creates no
- * driver on the way.
+ * A gap is reported by the run that met it. Resume has no state, so a later
+ * click that starts after those days does not see the earner again.
  */
 import type { TranslationKey } from '../i18n';
 import {
@@ -97,7 +104,17 @@ export type ResolveResult =
   | { ok: false; reason: TranslationKey; detail?: string };
 
 /** The drivers an import made or matched on its own, for the operator to check. */
-export interface ResolvedDrivers {
+/** An Uber earner Reidey could not place: no earnings arrived for them. */
+export interface UnmatchedGap {
+  name: string;
+  uberDriverUuid: string | null;
+  /** Summed over the pieces that named them; null when Reidey sent no count. */
+  trips: number | null;
+}
+
+export interface Findings {
+  /** Earners for whom no earnings were imported. */
+  unmatched: UnmatchedGap[];
   created: string[];
   linked: string[];
 }
@@ -125,18 +142,35 @@ export type BackfillProgress =
   | { phase: 'importing'; day: string; last: string; rows: number };
 
 export type EarningsOutcome =
-  | ({ status: 'done'; from: string; to: string; days: number; rows: number; resumed: boolean } & ResolvedDrivers)
+  | ({ status: 'done'; from: string; to: string; days: number; rows: number; resumed: boolean } & Findings)
+  /** Everything Reidey sent is imported, and at least one earner had nothing to import: not a clean success. */
+  | ({ status: 'gap'; from: string; to: string; days: number; rows: number; resumed: boolean } & Findings)
   | { status: 'nothing' }
   /** Not started, on purpose: the company has income of its own. */
   | { status: 'unavailable'; reason: TranslationKey }
-  | ({ status: 'stopped'; through: string | null; rows: number } & ResolvedDrivers)
+  | ({ status: 'stopped'; through: string | null; rows: number } & Findings)
   | ({
     status: 'failed'; reason: TranslationKey; detail?: string;
     /** Last day that is safely in the table, or null when nothing was written. */
     through: string | null; rows: number;
-  } & ResolvedDrivers);
+  } & Findings);
 
-const NONE: ResolvedDrivers = { created: [], linked: [] };
+const NONE: Findings = { created: [], linked: [], unmatched: [] };
+
+const sameEarner = (a: UnmatchedGap, b: UnmatchedEarner) =>
+  a.uberDriverUuid !== null && b.uberDriverUuid !== null ? a.uberDriverUuid === b.uberDriverUuid : a.name === b.name;
+
+/** Adds one piece's unmatched earners; an earner met again has their trips summed. */
+function noteUnmatched(findings: Findings, earners: readonly UnmatchedEarner[]): void {
+  for (const earner of earners) {
+    const known = findings.unmatched.find(g => sameEarner(g, earner));
+    if (!known) {
+      findings.unmatched.push({ name: earner.name, uberDriverUuid: earner.uberDriverUuid, trips: earner.trips });
+    } else if (earner.trips !== null) {
+      known.trips = (known.trips ?? 0) + earner.trips;
+    }
+  }
+}
 
 const PAUSE_MS = 300;
 
@@ -194,7 +228,7 @@ async function importDays(
   let done: string | null = null;
   let rowCount = 0;
   let days = 0;
-  const drivers: ResolvedDrivers = { created: [], linked: [] };
+  const drivers: Findings = { created: [], linked: [], unmatched: [] };
   for (let day = start; day <= through; day = addDaysIso(day, DAYS_PER_PIECE)) {
     if (deps.shouldStop()) return { status: 'stopped', through: done, rows: rowCount, ...drivers };
     const reach = addDaysIso(day, DAYS_PER_PIECE - 1);
@@ -209,7 +243,8 @@ async function importDays(
     done = last;
     await deps.sleep(PAUSE_MS);
   }
-  return { status: 'done', from: start, to: through, days, rows: rowCount, resumed, ...drivers };
+  const status = drivers.unmatched.length > 0 ? 'gap' : 'done';
+  return { status, from: start, to: through, days, rows: rowCount, resumed, ...drivers };
 }
 
 type Piece =
@@ -222,7 +257,7 @@ type Piece =
  * `drivers` the moment the database answers.
  */
 async function placeUnlinked(
-  deps: BackfillDeps, unlinked: UnlinkedDriver[], drivers: ResolvedDrivers,
+  deps: BackfillDeps, unlinked: UnlinkedDriver[], drivers: Findings,
 ): Promise<Extract<Piece, { ok: false }> | null> {
   const resolved = await deps.resolve(unlinked);
   if (!resolved.ok) return resolved;
@@ -233,13 +268,11 @@ async function placeUnlinked(
 }
 
 async function importPiece(
-  deps: BackfillDeps, from: string, to: string, drivers: ResolvedDrivers,
+  deps: BackfillDeps, from: string, to: string, drivers: Findings,
 ): Promise<Piece> {
   const pulled = await deps.pull(from, to, 'day');
   if (!pulled.ok) return pulled;
-  if (pulled.unmatched.length > 0) {
-    return { ok: false, reason: 'import.earnings.unmatched', detail: pulled.unmatched.map(u => u.name).join(', ') };
-  }
+  noteUnmatched(drivers, pulled.unmatched);
   const unlinked = findUnlinked(pulled.weeks, pulled.links);
   if (unlinked.length > 0) {
     const refused = await placeUnlinked(deps, unlinked, drivers);

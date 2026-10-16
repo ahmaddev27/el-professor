@@ -172,6 +172,7 @@ export async function runFleetImport(
 
 function legSucceeded(o: FleetOutcome): boolean {
   if (o.scope !== 'earnings') return o.status === 'done';
+  // A gap (an earner with no earnings) is deliberately not a clean success.
   return o.earnings.status === 'done' || o.earnings.status === 'nothing';
 }
 
@@ -179,5 +180,7 @@ function legSucceeded(o: FleetOutcome): boolean {
 export function overallStatus(outcomes: readonly FleetOutcome[]): 'success' | 'partial' | 'failed' {
   const done = outcomes.filter(legSucceeded).length;
   if (done === outcomes.length && done > 0) return 'success';
-  return done > 0 ? 'partial' : 'failed';
+  // A gap imported everything Reidey sent: partial, never failed and never success.
+  const gap = outcomes.some(o => o.scope === 'earnings' && o.earnings.status === 'gap');
+  return done > 0 || gap ? 'partial' : 'failed';
 }
