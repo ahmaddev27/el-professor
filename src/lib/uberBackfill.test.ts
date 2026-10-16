@@ -22,6 +22,7 @@ interface World {
   unmatched: { value: string[] };
   unmatchedTrips: { value: number | null };
   negativePromotion: { value: boolean };
+  negativeCash: { value: boolean };
   resolveCalls: Array<Array<{ externalDriverId: string; name: string }>>;
   resolveAnswer: { value: 'created' | 'skipped' | 'refused' };
 }
@@ -39,6 +40,7 @@ function world(dataStart: string | null = DATA_START): World {
     unmatched: { value: [] as string[] },
     unmatchedTrips: { value: null as number | null },
     negativePromotion: { value: false },
+    negativeCash: { value: false },
     resolveCalls: [] as World['resolveCalls'],
     resolveAnswer: { value: 'created' as World['resolveAnswer']['value'] },
   };
@@ -63,6 +65,7 @@ function world(dataStart: string | null = DATA_START): World {
         }
         const d = driver(fare);
         if (w.negativePromotion.value) d.promotionCents = -500;
+        if (w.negativeCash.value) d.cashCents = -500;
         return { segment: seg, drivers: fare > 0 ? [d] : [] };
       });
       const noLink = w.unlinked.value && !w.linkMade.value;
@@ -218,16 +221,26 @@ describe('runEarningsBackfill', () => {
     expect(gap[0].trips).toBeGreaterThan(2); // more than one piece named them
   });
 
-  it('imports the day despite a negative figure and lists it, so it is never dropped quietly', async () => {
+  it('stores a negative promotion as a row, so the day is complete and nothing is listed', async () => {
     const x = world();
     x.negativePromotion.value = true;
+    const out = await runEarningsBackfill(x.deps);
+    const days = diffDaysIso(DATA_START, THROUGH) + 1;
+    expect(x.income).toHaveLength(days * 2); // the fare and the clawed-back promotion
+    expect(out.status).toBe('done');
+    expect((out as { skipped: unknown[] }).skipped).toHaveLength(0);
+  });
+
+  it('imports the day despite a negative CASH figure and lists it, so it is never dropped quietly', async () => {
+    const x = world();
+    x.negativeCash.value = true;
     const out = await runEarningsBackfill(x.deps);
     // The other figures of the day are written: the sign no longer loses the day.
     expect(x.income).toHaveLength(diffDaysIso(DATA_START, THROUGH) + 1);
     expect(out.status).toBe('gap');
     const skipped = (out as { skipped: Array<{ type: string; cents: number; day: string }> }).skipped;
     expect(skipped).toHaveLength(diffDaysIso(DATA_START, THROUGH) + 1);
-    expect(skipped[0]).toMatchObject({ type: 'aktionen', cents: -500, day: DATA_START });
+    expect(skipped[0]).toMatchObject({ type: 'bargeld', cents: -500, day: DATA_START });
   });
 
   it('keeps the drivers it created in the report when a later piece fails', async () => {

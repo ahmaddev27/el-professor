@@ -37,6 +37,18 @@
  *    be refused when the live figure differs from the stored base, are the
  *    owner's decisions and are not taken here.
  *
+ * 5. **The salary is never negative; what a period's clawbacks exceed its
+ *    earnings by is shown, not carried.** Negative Uber fares, promotions and
+ *    tips are stored (`income_amount_check`, 20261016170000) and reduce the
+ *    period's Umsatz/Trinkgeld like any other row. Before that they were refused
+ *    and the totals overstated. The floor is applied to the TOTAL, so a reversed
+ *    tip and a positive revenue share net against each other (all of it is the
+ *    same driver's money). The shortfall is `unrecovered`; carrying it into the
+ *    next period is a larger design and is deliberately not done here.
+ *    A salary row that already exists is untouched: its stored `amount_due` and
+ *    `netto_salary` are frozen, and this only changes the live recomputation
+ *    the screens display (rule 4).
+ *
  * Nothing in this module reads a clock, a locale or the database.
  */
 
@@ -122,6 +134,26 @@ export function salaryDueState(row: SalaryBaseRow, totalPaid: number | string | 
   };
 }
 
+/** The columns of an `income` row a salary sums. */
+export interface IncomeAmountRow {
+  type: string;
+  amount: number | string;
+}
+
+/**
+ * The sum of `amount` over the rows of the given types, in the same float
+ * arithmetic the screen always used (`sum + Number(amount)`).
+ *
+ * **Every row counts, whatever its sign.** A negative Uber fare, promotion or
+ * tip is a stored row since 20261016170000, and a total that skipped it would
+ * overstate what the driver earned by exactly what Uber took back. Do not clamp
+ * a row here, and do not clamp the sum: the floor belongs to the salary
+ * (`calcSalaryFromIncome`), not to the revenue.
+ */
+export function sumIncomeAmount(rows: readonly IncomeAmountRow[], types: readonly string[]): number {
+  return rows.filter(row => types.includes(row.type)).reduce((sum, row) => sum + Number(row.amount), 0);
+}
+
 /** The income side of one driver's period, already summed by type. */
 export interface SalaryIncomeInput {
   /** Umsatz + Aktionen. */
@@ -135,18 +167,35 @@ export interface SalaryIncomeInput {
 export interface SalaryFromIncome {
   salaryRatio: number;
   revenueShare: number;
-  /** `(Umsatz + Aktionen) × ratio + Trinkgeld`. */
+  /** `(Umsatz + Aktionen) × ratio + Trinkgeld`, and never below zero. */
   amountDue: number;
+  /**
+   * What the period's clawbacks took beyond what the period earned: the amount
+   * that could not be taken off the salary, in salary euros, rounded to cents.
+   * Zero when the salary is not floored. Display only (rule 5); not carried to
+   * the next period.
+   */
+  unrecovered: number;
 }
 
 /**
- * Rule 2, as one function so it can be pinned by a test.
+ * Rule 2, as one function so it can be pinned by a test — and rule 5.
  *
  * Tips are added at 100 % and never scaled by the ratio — the one part of this
  * formula a plausible-looking refactor gets wrong.
+ *
+ * Negative Uber figures are stored since 16.10.2026, so `revenue` and `tips`
+ * can be below zero and the formula can go below zero. German payroll has no
+ * negative wage: the salary is floored at zero and the shortfall is reported in
+ * `unrecovered`. The formula is exactly the old one wherever it is not
+ * negative (no rounding is added to it); the floor and the remainder are the
+ * only new behaviour. A result within half a cent of zero is float noise, not
+ * a shortfall (MONEY_EPSILON).
  */
 export function calcSalaryFromIncome(input: SalaryIncomeInput): SalaryFromIncome {
   const salaryRatio = input.salaryRatio ?? DEFAULT_SALARY_RATIO;
   const revenueShare = input.revenue * salaryRatio;
-  return { salaryRatio, revenueShare, amountDue: revenueShare + input.tips };
+  const raw = revenueShare + input.tips;
+  const unrecovered = raw < -MONEY_EPSILON ? Math.round(-raw * 100) / 100 : 0;
+  return { salaryRatio, revenueShare, amountDue: raw > 0 ? raw : 0, unrecovered };
 }

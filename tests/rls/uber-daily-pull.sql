@@ -642,6 +642,37 @@ BEGIN
     'ERR 42501 (no hint) | ERR 42501 (no hint)');
 END $$;
 
+-- ─── 11. the scheduled writer stores a negative fare, promotion and tip ────
+--
+--  (20261016170000) The same rule as income-import-uber.sql section 8, through
+--  the system writer, which carries its own copy of the amount clause.
+
+DO $$
+DECLARE
+  co_b  constant uuid := 'c0000000-0000-4000-8000-00000000000b';
+  v_run text;
+  v_cnt integer;
+BEGIN
+  v_run := _ud_claim(co_b, _ud_day(10));
+  PERFORM _ud_rec(1101, 'a negative promotion and a negative tip are written beside a positive fare',
+    _ud_sys(v_run, jsonb_build_array(
+      _ud_row('1001', 'umsatz',    '80.00',  _ud_day(10), 4),
+      _ud_row('1001', 'aktionen',  '-20.00', _ud_day(10)),
+      _ud_row('1001', 'trinkgeld', '-5.50',  _ud_day(10)))),
+    '%"ok": true%"inserted": 3%', true);
+  PERFORM _ud_rec(1102, 'they are stored with their sign, and the day sums to what Uber kept',
+    (SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type) || ' = ' || sum(amount)::text
+       FROM income WHERE company_id = co_b AND source = 'uber' AND date = _ud_day(10)),
+    'aktionen:-20.00 trinkgeld:-5.50 umsatz:80.00 = 54.50');
+
+  v_run := _ud_claim(co_b, _ud_day(10), 'recheck');
+  v_cnt := (SELECT count(*) FROM income WHERE company_id = co_b);
+  PERFORM _ud_rec(1103, 'a negative cash figure is still refused by the writer, and nothing is written',
+    _ud_sys(v_run, jsonb_build_array(_ud_row('1001', 'bargeld', '-3.00', _ud_day(10)))) || ' / ' ||
+    (SELECT count(*) FROM income WHERE company_id = co_b)::text,
+    '{"ok": false, "reason": "invalid_request"} / ' || v_cnt::text);
+END $$;
+
 -- ─── result ────────────────────────────────────────────────────────────────
 
 DO $$

@@ -81,10 +81,9 @@ export function parseCents(value: unknown, signed = false): number | null {
 export type FigureType = 'umsatz' | 'aktionen' | 'trinkgeld' | 'bargeld';
 
 /**
- * A figure Reidey sent below zero: a refunded fare, a clawed-back promotion, a
- * reversed tip, a cash adjustment. `income.amount` is `CHECK (amount >= 0)` and
- * every weekly total sums it, so such a figure cannot be stored as a row; it is
- * carried here instead, so it is reported and never silently dropped.
+ * A figure Reidey sent below zero that is NOT stored: only a negative `bargeld`
+ * (a cash adjustment) is left, see `figureBecomesRow`. It is carried here so it
+ * is reported and never silently dropped.
  */
 export interface NegativeFigure {
   externalDriverId: string;
@@ -105,12 +104,37 @@ const FIGURES: ReadonlyArray<{
   { type: 'bargeld', field: 'cashCents' },
 ];
 
-/** Every figure below zero among `drivers`, in driver then type order. */
+/**
+ * The types whose negative figure is stored as a row (16.10.2026): a refunded
+ * fare, a clawed-back promotion, a reversed tip. `income_amount_check` admits a
+ * negative for exactly these, and only on `source = 'uber'`.
+ *
+ * `bargeld` is deliberately NOT here. Its negative would reach the till
+ * (Bargeldbestand, Overview cash panel, `bar_zuruck`) as cash that left, and an
+ * Uber cash adjustment is not known to be a movement of cash out of the
+ * company's till; a wrong till is worse than a refused figure, so it is
+ * reported on the run and the screens instead.
+ */
+export const NEGATIVE_STORABLE_TYPES: readonly FigureType[] = ['umsatz', 'aktionen', 'trinkgeld'];
+
+/**
+ * Whether a figure becomes an income row. Zero is no row (except a `umsatz` of
+ * 0 that carries trips); a positive is always a row; a negative only for the
+ * types above. One rule for the browser import, the scheduled pull and the
+ * summary, so they cannot disagree about which rows exist.
+ */
+export function figureBecomesRow(type: FigureType, cents: number, trips: number | null): boolean {
+  if (cents > 0) return true;
+  if (cents < 0) return NEGATIVE_STORABLE_TYPES.includes(type);
+  return type === 'umsatz' && (trips ?? 0) > 0;
+}
+
+/** Every figure below zero that is not stored, in driver then type order. */
 export function negativeFigures(drivers: readonly UberDriverEarnings[]): NegativeFigure[] {
   const found: NegativeFigure[] = [];
   for (const d of drivers) {
     for (const { type, field } of FIGURES) {
-      if (d[field] < 0) found.push({ externalDriverId: d.externalDriverId, name: d.name, type, cents: d[field] });
+      if (d[field] < 0 && !NEGATIVE_STORABLE_TYPES.includes(type)) found.push({ externalDriverId: d.externalDriverId, name: d.name, type, cents: d[field] });
     }
   }
   return found;

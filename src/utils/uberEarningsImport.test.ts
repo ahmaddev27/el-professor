@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addDaysIso,
   centsToDecimal,
+  figureBecomesRow,
   isWeekSegment,
   mondayOf,
   parseCents,
@@ -291,18 +292,32 @@ describe('figures below zero: read, reported, never a row', () => {
       .toEqual({ ok: false, problem: 'amount_invalid' });
   });
 
-  it('writes no row for a negative figure and keeps the driver\'s other rows', () => {
-    const w = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ fare: '10.00', tips: '0.00', cash: '0.00', promotion: '-12.00' })]);
-    expect(buildImportRows([w]).map(r => [r.type, r.amount])).toEqual([['umsatz', '10.00']]);
+  it('writes a negative fare, promotion and tip as rows with their sign, and no row for negative cash', () => {
+    const w = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ fare: '-3.00', tips: '-1.50', cash: '-20.00', promotion: '-12.00' })]);
+    expect(buildImportRows([w]).map(r => [r.type, r.amount])).toEqual([
+      ['umsatz', '-3.00'], ['aktionen', '-12.00'], ['trinkgeld', '-1.50']]);
   });
 
-  it('lists every negative figure with its day, and the preview totals equal the rows', () => {
+  it('keeps the other rows beside a negative one', () => {
+    const w = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ fare: '10.00', tips: '0.00', cash: '0.00', promotion: '-12.00' })]);
+    expect(buildImportRows([w]).map(r => [r.type, r.amount])).toEqual([['umsatz', '10.00'], ['aktionen', '-12.00']]);
+  });
+
+  it('lists only the figure that is not stored (cash), and the preview totals equal the rows', () => {
     const w = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ promotion: '-12.00', cash: '-20.00' })]);
     const listed = skippedFigures([w]);
-    expect(listed.map(f => [f.type, f.cents, f.day])).toEqual([
-      ['aktionen', -1200, '2026-10-12'], ['bargeld', -2000, '2026-10-12']]);
+    expect(listed.map(f => [f.type, f.cents, f.day])).toEqual([['bargeld', -2000, '2026-10-12']]);
     const total = summarizeByDriver([w], {})[0];
-    expect([total.promotionCents, total.cashCents]).toEqual([0, 0]);
+    // The promotion is a row and lowers the total; the cash figure is not and does not.
+    expect([total.promotionCents, total.cashCents]).toEqual([-1200, 0]);
+  });
+
+  it('figureBecomesRow: the one rule behind every builder', () => {
+    expect(figureBecomesRow('aktionen', -1, null)).toBe(true);
+    expect(figureBecomesRow('bargeld', -1, null)).toBe(false);
+    expect(figureBecomesRow('bargeld', 1, null)).toBe(true);
+    expect(figureBecomesRow('umsatz', 0, 3)).toBe(true);
+    expect(figureBecomesRow('aktionen', 0, 3)).toBe(false);
   });
 
   it('labels a skipped figure in German money and date', () => {

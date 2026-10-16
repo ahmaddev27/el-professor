@@ -6754,8 +6754,8 @@ export const en: PartialDictionary = {
   'settings.uberPull.runs.gapOther':       '{count} days were imported with a gap',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'import.earnings.skippedBody':         'Uber reports a negative amount for these items (a refund, clawback or correction). Earnings cannot store negative amounts, so they were not imported and are missing from the totals: {items}. Please check them and adjust the payroll by hand if needed.',
-  'import.earnings.skippedTitle':        'Negative amounts not imported',
+  'import.earnings.skippedBody':         'Uber reports a negative cash amount for these items (an adjustment). It is not stored because it would change the cash balance, so it is missing from the totals: {items}. Please check it and book it by hand if needed.',
+  'import.earnings.skippedTitle':        'Negative cash amounts not imported',
   'settings.uberPull.runs.skippedNames': 'Negative amounts not imported: {items}',
   'sa.deletion.accounts':     'Login accounts that will be deleted',
   'sa.deletion.accountsFree': 'These e-mail addresses can be registered again afterwards.',
@@ -6783,4 +6783,10 @@ export const en: PartialDictionary = {
   'sa.deletion.salaries':     'Salaries',
   'sa.deletion.total':        'Records in total',
   'sa.deletion.trips':        'Fahrtenbuch trips',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sal.unrecovered.body':     'Negative Uber amounts (refund, clawback, tip reversal) took off more in this period than the driver earned. The salary is not negative but set to 0.00 €; the amount below could not be taken off. It is not carried into the next period.',
+  'sal.unrecovered.cellHint': 'Clawbacks exceed earnings: salary set to 0.00 €',
+  'sal.unrecovered.item':     '{name}: {amount} not recovered ({period})',
+  'sal.unrecovered.title':    'Clawbacks exceed earnings',
 };

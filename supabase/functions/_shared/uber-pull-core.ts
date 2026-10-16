@@ -41,6 +41,7 @@ import {
   centsToDecimal,
   mondayOf,
   negativeFigures,
+  figureBecomesRow,
   type NegativeFigure,
   type UberDriverEarnings,
   type UnmatchedEarner,
@@ -243,8 +244,7 @@ export function buildDayRows(day: string, drivers: readonly UberDriverEarnings[]
   for (const driver of drivers) {
     for (const { type, field } of TYPES) {
       const cents = driver[field];
-      const tripsOnly = type === 'umsatz' && cents === 0 && (driver.trips ?? 0) > 0;
-      if (cents <= 0 && !tripsOnly) continue;
+      if (!figureBecomesRow(type, cents, driver.trips)) continue;
       rows.push({
         external_driver_id: driver.externalDriverId,
         type,

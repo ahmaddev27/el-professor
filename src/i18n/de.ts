@@ -6810,8 +6810,8 @@ export const de = {
   'settings.uberPull.runs.gapOther':       '{count} Tage wurden mit Lücke eingetragen',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'import.earnings.skippedBody':         'Uber meldet für diese Posten einen negativen Betrag (Rückbuchung, Rückforderung oder Korrektur). Umsätze können keine negativen Beträge speichern, deshalb wurden sie nicht übernommen und fehlen in den Summen: {items}. Bitte prüfen Sie sie und passen Sie die Abrechnung bei Bedarf von Hand an.',
-  'import.earnings.skippedTitle':        'Negative Beträge nicht übernommen',
+  'import.earnings.skippedBody':         'Uber meldet für diese Posten einen negativen Bargeld-Betrag (Korrektur). Er wird nicht gespeichert, weil er den Bargeldbestand verändern würde, und fehlt deshalb in den Summen: {items}. Bitte prüfen Sie ihn und buchen Sie ihn bei Bedarf von Hand.',
+  'import.earnings.skippedTitle':        'Negative Bargeld-Beträge nicht übernommen',
   'settings.uberPull.runs.skippedNames': 'Negative Beträge nicht übernommen: {items}',
   'sa.deletion.accounts':     'Anmeldekonten, die gelöscht werden',
   'sa.deletion.accountsFree': 'Diese E-Mail-Adressen sind danach wieder frei und können neu registriert werden.',
@@ -6839,4 +6839,10 @@ export const de = {
   'sa.deletion.salaries':     'Gehälter',
   'sa.deletion.total':        'Datensätze insgesamt',
   'sa.deletion.trips':        'Fahrten im Fahrtenbuch',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sal.unrecovered.body':     'Negative Uber-Beträge (Rückbuchung, Rückforderung, Trinkgeld-Storno) haben in diesem Zeitraum mehr abgezogen, als der Fahrer verdient hat. Das Gehalt wird nicht negativ, sondern auf 0,00 € gesetzt; der Betrag unten konnte nicht abgezogen werden. Er wird nicht in den nächsten Zeitraum übertragen.',
+  'sal.unrecovered.cellHint': 'Rückbuchungen übersteigen den Verdienst: Gehalt auf 0,00 € gesetzt',
+  'sal.unrecovered.item':     '{name}: {amount} nicht verrechnet ({period})',
+  'sal.unrecovered.title':    'Rückbuchungen übersteigen den Verdienst',
 } as const;
