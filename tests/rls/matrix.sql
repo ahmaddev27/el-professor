@@ -3699,6 +3699,14 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('partner_earners_resolve(administrator)',
      $q$SELECT partner_earners_resolve('reidey', '[]'::jsonb) ->> 'ok'$q$,
      'PTTTYYT', NULL),
+    -- Undo the Uber import (20261016120000). Administrator only and refused in a
+    -- platform session, like the fleet import; a dry run is the call that can
+    -- be probed here without deleting the fixtures. Company B's administrator
+    -- is a legitimate caller with nothing to undo, so that cell reads Y and
+    -- measures the gate and not the lookup. The deleting run has its own file.
+    ('uber_import_undo(administrator, dry run)',
+     $q$SELECT uber_import_undo(true) ->> 'ok'$q$,
+     'PTTTYYT', NULL),
 
     -- M4's door (20261008140000). It is service_role's. The two reviewer
     -- decisions that used to sit beside it were dropped by 20261013110000: a
@@ -3887,7 +3895,8 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- Refused in both modes with the same reason as the earnings import.
     ('partner_drivers_import(administrator)',                         'TT'),
     ('partner_vehicles_import(administrator)',                        'TT'),
-    ('partner_earners_resolve(administrator)',                        'TT')
+    ('partner_earners_resolve(administrator)',                        'TT'),
+    ('uber_import_undo(administrator, dry run)',                       'TT')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3927,7 +3936,8 @@ BEGIN
       ('income_import_uber(confirmed link of A)'),
       ('partner_drivers_import(administrator)'),
       ('partner_vehicles_import(administrator)'),
-      ('partner_earners_resolve(administrator)')
+      ('partner_earners_resolve(administrator)'),
+      ('uber_import_undo(administrator, dry run)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

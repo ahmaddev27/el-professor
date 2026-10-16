@@ -841,4 +841,31 @@ BEGIN
   UPDATE company_settings SET notification_email = NULL WHERE company_id = co_a;
 END $$;
 
+-- ─── 8. uber_import_undo (20261016120000) ───────────────────────────────────
+--
+-- Administrator only, and `current_role_permits` is not the gate: a supervisor
+-- holds can_edit on every page and is refused all the same, which is the one
+-- probe that tells the administrator gate from a page gate. Deleting is
+-- uber-import-undo.sql's; this is who may ask.
+
+DO $$
+DECLARE
+  admin_a      constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  supervisor_a constant uuid := 'a0000000-0000-4000-8000-000000000009';
+  editor_a     constant uuid := 'a0000000-0000-4000-8000-000000000002';
+  viewer_a     constant uuid := 'a0000000-0000-4000-8000-000000000003';
+  v_call       constant text := 'SELECT uber_import_undo(true) ->> ''ok''';
+BEGIN
+  PERFORM _pk_ok('undo import: the administrator may preview',
+    _pk_try(admin_a, v_call) = 'true');
+  PERFORM _pk_ok('undo import: a supervisor, who may edit every page, may not',
+    _pk_try(supervisor_a, v_call) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('undo import: an editor may not',
+    _pk_try(editor_a, v_call) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('undo import: a viewer may not',
+    _pk_try(viewer_a, v_call) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('undo import: the supervisor''s real run is refused too, before the name is read',
+    _pk_try(supervisor_a, 'SELECT uber_import_undo(false, ''Test A'', ''{"income":0,"drivers":0,"cars":0}''::jsonb)::text') LIKE 'ERR 42501%');
+END $$;
+
 ROLLBACK;

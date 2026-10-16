@@ -20,6 +20,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { PartnerConnectCard } from '../components/partner/PartnerConnectCard';
 import { FleetImportCard } from '../components/partner/FleetImportCard';
+import { UndoImportCard } from '../components/partner/UndoImportCard';
 import { Alert, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from '../components/ui';
 
 export default function DataImportPage() {
@@ -99,6 +100,9 @@ export default function DataImportPage() {
         <FleetImportCard connected={connected} mayImport={mayImport} />
       )}
 
+      {/* Shown to administrators only, and independent of the connection: undoing
+          an import is not disconnecting, and it must stay reachable after one. */}
+      {isAdmin ? <UndoImportCard mayUndo={mayImport} /> : null}
     </div>
   );
 }
