@@ -146,7 +146,23 @@ function EarningsView({ outcome }: { outcome: EarningsOutcome }) {
   const body = earningsBody(outcome, t);
   const tone = outcome.status === 'done' || outcome.status === 'nothing' ? 'positive'
     : outcome.status === 'unavailable' ? 'neutral' : outcome.status === 'stopped' ? 'caution' : 'critical';
-  return <Alert tone={tone} title={title}>{body}</Alert>;
+  const drivers = outcome.status === 'done' || outcome.status === 'stopped' || outcome.status === 'failed'
+    ? outcome : null;
+  return (
+    <div className="space-y-3">
+      <Alert tone={tone} title={title}>{body}</Alert>
+      {drivers && drivers.created.length > 0 ? (
+        <Alert tone="caution" title={t('import.earnings.createdTitle')}>
+          {t('import.earnings.createdBody', { names: drivers.created.join(', ') })}
+        </Alert>
+      ) : null}
+      {drivers && drivers.linked.length > 0 ? (
+        <Alert tone="neutral" title={t('import.earnings.linkedTitle')}>
+          {t('import.earnings.linkedBody', { names: drivers.linked.join(', ') })}
+        </Alert>
+      ) : null}
+    </div>
+  );
 }
 
 function earningsBody(o: EarningsOutcome, t: Translate): string {
@@ -164,7 +180,7 @@ function earningsBody(o: EarningsOutcome, t: Translate): string {
         ? t('import.earnings.stoppedAfter', { through: formatDate(o.through), rows: String(o.rows) })
         : t('import.earnings.stoppedNone');
     case 'failed': {
-      const reason = o.reason === 'import.earnings.blocked'
+      const reason = o.reason === 'import.earnings.unmatched' || o.reason === 'import.earnings.unresolved'
         ? t(o.reason, { names: o.detail ?? '' })
         : `${t(o.reason)}${o.detail ? ` (${o.detail})` : ''}`;
       return o.through

@@ -8,7 +8,8 @@ import { supabase } from './supabase';
 import type { TranslationKey } from '../i18n';
 import { normalizePartnerReason } from '../utils/uberPeriods';
 import { readPullAnswer, readImportAnswer } from '../utils/uberEarningsImport';
-import type { BackfillDeps, BackfillState, PullResult, WriteResult } from './uberBackfill';
+import type { UnlinkedDriver } from '../utils/uberEarningsImport';
+import type { BackfillDeps, BackfillState, PullResult, ResolveResult, WriteResult } from './uberBackfill';
 
 const PULL_REASON_KEYS: Record<string, TranslationKey> = {
   not_authorized: 'inc.uber.err.notAuthorized',
@@ -86,6 +87,42 @@ async function write(rows: unknown[]): Promise<WriteResult> {
   }
 }
 
+/** The names in one array of `{ name }` objects, or null if it is anything else. */
+function namesOf(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const names: string[] = [];
+  for (const item of value) {
+    const name = (item as { name?: unknown } | null)?.name;
+    if (typeof name !== 'string') return null;
+    names.push(name);
+  }
+  return names;
+}
+
+/** Anything but the exact shape is a failure: "nothing created" is a claim. */
+function readResolveAnswer(data: unknown): ResolveResult {
+  const a = (data ?? {}) as { ok?: unknown; created?: unknown; linked?: unknown; skipped?: unknown };
+  const created = namesOf(a.created);
+  const linked = namesOf(a.linked);
+  const skipped = namesOf(a.skipped);
+  if (a.ok !== true || !created || !linked || !skipped) return { ok: false, reason: 'inc.uber.err.generic' };
+  return { ok: true, created, linked, skipped };
+}
+
+async function resolve(earners: UnlinkedDriver[]): Promise<ResolveResult> {
+  try {
+    const p_earners = earners.map(e => ({ external_driver_id: e.externalDriverId, name: e.name }));
+    const { data, error } = await supabase.rpc('partner_earners_resolve', { p_partner: 'reidey', p_earners });
+    if (error) {
+      const hint = (error as { hint?: string }).hint ?? '';
+      return { ok: false, reason: IMPORT_HINT_KEYS[hint] ?? 'inc.uber.err.generic' };
+    }
+    return readResolveAnswer(data);
+  } catch {
+    return { ok: false, reason: 'inc.uber.err.generic' };
+  }
+}
+
 async function readState(): Promise<BackfillState | null> {
   try {
     const newest = await supabase.from('income').select('source_period_end')
@@ -106,6 +143,7 @@ export function supabaseBackfillDeps(shouldStop: () => boolean): BackfillDeps {
     readState,
     pull,
     write,
+    resolve,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     shouldStop,
   };

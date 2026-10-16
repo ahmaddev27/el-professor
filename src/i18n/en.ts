@@ -6656,7 +6656,6 @@ export const en: PartialDictionary = {
   'import.partialTitle': 'Partly imported',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'import.earnings.blocked':         'These drivers are not linked yet: {names}. Link them and click again; the import carries on from there.',
   'import.earnings.done':            'Earnings from {from} to {to}: {days} days checked, {rows} rows created.',
   'import.earnings.failedAfter':     'Earnings through {through} are imported ({rows} rows). It then stopped: {reason} Another click carries on from there.',
   'import.earnings.failedNone':      'No earnings were imported yet: {reason} Another click tries again.',
@@ -6684,4 +6683,12 @@ export const en: PartialDictionary = {
   'sa.dash.billedUnavailable': 'The invoice amount is only visible with the billing right, or could not be read.',
   'sa.dash.firstInvoice':      'First invoice (flat)',
   'partner.connect.error.serverError': 'Something failed on our side while connecting. Nothing was saved — please try again.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.earnings.createdBody':  'These drivers were not in your driver list but are in the Uber earnings. The import created them as inactive drivers so the earnings have a name to belong to: {names}. Please check them on the Drivers page.',
+  'import.earnings.createdTitle': 'Drivers created by the import',
+  'import.earnings.linkedBody':   'These Uber earners were linked by name to drivers you already had: {names}.',
+  'import.earnings.linkedTitle':  'Linked to existing drivers',
+  'import.earnings.unmatched':    'Reidey cannot match these Uber earners to any of its own drivers, so it sends no earnings for them: {names}. Nothing was imported for them. Have them matched at Reidey and click again; the import carries on from there.',
+  'import.earnings.unresolved':   'No driver could be created or linked for these earners: {names}. The name is missing or already belongs to another Reidey driver. Check the drivers and click again; the import carries on from there.',
 };
