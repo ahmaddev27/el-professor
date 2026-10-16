@@ -6808,4 +6808,9 @@ export const de = {
   'settings.uberPull.runs.gapNames':       'Keine Umsätze für: {names}',
   'settings.uberPull.runs.gapOne':         'Ein Tag wurde mit Lücke eingetragen',
   'settings.uberPull.runs.gapOther':       '{count} Tage wurden mit Lücke eingetragen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.earnings.skippedBody':         'Uber meldet für diese Posten einen negativen Betrag (Rückbuchung, Rückforderung oder Korrektur). Umsätze können keine negativen Beträge speichern, deshalb wurden sie nicht übernommen und fehlen in den Summen: {items}. Bitte prüfen Sie sie und passen Sie die Abrechnung bei Bedarf von Hand an.',
+  'import.earnings.skippedTitle':        'Negative Beträge nicht übernommen',
+  'settings.uberPull.runs.skippedNames': 'Negative Beträge nicht übernommen: {items}',
 } as const;

@@ -20,6 +20,8 @@ import {
   readImportAnswer,
   uberWindowLabel,
   readPullAnswer,
+  skippedFigureLabel,
+  skippedFigures,
   summarizeByDriver,
   weekNumberOf,
   type WeekEarnings,
@@ -113,7 +115,7 @@ describe('parseEarningsBody', () => {
   it.each([
     ['a float fare', { fare: 664.19 }, 'amount_invalid'],
     ['a comma fare', { fare: '664,19' }, 'amount_invalid'],
-    ['a negative fare', { fare: '-1.00' }, 'amount_invalid'],
+    ['a plus sign', { fare: '+1.00' }, 'amount_invalid'],
     ['a string driver id', { driver_id: '139' }, 'driver_id_invalid'],
     ['a fractional trip count', { trips: 6.5 }, 'trips_invalid'],
     ['a missing difference', { difference: undefined }, 'amount_invalid'],
@@ -257,15 +259,55 @@ describe('readPullAnswer: the screen trusts the function\'s reply only in full s
     expect(read?.weeks[0].segment).toEqual({ from: '2026-10-06', to: '2026-10-11', monday: '2026-10-05' });
     expect(read?.links['139'].driverName).toBe('Ahmed');
   });
-  it('refuses a refusal, a NaN figure, a negative fare and a segment across two weeks', () => {
+  it('refuses a refusal, a NaN figure and a segment across two weeks', () => {
     expect(readPullAnswer({ ok: false, reason: 'not_connected' })).toBeNull();
     expect(readPullAnswer(null)).toBeNull();
     const nan = good(); (nan.weeks[0].drivers[0] as { fareCents: number }).fareCents = NaN;
     expect(readPullAnswer(nan)).toBeNull();
-    const neg = good(); (neg.weeks[0].drivers[0] as { fareCents: number }).fareCents = -5;
-    expect(readPullAnswer(neg)).toBeNull();
+    const frac = good(); (frac.weeks[0].drivers[0] as { fareCents: number }).fareCents = 1.5;
+    expect(readPullAnswer(frac)).toBeNull();
     const across = good(); (across.weeks[0] as { to: string }).to = '2026-10-12';
     expect(readPullAnswer(across)).toBeNull();
+  });
+});
+
+describe('figures below zero: read, reported, never a row', () => {
+  const NEG = { fare: '-3.00', promotion: '-12.00', tips: '-1.50', cash: '-20.00' };
+
+  it.each([['fare', 'fareCents', -300], ['promotion', 'promotionCents', -1200],
+           ['tips', 'tipsCents', -150], ['cash', 'cashCents', -2000]])(
+    'a negative %s parses (Reidey signs all four)', (field, key, cents) => {
+      const r = parseEarningsBody(body([driverWire({ [field]: NEG[field as keyof typeof NEG] })]), '2026-10-06', '2026-10-12');
+      expect(r.ok && (r.value.drivers[0] as unknown as Record<string, number>)[key as string]).toBe(cents);
+    });
+
+  it('a signed zero is a plain zero', () => {
+    expect(parseCents('-0.00', true)).toBe(0);
+    expect(Object.is(parseCents('-0.00', true), 0)).toBe(true);
+  });
+
+  it('still refuses an amount that is not a decimal string', () => {
+    expect(parseEarningsBody(body([driverWire({ promotion: '--1.00' })]), '2026-10-06', '2026-10-12'))
+      .toEqual({ ok: false, problem: 'amount_invalid' });
+  });
+
+  it('writes no row for a negative figure and keeps the driver\'s other rows', () => {
+    const w = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ fare: '10.00', tips: '0.00', cash: '0.00', promotion: '-12.00' })]);
+    expect(buildImportRows([w]).map(r => [r.type, r.amount])).toEqual([['umsatz', '10.00']]);
+  });
+
+  it('lists every negative figure with its day, and the preview totals equal the rows', () => {
+    const w = week('2026-10-12', '2026-10-13', '2026-10-12', [driverWire({ promotion: '-12.00', cash: '-20.00' })]);
+    const listed = skippedFigures([w]);
+    expect(listed.map(f => [f.type, f.cents, f.day])).toEqual([
+      ['aktionen', -1200, '2026-10-12'], ['bargeld', -2000, '2026-10-12']]);
+    const total = summarizeByDriver([w], {})[0];
+    expect([total.promotionCents, total.cashCents]).toEqual([0, 0]);
+  });
+
+  it('labels a skipped figure in German money and date', () => {
+    const f = { externalDriverId: '1', name: 'Anna', type: 'aktionen' as const, cents: -1200, day: '2026-08-14' };
+    expect(skippedFigureLabel(f, c => `${c / 100} EUR`)).toBe('Anna: Aktionen -12 EUR (14.08.2026)');
   });
 });
 

@@ -11,6 +11,8 @@ import {
   canConfirmImport,
   findExistingIncome,
   findUnlinked,
+  skippedFigures,
+  skippedFigureLabel,
   groupByBusinessMonth,
   importRpcArgs,
   readImportAnswer,
@@ -157,10 +159,22 @@ async function failureReason(error: unknown): Promise<string | null> {
   const context = (error as { context?: unknown } | null)?.context;
   if (!(context instanceof Response)) return null;
   try {
-    const body = (await context.json()) as { reason?: unknown };
+    const body = (await context.clone().json()) as { reason?: unknown };
     return typeof body?.reason === 'string' ? body.reason : null;
   } catch {
     return null;
+  }
+}
+
+/** The fixed code beside a refusal's reason (`amount_invalid`, ...), or ''. */
+async function failureProblem(error: unknown): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (!(context instanceof Response)) return '';
+  try {
+    const body = (await context.clone().json()) as { problem?: unknown };
+    return typeof body?.problem === 'string' ? body.problem : '';
+  } catch {
+    return '';
   }
 }
 
@@ -233,6 +247,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
 
   const rows = useMemo(() => (pulled ? buildImportRows(pulled.weeks) : []), [pulled]);
   const unlinked = useMemo(() => (pulled ? findUnlinked(pulled.weeks, pulled.links) : []), [pulled]);
+  const skipped = useMemo(() => (pulled ? skippedFigures(pulled.weeks) : []), [pulled]);
   // Both causes stop the import and both are named: an earner Reidey cannot
   // place, and a Reidey driver nobody here has linked.
   const existingByWeek = useMemo(
@@ -266,8 +281,9 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
       const { data, error } = await supabase.functions.invoke('uber-earnings-pull', { body: { from, to } });
       if (mine !== generation.current) return;
       const body = data as
-        { reason?: string; partner_reason?: string; partner_detail?: string } | null;
+        { reason?: string; partner_reason?: string; partner_detail?: string; problem?: string } | null;
       const reason = error ? await failureReason(error) : body?.reason ?? null;
+      const problemCode = error ? await failureProblem(error) : body?.problem ?? '';
       const read = error || reason ? null : readPullAnswer(data);
       if (!read) {
         const partnerReason = reason === 'partner_refused' ? normalizePartnerReason(body?.partner_reason ?? '') : '';
@@ -285,7 +301,8 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
               : detail !== ''
                 ? t('inc.uber.err.partner.detail', { reason: partnerReason, detail })
                 : t('inc.uber.err.partner.generic', { reason: partnerReason })
-            : t(reason && PULL_REASON_KEYS[reason] ? PULL_REASON_KEYS[reason] : 'inc.uber.err.generic'),
+            : `${t(reason && PULL_REASON_KEYS[reason] ? PULL_REASON_KEYS[reason] : 'inc.uber.err.generic')}${
+              /^[a-z][a-z0-9_]{0,59}$/.test(problemCode) ? ` (${problemCode})` : ''}`,
         );
         setStage('range');
         return;
@@ -541,6 +558,14 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
         </DialogHeader>
 
         {problem && <Alert tone="critical" title={t('inc.uber.errorTitle')}>{problem}</Alert>}
+
+        {stage === 'preview' && skipped.length > 0 && (
+          <Alert tone="critical" title={t('import.earnings.skippedTitle')}>
+            {t('import.earnings.skippedBody', {
+              items: skipped.map(f => skippedFigureLabel(f, formatEuroCents)).join('; '),
+            })}
+          </Alert>
+        )}
 
         {(stage === 'range' || stage === 'pulling') && (
           <div className="grid grid-cols-1 gap-4">

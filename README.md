@@ -40,6 +40,8 @@ n_15.10.2026: the Umsätze list has Tag / Woche / Monat / Liste tabs (PR against
 
 > **16.10.2026 (branch `fix/daily-pull-gap`, not merged):** the scheduled Uber pull writes a day for the earners Reidey sent and records the ones it could not place on the run (`imported_with_gap`), instead of writing nothing. Details in HANDOFF.md.
 
+> **16.10.2026 (branch `fix/earnings-negative-amounts`, not merged):** Reidey's minus sign no longer rejects a whole day; negative figures are read, not stored (`income.amount >= 0`), and listed so they are never dropped silently; the specific refusal code is shown and logged. Details in HANDOFF.md.
+
 > **15.10.2026 (branch `feat/remove-free-trial`, not merged, SCHEMA_EPOCH 3):** the 14-day free trial is removed by the owner's decision. Access comes from an activation code or a recorded period only; `get_active_company_id()` now admits `status = 'active'`, and the migration moves every `trial` row first (measured on staging: 13 companies admitted before and after, none lost). Details in HANDOFF.md.
 > 15.10.2026: the capability matrix now gives `support` `companies.lifecycle` (D2) and all four staff roles `audit.read` (D3), by the owner's answers; see HANDOFF.md.
 > **15.10.2026 (branch `feat/one-button-fleet-import`, not merged):** the data import at `/datenimport` is one button that brings in drivers, vehicles and all Uber earnings from the first day, day by day, resumable. Details in HANDOFF.md.

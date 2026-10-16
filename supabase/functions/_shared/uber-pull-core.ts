@@ -40,6 +40,8 @@ import { addDays, berlinParts, parseSendTime } from './abrechnung-schedule-core.
 import {
   centsToDecimal,
   mondayOf,
+  negativeFigures,
+  type NegativeFigure,
   type UberDriverEarnings,
   type UnmatchedEarner,
 } from './uber-earnings-core.ts';
@@ -307,6 +309,11 @@ export interface DayPlan {
   rows: UberImportRow[];
   /** Earners Reidey could not place: no earnings arrived for them. */
   unmatched: UnmatchedNote[];
+  /**
+   * Figures below zero. `income.amount` cannot hold them, so they are not rows;
+   * they are recorded on the run beside the unmatched earners, never dropped.
+   */
+  skipped: NegativeFigure[];
   /** What a day with no rows is recorded as. */
   emptyOutcome: 'nothing_to_import' | 'imported_with_gap';
 }
@@ -324,10 +331,12 @@ export function planDay(
   linked: ReadonlySet<string>,
 ): DayPlan {
   const notes = unmatchedNotes(unmatched);
+  const skipped = negativeFigures(drivers).slice(0, MAX_UNMATCHED_NOTES);
   return {
     unlinked: driversWithRows(drivers, day).filter((d) => !linked.has(d.externalDriverId)).length,
     rows: buildDayRows(day, drivers),
     unmatched: notes,
-    emptyOutcome: notes.length > 0 ? GAP_OUTCOME : 'nothing_to_import',
+    skipped,
+    emptyOutcome: notes.length > 0 || skipped.length > 0 ? GAP_OUTCOME : 'nothing_to_import',
   };
 }

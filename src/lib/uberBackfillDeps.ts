@@ -40,7 +40,7 @@ const IMPORT_HINT_KEYS: Record<string, TranslationKey> = {
 };
 
 /** supabase-js hides the body of a non-2xx answer behind `error.context`. */
-type Failure = { ok?: boolean; reason?: string; partner_reason?: string };
+type Failure = { ok?: boolean; reason?: string; partner_reason?: string; problem?: string };
 
 async function bodyOf(error: unknown): Promise<Failure | null> {
   const context = (error as { context?: unknown } | null)?.context;
@@ -52,13 +52,19 @@ async function bodyOf(error: unknown): Promise<Failure | null> {
   }
 }
 
-function refusal(body: Failure | null): PullResult {
+export function refusal(body: Failure | null): PullResult {
   if (body?.reason === 'partner_refused') {
     const partner = normalizePartnerReason(body.partner_reason ?? '');
     const named = PARTNER_REASON_KEYS[partner];
     return named ? { ok: false, reason: named } : { ok: false, reason: 'inc.uber.err.generic', detail: partner };
   }
-  return { ok: false, reason: (body?.reason && PULL_REASON_KEYS[body.reason]) || 'inc.uber.err.generic' };
+  const reason = (body?.reason && PULL_REASON_KEYS[body.reason]) || 'inc.uber.err.generic';
+  // The edge function names WHY it could not read the answer (amount_invalid,
+  // driver_duplicated, ...). One sentence for thirteen causes made them
+  // indistinguishable on screen, so the fixed code travels with it.
+  return /^[a-z][a-z0-9_]{0,59}$/.test(body?.problem ?? '')
+    ? { ok: false, reason, detail: body?.problem }
+    : { ok: false, reason };
 }
 
 async function pull(from: string, to: string, granularity: 'week' | 'day'): Promise<PullResult> {

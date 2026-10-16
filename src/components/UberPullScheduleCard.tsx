@@ -6,7 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { germanDay } from '../../supabase/functions/_shared/abrechnung-schedule-core';
 import { isFailure, isGap } from '../../supabase/functions/_shared/uber-pull-core';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input } from './ui';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, formatEuroCents } from './ui';
 
 /**
  * The daily Uber pull (owner request 15.10.2026, which reverses his decision of
@@ -43,12 +43,17 @@ interface RunRow {
   driver_count: number;
   /** Earners Reidey could not place that day: no earnings arrived for them. */
   unmatched: Array<{ name: string; trips: number | null }>;
+  /** Figures below zero that were not imported: income.amount cannot hold them. */
+  skipped: Array<{ name: string; type: 'umsatz' | 'aktionen' | 'trinkgeld' | 'bargeld'; cents: number }>;
 }
 
 /** How many of the latest claims the card lists. */
 const RUNS_SHOWN = 14;
 
 const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed';
+
+/** Domain vocabulary: the four income types stay German in both languages. */
+const FIGURE_WORDS = { umsatz: 'Umsatz', aktionen: 'Aktionen', trinkgeld: 'Trinkgeld', bargeld: 'Bargeld' } as const;
 
 const OUTCOME_KEYS = {
   imported: 'settings.uberPull.outcome.imported',
@@ -103,7 +108,7 @@ const UberPullScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) => 
 
     const history = await supabase
       .from('uber_pull_runs')
-      .select('id, day_key, pass, outcome, detail, rows_written, rows_deleted, driver_count, unmatched')
+      .select('id, day_key, pass, outcome, detail, rows_written, rows_deleted, driver_count, unmatched, skipped')
       .eq('company_id', companyId)
       .order('day_key', { ascending: false })
       .order('claimed_at', { ascending: false })
@@ -304,6 +309,13 @@ const RunLine: React.FC<{ run: RunRow }> = ({ run }) => {
         <span className="min-w-0 break-words text-fg">
           {t('settings.uberPull.runs.gapNames', {
             names: run.unmatched.map((u) => (u.trips === null ? u.name : `${u.name} (${u.trips})`)).join(', '),
+          })}
+        </span>
+      )}
+      {gap && run.skipped.length > 0 && (
+        <span className="min-w-0 break-words text-fg">
+          {t('settings.uberPull.runs.skippedNames', {
+            items: run.skipped.map((f) => `${f.name}: ${FIGURE_WORDS[f.type]} ${formatEuroCents(f.cents)}`).join('; '),
           })}
         </span>
       )}

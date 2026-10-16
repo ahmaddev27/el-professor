@@ -104,11 +104,24 @@ async function refusalReason(
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsFor(req) })
 
-  const respond = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), {
+  const respond = (body: unknown, status = 200) => {
+    // Every refusal passes here, and none of them left a trace: the screen showed
+    // one sentence and the container showed nothing. The reason and the problem
+    // are fixed codes (the partner's own reason is matched against a pattern
+    // before it gets this far); the token and the payload are never in `body`.
+    const refusal = body as { reason?: unknown; problem?: unknown; partner_reason?: unknown } | null
+    if (typeof refusal?.reason === 'string') {
+      console.log(JSON.stringify({
+        level: 'info', fn: 'uber-earnings-pull', status, reason: refusal.reason,
+        problem: typeof refusal.problem === 'string' ? refusal.problem : undefined,
+        partner_reason: typeof refusal.partner_reason === 'string' ? refusal.partner_reason : undefined,
+      }))
+    }
+    return new Response(JSON.stringify(body), {
       status,
       headers: { ...corsFor(req), 'Content-Type': 'application/json' },
     })
+  }
 
   if (req.method !== 'POST') return respond({ ok: false, reason: 'method_not_allowed' }, 405)
 

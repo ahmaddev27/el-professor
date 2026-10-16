@@ -6752,4 +6752,9 @@ export const en: PartialDictionary = {
   'settings.uberPull.runs.gapNames':       'No earnings for: {names}',
   'settings.uberPull.runs.gapOne':         'One day was imported with a gap',
   'settings.uberPull.runs.gapOther':       '{count} days were imported with a gap',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.earnings.skippedBody':         'Uber reports a negative amount for these items (a refund, clawback or correction). Earnings cannot store negative amounts, so they were not imported and are missing from the totals: {items}. Please check them and adjust the payroll by hand if needed.',
+  'import.earnings.skippedTitle':        'Negative amounts not imported',
+  'settings.uberPull.runs.skippedNames': 'Negative amounts not imported: {items}',
 };
