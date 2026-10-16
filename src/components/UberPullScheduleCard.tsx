@@ -5,7 +5,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { germanDay } from '../../supabase/functions/_shared/abrechnung-schedule-core';
-import { isFailure } from '../../supabase/functions/_shared/uber-pull-core';
+import { isFailure, isGap } from '../../supabase/functions/_shared/uber-pull-core';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input } from './ui';
 
 /**
@@ -41,6 +41,8 @@ interface RunRow {
   rows_written: number;
   rows_deleted: number;
   driver_count: number;
+  /** Earners Reidey could not place that day: no earnings arrived for them. */
+  unmatched: Array<{ name: string; trips: number | null }>;
 }
 
 /** How many of the latest claims the card lists. */
@@ -50,6 +52,7 @@ const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled
 
 const OUTCOME_KEYS = {
   imported: 'settings.uberPull.outcome.imported',
+  imported_with_gap: 'settings.uberPull.outcome.imported_with_gap',
   nothing_to_import: 'settings.uberPull.outcome.nothing_to_import',
   blocked_unlinked: 'settings.uberPull.outcome.blocked_unlinked',
   blocked_unmatched: 'settings.uberPull.outcome.blocked_unmatched',
@@ -100,7 +103,7 @@ const UberPullScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) => 
 
     const history = await supabase
       .from('uber_pull_runs')
-      .select('id, day_key, pass, outcome, detail, rows_written, rows_deleted, driver_count')
+      .select('id, day_key, pass, outcome, detail, rows_written, rows_deleted, driver_count, unmatched')
       .eq('company_id', companyId)
       .order('day_key', { ascending: false })
       .order('claimed_at', { ascending: false })
@@ -223,6 +226,7 @@ interface RunHistoryProps {
 const RunHistory: React.FC<RunHistoryProps> = ({ runs, failures, loading, failed, onRetry }) => {
   const { t, tPlural } = useTranslation();
   if (loading) return null;
+  const gaps = runs.filter((run) => isGap(run.outcome)).length;
 
   let content: React.ReactNode;
   if (failed) {
@@ -247,6 +251,17 @@ const RunHistory: React.FC<RunHistoryProps> = ({ runs, failures, loading, failed
             {t('settings.uberPull.runs.failedBody')}
           </Alert>
         )}
+        {gaps > 0 && (
+          <Alert
+            tone="caution"
+            title={tPlural({
+              one: 'settings.uberPull.runs.gapOne',
+              other: 'settings.uberPull.runs.gapOther',
+            }, gaps)}
+          >
+            {t('settings.uberPull.runs.gapBody')}
+          </Alert>
+        )}
         <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0">
           {runs.map((run) => <RunLine key={run.id} run={run} />)}
         </ul>
@@ -265,10 +280,11 @@ const RunHistory: React.FC<RunHistoryProps> = ({ runs, failures, loading, failed
 const RunLine: React.FC<{ run: RunRow }> = ({ run }) => {
   const { t } = useTranslation();
   const failure = isFailure(run.outcome);
+  const gap = isGap(run.outcome);
   const outcomeKey = run.outcome && run.outcome in OUTCOME_KEYS
     ? OUTCOME_KEYS[run.outcome as keyof typeof OUTCOME_KEYS]
     : 'settings.uberPull.outcome.open';
-  const counts = run.outcome === 'imported'
+  const counts = run.outcome === 'imported' || gap
     ? t('settings.uberPull.runs.counts', { rows: run.rows_written, drivers: run.driver_count })
     : null;
 
@@ -276,13 +292,20 @@ const RunLine: React.FC<{ run: RunRow }> = ({ run }) => {
     <li className="grid grid-cols-1 gap-1 sm:flex sm:items-center sm:gap-3">
       <span className="tabular-nums font-medium">{germanDay(run.day_key)}</span>
       {run.pass === 'recheck' && <Badge tone="neutral">{t('settings.uberPull.runs.recheck')}</Badge>}
-      <Badge tone={failure ? 'critical' : 'positive'}>
-        {failure ? <AlertTriangle aria-hidden /> : <CheckCircle2 aria-hidden />}
+      <Badge tone={failure ? 'critical' : gap ? 'caution' : 'positive'}>
+        {failure || gap ? <AlertTriangle aria-hidden /> : <CheckCircle2 aria-hidden />}
         {t(outcomeKey)}
       </Badge>
       {counts && <span className="text-fg-subtle">{counts}</span>}
       {run.rows_deleted > 0 && (
         <span className="text-fg-subtle">{t('settings.uberPull.runs.replaced', { count: run.rows_deleted })}</span>
+      )}
+      {gap && run.unmatched.length > 0 && (
+        <span className="min-w-0 break-words text-fg">
+          {t('settings.uberPull.runs.gapNames', {
+            names: run.unmatched.map((u) => (u.trips === null ? u.name : `${u.name} (${u.trips})`)).join(', '),
+          })}
+        </span>
       )}
       {failure && run.detail && <span className="min-w-0 break-words text-fg-subtle">{run.detail}</span>}
     </li>

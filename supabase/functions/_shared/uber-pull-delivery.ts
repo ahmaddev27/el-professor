@@ -41,6 +41,11 @@
  * One operating day is one Reidey call and one `income_import_uber_system` call,
  * which is one transaction. Any failure before it writes nothing; a refusal in
  * it rolls the whole day back. The same all-or-nothing the button has.
+ *
+ * An earner Reidey could not place is not a reason to write nothing: Reidey sends
+ * no money for them. The day is written for the rest, the earners are recorded on
+ * the run first (`uber_pull_note_unmatched`) and the run settles
+ * `imported_with_gap`. `blocked_unmatched` is no longer produced here.
  */
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { logFailure } from './otp-core.ts';
@@ -48,10 +53,10 @@ import { PARTNER_ENDPOINT_VAR, partnerEndpoint } from './partner-endpoint.ts';
 import { openPartnerToken } from './partner-token-seal.ts';
 import { parseEarningsBody, type UberDriverEarnings, type UnmatchedEarner } from './uber-earnings-core.ts';
 import {
-  buildDayRows,
-  driversWithRows,
+  GAP_OUTCOME,
   outcomeOfRefusal,
   planCompany,
+  planDay,
   type UberPass,
   type UberPullCompany,
   type UberPullOutcome,
@@ -92,6 +97,8 @@ export interface UberPullRunReport {
   /** Of `imported`, the rechecks: a day pulled again with replace semantics. */
   replaced: number;
   already_claimed: number;
+  /** Days written with an earner Reidey could not place; counted in neither imported nor failed unless rows were written. */
+  gaps: number;
   failed: number;
   items: UberPullRunItem[];
 }
@@ -111,7 +118,7 @@ export async function runUberPullJob(
 ): Promise<UberPullRunReport> {
   const report: UberPullRunReport = {
     mode, companies_scanned: 0, companies_due: 0, claimed: 0, imported: 0,
-    replaced: 0, already_claimed: 0, failed: 0, items: [],
+    replaced: 0, already_claimed: 0, gaps: 0, failed: 0, items: [],
   };
 
   const endpoint = partnerEndpoint(Deno.env.get(PARTNER_ENDPOINT_VAR));
@@ -183,10 +190,12 @@ async function runCompany(
     ctx.report.claimed += 1;
     token ??= await openToken(ctx, companyId);
     const item = await pullOneDay(ctx, companyId, runId, task.day, task.pass, token);
-    if (item.result === 'imported') {
+    if (item.result === 'imported' || (item.result === GAP_OUTCOME && (item.rows ?? 0) > 0)) {
       ctx.report.imported += 1;
       if (task.pass === 'recheck') ctx.report.replaced += 1;
-    } else {
+    }
+    if (item.result === GAP_OUTCOME) ctx.report.gaps += 1;
+    if (item.result !== 'imported' && item.result !== GAP_OUTCOME) {
       ctx.report.failed += SUCCESS_RESULTS.has(item.result) ? 0 : 1;
     }
     ctx.report.items.push(item);
@@ -268,18 +277,21 @@ async function pullOneDay(
 
   const earnings = await fetchDay(ctx, companyId, token.value, day);
   if (!earnings.ok) return stop({ outcome: earnings.outcome, detail: earnings.detail });
-  if (earnings.unmatched.length > 0) {
-    return stop({ outcome: 'blocked_unmatched', drivers: earnings.unmatched.length });
-  }
-
-  const earners = driversWithRows(earnings.drivers, day);
   const links = await loadLinks(ctx.admin, companyId);
   if (links === null) return stop({ outcome: 'failed', detail: 'links_unreadable' });
-  const unlinked = earners.filter((d) => !links.has(d.externalDriverId));
-  if (unlinked.length > 0) return stop({ outcome: 'blocked_unlinked', drivers: unlinked.length });
+  const plan = planDay(day, earnings.drivers, earnings.unmatched, links);
+  if (plan.unlinked > 0) return stop({ outcome: 'blocked_unlinked', drivers: plan.unlinked });
 
-  const rows = buildDayRows(day, earnings.drivers);
-  if (rows.length === 0) return stop({ outcome: 'nothing_to_import' });
+  // An earner Reidey could not place sends no money, so the day is written for
+  // the rest. Their names go on the run BEFORE the rows: if they cannot be
+  // recorded the day is not written, rather than imported with its gap forgotten.
+  if (plan.unmatched.length > 0) {
+    const noted = await ctx.admin.rpc('uber_pull_note_unmatched', { p_run_id: runId, p_unmatched: plan.unmatched });
+    if (noted.error || noted.data !== true) return stop({ outcome: 'failed', detail: 'unmatched_unrecorded' });
+  }
+
+  const rows = plan.rows;
+  if (rows.length === 0) return stop({ outcome: plan.emptyOutcome });
 
   const written = await ctx.admin.rpc('income_import_uber_system', { p_run_id: runId, p_rows: rows });
   if (written.error) {
@@ -288,10 +300,12 @@ async function pullOneDay(
   }
   const answer = written.data as { ok?: boolean; reason?: string; inserted?: number; deleted?: number; drivers?: number };
   if (answer?.ok === true) {
-    return item('imported', { rows: answer.inserted ?? 0, deleted: answer.deleted ?? 0, drivers: answer.drivers ?? 0 });
+    return item(plan.unmatched.length > 0 ? GAP_OUTCOME : 'imported', {
+      rows: answer.inserted ?? 0, deleted: answer.deleted ?? 0, drivers: answer.drivers ?? 0,
+    });
   }
   const reason = typeof answer?.reason === 'string' ? answer.reason : 'unknown';
-  return stop({ outcome: outcomeOfRefusal(reason), detail: reason, drivers: earners.length });
+  return stop({ outcome: outcomeOfRefusal(reason), detail: reason, drivers: new Set(plan.rows.map((r) => r.external_driver_id)).size });
 }
 
 type Fetched =

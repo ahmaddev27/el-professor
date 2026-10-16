@@ -41,6 +41,7 @@ import {
   centsToDecimal,
   mondayOf,
   type UberDriverEarnings,
+  type UnmatchedEarner,
 } from './uber-earnings-core.ts';
 
 /** Uber's operating day starts here, in minutes after midnight Berlin time. */
@@ -74,7 +75,7 @@ export function completedOperatingDay(instant: Date): string {
 export type UberPass = 'first' | 'recheck';
 
 export type UberPullOutcome =
-  | 'imported' | 'nothing_to_import' | 'blocked_unlinked' | 'blocked_unmatched'
+  | 'imported' | 'imported_with_gap' | 'nothing_to_import' | 'blocked_unlinked' | 'blocked_unmatched'
   | 'already_imported' | 'not_connected' | 'seal_unreadable' | 'token_rejected'
   | 'partner_refused' | 'partner_unavailable' | 'partner_malformed'
   | 'company_blocked' | 'refused' | 'failed';
@@ -84,7 +85,19 @@ const SUCCESS_OUTCOMES: ReadonlySet<string> = new Set(['imported', 'nothing_to_i
 
 /** Anything but a success, and a claim with no outcome at all (a crash), is a failure a person must see. */
 export function isFailure(outcome: string | null): boolean {
-  return outcome === null || !SUCCESS_OUTCOMES.has(outcome);
+  return outcome === null || !(SUCCESS_OUTCOMES.has(outcome) || outcome === GAP_OUTCOME);
+}
+
+/**
+ * The day was written for every earner Reidey sent, and at least one earner it
+ * could not place has no earnings. Not a success, because money is missing, and
+ * not a failure, because the rows are there: the screen shows it as a third
+ * thing, with the names.
+ */
+export const GAP_OUTCOME = 'imported_with_gap';
+
+export function isGap(outcome: string | null): boolean {
+  return outcome === GAP_OUTCOME;
 }
 
 /** One company from `uber_pull_candidates`. */
@@ -156,7 +169,7 @@ export interface UberPullPlan {
  * `first` for the completed day unless a claim for it exists, whatever its
  * outcome: a failed day is not retried by the schedule (the button pulls it).
  * `recheck` for the day before it, only with the corrections switch on, only
- * when that day's first pass was IMPORTED, and only once.
+ * when that day's first pass was IMPORTED (with a gap or without), and only once.
  */
 export function planCompany(company: UberPullCompany, now: Date): UberPullPlan | null {
   const result = dueOccurrence(company, now);
@@ -171,7 +184,7 @@ export function planCompany(company: UberPullCompany, now: Date): UberPullPlan |
 
   const recheckDay = addDays(pullDay, -1);
   const firstImported = company.runs.some(
-    (r) => r.day_key === recheckDay && r.pass === 'first' && r.outcome === 'imported',
+    (r) => r.day_key === recheckDay && r.pass === 'first' && (r.outcome === 'imported' || r.outcome === GAP_OUTCOME),
   );
   if (company.replace_corrections && firstImported && !held(recheckDay, 'recheck')) {
     tasks.push({ day: recheckDay, pass: 'recheck' });
@@ -262,4 +275,59 @@ export function outcomeOfRefusal(reason: string): UberPullOutcome {
     case 'company_blocked': return 'company_blocked';
     default: return 'refused';
   }
+}
+
+/** One earner Reidey could not place, as the run records it. */
+export interface UnmatchedNote {
+  name: string;
+  trips: number | null;
+}
+
+/** At most this many are recorded on a run; the database refuses more. */
+export const MAX_UNMATCHED_NOTES = 200;
+
+/** Each earner once (by Uber uuid, else by name), in the order Reidey sent them. */
+export function unmatchedNotes(unmatched: readonly UnmatchedEarner[]): UnmatchedNote[] {
+  const seen = new Set<string>();
+  const notes: UnmatchedNote[] = [];
+  for (const earner of unmatched) {
+    const key = earner.uberDriverUuid ?? `name:${earner.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    notes.push({ name: earner.name, trips: earner.trips });
+  }
+  return notes.slice(0, MAX_UNMATCHED_NOTES);
+}
+
+/** What one pulled day comes to. The job acts on this and decides nothing itself. */
+export interface DayPlan {
+  /** Earners with money and no confirmed link: these still stop the day. */
+  unlinked: number;
+  /** The rows of every earner Reidey sent. Unmatched earners have none. */
+  rows: UberImportRow[];
+  /** Earners Reidey could not place: no earnings arrived for them. */
+  unmatched: UnmatchedNote[];
+  /** What a day with no rows is recorded as. */
+  emptyOutcome: 'nothing_to_import' | 'imported_with_gap';
+}
+
+/**
+ * An earner Reidey could not place used to stop the whole day, writing none of
+ * the matched drivers' rows. They sent no money for that earner, so nothing was
+ * protected by it: the day is written for the earners that were sent and the
+ * others are carried to the run's record (owner, 16.10.2026).
+ */
+export function planDay(
+  day: string,
+  drivers: readonly UberDriverEarnings[],
+  unmatched: readonly UnmatchedEarner[],
+  linked: ReadonlySet<string>,
+): DayPlan {
+  const notes = unmatchedNotes(unmatched);
+  return {
+    unlinked: driversWithRows(drivers, day).filter((d) => !linked.has(d.externalDriverId)).length,
+    rows: buildDayRows(day, drivers),
+    unmatched: notes,
+    emptyOutcome: notes.length > 0 ? GAP_OUTCOME : 'nothing_to_import',
+  };
 }
