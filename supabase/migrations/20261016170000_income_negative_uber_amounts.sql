@@ -14,7 +14,11 @@
   ## Scope: source = 'uber' and the three payroll types, nothing else
 
       amount >= 0
-      OR (source = 'uber' AND type IN ('umsatz', 'aktionen', 'trinkgeld'))
+      OR (COALESCE(source = 'uber', false) AND type IN ('umsatz', 'aktionen', 'trinkgeld'))
+
+  The COALESCE is load-bearing: a hand-typed row has source NULL, `NULL = 'uber'`
+  is NULL, and a CHECK treats NULL as a pass, so without it a negative typed row
+  would be admitted. The self-check below inserts one and requires the refusal.
 
   * Hand-typed rows (source IS NULL) keep the old rule: a person typing a
     negative is a mistake, and the Einnahmen screen has never offered one.
@@ -50,7 +54,7 @@
 ALTER TABLE public.income DROP CONSTRAINT IF EXISTS income_amount_check;
 ALTER TABLE public.income
   ADD CONSTRAINT income_amount_check
-  CHECK (amount >= 0 OR (source = 'uber' AND type IN ('umsatz', 'aktionen', 'trinkgeld')));
+  CHECK (amount >= 0 OR (COALESCE(source = 'uber', false) AND type IN ('umsatz', 'aktionen', 'trinkgeld')));
 
 COMMENT ON CONSTRAINT income_amount_check ON public.income IS
   'An amount is not negative, except a source = uber row of type umsatz, aktionen or trinkgeld (a refund, a clawback, a reversed tip). bargeld never goes below zero: it moves the till.';
@@ -106,7 +110,7 @@ BEGIN
   --    expression (income itself needs a company, a driver and a link).
   CREATE TEMP TABLE _neg_probe (amount numeric, source text, type text) ON COMMIT DROP;
   ALTER TABLE _neg_probe ADD CONSTRAINT p
-    CHECK (amount >= 0 OR (source = 'uber' AND type IN ('umsatz', 'aktionen', 'trinkgeld')));
+    CHECK (amount >= 0 OR (COALESCE(source = 'uber', false) AND type IN ('umsatz', 'aktionen', 'trinkgeld')));
   INSERT INTO _neg_probe VALUES (-1, 'uber', 'umsatz'), (-1, 'uber', 'aktionen'),
                                 (-1, 'uber', 'trinkgeld'), (0, NULL, 'bargeld');
   BEGIN
