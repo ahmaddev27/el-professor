@@ -2986,6 +2986,13 @@ VALUES (_mx_id('rpc_monthly_block', 'a'), _mx_co('a'), _mx_id('rpc_monthly_plan'
         'mx-rpc', 'MX-CAR', '2027-03-02 08:23+01', '2027-03-02 09:44+01', 81, 81)
 ON CONFLICT (id) DO NOTHING;
 
+-- The company platform_company_delete is probed against (20261016140000): it
+-- has to be marked deleted, or the function refuses before it reaches anything
+-- interesting. Every probe is rolled back, so each principal finds it again.
+INSERT INTO companies (id, name, slug, status)
+VALUES ('c0000000-0000-4000-8000-0000000000dd', 'MX Deleted', 'mx-deleted', 'deleted')
+ON CONFLICT (id) DO NOTHING;
+
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
 --
 -- `want` carries the seven principals of the columns above. `staff` carries the
@@ -3800,7 +3807,20 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
         'external_driver_id', '4711', 'type', 'umsatz', 'amount', '1.00',
         'date', '2026-01-05', 'week', 1, 'description', 'Woche 1 - Uber',
         'trip_count', NULL, 'period_start', '2026-01-05', 'period_end', '2026-01-11')))->>'inserted'$q$,
-     'PTYYYET', NULL);
+     'PTYYYET', NULL),
+
+    -- 20261016140000, deleting a company completely. Both ask companies.hard_delete,
+    -- the owner's alone, and write their own audit row. The preview is a read of
+    -- any company; the deletion needs one marked deleted, so the line points at
+    -- a throwaway company of its own (inserted above this list) and the probe is
+    -- rolled back with the rest. tests/rls/company-deletion.sql takes both
+    -- through every refusal, every kept account and the counts.
+    ('platform_company_delete_preview(company A)',
+     $q$SELECT platform_company_delete_preview('c0000000-0000-4000-8000-00000000000a')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_delete(company marked deleted, its name)',
+     $q$SELECT platform_company_delete('c0000000-0000-4000-8000-0000000000dd', 'MX Deleted')::text$q$,
+     'PNNNNNY', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -3896,7 +3916,14 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('partner_drivers_import(administrator)',                         'TT'),
     ('partner_vehicles_import(administrator)',                        'TT'),
     ('partner_earners_resolve(administrator)',                        'TT'),
+<<<<<<< HEAD
     ('uber_import_undo(administrator, dry run)',                       'TT')
+=======
+    -- An open context of either mode makes the guard on companies refuse the
+    -- delete (company_delete_context_open), and the function answers it as a
+    -- sentence: success false, so N, not an exception.
+    ('platform_company_delete(company marked deleted, its name)',     'NN')
+>>>>>>> 2d97b81 (feat(platform): delete a company completely, accounts and files included)
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3937,7 +3964,11 @@ BEGIN
       ('partner_drivers_import(administrator)'),
       ('partner_vehicles_import(administrator)'),
       ('partner_earners_resolve(administrator)'),
+<<<<<<< HEAD
       ('uber_import_undo(administrator, dry run)')
+=======
+      ('platform_company_delete(company marked deleted, its name)')
+>>>>>>> 2d97b81 (feat(platform): delete a company completely, accounts and files included)
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

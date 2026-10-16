@@ -31,6 +31,11 @@
  * step, so there is nothing for the function to add on the way — and the route
  * exists for the same reason `/invite` and `platform_staff_add` both do: one
  * audited door per team change, reachable with a token alone.
+ *
+ * `/delete-company` (20261016140000) is not about the team at all; it is here
+ * because a new function costs a line in PUBLIC_FUNCTIONS/FUNCTION_ENV and in
+ * the compose file, and this one already holds the service role and the audit
+ * helpers. See the route's own comment.
  */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2'
@@ -51,6 +56,18 @@ import {
   resolvePlatformStaffRoute,
   STAFF_ROLE_REFUSAL_DE,
 } from '../_shared/platform-staff-routes.ts'
+import {
+  batchObjects,
+  cleanupIsIncomplete,
+  decideAccounts,
+  incompleteCleanupMessage,
+  isAlreadyGone,
+  parseDeleteCompanyRequest,
+  parseDeletionAnswer,
+  restoredStaffProfile,
+  statusForDeleteReason,
+  type CleanupReport,
+} from '../_shared/company-delete-core.ts'
 import { matchPlatformEmailChangeRoute } from '../_shared/platform-email-change.ts'
 import { changeOwnPlatformEmail } from './email-change.ts'
 
@@ -143,7 +160,9 @@ Deno.serve(async (req: Request) => {
 
     if (!(await platformCan(supabaseUser, route.capability))) {
       await recordPlatformAudit(supabaseUser, { ...subject(), outcome: 'denied' })
-      throw new UserError('Keine Berechtigung: Nur Inhaber der Plattform dürfen das Plattform-Team verwalten.', 403)
+      throw new UserError(route.name === 'delete-company'
+        ? 'Keine Berechtigung: Nur Inhaber der Plattform dürfen ein Unternehmen endgültig löschen.'
+        : 'Keine Berechtigung: Nur Inhaber der Plattform dürfen das Plattform-Team verwalten.', 403)
     }
 
     recordPlatformFailure = () => recordPlatformAudit(supabaseUser, { ...subject(), outcome: 'error' })
@@ -399,6 +418,133 @@ Deno.serve(async (req: Request) => {
       })
 
       return json(req, 200, { success: true, staff: { user_id: userId, role } })
+    }
+
+
+    // =========================================================================
+    // DELETE COMPANY — the company, everything it owns, and its login accounts
+    // =========================================================================
+    //
+    // Order is the design:
+    //
+    //   1. `attempt` row, before anything is touched (auditedPlatformWrite).
+    //   2. `platform_company_delete`, called with the CALLER'S token, never the
+    //      service role: the open-context guard on `companies` reads auth.uid(),
+    //      and the service role has none, so the guard would wave it through.
+    //      One transaction: the company and every table it owns go, the same
+    //      counter the preview used proves nothing is left, and the database
+    //      writes its own audit row. A refusal (wrong name, a platform context
+    //      open, not marked deleted) happens here and nothing has changed.
+    //   3. Only then the things the database cannot reach: each login account
+    //      through GoTrue's admin API, and the stored files through the storage
+    //      API. Every account is asked about a second time (`account_is_platform_staff`)
+    //      because a staff row may have been added since the plan; a platform
+    //      account is never removed. A kept platform account has lost its
+    //      profile to the company's cascade, so it is written back without a
+    //      company.
+    //   4. Nothing in step 3 throws away the answer of step 2: a failure is
+    //      collected, and the route then answers an error that says the company
+    //      IS gone and which accounts remain, with an `error` outcome row that
+    //      names the accounts (ids, never addresses).
+    if (route.name === 'delete-company') {
+      const parsed = parseDeleteCompanyRequest(await req.json().catch(() => null))
+      if (!parsed.ok) throw new UserError(parsed.message, 400, 'invalid')
+      const { companyId, confirmName } = parsed.request
+
+      auditTarget.companyId = companyId
+      auditTarget.targetType = 'company'
+      auditTarget.targetId = companyId
+
+      const report = await platformWrite(async (): Promise<CleanupReport & { rowsTotal: number }> => {
+        const { data, error } = await supabaseUser.rpc('platform_company_delete', {
+          p_company_id: companyId,
+          p_confirm_name: confirmName,
+        })
+        if (error) throw error
+        const answered = parseDeletionAnswer(data)
+        if (!answered.ok) {
+          throw new UserError(answered.message, statusForDeleteReason(answered.reason), answered.reason)
+        }
+        const { answer } = answered
+
+        // From here the company is gone. The audit row names what was done and
+        // what was not, in ids and counts; the company's own name is in the
+        // database's row, written in the deletion's transaction.
+        auditTarget.before = { name_confirmed: true }
+        auditTarget.after = { rows_total: answer.rowsTotal, accounts: answer.accounts.length, files: answer.fileCount }
+
+        const decision = await decideAccounts(answer.accounts, id => accountIsPlatformStaff(supabaseAdmin, id))
+        const result: CleanupReport & { rowsTotal: number } = {
+          rowsTotal: answer.rowsTotal,
+          accountsDeleted: [],
+          accountsKept: decision.kept.map(a => ({ user_id: a.user_id, email: a.email, reason: a.keptBecause })),
+          accountsFailed: [],
+          profilesRestored: [],
+          profilesNotRestored: [],
+          filesRemoved: 0,
+          filesFailed: 0,
+        }
+
+        for (const account of decision.toDelete) {
+          const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(account.user_id)
+          if (deleteError && !isAlreadyGone(deleteError)) {
+            logFailure('platform-staff', 'delete-company-account', { user_id: account.user_id }, deleteError)
+            result.accountsFailed.push({ user_id: account.user_id, email: account.email })
+          } else {
+            result.accountsDeleted.push(account.user_id)
+          }
+        }
+
+        for (const kept of decision.kept) {
+          const { error: profileError } = await supabaseAdmin
+            .from('user_profiles')
+            .upsert(restoredStaffProfile(kept), { onConflict: 'user_id' })
+          if (profileError) {
+            logFailure('platform-staff', 'delete-company-restore-profile', { user_id: kept.user_id }, profileError)
+            result.profilesNotRestored.push(kept.user_id)
+          } else {
+            result.profilesRestored.push(kept.user_id)
+          }
+        }
+
+        for (const batch of batchObjects(answer.objects)) {
+          const { error: removeError } = await supabaseAdmin.storage.from(batch.bucket).remove(batch.names)
+          if (removeError) {
+            logFailure('platform-staff', 'delete-company-files', { bucket: batch.bucket, count: batch.names.length }, removeError)
+            result.filesFailed += batch.names.length
+          } else {
+            result.filesRemoved += batch.names.length
+          }
+        }
+
+        auditTarget.after = {
+          rows_total: answer.rowsTotal,
+          accounts_deleted: result.accountsDeleted,
+          accounts_kept: result.accountsKept.map(a => a.user_id),
+          accounts_failed: result.accountsFailed.map(a => a.user_id),
+          profiles_not_restored: result.profilesNotRestored,
+          files_removed: result.filesRemoved,
+          files_failed: result.filesFailed,
+        }
+
+        if (cleanupIsIncomplete(result)) {
+          throw new UserError(incompleteCleanupMessage(result), 502, 'cleanup_incomplete', {
+            company_deleted: true,
+            accounts_failed: result.accountsFailed,
+            files_failed: result.filesFailed,
+          })
+        }
+        return result
+      })
+
+      return json(req, 200, {
+        success: true,
+        company_deleted: true,
+        rows_total: report.rowsTotal,
+        accounts_deleted: report.accountsDeleted.length,
+        accounts_kept: report.accountsKept,
+        files_removed: report.filesRemoved,
+      })
     }
 
     recordPlatformFailure = null

@@ -10,7 +10,7 @@
  */
 import type { AuditCategory, PlatformCapability } from './platform-access.ts';
 
-export type PlatformStaffRouteName = 'invite' | 'resend-invite' | 'set-role';
+export type PlatformStaffRouteName = 'invite' | 'resend-invite' | 'set-role' | 'delete-company';
 
 export interface PlatformStaffRoute {
   name: PlatformStaffRouteName;
@@ -30,6 +30,12 @@ export const PLATFORM_STAFF_ROUTES: readonly PlatformStaffRoute[] = [
   // the `platform_staff.` namespace: `platform_audit_record` refuses that one
   // because the database writes it itself.
   { name: 'set-role',      method: 'POST', segment: '/set-role',      capability: 'staff.manage', category: 'write', action: 'platform_staff_role.set' },
+  // 20261016140000: deleting a company completely, login accounts and files
+  // included. It lives on this function rather than a new one because a new
+  // function costs a line in PUBLIC_FUNCTIONS/FUNCTION_ENV and in the compose
+  // file, and this one already holds the service role and the platform audit
+  // helpers. The capability is the owner's alone, and not `staff.manage`.
+  { name: 'delete-company', method: 'POST', segment: '/delete-company', capability: 'companies.hard_delete', category: 'write', action: 'platform_company_hard_delete.execute' },
 ];
 
 /**

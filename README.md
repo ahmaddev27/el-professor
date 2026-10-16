@@ -24,6 +24,8 @@ A multi-tenant SaaS for German taxi and Mietwagen fleets: import the monthly Fah
 A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Functions); there is no application server of our own. The UI is German and English with German as the fallback, and generated documents, domain terms, money and dates stay German (`41,47`, `DD.MM.YYYY`). Since 23.09.2026 every screen is converted: the engines name a dictionary key beside their German text (PR #112) and the last visible labels, buttons and empty states go through `t(...)`.
 
 ## Status
+
+> **16.10.2026 (branch `feat/delete-company-completely`, not merged):** a platform owner can delete a company completely from the panel - its data, every login account (so the addresses can be used again), its files and its partner connection - after a preview counted by the same database function that carries the deletion out. Platform staff accounts are never deleted. Details in HANDOFF.md.
 n_15.10.2026: the Umsätze list has Tag / Woche / Monat / Liste tabs (PR against `staging`); figures still come from `groupIncome`._
 
 > Last update: **13.10.2026**. A step counts once it is merged into `staging` and verified there.
