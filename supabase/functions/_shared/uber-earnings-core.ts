@@ -74,7 +74,46 @@ export function parseCents(value: unknown, signed = false): number | null {
   const negative = value.startsWith('-');
   const [whole, fraction = ''] = (negative ? value.slice(1) : value).split('.');
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-  return negative ? -cents : cents;
+  return negative && cents !== 0 ? -cents : cents;
+}
+
+/** The four kinds of income row an Uber figure becomes. Stored data: never translated. */
+export type FigureType = 'umsatz' | 'aktionen' | 'trinkgeld' | 'bargeld';
+
+/**
+ * A figure Reidey sent below zero: a refunded fare, a clawed-back promotion, a
+ * reversed tip, a cash adjustment. `income.amount` is `CHECK (amount >= 0)` and
+ * every weekly total sums it, so such a figure cannot be stored as a row; it is
+ * carried here instead, so it is reported and never silently dropped.
+ */
+export interface NegativeFigure {
+  externalDriverId: string;
+  /** Reidey's spelling. Display only. */
+  name: string;
+  type: FigureType;
+  /** Always below zero. */
+  cents: number;
+}
+
+const FIGURES: ReadonlyArray<{
+  type: FigureType;
+  field: 'fareCents' | 'promotionCents' | 'tipsCents' | 'cashCents';
+}> = [
+  { type: 'umsatz', field: 'fareCents' },
+  { type: 'aktionen', field: 'promotionCents' },
+  { type: 'trinkgeld', field: 'tipsCents' },
+  { type: 'bargeld', field: 'cashCents' },
+];
+
+/** Every figure below zero among `drivers`, in driver then type order. */
+export function negativeFigures(drivers: readonly UberDriverEarnings[]): NegativeFigure[] {
+  const found: NegativeFigure[] = [];
+  for (const d of drivers) {
+    for (const { type, field } of FIGURES) {
+      if (d[field] < 0) found.push({ externalDriverId: d.externalDriverId, name: d.name, type, cents: d[field] });
+    }
+  }
+  return found;
 }
 
 /** 66419 becomes "664.19": the plain decimal string the database casts once. */
@@ -203,10 +242,13 @@ function readDriver(raw: unknown): ParseOutcome<UberDriverEarnings> {
   if (r.uber_driver_uuid != null && typeof r.uber_driver_uuid !== 'string') {
     return { ok: false, problem: 'uuid_invalid' };
   }
-  const fare = parseCents(r.fare);
-  const promotion = parseCents(r.promotion);
-  const tips = parseCents(r.tips);
-  const cash = parseCents(r.cash);
+  // Reidey formats every figure with one function that prefixes '-' when the
+  // value is below zero, so any of the four can carry a sign (a refund, a
+  // clawback, a reversal, a cash adjustment). Refusing it lost the whole day.
+  const fare = parseCents(r.fare, true);
+  const promotion = parseCents(r.promotion, true);
+  const tips = parseCents(r.tips, true);
+  const cash = parseCents(r.cash, true);
   const net = parseCents(r.net_outstanding, true);
   const difference = parseCents(r.difference, true);
   if (fare === null || promotion === null || tips === null || cash === null

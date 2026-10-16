@@ -56,6 +56,13 @@
  *   arrive and the operator is told so by name. Like the created drivers, the
  *   list survives a later piece failing.
  *
+ * A figure BELOW ZERO (a refunded fare, a clawed-back promotion, a reversed tip,
+ * a cash adjustment) is read, but it is not a row: `income.amount` is
+ * `CHECK (amount >= 0)` and every weekly total sums it. It is listed on the
+ * outcome (`skipped`, with the day) and makes the status `gap`, so it is never
+ * dropped quietly. Dropping the CHECK is a decision about every income writer
+ * and every total, not this import's to take.
+ *
  * A gap is reported by the run that met it. Resume has no state, so a later
  * click that starts after those days does not see the earner again.
  */
@@ -69,6 +76,8 @@ import { completedOperatingDay } from '../../supabase/functions/_shared/uber-pul
 import {
   buildImportRows,
   findUnlinked,
+  skippedFigures,
+  type SkippedFigure,
   type DriverLinks,
   type IncomeImportRow,
   type UnlinkedDriver,
@@ -113,6 +122,8 @@ export interface UnmatchedGap {
 }
 
 export interface Findings {
+  /** Figures below zero that were not imported: `income.amount` cannot hold them. */
+  skipped: SkippedFigure[];
   /** Earners for whom no earnings were imported. */
   unmatched: UnmatchedGap[];
   created: string[];
@@ -155,7 +166,7 @@ export type EarningsOutcome =
     through: string | null; rows: number;
   } & Findings);
 
-const NONE: Findings = { created: [], linked: [], unmatched: [] };
+const NONE: Findings = { created: [], linked: [], unmatched: [], skipped: [] };
 
 const sameEarner = (a: UnmatchedGap, b: UnmatchedEarner) =>
   a.uberDriverUuid !== null && b.uberDriverUuid !== null ? a.uberDriverUuid === b.uberDriverUuid : a.name === b.name;
@@ -228,7 +239,7 @@ async function importDays(
   let done: string | null = null;
   let rowCount = 0;
   let days = 0;
-  const drivers: Findings = { created: [], linked: [], unmatched: [] };
+  const drivers: Findings = { created: [], linked: [], unmatched: [], skipped: [] };
   for (let day = start; day <= through; day = addDaysIso(day, DAYS_PER_PIECE)) {
     if (deps.shouldStop()) return { status: 'stopped', through: done, rows: rowCount, ...drivers };
     const reach = addDaysIso(day, DAYS_PER_PIECE - 1);
@@ -243,7 +254,7 @@ async function importDays(
     done = last;
     await deps.sleep(PAUSE_MS);
   }
-  const status = drivers.unmatched.length > 0 ? 'gap' : 'done';
+  const status = drivers.unmatched.length > 0 || drivers.skipped.length > 0 ? 'gap' : 'done';
   return { status, from: start, to: through, days, rows: rowCount, resumed, ...drivers };
 }
 
@@ -273,6 +284,7 @@ async function importPiece(
   const pulled = await deps.pull(from, to, 'day');
   if (!pulled.ok) return pulled;
   noteUnmatched(drivers, pulled.unmatched);
+  drivers.skipped.push(...skippedFigures(pulled.weeks));
   const unlinked = findUnlinked(pulled.weeks, pulled.links);
   if (unlinked.length > 0) {
     const refused = await placeUnlinked(deps, unlinked, drivers);

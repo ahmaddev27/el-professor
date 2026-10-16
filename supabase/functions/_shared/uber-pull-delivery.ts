@@ -290,6 +290,11 @@ async function pullOneDay(
     if (noted.error || noted.data !== true) return stop({ outcome: 'failed', detail: 'unmatched_unrecorded' });
   }
 
+  if (plan.skipped.length > 0) {
+    const noted = await ctx.admin.rpc('uber_pull_note_skipped', { p_run_id: runId, p_skipped: plan.skipped });
+    if (noted.error || noted.data !== true) return stop({ outcome: 'failed', detail: 'skipped_unrecorded' });
+  }
+
   const rows = plan.rows;
   if (rows.length === 0) return stop({ outcome: plan.emptyOutcome });
 
@@ -300,7 +305,7 @@ async function pullOneDay(
   }
   const answer = written.data as { ok?: boolean; reason?: string; inserted?: number; deleted?: number; drivers?: number };
   if (answer?.ok === true) {
-    return item(plan.unmatched.length > 0 ? GAP_OUTCOME : 'imported', {
+    return item(plan.unmatched.length > 0 || plan.skipped.length > 0 ? GAP_OUTCOME : 'imported', {
       rows: answer.inserted ?? 0, deleted: answer.deleted ?? 0, drivers: answer.drivers ?? 0,
     });
   }

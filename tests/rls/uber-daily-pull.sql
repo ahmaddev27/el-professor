@@ -588,6 +588,60 @@ BEGIN
     'ERR 23514 uber_pull_runs_outcome_check');
 END $$;
 
+-- ─── 10. a figure below zero is recorded, not dropped (20261016150000) ──────
+--
+--  income.amount cannot hold a negative, so the row builder skips it; the run
+--  records it, and a run with skipped figures is a gap exactly like one with
+--  unmatched earners. Company B is used because company A's days are claimed.
+
+DO $$
+DECLARE
+  co_b    constant uuid := 'c0000000-0000-4000-8000-00000000000b';
+  admin_a constant text := 'a0000000-0000-4000-8000-000000000001';
+  v_run   text;
+  v_only  text;
+BEGIN
+  v_run := _ud_claim(co_b, _ud_day(9));
+  PERFORM _ud_rec(1001, 'skipped figures are recorded on the open claim',
+    _ud_call('service', format(
+      $q$SELECT uber_pull_note_skipped(%L::uuid,
+         '[{"name": " Anna ", "type": "aktionen", "cents": -1200, "extra": "dropped"}]'::jsonb)::text$q$, v_run)),
+    'true');
+  PERFORM _ud_rec(1002, 'ROWS: the day is still written for the positive figures',
+    _ud_sys(v_run, jsonb_build_array(_ud_row('1001', 'umsatz', '80.00', _ud_day(9), 4))),
+    '%"ok": true%"inserted": 1%', true);
+  PERFORM _ud_rec(1003, 'RECORD: the run settled as a gap with only skipped figures, and holds them',
+    coalesce((SELECT outcome || ' ' || skipped::text FROM uber_pull_runs WHERE id = v_run::uuid), '<null>'),
+    'imported_with_gap [{"name": "Anna", "type": "aktionen", "cents": -1200}]');
+  PERFORM _ud_rec(1004, 'no negative row exists in income',
+    (SELECT count(*)::text FROM income WHERE company_id = co_b AND source = 'uber' AND amount < 0), '0');
+
+  v_only := _ud_claim(co_b, _ud_day(9), 'recheck');
+  PERFORM _ud_rec(1005, 'a gap cannot be settled for a claim that left nothing out',
+    _ud_call('service', format($q$SELECT uber_pull_settle(%L::uuid, 'imported_with_gap', NULL, 0)::text$q$, v_only)),
+    'false');
+  PERFORM _ud_call('service', format(
+    $q$SELECT uber_pull_note_skipped(%L::uuid, '[{"name": "Only", "type": "bargeld", "cents": -5}]'::jsonb)::text$q$, v_only));
+  PERFORM _ud_rec(1006, 'with a skipped figure it settles',
+    _ud_call('service', format($q$SELECT uber_pull_settle(%L::uuid, 'imported_with_gap', NULL, 0)::text$q$, v_only)),
+    'true');
+
+  PERFORM _ud_rec(1007, 'a non-negative amount is refused',
+    _ud_call('service', format($q$SELECT uber_pull_note_skipped(%L::uuid, '[{"name": "x", "type": "umsatz", "cents": 5}]'::jsonb)::text$q$, v_run)),
+    'ERR 22023 (no hint)');
+  PERFORM _ud_rec(1008, 'so is an unknown type',
+    _ud_call('service', format($q$SELECT uber_pull_note_skipped(%L::uuid, '[{"name": "x", "type": "tax", "cents": -5}]'::jsonb)::text$q$, v_run)),
+    'ERR 22023 (no hint)');
+  PERFORM _ud_rec(1009, 'a settled claim takes no more',
+    _ud_call('service', format($q$SELECT uber_pull_note_skipped(%L::uuid, '[{"name": "x", "type": "umsatz", "cents": -5}]'::jsonb)::text$q$, v_run)),
+    'false');
+  PERFORM _ud_rec(1010, 'anon and an administrator cannot note',
+    _ud_call('anon', format($q$SELECT uber_pull_note_skipped(%L::uuid, '[]'::jsonb)::text$q$, v_run))
+    || ' | ' ||
+    _ud_call(admin_a, format($q$SELECT uber_pull_note_skipped(%L::uuid, '[]'::jsonb)::text$q$, v_run)),
+    'ERR 42501 (no hint) | ERR 42501 (no hint)');
+END $$;
+
 -- ─── result ────────────────────────────────────────────────────────────────
 
 DO $$

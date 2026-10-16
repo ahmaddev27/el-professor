@@ -258,6 +258,13 @@ describe('a day with an earner Reidey could not place', () => {
     expect(planDay(day, [sent('1', 1000), sent('9', 500)], [nobody], linked).unlinked).toBe(1);
   });
 
+  it('lists a negative figure for the run and still writes the other rows of the driver', () => {
+    const plan = planDay(day, [{ ...sent('1', 1000), promotionCents: -500 }], [], linked);
+    expect(plan.rows.map((r) => r.type)).toEqual(['umsatz']);
+    expect(plan.skipped).toEqual([{ externalDriverId: '1', name: 'N1', type: 'aktionen', cents: -500 }]);
+    expect(plan.emptyOutcome).toBe('imported_with_gap');
+  });
+
   it('records each earner once and at most 200', () => {
     const many = Array.from({ length: 250 }, (_, i) => ({ name: 'E' + i, uberDriverUuid: 'u' + i, trips: null }));
     expect(unmatchedNotes(many)).toHaveLength(200);

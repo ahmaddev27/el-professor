@@ -37,6 +37,9 @@ import {
   type UnmatchedEarner,
   isWeekSegment,
   mondayOf,
+  negativeFigures,
+  type FigureType,
+  type NegativeFigure,
   type UberDriverEarnings,
   type WeekSegment,
 } from '../../supabase/functions/_shared/uber-earnings-core';
@@ -147,6 +150,28 @@ export function buildImportRows(weeks: readonly WeekEarnings[]): IncomeImportRow
   });
 }
 
+/** A figure below zero with the day it belongs to, as the screens list it. */
+export interface SkippedFigure extends NegativeFigure {
+  /** YYYY-MM-DD of the pulled stretch's first day. */
+  day: string;
+}
+
+/** Every negative figure in the pulled weeks. They are not rows: see `negativeFigures`. */
+export function skippedFigures(weeks: readonly WeekEarnings[]): SkippedFigure[] {
+  return weeks.flatMap(({ segment, drivers }) =>
+    negativeFigures(drivers).map(f => ({ ...f, day: segment.from })));
+}
+
+/** The four words are domain vocabulary and stay German in both languages. */
+const FIGURE_LABEL: Record<FigureType, string> = {
+  umsatz: 'Umsatz', aktionen: 'Aktionen', trinkgeld: 'Trinkgeld', bargeld: 'Bargeld',
+};
+
+/** `Anna: Aktionen -12,00 € (14.08.2026)`. The money formatter is the screen's own. */
+export function skippedFigureLabel(f: SkippedFigure, formatCents: (cents: number) => string): string {
+  return `${f.name}: ${FIGURE_LABEL[f.type]} ${formatCents(f.cents)} (${germanDate(f.day)})`;
+}
+
 export interface UnlinkedDriver {
   externalDriverId: string;
   /** Reidey's spelling, to tell the operator who to link. Display only. */
@@ -201,10 +226,12 @@ export function summarizeByDriver(
         fareCents: 0, promotionCents: 0, tipsCents: 0, cashCents: 0,
         trips: null, differenceCents: 0, hasDifference: false, rowCount: 0,
       };
-      row.fareCents += d.fareCents;
-      row.promotionCents += d.promotionCents;
-      row.tipsCents += d.tipsCents;
-      row.cashCents += d.cashCents;
+      // What the import writes: a figure below zero is not a row (see
+      // negativeFigures), so it must not lower a total the rows do not carry.
+      row.fareCents += Math.max(0, d.fareCents);
+      row.promotionCents += Math.max(0, d.promotionCents);
+      row.tipsCents += Math.max(0, d.tipsCents);
+      row.cashCents += Math.max(0, d.cashCents);
       if (d.trips !== null) row.trips = (row.trips ?? 0) + d.trips;
       row.differenceCents += d.differenceCents;
       row.hasDifference = row.hasDifference || d.differenceCents !== 0;
@@ -225,7 +252,6 @@ function isDriverShape(d: unknown): d is UberDriverEarnings {
   return typeof r.externalDriverId === 'string' && /^[0-9]+$/.test(r.externalDriverId)
     && typeof r.name === 'string'
     && CENT_FIELDS.every(f => Number.isSafeInteger(r[f]))
-    && [r.fareCents, r.promotionCents, r.tipsCents, r.cashCents].every(v => (v as number) >= 0)
     && (r.trips === null || (Number.isSafeInteger(r.trips) && (r.trips as number) >= 0));
 }
 

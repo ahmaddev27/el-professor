@@ -30,9 +30,10 @@ import {
   type ImportScope,
   type LegOutcome,
 } from '../../lib/partnerFleetImport';
+import { skippedFigureLabel } from '../../utils/uberEarningsImport';
 import { runEarningsBackfill, type BackfillProgress, type EarningsOutcome, type UnmatchedGap } from '../../lib/uberBackfill';
 import { supabaseBackfillDeps } from '../../lib/uberBackfillDeps';
-import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, formatDate } from '../ui';
+import { Alert, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, formatDate, formatEuroCents } from '../ui';
 
 /** Past this the list says how many more there are. */
 const SKIPPED_SHOWN = 20;
@@ -155,6 +156,13 @@ function EarningsView({ outcome }: { outcome: EarningsOutcome }) {
       {drivers && drivers.unmatched.length > 0 ? (
         <Alert tone="critical" title={t('import.earnings.gapTitle')}>
           {t('import.earnings.gapBody', { names: drivers.unmatched.map(g => gapEntry(g, t)).join(', ') })}
+        </Alert>
+      ) : null}
+      {drivers && drivers.skipped.length > 0 ? (
+        <Alert tone="critical" title={t('import.earnings.skippedTitle')}>
+          {t('import.earnings.skippedBody', {
+            items: drivers.skipped.map(f => skippedFigureLabel(f, formatEuroCents)).join('; '),
+          })}
         </Alert>
       ) : null}
       {drivers && drivers.created.length > 0 ? (
