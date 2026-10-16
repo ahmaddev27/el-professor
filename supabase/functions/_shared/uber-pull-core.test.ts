@@ -258,10 +258,23 @@ describe('a day with an earner Reidey could not place', () => {
     expect(planDay(day, [sent('1', 1000), sent('9', 500)], [nobody], linked).unlinked).toBe(1);
   });
 
-  it('lists a negative figure for the run and still writes the other rows of the driver', () => {
+  it('writes a negative promotion as a row, with its sign, and lists nothing', () => {
     const plan = planDay(day, [{ ...sent('1', 1000), promotionCents: -500 }], [], linked);
+    expect(plan.rows.map((r) => [r.type, r.amount])).toEqual([['umsatz', '10.00'], ['aktionen', '-5.00']]);
+    expect(plan.skipped).toEqual([]);
+    expect(plan.emptyOutcome).toBe('nothing_to_import');
+  });
+
+  it('a negative fare and a negative tip are rows too', () => {
+    const plan = planDay(day, [{ ...sent('1', -300), tipsCents: -150 }], [], linked);
+    expect(plan.rows.map((r) => [r.type, r.amount])).toEqual([['umsatz', '-3.00'], ['trinkgeld', '-1.50']]);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it('lists a negative CASH figure for the run and still writes the other rows of the driver', () => {
+    const plan = planDay(day, [{ ...sent('1', 1000), cashCents: -500 }], [], linked);
     expect(plan.rows.map((r) => r.type)).toEqual(['umsatz']);
-    expect(plan.skipped).toEqual([{ externalDriverId: '1', name: 'N1', type: 'aktionen', cents: -500 }]);
+    expect(plan.skipped).toEqual([{ externalDriverId: '1', name: 'N1', type: 'bargeld', cents: -500 }]);
     expect(plan.emptyOutcome).toBe('imported_with_gap');
   });
 

@@ -532,8 +532,8 @@ BEGIN
     _ui_call(admin_a, format($q$SELECT income_import_uber(%L::jsonb)::text$q$,
       jsonb_build_array(jsonb_set(_ui_row('1002', 'umsatz', '1.00', '2026-10-26', '2026-11-01', 4), '{amount}', '12.5'::jsonb))::text)),
     'ERR 22023 invalid_request');
-  PERFORM _ui_rec(31, 'a negative amount is refused',
-    _ui_call(admin_a, _ui_import(jsonb_build_array(_ui_row('1002', 'umsatz', '-1.00', '2026-10-26', '2026-11-01', 4)))),
+  PERFORM _ui_rec(31, 'a negative CASH amount is refused (a negative fare is stored, section 8)',
+    _ui_call(admin_a, _ui_import(jsonb_build_array(_ui_row('1002', 'bargeld', '-1.00', '2026-10-26', '2026-11-01', 4)))),
     'ERR 22023 invalid_request');
   PERFORM _ui_rec(32, 'a type outside the four is refused',
     _ui_call(admin_a, _ui_import(jsonb_build_array(_ui_row('1002', 'nettofahrt', '1.00', '2026-10-26', '2026-11-01', 4)))),
@@ -587,6 +587,65 @@ BEGIN
     (SELECT string_agg(coalesce(source, 'manual') || ':' || amount::text, ' ' ORDER BY amount DESC)
        FROM income WHERE driver_name = 'Omar Khalil' AND date BETWEEN '2026-11-02' AND '2026-11-08'),
     'manual:100 uber:50.00');
+END $$;
+
+-- ─── 8. a negative fare, promotion or tip is stored (20261016170000) ───────
+--
+--  What separates the three things the change is, so one probe cannot hide
+--  another:
+--    61/62  the writer accepts and STORES a negative umsatz/aktionen/trinkgeld
+--    63     the weekly total follows the stored rows (they are summed, not skipped)
+--    64     a negative bargeld, -0 and -0.00 are refused and leave no row
+--    65     the table's own CHECK, probed as the owner past the function: a
+--           negative bargeld and a negative hand-typed row are both refused,
+--           a negative uber umsatz row is not
+--    66     replace mode corrects a week that holds a negative row
+
+DO $$
+DECLARE
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_before integer;
+BEGIN
+  PERFORM _ui_rec(61, 'a negative fare is accepted, and so is a negative promotion and a negative tip',
+    _ui_call(admin_a, _ui_import(jsonb_build_array(
+      _ui_row('1002', 'umsatz',    '80.00', '2027-01-04', '2027-01-10', 2, 9),
+      _ui_row('1002', 'aktionen',  '-20.00', '2027-01-04', '2027-01-10', 2),
+      _ui_row('1002', 'trinkgeld', '-5.50', '2027-01-04', '2027-01-10', 2)))) :: text,
+    '{"ok": true, "drivers": 1, "inserted": 3}');
+
+  PERFORM _ui_rec(62, 'the negative amounts are stored with their sign, exactly',
+    (SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type)
+       FROM income WHERE source = 'uber' AND driver_name = 'Omar Khalil' AND date = '2027-01-04'),
+    'aktionen:-20.00 trinkgeld:-5.50 umsatz:80.00');
+
+  PERFORM _ui_rec(63, 'the week''s total follows them: 80,00 - 20,00 - 5,50',
+    (SELECT sum(amount)::text FROM income WHERE source = 'uber' AND driver_name = 'Omar Khalil' AND date = '2027-01-04'),
+    '54.50');
+
+  v_before := (SELECT count(*) FROM income);
+  PERFORM _ui_rec(64, 'a negative cash figure, -0 and -0.00 are refused, and no row is left',
+    _ui_call(admin_a, _ui_import(jsonb_build_array(_ui_row('1002', 'bargeld', '-3.00', '2026-11-16', '2026-11-22', 3)))) || ' / ' ||
+    _ui_call(admin_a, _ui_import(jsonb_build_array(_ui_row('1002', 'umsatz', '-0', '2026-11-16', '2026-11-22', 3)))) || ' / ' ||
+    _ui_call(admin_a, _ui_import(jsonb_build_array(_ui_row('1002', 'umsatz', '-0.00', '2026-11-16', '2026-11-22', 3)))) || ' / ' ||
+    (SELECT count(*) FROM income)::text,
+    'ERR 22023 invalid_request / ERR 22023 invalid_request / ERR 22023 invalid_request / ' || v_before::text);
+
+  -- A support session left the write flag set in this transaction; the owner
+  -- probes below go straight at the table, so clear it as the owner would.
+  PERFORM set_config('app_private.support_write_context', '', true);
+  PERFORM _ui_rec(65, 'the table: a negative cash row and a negative typed row are refused by the CHECK, a negative uber fare is not',
+    _ui_call(NULL, $q$INSERT INTO income (description, amount, type, driver_name, date, company_id, source, source_driver_key, source_period_start, source_period_end)
+      VALUES ('x', -1, 'bargeld', 'Omar Khalil', '2026-11-23', 'c0000000-0000-4000-8000-00000000000a', 'uber', '1002', '2026-11-23', '2026-11-29')$q$ || ' RETURNING 1::text', NULL, true) || ' / ' ||
+    _ui_call(NULL, $q$INSERT INTO income (description, amount, type, driver_name, date, company_id)
+      VALUES ('x', -1, 'umsatz', 'Omar Khalil', '2026-11-23', 'c0000000-0000-4000-8000-00000000000a') RETURNING 1::text$q$, NULL, true) || ' / ' ||
+    _ui_call(NULL, $q$INSERT INTO income (description, amount, type, driver_name, date, company_id, source, source_driver_key, source_period_start, source_period_end)
+      VALUES ('x', -1, 'umsatz', 'Omar Khalil', '2026-11-23', 'c0000000-0000-4000-8000-00000000000a', 'uber', '1002', '2026-11-23', '2026-11-29') RETURNING 1::text$q$, NULL, true),
+    'ERR 23514 income_amount_check / ERR 23514 income_amount_check / 1');
+
+  PERFORM _ui_rec(66, 'replace mode corrects a week that holds negative rows: 3 go, 1 comes',
+    _ui_call(admin_a, _ui_replace(jsonb_build_array(
+      _ui_row('1002', 'umsatz', '90.00', '2027-01-04', '2027-01-10', 2)))) :: text,
+    '{"ok": true, "deleted": 3, "drivers": 1, "inserted": 1}');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────

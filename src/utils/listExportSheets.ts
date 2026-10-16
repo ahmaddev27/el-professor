@@ -265,6 +265,7 @@ export function buildSalarySheets(
       { metric: 'Gesamt Trinkgeld',    amount: totalTips },
       { metric: 'Gesamt Umsatzanteil', amount: totalRevenueShare },
       { metric: 'Gesamt Fällig',       amount: totalDue },
+      { metric: 'Gesamt nicht verrechnet', amount: priced.reduce((sum, p) => sum + (p.salary.unrecovered ?? 0), 0) },
       { metric: 'Anzahl Fahrer',                    count: salaries.length },
       { metric: SALARY_STATUS_LABEL.paid,           count: countOf('paid') },
       { metric: SALARY_STATUS_LABEL.partially_paid, count: countOf('partially_paid') },
@@ -285,6 +286,7 @@ export function buildSalarySheets(
       { key: 'share',   label: 'Umsatzanteil',    width: 17, align: 'right', type: 'money' },
       { key: 'tips',    label: 'Trinkgeld',       width: 15, align: 'right', type: 'money' },
       { key: 'due',     label: 'Fälliger Betrag', width: 18, align: 'right', type: 'money' },
+      { key: 'unrecovered', label: 'Nicht verrechnet', width: 18, align: 'right', type: 'money' },
       { key: 'status',  label: 'Status',          width: 18 },
     ],
     rows: priced.map(({ salary, due }): ExportRow => ({
@@ -297,6 +299,7 @@ export function buildSalarySheets(
       share: salary.revenue_share,
       tips: salary.tips,
       due: due.base,
+      unrecovered: salary.unrecovered ?? 0,
       status: SALARY_STATUS_LABEL[due.paymentStatus],
     })),
     // `ratio` carries no total: averaging percentages across drivers is a figure
@@ -306,6 +309,7 @@ export function buildSalarySheets(
       share: totalRevenueShare,
       tips: totalTips,
       due: totalDue,
+      unrecovered: priced.reduce((sum, p) => sum + (p.salary.unrecovered ?? 0), 0),
     },
   };
 

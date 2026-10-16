@@ -38,6 +38,7 @@ import {
   isWeekSegment,
   mondayOf,
   negativeFigures,
+  figureBecomesRow,
   type FigureType,
   type NegativeFigure,
   type UberDriverEarnings,
@@ -125,8 +126,7 @@ function rowsForDriver(
   const rows: IncomeImportRow[] = [];
   for (const { type, field } of IMPORT_TYPES) {
     const cents = driver[field];
-    const tripsOnly = type === 'umsatz' && cents === 0 && (driver.trips ?? 0) > 0;
-    if (cents <= 0 && !tripsOnly) continue;
+    if (!figureBecomesRow(type, cents, driver.trips)) continue;
     rows.push({
       external_driver_id: driver.externalDriverId,
       type,
@@ -156,7 +156,7 @@ export interface SkippedFigure extends NegativeFigure {
   day: string;
 }
 
-/** Every negative figure in the pulled weeks. They are not rows: see `negativeFigures`. */
+/** Every negative figure in the pulled weeks that is not stored (cash only): see `negativeFigures`. */
 export function skippedFigures(weeks: readonly WeekEarnings[]): SkippedFigure[] {
   return weeks.flatMap(({ segment, drivers }) =>
     negativeFigures(drivers).map(f => ({ ...f, day: segment.from })));
@@ -226,11 +226,12 @@ export function summarizeByDriver(
         fareCents: 0, promotionCents: 0, tipsCents: 0, cashCents: 0,
         trips: null, differenceCents: 0, hasDifference: false, rowCount: 0,
       };
-      // What the import writes: a figure below zero is not a row (see
-      // negativeFigures), so it must not lower a total the rows do not carry.
-      row.fareCents += Math.max(0, d.fareCents);
-      row.promotionCents += Math.max(0, d.promotionCents);
-      row.tipsCents += Math.max(0, d.tipsCents);
+      // What the import writes: a negative fare, promotion or tip is a row and
+      // lowers the total like any other; a negative cash figure is not a row
+      // (see figureBecomesRow), so it must not lower a total the rows do not carry.
+      row.fareCents += d.fareCents;
+      row.promotionCents += d.promotionCents;
+      row.tipsCents += d.tipsCents;
       row.cashCents += Math.max(0, d.cashCents);
       if (d.trips !== null) row.trips = (row.trips ?? 0) + d.trips;
       row.differenceCents += d.differenceCents;

@@ -156,6 +156,8 @@ export interface SalaryCalculation {
   tips: number;
   revenue_share: number;
   amount_due: number;
+  /** Clawbacks beyond what the period earned, in salary euros; display only. */
+  unrecovered?: number;
   netto_salary?: number;
   status: 'paid' | 'unpaid';
   paid_at?: string;

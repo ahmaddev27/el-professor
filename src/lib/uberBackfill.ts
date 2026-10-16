@@ -56,12 +56,12 @@
  *   arrive and the operator is told so by name. Like the created drivers, the
  *   list survives a later piece failing.
  *
- * A figure BELOW ZERO (a refunded fare, a clawed-back promotion, a reversed tip,
- * a cash adjustment) is read, but it is not a row: `income.amount` is
- * `CHECK (amount >= 0)` and every weekly total sums it. It is listed on the
+ * A figure BELOW ZERO is read. A refunded fare, a clawed-back promotion and a
+ * reversed tip are rows with their sign (20261016170000), so the weekly totals
+ * and the salary follow them. A negative CASH adjustment is not a row: it would
+ * move the till, and whether it left the till is not known. It is listed on the
  * outcome (`skipped`, with the day) and makes the status `gap`, so it is never
- * dropped quietly. Dropping the CHECK is a decision about every income writer
- * and every total, not this import's to take.
+ * dropped quietly.
  *
  * A gap is reported by the run that met it. Resume has no state, so a later
  * click that starts after those days does not see the earner again.
