@@ -6739,4 +6739,5 @@ export const de = {
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'sa.dash.billedUnavailable': 'Der Rechnungsbetrag ist nur mit dem Recht Abrechnung sichtbar oder konnte nicht gelesen werden.',
   'sa.dash.firstInvoice':      'Erstrechnung (Pauschale)',
+  'partner.connect.error.serverError': 'Beim Verbinden ist auf unserer Seite ein Fehler aufgetreten. Es wurde nichts gespeichert — bitte erneut versuchen.',
 } as const;

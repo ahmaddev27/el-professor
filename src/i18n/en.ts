@@ -6683,4 +6683,5 @@ export const en: PartialDictionary = {
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'sa.dash.billedUnavailable': 'The invoice amount is only visible with the billing right, or could not be read.',
   'sa.dash.firstInvoice':      'First invoice (flat)',
+  'partner.connect.error.serverError': 'Something failed on our side while connecting. Nothing was saved — please try again.',
 };
