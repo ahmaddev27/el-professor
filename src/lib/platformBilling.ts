@@ -112,6 +112,20 @@ export interface PlatformSubscriptionSummary {
   activeByPlan: Record<string, number>;
 }
 
+/**
+ * What one active subscription's invoice for a period would cost, as
+ * `platform_invoice_quotes` decides it (20261015160000): the company's FIRST
+ * invoice is the price book's flat first-month figure, every later one the book
+ * per car. `amountCents` is integer cents; the screen divides once to print and
+ * once to insert, and never sums floats.
+ */
+export interface PlatformInvoiceQuote {
+  subscriptionId: string;
+  companyId: string;
+  firstInvoice: boolean;
+  amountCents: number;
+}
+
 export const EMPTY_INVOICE_SUMMARY: PlatformInvoiceSummary = Object.freeze({
   openCount: 0,
   overdueCount: 0,
@@ -246,6 +260,33 @@ export interface PlatformBillingPage<T, S> {
 }
 
 export type PlatformBillingResult<T, S> = PlatformBillingPage<T, S> | PlatformReadRefusal;
+
+/**
+ * The quotes of one period, by subscription id, or null when the answer is not
+ * one this build understands. Null, never an empty map: an empty map would read
+ * as "nothing to raise" and a run would create nothing without saying why, and
+ * an item with a missing or fractional amount must not become an invoice.
+ */
+export function parseInvoiceQuotes(data: unknown): Map<string, PlatformInvoiceQuote> | null {
+  if (!isRecord(data) || data.ok !== true || !Array.isArray(data.items)) return null;
+  const quotes = new Map<string, PlatformInvoiceQuote>();
+  for (const item of data.items) {
+    if (!isRecord(item)) return null;
+    const amount = item.amount_cents;
+    if (typeof item.subscription_id !== 'string' || typeof item.company_id !== 'string'
+        || typeof item.first_invoice !== 'boolean'
+        || typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0) {
+      return null;
+    }
+    quotes.set(item.subscription_id, {
+      subscriptionId: item.subscription_id,
+      companyId: item.company_id,
+      firstInvoice: item.first_invoice,
+      amountCents: amount,
+    });
+  }
+  return quotes;
+}
 
 /**
  * The shared read-model parser plus this slice's summary. A refusal keeps its

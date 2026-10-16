@@ -6777,4 +6777,11 @@ export const de = {
   'inc.group.viewDay':   'Tag',
   'inc.group.viewMonth': 'Monat',
   'inc.group.viewWeek':  'Woche',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'admin.settings.exampleFirstMonth': 'Erste Rechnung: {amount} € pauschal',
+  'admin.settings.firstMonth':        'Preis des ersten Monats',
+  'admin.settings.firstMonthHint':    'Pauschal für die erste Rechnung jedes Unternehmens, unabhängig von Tarif und Fahrzeuganzahl. Ab der zweiten Rechnung gilt der Preis pro Fahrzeug. Leer lassen: kein Pauschalpreis.',
+  'bill.invoice.quoteFailed':         'Die Beträge konnten nicht berechnet werden. Es wird nichts erstellt.',
+  'bill.invoice.quoteHint':           'Die erste Rechnung eines Unternehmens wird zum Pauschalpreis des ersten Monats erstellt, alle weiteren nach der Preisliste pro Fahrzeug.',
 } as const;

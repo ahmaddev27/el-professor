@@ -204,6 +204,41 @@ describe('the price book form', () => {
     expect(priceBookFromForm(pricey)).toEqual({ error: 'price_book.price_per_car_cents.premium' });
   });
 
+  it('shows the first month the German way, reads it back as cents, and keeps it through a save', () => {
+    const form = priceBookToForm(SEED_PRICE_BOOK);
+    expect(form.firstMonth).toBe('200,00');
+
+    form.firstMonth = '149,50';
+    const result = priceBookFromForm(form);
+    expect('book' in result && result.book.first_month_cents).toBe(14950);
+  });
+
+  it('an empty first month is a book with none, and 0 is a free first month', () => {
+    const form = priceBookToForm(SEED_PRICE_BOOK);
+    form.firstMonth = '';
+    const none = priceBookFromForm(form);
+    expect('book' in none && 'first_month_cents' in none.book).toBe(false);
+
+    form.firstMonth = '0';
+    const free = priceBookFromForm(form);
+    expect('book' in free && free.book.first_month_cents).toBe(0);
+  });
+
+  it('a book saved before the decision opens with an empty first month, and saves without one', () => {
+    const { first_month_cents: _none, ...old } = SEED_PRICE_BOOK;
+    const form = priceBookToForm(old);
+    expect(form.firstMonth).toBe('');
+    expect(priceBookFromForm(form)).toEqual({ book: old });
+  });
+
+  it('names the first month when it is not an amount the database would accept', () => {
+    const form = priceBookToForm(SEED_PRICE_BOOK);
+    form.firstMonth = '20x';
+    expect(priceBookFromForm(form)).toEqual({ error: 'price_book.first_month_cents' });
+    form.firstMonth = '10001,00';
+    expect(priceBookFromForm(form)).toEqual({ error: 'price_book.first_month_cents' });
+  });
+
   it('accepts a book with no fleet tiers at all', () => {
     const form = priceBookToForm(SEED_PRICE_BOOK);
     form.tiers = [];

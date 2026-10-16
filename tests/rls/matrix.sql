@@ -3105,6 +3105,12 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_subscriptions_list() is allowed',
      $q$SELECT platform_subscriptions_list() ->> 'ok'$q$,
      'PNNNNNY', NULL),
+    -- the ninth read model, 20261015160000: what each active subscription's
+    -- invoice for a period costs, and whether it is the company's first. Same
+    -- capability and the same shape as the two above.
+    ('platform_invoice_quotes(10, 2026) is allowed',
+     $q$SELECT platform_invoice_quotes(10, 2026) ->> 'ok'$q$,
+     'PNNNNNY', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
     -- calls it signed in. It was SECURITY INVOKER and read subscription_invoices
     -- under the caller's own RLS, so every principal got a number — a company
@@ -3140,6 +3146,11 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- restates the same grants, so no cell moves with it
     ('compute_plan_price(basic, 5, monthly)',
      $q$SELECT compute_plan_price('basic', 5, 'monthly')::text$q$,
+     'PYYYYYY', NULL),
+    -- 20261015160000 gave it a fourth argument, the first invoice, and dropped
+    -- the three-argument form. The grants are restated, so no cell moves.
+    ('compute_plan_price(basic, 5, monthly, first invoice)',
+     $q$SELECT compute_plan_price('basic', 5, 'monthly', true)::text$q$,
      'PYYYYYY', NULL),
 
     -- Plan 3.5's platform write RPCs (20260916130000, 20260916130010). Each
@@ -3216,8 +3227,10 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_settings_get(price_book) is ok',
      $q$SELECT (platform_settings_get('price_book') ->> 'ok')::text$q$,
      'PNNNNNY', NULL),
-    ('platform_settings_put(price_book, the seeded book, version 1) is ok',
-     $q$SELECT (platform_settings_put('price_book', '{"price_per_car_cents":{"basic":2000,"advanced":4000,"premium":7000},"fleet_discount_tiers":[{"min_cars":6,"percent":5},{"min_cars":11,"percent":10}],"yearly_discount_percent":10}'::jsonb, 1) ->> 'ok')::text$q$,
+    -- version 2 and the first month since 20261015160000, which added the
+    -- figure to the stored book and raised its version
+    ('platform_settings_put(price_book, the seeded book, version 2) is ok',
+     $q$SELECT (platform_settings_put('price_book', '{"first_month_cents":20000,"price_per_car_cents":{"basic":2000,"advanced":4000,"premium":7000},"fleet_discount_tiers":[{"min_cars":6,"percent":5},{"min_cars":11,"percent":10}],"yearly_discount_percent":10}'::jsonb, 2) ->> 'ok')::text$q$,
      'PNNNNNY', NULL),
     -- the product configuration: the price book is public (the landing page
     -- prices plans before anyone signs in), the feature map is not

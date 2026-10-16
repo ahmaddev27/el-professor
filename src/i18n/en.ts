@@ -6721,4 +6721,11 @@ export const en: PartialDictionary = {
   'inc.group.viewDay':   'Day',
   'inc.group.viewMonth': 'Month',
   'inc.group.viewWeek':  'Week',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'admin.settings.exampleFirstMonth': 'First invoice: {amount} € flat',
+  'admin.settings.firstMonth':        'First month price',
+  'admin.settings.firstMonthHint':    'A flat price for each company\'s first invoice, whatever its plan or number of cars. From the second invoice on, the price per car applies. Leave empty for no flat price.',
+  'bill.invoice.quoteFailed':         'The amounts could not be calculated. Nothing will be created.',
+  'bill.invoice.quoteHint':           'A company\'s first invoice is raised at the flat first-month price, every later one at the price list per car.',
 };

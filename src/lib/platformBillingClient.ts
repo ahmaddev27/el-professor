@@ -12,6 +12,7 @@ import {
   collectAllPages,
   invoiceRpcArgs,
   parseBillingPage,
+  parseInvoiceQuotes,
   parseInvoiceRow,
   parseInvoiceSummary,
   parseSubscriptionRow,
@@ -19,6 +20,7 @@ import {
   subscriptionRpcArgs,
   type InvoiceQuery,
   type PlatformBillingResult,
+  type PlatformInvoiceQuote,
   type PlatformInvoiceRow,
   type PlatformInvoiceSummary,
   type PlatformSubscriptionRow,
@@ -39,6 +41,19 @@ export async function fetchSubscriptions(query: SubscriptionQuery): Promise<Subs
   const { data, error } = await supabase.rpc('platform_subscriptions_list', subscriptionRpcArgs(query));
   if (error) throw new Error(error.message);
   return parseBillingPage(data, parseSubscriptionRow, parseSubscriptionSummary);
+}
+
+/**
+ * What each active subscription's invoice for one period costs, and whether it
+ * is the company's first (migration 20261015160000). One call, one audited read
+ * row. Null means the answer could not be read — a refusal, a transport failure
+ * or a shape this build does not know — and then nothing is generated: an
+ * invoice with a guessed amount is worse than none.
+ */
+export async function fetchInvoiceQuotes(month: number, year: number): Promise<Map<string, PlatformInvoiceQuote> | null> {
+  const { data, error } = await supabase.rpc('platform_invoice_quotes', { p_month: month, p_year: year });
+  if (error) return null;
+  return parseInvoiceQuotes(data);
 }
 
 /**

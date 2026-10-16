@@ -18,6 +18,9 @@ export const SEED_PRICE_BOOK: PriceBook = {
     { min_cars: 11, percent: 10 },
   ],
   yearly_discount_percent: 10,
+  // The owner's decision of 15.10.2026: the first invoice is 200,00 EUR whatever
+  // the car count (migration 20261015160000 writes the same into the stored book).
+  first_month_cents: 20000,
 };
 
 /** Every feature the app gates, so a new FeatureKey without a seed fails to compile. */

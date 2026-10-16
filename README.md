@@ -29,6 +29,7 @@ n_15.10.2026: the Umsätze list has Tag / Woche / Monat / Liste tabs (PR against
 > Last update: **13.10.2026**. A step counts once it is merged into `staging` and verified there.
 
 > **15.10.2026, outside the step count:** a company administrator can now list several addresses per kind of company mail (Einstellungen, tab Verbindungen; `notification_recipients`). A kind with no address falls back to the single company address, then to the administrators.
+> **15.10.2026 (branch `feat/first-month-price`, not merged):** a company's first invoice is a flat 200,00 EUR (`price_book.first_month_cents`) whatever its car count; every later invoice is the price book per car. Invoice generation takes the amount from `platform_invoice_quotes`, no longer from `subscription_plans.monthly_price`. The dashboard's price column still shows the per-car figure (follow-up in HANDOFF.md).
 > 15.10.2026: the capability matrix now gives `support` `companies.lifecycle` (D2) and all four staff roles `audit.read` (D3), by the owner's answers; see HANDOFF.md.
 > **15.10.2026 (branch `feat/one-button-fleet-import`, not merged):** the data import at `/datenimport` is one button that brings in drivers, vehicles and all Uber earnings from the first day, day by day, resumable. Details in HANDOFF.md.
 

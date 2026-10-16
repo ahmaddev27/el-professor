@@ -11,6 +11,7 @@ import type { TranslationKey } from '../i18n';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess } from '../lib/platformAccess';
 import { calcPricing, fmt, type PriceBook } from '../utils/pricing';
+import { Field as UiField, Input as UiInput } from '../components/ui';
 import type { PlanFeatureMap } from '../utils/planFeatures';
 import {
   canReadAnnouncements,
@@ -282,6 +283,15 @@ const PriceBookEditor: React.FC = () => {
       })()
     : null;
 
+  // The first invoice under the typed book, when it names a first month.
+  const firstMonthPreview = form && loaded && Number.isFinite(cars) && cars > 0
+    ? (() => {
+        const parsed = priceBookFromForm(form);
+        if (!('book' in parsed) || parsed.book.first_month_cents === undefined) return null;
+        return calcPricing(parsed.book, 'premium', cars, 'monthly', true);
+      })()
+    : null;
+
   return (
     <EditorShell
       loading={loading}
@@ -317,6 +327,22 @@ const PriceBookEditor: React.FC = () => {
               ))}
             </div>
             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.perMonth')}</p>
+          </div>
+
+          {/* The owner's first-month price (15.10.2026): one flat figure for a
+              company's first invoice. Drawn with the design system's classes so
+              the file's inline-style count does not move. */}
+          <div className="space-y-4 rounded-2xl border border-line bg-raised p-5 font-ui">
+            <UiField label={t('admin.settings.firstMonth')} hint={t('admin.settings.firstMonthHint')} className="max-w-xs">
+              <UiInput
+                value={form.firstMonth}
+                disabled={!maySave}
+                onChange={e => setForm({ ...form, firstMonth: e.target.value })}
+                /* German decimal comma in both languages — src/i18n/index.ts. */
+                placeholder="200,00"
+                inputMode="decimal"
+              />
+            </UiField>
           </div>
 
           <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
@@ -406,6 +432,9 @@ const PriceBookEditor: React.FC = () => {
               <div className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
                 <p>{t('admin.settings.exampleMonthly', { amount: fmt(preview.monthlyAfterFleet), percent: String(preview.fleetDiscountPct) })}</p>
                 <p>{t('admin.settings.exampleYearly', { amount: fmt(preview.yearlyTotal) })}</p>
+                {firstMonthPreview && (
+                  <p>{t('admin.settings.exampleFirstMonth', { amount: fmt(firstMonthPreview.finalTotal) })}</p>
+                )}
               </div>
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>

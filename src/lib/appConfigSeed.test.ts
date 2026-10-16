@@ -19,6 +19,8 @@ const repoFile = (path: string) =>
   readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 const SETTINGS_MIGRATION = repoFile('supabase/migrations/20260916150000_platform_settings_price_book.sql');
+/** The first month (owner's decision, 15.10.2026): added to the stored book by migration. */
+const FIRST_MONTH_MIGRATION = repoFile('supabase/migrations/20261015160000_first_month_price.sql');
 const SIGNUP_MIGRATION = repoFile('supabase/migrations/20260916100010_signup_insert_company.sql');
 /** Plan 3.10, first half: the seller, the trial length and the invoice defaults. */
 const TRIAL_MIGRATION = repoFile('supabase/migrations/20260919120000_platform_settings_seller_trial_invoice.sql');
@@ -34,7 +36,17 @@ const seededJson = (tag: string): unknown => JSON.parse(dollarQuoted(SETTINGS_MI
 
 describe('the seed the app shows and the seed the migration writes', () => {
   it('price_book: the same prices, tiers and yearly discount', () => {
-    expect(seededJson('seed_price_book')).toEqual(SEED_PRICE_BOOK);
+    // 20260916150000 seeded the book with three keys; the fourth, the first
+    // month, is added by 20261015160000 and compared in the next test.
+    const { first_month_cents: _firstMonth, ...threeKeys } = SEED_PRICE_BOOK;
+    expect(seededJson('seed_price_book')).toEqual(threeKeys);
+  });
+
+  it('price_book: the first month is the 20000 cents 20261015160000 adds to the stored book', () => {
+    const added = FIRST_MONTH_MIGRATION.match(/value\s*\|\|\s*'(\{"first_month_cents":\s*\d+\})'::jsonb/);
+    if (!added) throw new Error('the migration no longer adds first_month_cents to the stored book');
+    expect(JSON.parse(added[1])).toEqual({ first_month_cents: SEED_PRICE_BOOK.first_month_cents });
+    expect(SEED_PRICE_BOOK.first_month_cents).toBe(20000);
   });
 
   it('plan_features: the same feature map', () => {

@@ -56,8 +56,26 @@ describe('parsePriceBook accepts a book the database would have stored', () => {
     const book = parsePriceBook(bookWith({ vat_percent: 19, price_per_car_cents: { ...SEED_PRICE_BOOK.price_per_car_cents, gold: 5000 } }));
     expect(book).not.toBeNull();
     expect(Object.keys(book!).sort())
-      .toEqual(['fleet_discount_tiers', 'price_per_car_cents', 'yearly_discount_percent']);
+      .toEqual(['first_month_cents', 'fleet_discount_tiers', 'price_per_car_cents', 'yearly_discount_percent']);
     expect(Object.keys(book!.price_per_car_cents).sort()).toEqual(['advanced', 'basic', 'premium']);
+  });
+
+  it('the first month is optional: a book saved before the decision names none, and still reads', () => {
+    const { first_month_cents: _none, ...old } = SEED_PRICE_BOOK;
+    const book = parsePriceBook(JSON.parse(JSON.stringify(old)));
+    expect(book).toEqual(old);
+    expect(book && 'first_month_cents' in book).toBe(false);
+    expect(parsePriceBook(bookWith({ first_month_cents: 0 }))?.first_month_cents).toBe(0);
+  });
+
+  it.each([
+    ['a fraction of a cent', 200.5],
+    ['a negative amount', -1],
+    ['above the per-car ceiling', 1_000_001],
+    ['a string', '20000'],
+    ['null', null],
+  ])('a first month that is %s is not a price book', (_name, value) => {
+    expect(parsePriceBook(bookWith({ first_month_cents: value }))).toBeNull();
   });
 
   it('the tiers it returns are a copy, and read as consecutive bands', () => {
