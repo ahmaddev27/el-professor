@@ -51,7 +51,7 @@ export function storedNotificationAddress(raw: unknown): string | null {
 
 /**
  * The kinds of company mail whose recipients the administrator can list
- * (migration 20261015140000, `notification_recipients_type_check`): the four
+ * (migration 20261015140000, `notification_recipients_type_check`): the two
  * expiry notices of notification-core.ts and the weekly Abrechnung summary for
  * the manager. A test pins this list to the migration's CHECK and to
  * `NOTIFICATION_TYPES`, so a kind added in one place and not the others fails
@@ -61,8 +61,6 @@ export function storedNotificationAddress(raw: unknown): string | null {
 export const RECIPIENT_KINDS = [
   'tuev_bald_ablaufend',
   'tuev_abgelaufen',
-  'trial_bald_ablaufend',
-  'trial_abgelaufen',
   'manager_summary',
 ] as const;
 

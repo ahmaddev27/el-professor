@@ -209,10 +209,6 @@ INSERT INTO app_private.platform_staff (user_id, role, note) VALUES
 
 -- ─── fixtures the write RPCs act on ─────────────────────────────────────────
 
--- A trial to extend, so platform_company_extend_trial has something to move.
-UPDATE companies SET trial_end = now() + interval '7 days'
- WHERE id = 'c0000000-0000-4000-8000-00000000000a';
-
 INSERT INTO subscription_plans (id, name, monthly_price, included_cars, drivers_per_car_limit, is_active)
 VALUES ('3b100000-0000-4000-8000-000000000001', 'PR Plan', 49, 5, 4, true)
 ON CONFLICT (id) DO NOTHING;
@@ -252,7 +248,6 @@ BEGIN
       'public.platform_company_set_approval(uuid,text,text)',
       'public.platform_company_set_status(uuid,text)',
       'public.platform_company_lifecycle(uuid,text)',
-      'public.platform_company_extend_trial(uuid,integer)',
       'public.platform_company_set_plan(uuid,text,text,integer)',
       'public.platform_subscription_assign(uuid,uuid,integer,text)',
       'public.platform_invoice_mark_paid(uuid,bigint,timestamptz,text)',
@@ -317,8 +312,6 @@ BEGIN
      $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'suspend')::text$q$, 'YYNNN'),
     ('platform_company_lifecycle(archive)',
      $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'archive')::text$q$, 'YYNNN'),
-    ('platform_company_extend_trial(7)',
-     $q$SELECT platform_company_extend_trial('c0000000-0000-4000-8000-00000000000a', 7)::text$q$, 'YYNNN'),
     -- billing.manage: owners and billing
     ('platform_company_set_plan',
      $q$SELECT platform_company_set_plan('c0000000-0000-4000-8000-00000000000a', 'premium')::text$q$, 'YNYNN'),
@@ -411,16 +404,13 @@ BEGIN
     v_row.before_value ->> 'status' IS NOT NULL
     AND v_row.after_value ->> 'status' = 'suspended');
 
-  -- An error inside a call that passed authorization is recorded as an error,
-  -- with its reason, and the call changes nothing.
-  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
-  PERFORM _pr_ok('extending a trial on a company that has none answers no_trial',
-    _pr_reason(_pr_do(owner, format('SELECT platform_company_extend_trial(%L, 7)::text',
-      'c0000000-0000-4000-8000-00000000000b'))) = 'no_trial');
-  SELECT * INTO v_row FROM app_private.platform_audit_log WHERE id > v_from;
-  PERFORM _pr_ok('…and that is one audit row, outcome error, naming the reason',
-    v_row.action = 'company.extend_trial' AND v_row.outcome = 'error'
-    AND v_row.after_value ->> 'reason' = 'no_trial');
+  -- There is no trial to extend (20261015170000 dropped the RPC), so the call
+  -- cannot be made at all, and a status of 'trial' is refused as invalid.
+  PERFORM _pr_ok('platform_company_extend_trial does not exist any more',
+    to_regprocedure('public.platform_company_extend_trial(uuid,integer)') IS NULL);
+  PERFORM _pr_ok('setting a company to status trial is refused as invalid, and writes no company row',
+    _pr_reason(_pr_do(owner, format('SELECT platform_company_set_status(%L, %L)::text',
+      'c0000000-0000-4000-8000-00000000000b', 'trial'))) = 'invalid');
 END $$;
 
 -- ─── 4. a refused call is audited too ───────────────────────────────────────

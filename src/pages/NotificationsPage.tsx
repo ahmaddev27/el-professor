@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bell, BellOff, ShieldAlert, ShieldX, Clock, AlertTriangle, CheckCircle, Save, RotateCcw } from 'lucide-react';
+import { Bell, BellOff, ShieldAlert, ShieldX, CheckCircle, Save, RotateCcw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -8,11 +8,7 @@ import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type NotificationType =
-  | 'tuev_bald_ablaufend'
-  | 'tuev_abgelaufen'
-  | 'trial_bald_ablaufend'
-  | 'trial_abgelaufen';
+export type NotificationType = 'tuev_bald_ablaufend' | 'tuev_abgelaufen';
 
 interface NotificationRow {
   notification_type: NotificationType;
@@ -28,7 +24,7 @@ interface NotificationDef {
   icon: React.ElementType;
   iconColor: string;
   iconBg: string;
-  group: 'fahrzeuge' | 'abo';
+  group: 'fahrzeuge';
 }
 
 const NOTIFICATION_DEFS: NotificationDef[] = [
@@ -50,31 +46,11 @@ const NOTIFICATION_DEFS: NotificationDef[] = [
     iconBg:      'var(--danger-subtle)',
     group:       'fahrzeuge',
   },
-  {
-    type:        'trial_bald_ablaufend',
-    label:       'notif.trialSoon',
-    description: 'notif.trialSoonBody',
-    icon:        Clock,
-    iconColor:   'var(--accent-text)',
-    iconBg:      'var(--accent-subtle)',
-    group:       'abo',
-  },
-  {
-    type:        'trial_abgelaufen',
-    label:       'notif.trialExpired',
-    description: 'notif.trialExpiredBody',
-    icon:        AlertTriangle,
-    iconColor:   'var(--danger)',
-    iconBg:      'var(--danger-subtle)',
-    group:       'abo',
-  },
 ];
 
 const DEFAULT_ENABLED: Record<NotificationType, boolean> = {
-  tuev_bald_ablaufend:  true,
-  tuev_abgelaufen:      true,
-  trial_bald_ablaufend: true,
-  trial_abgelaufen:     false,
+  tuev_bald_ablaufend: true,
+  tuev_abgelaufen:     true,
 };
 
 // ─── Toggle component ─────────────────────────────────────────────────────────
@@ -250,9 +226,8 @@ export default function NotificationsPage() {
     );
   }
 
-  const groups: { key: 'fahrzeuge' | 'abo'; title: string; sub: string }[] = [
+  const groups: { key: 'fahrzeuge'; title: string; sub: string }[] = [
     { key: 'fahrzeuge', title: t('notif.vehicles'), sub: t('notif.vehiclesSub') },
-    { key: 'abo',       title: t('notif.subscription'),  sub: t('notif.subscriptionSub') },
   ];
 
   return (

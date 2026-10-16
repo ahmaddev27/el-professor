@@ -805,17 +805,17 @@ BEGIN
   PERFORM _pk_ok('recipients: …but the same mailbox for another kind is fine',
     _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'tuev_bald_ablaufend', 'chef@firma.example')) = 'rows 1');
   PERFORM _pk_ok('recipients: surrounding whitespace is trimmed before the CHECK, not refused',
-    _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'trial_abgelaufen', '  spaces@firma.example ')) = 'rows 1');
+    _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'tuev_abgelaufen', '  spaces@firma.example ')) = 'rows 1');
 
   -- The cap, seeded as the owner so RLS is out of the way; the trigger is the subject.
   INSERT INTO notification_recipients (company_id, notification_type, email)
-  SELECT co_b, 'trial_bald_ablaufend', 'cap' || g || '@firma.example' FROM generate_series(1, 10) g;
+  SELECT co_b, 'tuev_bald_ablaufend', 'cap' || g || '@firma.example' FROM generate_series(1, 10) g;
   PERFORM _pk_ok('recipients: an eleventh address for one kind is refused',
     _pk_try(admin_b, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)',
-                            co_b, 'trial_bald_ablaufend', 'cap11@firma.example')) LIKE 'ERR 23514%at most 10%');
+                            co_b, 'tuev_bald_ablaufend', 'cap11@firma.example')) LIKE 'ERR 23514%at most 10%');
   PERFORM _pk_ok('recipients: …while another kind of the same company still takes one',
     _pk_try(admin_b, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)',
-                            co_b, 'trial_abgelaufen', 'cap11@firma.example')) = 'rows 1');
+                            co_b, 'tuev_abgelaufen', 'cap11@firma.example')) = 'rows 1');
 
   -- The preview restates the rule in SQL, and the list is its first step.
   INSERT INTO company_settings (company_id) VALUES (co_a) ON CONFLICT (company_id) DO NOTHING;

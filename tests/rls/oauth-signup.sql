@@ -472,7 +472,6 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  c_trial_length  CONSTANT interval := interval '14 days';
   c_slug_attempts CONSTANT integer  := 10;
 
   v_email         text := lower(trim(p_email));
@@ -557,8 +556,8 @@ BEGIN
       (v_company_name,
        CASE WHEN i = 1 THEN v_base_slug
             ELSE v_base_slug || '-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 6) END,
-       'trial', 'pending', v_plan, v_cycle, v_car_limit,
-       v_now, v_now + c_trial_length, 'Deutschland', 'inactive',
+       'active', 'pending', v_plan, v_cycle, v_car_limit,
+       NULL, NULL, 'Deutschland', 'inactive',
        v_referral_id,
        CASE WHEN v_referral_id IS NOT NULL THEN v_ref_code END,
        CASE WHEN v_referral_id IS NOT NULL THEN v_now END)
@@ -904,13 +903,13 @@ BEGIN
     AND r->'company'->>'slug' = 'strassen-soehne-taxi' AND r->'company'->>'approval_status' = 'pending');
   co := (r->'company'->>'id')::uuid;
   SELECT * INTO comp FROM companies WHERE id = co;
-  PERFORM _oauth_ok('the company waits for approval: a pending, inactive trial in Deutschland',
-    comp.approval_status = 'pending' AND comp.status = 'trial' AND comp.subscription_status = 'inactive'
+  PERFORM _oauth_ok('the company waits for approval: pending, inactive, in Deutschland',
+    comp.approval_status = 'pending' AND comp.status = 'active' AND comp.subscription_status = 'inactive'
     AND comp.country = 'Deutschland' AND comp.approved_at IS NULL);
-  PERFORM _oauth_ok('plan, cycle, cars and the 14-day trial as asked',
+  PERFORM _oauth_ok('plan, cycle and cars as asked, and no trial',
     comp.plan = 'premium' AND comp.billing_cycle = 'yearly' AND comp.subscription_car_limit = 12
-    AND comp.trial_start = now() AND comp.trial_end = now() + interval '14 days'
-    AND (r->'company'->>'trial_end')::timestamptz = comp.trial_end);
+    AND comp.trial_start IS NULL AND comp.trial_end IS NULL
+    AND (r->'company'->>'trial_end') IS NULL);
   PERFORM _oauth_ok('the referral is recorded under its upper-cased code',
     comp.referral_id = ref_on AND comp.referral_code_used = 'G-ON' AND comp.referred_at = now());
 

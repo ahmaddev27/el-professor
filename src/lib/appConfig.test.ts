@@ -17,7 +17,7 @@ import {
   SEED_APP_CONFIG,
   type AppConfig,
 } from './appConfig';
-import { SEED_PLAN_FEATURES, SEED_PRICE_BOOK, SEED_TRIAL_DAYS } from './appConfigSeed';
+import { SEED_PLAN_FEATURES, SEED_PRICE_BOOK } from './appConfigSeed';
 
 const ANOTHER_BOOK = {
   price_per_car_cents: { basic: 1250, advanced: 3300, premium: 9900 },
@@ -29,22 +29,19 @@ const ANOTHER_BOOK = {
 const LOADED: AppConfig = {
   priceBook: ANOTHER_BOOK,
   planFeatures: { belege: 'premium' },
-  trialDays: 30,
   featureFlags: {},
   announcements: [],
 };
 
 describe('parseAppConfig reads a full answer', () => {
-  it('takes the price book, the feature map and the trial length', () => {
+  it('takes the price book and the feature map', () => {
     const config = parseAppConfig({
       price_book: ANOTHER_BOOK,
       plan_features: { belege: 'advanced' },
-      trial_days: 30,
     });
 
     expect(config.priceBook).toEqual(ANOTHER_BOOK);
     expect(config.planFeatures).toEqual({ belege: 'advanced' });
-    expect(config.trialDays).toBe(30);
   });
 
   it('takes the feature flags and the announcements (plan 3.11), dropping an entry it cannot read', () => {
@@ -55,7 +52,6 @@ describe('parseAppConfig reads a full answer', () => {
     const config = parseAppConfig({
       price_book: SEED_PRICE_BOOK,
       plan_features: SEED_PLAN_FEATURES,
-      trial_days: SEED_TRIAL_DAYS,
       feature_flags: { something: true, other: false, 'Bad Key': true, not_boolean: 'yes' },
       announcements: [announcement, { text: 'hello' }],
     });
@@ -77,7 +73,7 @@ describe('parseAppConfig reads a full answer', () => {
       }],
     };
     // get_public_config(), after a sign-out: nothing of the last account stays.
-    const visitor = parseAppConfig({ price_book: SEED_PRICE_BOOK, trial_days: 14 }, loaded);
+    const visitor = parseAppConfig({ price_book: SEED_PRICE_BOOK }, loaded);
     expect(visitor.featureFlags).toEqual({});
     expect(visitor.announcements).toEqual([]);
 
@@ -88,8 +84,8 @@ describe('parseAppConfig reads a full answer', () => {
   });
 
   it('a public answer without a feature map keeps the one already loaded', () => {
-    // get_public_config() carries the price book and the trial length only.
-    const config = parseAppConfig({ price_book: SEED_PRICE_BOOK, trial_days: 14 }, LOADED);
+    // get_public_config() carries the price book only.
+    const config = parseAppConfig({ price_book: SEED_PRICE_BOOK }, LOADED);
 
     expect(config.priceBook).toEqual(SEED_PRICE_BOOK);
     expect(config.planFeatures).toEqual(LOADED.planFeatures);
@@ -111,7 +107,6 @@ describe('a malformed database answer keeps what is already shown', () => {
     expect(parseAppConfig(null)).toBe(SEED_APP_CONFIG);
     expect(parseAppConfig({}).priceBook).toEqual(SEED_PRICE_BOOK);
     expect(parseAppConfig({}).planFeatures).toEqual(SEED_PLAN_FEATURES);
-    expect(parseAppConfig({}).trialDays).toBe(SEED_TRIAL_DAYS);
   });
 
   it('a broken price book does not price anything: the loaded one stays', () => {
@@ -135,20 +130,11 @@ describe('a malformed database answer keeps what is already shown', () => {
     expect(config.priceBook).toEqual(SEED_PRICE_BOOK);
   });
 
-  it.each([
-    ['zero', 0],
-    ['negative', -1],
-    ['a fraction', 14.5],
-    ['above ten years', 3651],
-    ['a string', '14'],
-    ['null', null],
-  ])('a trial length that is %s is refused', (_label, value) => {
-    expect(parseAppConfig({ trial_days: value }, LOADED).trialDays).toBe(LOADED.trialDays);
-  });
-
-  it('one day and ten years are accepted', () => {
-    expect(parseAppConfig({ trial_days: 1 }, LOADED).trialDays).toBe(1);
-    expect(parseAppConfig({ trial_days: 3650 }, LOADED).trialDays).toBe(3650);
+  it('ignores a trial length an older database still sends', () => {
+    // The free trial is gone (20261015170000); a stale answer must not break the parse.
+    const config = parseAppConfig({ price_book: SEED_PRICE_BOOK, trial_days: 14 }, LOADED);
+    expect(config.priceBook).toEqual(SEED_PRICE_BOOK);
+    expect('trialDays' in config).toBe(false);
   });
 });
 

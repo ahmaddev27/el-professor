@@ -10,17 +10,12 @@ import { buildPlanState, effectivePlanOf, planAllows } from '../utils/planState'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Plan = 'basic' | 'advanced' | 'premium';
-export type SubscriptionStatus = 'trial' | 'active' | 'trial_expired' | 'suspended' | 'inactive' | 'archived' | 'deleted';
+export type SubscriptionStatus = 'active' | 'suspended' | 'inactive' | 'archived' | 'deleted';
 export type { BillingCycle };
 
 export interface PlanState {
   plan: Plan;
   status: SubscriptionStatus;
-  trialStart: Date | null;
-  trialEnd: Date | null;
-  trialDaysLeft: number;
-  isInTrial: boolean;
-  isTrialExpired: boolean;
   isActive: boolean;
   /** Number of cars included in the subscription */
   carLimit: number;
@@ -100,11 +95,6 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setPlanState({
           plan: 'premium',
           status: 'active',
-          trialStart: null,
-          trialEnd: null,
-          trialDaysLeft: 0,
-          isInTrial: false,
-          isTrialExpired: false,
           isActive: true,
           carLimit: 999,
           billingCycle: 'monthly',
@@ -114,8 +104,7 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
-    // The subscription columns are read here, in the same row as `status` and
-    // `trial_end`, rather than taken from AuthContext's copy: the state machine
+    // The subscription columns are read here, in the same row as `status`, rather than taken from AuthContext's copy: the state machine
     // in `utils/planState.ts` needs all four to agree, and AuthContext fetches
     // the company only *after* it has set the profile — so `companyId` arrives
     // one round trip before the subscription does, and a plan state built from
@@ -126,7 +115,7 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .from('companies')
       // One literal, not a concatenation: supabase-js parses the column list at
       // the type level, and a `+` leaves it with `GenericStringError`.
-      .select('plan, status, trial_start, trial_end, subscription_status, subscription_expires_at, subscription_car_limit, billing_cycle')
+      .select('plan, status, subscription_status, subscription_expires_at, subscription_car_limit, billing_cycle')
       .eq('id', companyId)
       .maybeSingle();
 

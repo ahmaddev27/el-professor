@@ -191,19 +191,14 @@ const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced',
 const PLAN_COLOR: Record<Plan, string> = { basic: 'var(--accent)', advanced: '#f59e0b', premium: '#10b981' };
 // Keys, not text: this map lives outside any component, and t() is a hook value.
 const STATUS_LABEL: Record<string, TranslationKey> = {
-  trial:         'overview.status.trial',
   active:        'overview.status.active',
-  trial_expired: 'overview.status.trialExpired',
   suspended:     'overview.status.suspended',
   inactive:      'overview.status.inactive',
 };
 
 const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = ({ planState, effectivePlan }) => {
-  const { t, tPlural } = useTranslation();
-  const color = planState.isInTrial ? 'var(--accent)' : PLAN_COLOR[planState.plan];
-  const trialEndStr = planState.trialEnd
-    ? planState.trialEnd.toLocaleDateString('de-DE', { day: '2-digit', month: 'long', year: 'numeric' })
-    : null;
+  const { t } = useTranslation();
+  const color = PLAN_COLOR[planState.plan];
 
   return (
     <div
@@ -223,10 +218,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>
-              {planState.isInTrial
-                ? t('overview.plan.trialUnlocked', { plan: PLAN_LABEL[effectivePlan] })
-                : t('overview.plan.named', { plan: PLAN_LABEL[planState.plan] })
-              }
+              {t('overview.plan.named', { plan: PLAN_LABEL[effectivePlan] })}
             </span>
             <span
               className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -236,30 +228,10 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
             </span>
           </div>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            {planState.isInTrial && trialEndStr
-              ? tPlural(
-                  { one: 'overview.plan.trialLeft.one', other: 'overview.plan.trialLeft.other' },
-                  planState.trialDaysLeft,
-                  { date: trialEndStr },
-                )
-              : planState.isTrialExpired && trialEndStr
-                ? t('overview.plan.trialEnded', { date: trialEndStr })
-                : t('overview.plan.activeSub')
-            }
+            {planState.status === 'active' ? t('overview.plan.activeSub') : null}
           </p>
         </div>
       </div>
-
-      {(planState.isInTrial || planState.isTrialExpired) && (
-        <a
-          href="mailto:support@el-professor.de?subject=Plan upgraden"
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 transition-opacity hover:opacity-80"
-          style={{ background: color, color: 'white' }}
-        >
-          <Zap size={12} />
-          {t('trial.choosePlan')}
-        </a>
-      )}
     </div>
   );
 };
@@ -531,7 +503,7 @@ const OverviewPage: React.FC = () => {
         </Link>
       )}
 
-      {/* ── Plan / Trial Status Card ── */}
+      {/* ── Plan Status Card ── */}
       {!isSuperAdmin && (
         <PlanStatusCard planState={planState} effectivePlan={effectivePlan} />
       )}

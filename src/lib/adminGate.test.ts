@@ -313,9 +313,10 @@ describe('tenantAccessGate', () => {
       ? 'companySuspended'
       : 'allow';
 
-  it('lets a company user of an active or trial company into its own app', () => {
+  it('lets a company user of an active company into its own app, and refuses a stale trial status', () => {
     expect(tenantAccessGate(COMPANY_USER)).toBe('allow');
-    expect(tenantAccessGate({ ...COMPANY_USER, companyStatus: 'trial' })).toBe('allow');
+    // `trial` is no longer a state a company works in (20261015170000).
+    expect(tenantAccessGate({ ...COMPANY_USER, companyStatus: 'trial' })).toBe('companyUnusable');
     // Unchanged from the old gate, which is the point of the pair.
     expect(oldGate(COMPANY_USER)).toBe('allow');
   });
@@ -371,7 +372,7 @@ describe('tenantAccessGate', () => {
 
   /*
     R1. `get_active_company_id()` answers NULL for every company state outside
-    active/trial, and `AuthContext.checkProfileAccess` — the sign-in path —
+    active, and `AuthContext.checkProfileAccess` — the sign-in path —
     already refuses all of them. Only the restored-session gate did not, so a
     reload reached the app where a fresh sign-in was refused.
   */

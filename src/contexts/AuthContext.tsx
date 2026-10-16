@@ -51,7 +51,7 @@ export type PageKey =
  * recorded: `approval_status` and `subscription_status` no longer admit
  * `'suspended'`, and their CHECK constraints refuse it.
  */
-export type CompanyStatus = 'active' | 'trial' | 'suspended' | 'inactive' | 'archived' | 'deleted';
+export type CompanyStatus = 'active' | 'suspended' | 'inactive' | 'archived' | 'deleted';
 
 // Reason codes returned when login is blocked
 export type BlockReason =

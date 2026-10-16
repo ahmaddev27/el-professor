@@ -275,13 +275,15 @@ INSERT INTO user_profiles (user_id, email, full_name, role, role_id, company_id,
 
 -- ─── the data the figures are read from ─────────────────────────────────────
 
--- Two more companies, so the trial states and the search have something to
--- find. Company A (seeded) is 'active', company B 'active'.
+-- Two more companies, so the trial filter and the search have something to
+-- find. They carry trial dates but, since 20261015170000, status 'active' (the
+-- CHECK refuses 'trial'), so the read model must call neither of them a trial.
+-- Company A (seeded) is 'active', company B 'active'.
 INSERT INTO companies (id, name, slug, status, approval_status, plan, billing_cycle,
                        subscription_status, subscription_car_limit, trial_start, trial_end, created_at) VALUES
-  ('cb000000-0000-4000-8000-000000000001', 'RM Trial läuft',    'rm-trial-running', 'trial', 'approved', 'advanced', 'monthly',
+  ('cb000000-0000-4000-8000-000000000001', 'RM Trial läuft',    'rm-trial-running', 'active', 'approved', 'advanced', 'monthly',
    'inactive', 5, now() - interval '9 days',  now() + interval '5 days', now() - interval '9 days'),
-  ('cb000000-0000-4000-8000-000000000002', 'RM Trial vorbei',   'rm-trial-expired', 'trial', 'pending',  'basic',    'monthly',
+  ('cb000000-0000-4000-8000-000000000002', 'RM Trial vorbei',   'rm-trial-expired', 'active', 'pending',  'basic',    'monthly',
    'inactive', 5, now() - interval '30 days', now() - interval '5 days', now() - interval '30 days'),
   ('cb000000-0000-4000-8000-000000000003', 'RM Prozent 100%',   'rm-prozent',       'active', 'approved', 'premium', 'yearly',
    'active',   5, NULL, NULL, now() - interval '3 days');
@@ -718,19 +720,19 @@ BEGIN
   PERFORM _rm_ok('an active company has no trial state', (a ->> 'trial_state') IS NULL);
 
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,'running',false,'name_asc',100,0)::text$q$);
-  PERFORM _rm_ok('trial running: exactly the companies in a trial that has not ended',
-    (v ->> 'total')::int = (SELECT count(*) FROM companies WHERE status = 'trial' AND trial_end > now())
-    AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'slug' = 'rm-trial-running')
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'trial_state' <> 'running'));
+  -- 20261015170000 removed the trial: no row can hold status 'trial', and the
+  -- read model's trial_state is derived from that status, so the filters that
+  -- still exist (the column list is a pinned shape) answer nothing.
+  PERFORM _rm_ok('trial running: nobody, because no company can be in a trial',
+    (v ->> 'total')::int = 0 AND jsonb_array_length(v -> 'items') = 0
+    AND NOT EXISTS (SELECT 1 FROM companies WHERE status = 'trial'));
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,'expired',false,'name_asc',100,0)::text$q$);
-  PERFORM _rm_ok('trial expired: exactly the companies whose trial_end has passed',
-    (v ->> 'total')::int = (SELECT count(*) FROM companies WHERE status = 'trial' AND trial_end <= now())
-    AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'slug' = 'rm-trial-expired')
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'trial_state' <> 'expired'));
+  PERFORM _rm_ok('trial expired: nobody either, even a company that still carries a past trial_end',
+    (v ->> 'total')::int = 0 AND jsonb_array_length(v -> 'items') = 0
+    AND EXISTS (SELECT 1 FROM companies WHERE slug = 'rm-trial-expired' AND trial_end <= now()));
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,'none',false,'name_asc',100,0)::text$q$);
-  PERFORM _rm_ok('trial none: every company that is not in a dated trial, and no other',
-    (v ->> 'total')::int = (SELECT count(*) FROM companies c
-                             WHERE NOT (c.status = 'trial' AND c.trial_end IS NOT NULL))
+  PERFORM _rm_ok('trial none: every company, trial dates or not',
+    (v ->> 'total')::int = (SELECT count(*) FROM companies c)
     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'trial_state' IS NOT NULL));
 
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,NULL,true,'name_asc',100,0)::text$q$);

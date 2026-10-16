@@ -13,8 +13,8 @@ import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input }
  * One nullable column, `company_settings.notification_email`, saved here with its
  * own button for the same reason the Abrechnung card has one: it sits beside the
  * settings form, not in it. When it is set it REPLACES the company's
- * administrators as the recipients of the Abrechnung summary and the TUEV and
- * trial notices; when it is empty the administrators receive them. Driver mail
+ * administrators as the recipients of the Abrechnung summary and the TÜV
+ * notices; when it is empty the administrators receive them. Driver mail
  * is never affected. The rule is `chooseCompanyRecipients` in
  * supabase/functions/_shared/notification-recipients.ts, and the card says it
  * in words before anything is saved.

@@ -2,7 +2,6 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import UserMenu from './UserMenu';
-import TrialBanner from './TrialBanner';
 import AnnouncementBanner from './AnnouncementBanner';
 import SupportSessionBar from './SupportSessionBar';
 import { useTheme } from '../contexts/ThemeContext';
@@ -39,13 +38,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
       <Sidebar isSupportAdmin={isSupportAdmin} />
 
       <div className="lg:pl-64">
-        {/* Above the trial banner on purpose: whose data this is comes before
-            anything about that company's own subscription. It renders nothing
+        {/* Whose data this is comes before anything else. It renders nothing
             for a company user. */}
         <SupportSessionBar />
-        <TrialBanner />
-        {/* The platform's announcements for this company (plan 3.11). Below
-            the trial banner: the company's own state comes first. */}
+        {/* The platform's announcements for this company (plan 3.11). */}
         <AnnouncementBanner />
         <header className="sticky top-0 z-20 border-b border-line bg-raised shadow-raised">
           {/* Below `lg` the sidebar's menu button is fixed over this row's

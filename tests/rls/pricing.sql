@@ -197,8 +197,7 @@ BEGIN
       ('app_private.settings_integer_between(jsonb,integer,integer)',    false, false, false),
       ('app_private.platform_settings_problem(text,jsonb)',              false, false, false),
       ('app_private.price_book_price(jsonb,text,integer,text,boolean)',  false, false, false),
-      ('app_private.invoice_amount_cents(jsonb,text,integer,text,boolean)', false, false, false),
-      ('app_private.signup_trial_days()',                                false, false, false)
+      ('app_private.invoice_amount_cents(jsonb,text,integer,text,boolean)', false, false, false)
     ) AS t(sig, anon, authn, service)
   LOOP
     PERFORM _pr_ok(format('EXECUTE on %s: anon %s, authenticated %s, service_role %s',
@@ -340,19 +339,19 @@ DECLARE
   v_app    jsonb;
 BEGIN
   v_public := _pr_do(NULL, 'SELECT get_public_config()::text')::jsonb;
-  PERFORM _pr_ok('get_public_config: anyone gets the price book and the trial length, and nothing else',
-    app_private.settings_object_keys(v_public) = ARRAY['price_book', 'trial_days']
-    AND v_public -> 'price_book' = app_private.platform_setting_value('price_book')
-    AND (v_public ->> 'trial_days')::integer = app_private.signup_trial_days());
+  -- 20261015170000 removed the trial length from both answers.
+  PERFORM _pr_ok('get_public_config: anyone gets the price book, and nothing else',
+    app_private.settings_object_keys(v_public) = ARRAY['price_book']
+    AND v_public -> 'price_book' = app_private.platform_setting_value('price_book'));
 
   -- Since 20260920130010 feature_flags is the stored setting (seeded {}) and
   -- announcements are the ones that apply to the caller's company now; no
   -- announcement exists in this file, so both are still empty here.
   -- tests/rls/announcements.sql fills them.
   v_app := _pr_do(admin_a, 'SELECT get_app_config()::text')::jsonb;
-  PERFORM _pr_ok('get_app_config: a signed-in company user gets prices, features, the trial, the flags and the announcements',
+  PERFORM _pr_ok('get_app_config: a signed-in company user gets prices, features, the flags and the announcements',
     app_private.settings_object_keys(v_app)
-      = ARRAY['announcements', 'feature_flags', 'plan_features', 'price_book', 'trial_days']
+      = ARRAY['announcements', 'feature_flags', 'plan_features', 'price_book']
     AND v_app -> 'price_book' = app_private.platform_setting_value('price_book')
     AND v_app -> 'plan_features' = app_private.platform_setting_value('plan_features')
     AND v_app -> 'feature_flags' = '{}'::jsonb

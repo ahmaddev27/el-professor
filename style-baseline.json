@@ -206,8 +206,8 @@
       "color": 1
     },
     "src/pages/OverviewPage.tsx": {
-      "style": 188,
-      "color": 111
+      "style": 187,
+      "color": 110
     },
     "src/pages/PlatformAuditPage.tsx": {
       "style": 49,
@@ -218,7 +218,7 @@
       "color": 0
     },
     "src/pages/PlatformSettingsPage.tsx": {
-      "style": 53,
+      "style": 50,
       "color": 2
     },
     "src/pages/PlatformTeamPage.tsx": {
@@ -238,8 +238,8 @@
       "color": 5
     },
     "src/pages/SuperAdminDashboard.tsx": {
-      "style": 197,
-      "color": 28
+      "style": 174,
+      "color": 25
     },
     "src/pages/WerkstattPage.tsx": {
       "style": 54,

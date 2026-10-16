@@ -17,13 +17,17 @@ const admins = ['chef@firma.de', 'zweiter@firma.de'];
 const row = (notification_type: string, email: unknown): RecipientRow => ({ notification_type, email });
 
 describe('the kinds that can have their own recipients', () => {
-  it('are the four expiry notices plus the Abrechnung manager summary', () => {
+  it('are the two expiry notices plus the Abrechnung manager summary', () => {
     expect([...RECIPIENT_KINDS].sort()).toEqual([...NOTIFICATION_TYPES, 'manager_summary'].sort());
   });
 
   it('match the database CHECK on notification_recipients', () => {
+    // The newest migration that spells the constraint: 20261015140000 created
+    // it, and the one that removed the trial kinds restated it.
     const file = readdirSync(new URL('../../supabase/migrations', import.meta.url))
-      .filter((name) => name.endsWith('_notification_recipients.sql')).sort().pop();
+      .filter((name) => name.endsWith('.sql'))
+      .filter((name) => source(`supabase/migrations/${name}`).includes('notification_recipients_type_check CHECK (notification_type IN ('))
+      .sort().pop();
     expect(file).toBeDefined();
     const sql = source(`supabase/migrations/${file}`);
     const check = /notification_recipients_type_check CHECK \(notification_type IN \(([^)]*)\)/.exec(sql);
@@ -59,7 +63,7 @@ describe('addressesForKind', () => {
   });
 
   it('is empty for a kind nobody listed', () => {
-    expect(addressesForKind(rows, 'trial_abgelaufen')).toEqual([]);
+    expect(addressesForKind(rows, 'tuev_bald_ablaufend')).toEqual([]);
   });
 });
 

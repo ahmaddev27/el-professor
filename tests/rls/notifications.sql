@@ -36,8 +36,8 @@
                   a bad period key are all refused
     7. settle     an outcome is recorded once and never overwritten
     8. candidates the query's own boundary — approved and not suspended — and
-                  the deliberate absence of a subscription term, which is what
-                  lets trial_abgelaufen reach the company it is about
+                  the deliberate absence of a subscription term, so a company
+                  whose subscription is not active is still offered
 
   The matrix lines for the table are in tests/rls/matrix.sql.
 */
@@ -163,16 +163,15 @@ INSERT INTO companies (id, name, slug, approval_status, status, plan, subscripti
 VALUES
   (_nt_id('company:suspended'), 'NT suspended', 'nt-suspended', 'approved', 'suspended', 'basic',
    'active', NULL),
-  (_nt_id('company:pending'),   'NT pending',   'nt-pending',   'pending',  'trial',     'basic',
-   'inactive', now() + interval '3 days'),
-  -- A company inside its trial, three days from the end. Its subscription has
-  -- never been active, which is what signup writes.
-  (_nt_id('company:trialing'),  'NT trialing',  'nt-trialing',  'approved', 'trial',     'basic',
-   'inactive', now() + interval '3 days'),
-  -- A paying customer that still reads as a trial company, which is the normal
-  -- state after redeem_activation_code: its trial ended long ago.
-  (_nt_id('company:paying'),    'NT paying',    'nt-paying',    'approved', 'trial',     'advanced',
-   'active', now() - interval '40 days')
+  (_nt_id('company:pending'),   'NT pending',   'nt-pending',   'pending',  'active',    'basic',
+   'inactive', NULL),
+  -- An approved company whose subscription has never been active, which is
+  -- what signup writes. (These two were trial companies until 20261015170000.)
+  (_nt_id('company:trialing'),  'NT trialing',  'nt-trialing',  'approved', 'active',    'basic',
+   'inactive', NULL),
+  -- A paying customer.
+  (_nt_id('company:paying'),    'NT paying',    'nt-paying',    'approved', 'active',    'advanced',
+   'active', NULL)
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE companies SET subscription_expires_at = now() + interval '200 days'
@@ -220,6 +219,10 @@ VALUES
   (_nt_id('car:suspended'), _nt_id('company:suspended'),            'NT-S 1',
    _nt_id('user:admin-suspended'),         (now() + interval '10 days')::date),
   (_nt_id('car:pending'),   _nt_id('company:pending'),              'NT-P 1',
+   'a0000000-0000-4000-8000-000000000001', (now() + interval '10 days')::date),
+  (_nt_id('car:trialing'),  _nt_id('company:trialing'),             'NT-T 1',
+   'a0000000-0000-4000-8000-000000000001', (now() + interval '10 days')::date),
+  (_nt_id('car:paying'),    _nt_id('company:paying'),               'NT-Y 1',
    'a0000000-0000-4000-8000-000000000001', (now() + interval '10 days')::date)
 ON CONFLICT (id) DO NOTHING;
 
@@ -494,7 +497,7 @@ BEGIN
 
   -- As the kit runs, with no JWT at all: the same condition the service role
   -- meets, and the branch the trigger takes for it.
-  v_id := notification_delivery_claim(co_a, 'trial_bald_ablaufend', co_a, '2095-01-01');
+  v_id := notification_delivery_claim(co_a, 'tuev_bald_ablaufend', co_a, '2095-01-01');
   PERFORM _nt_ok('job: a claim with no session goes through', v_id IS NOT NULL);
   PERFORM _nt_ok('job: …and the settle too', notification_delivery_settle(v_id, true, 1) = true);
   PERFORM _nt_ok('job: neither leaves a support-write audit row', _nt_rows(v_mark) = 0);
@@ -551,8 +554,14 @@ BEGIN
   PERFORM _nt_ok('claim: a car of another company is not a target of this one',
     notification_delivery_claim(co_a, 'tuev_abgelaufen', _nt_id('car:b'), '2028-01-01') IS NULL);
 
-  PERFORM _nt_ok('claim: the company itself is a valid target, for the trial types',
-    notification_delivery_claim(co_a, 'trial_abgelaufen', co_a, '2028-01-01') IS NOT NULL);
+  -- The trial notices were removed with the trial (20261015170000).
+  BEGIN
+    PERFORM notification_delivery_claim(co_a, 'trial_abgelaufen', co_a, '2028-01-01');
+    v_state := 'no error';
+  EXCEPTION WHEN OTHERS THEN
+    v_state := SQLSTATE;
+  END;
+  PERFORM _nt_ok('claim: a trial type no longer exists, and is refused as unknown', v_state = '22023');
 
   BEGIN
     PERFORM notification_delivery_claim(co_a, 'tuev_bald_abgelaufen', _nt_id('car:a'), '2028-02-01');
@@ -591,7 +600,7 @@ DECLARE
   v_id uuid;
   r    public.notification_deliveries%ROWTYPE;
 BEGIN
-  v_id := notification_delivery_claim(co_a, 'trial_bald_ablaufend', co_a, '2029-01-01');
+  v_id := notification_delivery_claim(co_a, 'tuev_bald_ablaufend', co_a, '2029-01-01');
   SELECT * INTO r FROM notification_deliveries WHERE id = v_id;
   PERFORM _nt_ok('settle: a fresh claim is unsettled — the mail has not gone yet',
     r.mail_sent IS NULL AND r.settled_at IS NULL AND r.recipient_count = 0);
@@ -637,21 +646,18 @@ BEGIN
     r.sent::text LIKE '%' || _nt_id('car:a')::text || '%'
     AND r.sent::text NOT LIKE '%' || _nt_id('car:b')::text || '%');
 
-  -- A company with a narrower window offered no cars, and so is offered at all
-  -- only if it has a trial_end.
+  -- A company with a narrower window offered no cars, and so is not offered.
   PERFORM _nt_ok('candidates: the window is the caller''s argument, not a constant in here',
     (SELECT count(*) FROM jsonb_array_elements(
        (SELECT c.cars FROM notification_candidates(5, 500) c WHERE c.company_id = co_a))) = 1);
 
-  -- The decision this whole feature turns on: the query must not gate on the
-  -- subscription, or trial_abgelaufen could never reach the company it is
-  -- about, and trial_bald_ablaufend could never be sent at all — a company
-  -- inside its trial has subscription_status = 'inactive'.
-  PERFORM _nt_ok('candidates: a company inside its trial is offered, although its subscription is inactive',
+  -- The query still does not gate on the subscription: the job decides, and an
+  -- approved company that has never subscribed keeps its TÜV warnings.
+  PERFORM _nt_ok('candidates: a company whose subscription never became active is offered',
     EXISTS (SELECT 1 FROM notification_candidates(60, 500)
              WHERE company_id = _nt_id('company:trialing')));
 
-  PERFORM _nt_ok('candidates: a paying customer still on status=trial is offered too — the job decides, not the query',
+  PERFORM _nt_ok('candidates: a paying customer is offered too',
     EXISTS (SELECT 1 FROM notification_candidates(60, 500)
              WHERE company_id = _nt_id('company:paying')));
 

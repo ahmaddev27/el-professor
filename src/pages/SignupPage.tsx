@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { Plan } from '../contexts/PlanContext';
 import type { BillingCycle, DiscountResult } from '../utils/pricing';
-import { useAppConfig } from '../contexts/AppConfigContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { useOtpSessionHandoff } from '../hooks/useOtpSessionHandoff';
@@ -39,9 +38,6 @@ const STEP_LABEL_KEYS: Record<Step, TranslationKey> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const SignupPage: React.FC = () => {
-  // The trial length comes from the database (plan 3.9), like the prices the
-  // plan block quotes.
-  const { trialDays } = useAppConfig();
   const { t, tPlural } = useTranslation();
   const completeSignIn = useOtpSessionHandoff();
   const [step, setStep] = useState<Step>('plan');
@@ -184,7 +180,7 @@ const SignupPage: React.FC = () => {
     <AuthShell
       width="wide"
       title={t('signup.cta')}
-      subtitle={t('signup.subtitle', { days: trialDays })}
+      subtitle={t('signup.subtitle')}
       above={stepIndicator}
       footer={
         <>
@@ -246,7 +242,7 @@ const SignupPage: React.FC = () => {
           {/* ── Step 1: Plan + Car Count + Billing Cycle ── */}
           {step === 'plan' && (
             <div className="grid gap-5">
-              {heading(t('signup.plan.heading'), t('signup.plan.subheading', { days: trialDays }))}
+              {heading(t('signup.plan.heading'), t('signup.plan.subheading'))}
 
               {/* The same block the Google registration screen shows, so both
                   paths sell the same tiers at the same prices. */}
@@ -377,7 +373,7 @@ const SignupPage: React.FC = () => {
                 </Button>
 
                 <p className="pt-1 text-center text-xs text-fg-subtle">
-                  {t('signup.summaryLead', { days: trialDays })}
+                  {t('signup.summaryLead')}
                   <strong className="font-semibold text-fg-muted">{selectedPlanDef.name}</strong>
                   {t('signup.summaryTail', {
                     cars: carLimit,

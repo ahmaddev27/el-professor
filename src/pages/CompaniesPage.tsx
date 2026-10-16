@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, Plus, Search, Eye, CreditCard as Edit2, MoreVertical,
-  CheckCircle, XCircle, PauseCircle, AlertCircle, Users, ChevronRight,
+  CheckCircle, XCircle, PauseCircle, Users, ChevronRight,
   Globe, Mail, Phone, MapPin, Calendar, RefreshCw, ArrowLeft, User,
   Shield, X, Save, ExternalLink, Archive, Trash2, AlertTriangle,
   RotateCcw, Lock, ChevronDown, Download,
@@ -54,7 +54,7 @@ interface CompanyFormData {
   city: string;
   postal_code: string;
   country: string;
-  status: 'active' | 'trial' | 'suspended' | 'inactive';
+  status: 'active' | 'suspended' | 'inactive';
 }
 
 interface AdminFormData {
@@ -71,7 +71,6 @@ interface AdminFormData {
 // and t() is a hook value; SuperAdminDashboard.tsx resolves the same key set.
 const STATUS_CONFIG: Record<CompanyStatus, { label: TranslationKey; icon: React.ElementType; color: string; bg: string }> = {
   active:    { label: 'sa.status.active',    icon: CheckCircle,    color: 'var(--success)',        bg: 'var(--success-subtle)' },
-  trial:     { label: 'sa.status.trial',     icon: AlertCircle,    color: 'var(--warning)',        bg: 'var(--warning-subtle)' },
   suspended: { label: 'sa.status.suspended', icon: PauseCircle,    color: 'var(--danger)',         bg: 'var(--danger-subtle)' },
   inactive:  { label: 'sa.status.inactive',  icon: XCircle,        color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)' },
   archived:  { label: 'sa.status.archived',  icon: Archive,        color: '#64748b',               bg: 'rgba(100,116,139,0.12)' },
@@ -477,7 +476,6 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
                 {/* `value` is the stored companies.status — only the label is translated. */}
                 <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))}>
                   <option value="active">{t('sa.status.active')}</option>
-                  <option value="trial">{t('sa.status.trial')}</option>
                   <option value="suspended">{t('sa.status.suspended')}</option>
                   <option value="inactive">{t('sa.status.inactive')}</option>
                 </select>
@@ -542,7 +540,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
     phone: company.phone || '', address: company.address || '',
     city: company.city || '', postal_code: company.postal_code || '',
     country: company.country || 'Deutschland',
-    status: (['active','trial','suspended','inactive'].includes(company.status) ? company.status : 'inactive') as any,
+    status: (['active','suspended','inactive'].includes(company.status) ? company.status : 'inactive') as any,
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -583,7 +581,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
             <div><label style={labelStyle}>{t('common.status')}</label>
               {/* `value` is the stored companies.status — only the label is translated. */}
               <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))}>
-                <option value="active">{t('sa.status.active')}</option><option value="trial">{t('sa.status.trial')}</option>
+                <option value="active">{t('sa.status.active')}</option>
                 <option value="suspended">{t('sa.status.suspended')}</option><option value="inactive">{t('sa.status.inactive')}</option>
               </select>
             </div>
@@ -1341,12 +1339,11 @@ export default function CompaniesPage() {
   }
 
   // ── List view ──
-  const filterOptions: Array<'all' | CompanyStatus> = ['all', 'active', 'trial', 'suspended', 'inactive', 'archived', 'deleted'];
+  const filterOptions: Array<'all' | CompanyStatus> = ['all', 'active', 'suspended', 'inactive', 'archived', 'deleted'];
   // Keys are the stored companies.status values the filter compares against.
   const filterLabels: Record<string, TranslationKey> = {
     all: 'common.all',
     active: 'sa.status.active',
-    trial: 'sa.status.trial',
     suspended: 'sa.status.suspended',
     inactive: 'sa.status.inactive',
     archived: 'sa.status.archived',

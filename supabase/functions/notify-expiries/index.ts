@@ -1,5 +1,5 @@
 /**
- * The nightly notification job: TÜV expiries and trial ends.
+ * The nightly notification job: TÜV expiries.
  *
  * ─── Why this is a function of its own ───────────────────────────────────────
  *
@@ -30,7 +30,7 @@
  * here rather than a second function because its caller is the same kind of
  * caller — a cron line with the service key and no `auth.uid()` — and a new
  * function costs a line in `FUNCTION_ENV` and one in the compose file. A body
- * with no `job` is the TÜV / trial job, so the installed notification cron line
+ * with no `job` is the TÜV job, so the installed notification cron line
  * is unchanged. The name is the notifications' and stays, because
  * `PUBLIC_FUNCTIONS`, `FUNCTION_ENV` and the cron line name it.
  *
@@ -84,7 +84,7 @@ function bearer(req: Request): string | null {
  * The job and the mode a request asks for.
  *
  * `{"job":"abrechnung"}` is the scheduled Abrechnung; anything else, an absent
- * `job` included, is the TÜV / trial job, so the cron line installed for the
+ * `job` included, is the TÜV job, so the cron line installed for the
  * notifications keeps working unchanged. `mode` is `dry_run` for anything that
  * is not exactly `send`, and an unreadable body is a dry run of the default job.
  */
