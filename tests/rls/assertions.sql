@@ -516,7 +516,7 @@ DECLARE
   -- functions only signed-in screens and the service role call, whose anon
   -- grant 20260915120000 revoked
   signed_in_only constant text[] := ARRAY[
-    'public.compute_plan_price(text, integer, text)',
+    'public.compute_plan_price(text, integer, text, boolean)',
     'public.generate_invoice_number(integer)',
     'public.apply_monthly_planning_run(jsonb)',
     'public.replace_monthly_planning_run(jsonb, uuid)',

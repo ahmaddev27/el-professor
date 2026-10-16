@@ -24,6 +24,8 @@ export interface FleetDiscountTier {
  * `price_book` (migration 20260916150000).
  *
  * Prices are integer cents per car per month and percentages whole numbers.
+ * `first_month_cents`, when the book names it, is the flat price of a company's
+ * first invoice (owner's decision, 15.10.2026; migration 20261015160000).
  * Tiers are sorted by `min_cars`, strictly increasing. The database validates
  * every book it saves; screens get the book from AppConfigContext, and
  * `compute_plan_price()` reads the same row, so the price a screen shows and the
@@ -33,6 +35,13 @@ export interface PriceBook {
   readonly price_per_car_cents: Readonly<Record<Plan, number>>;
   readonly fleet_discount_tiers: readonly FleetDiscountTier[];
   readonly yearly_discount_percent: number;
+  /**
+   * The flat price of a company's first invoice, in integer cents, whatever its
+   * plan, car count or cycle. Absent: the book has no first month and every
+   * invoice is priced per car, which is what every book saved before the
+   * decision says.
+   */
+  readonly first_month_cents?: number;
 }
 
 /** The discount of the highest tier the car count reaches, or 0. */
@@ -58,6 +67,12 @@ export interface PriceBreakdown {
   monthlyEquivalent: number;
   /** Annual total (monthlyAfterFleet * 12 * (1 - yearly%)) — useful for display even in monthly mode */
   yearlyTotal: number;
+  /**
+   * True when this is the figure of a company's first invoice and the book names
+   * one: `finalTotal` and `monthlyEquivalent` are then the flat price, and every
+   * other figure stays the per-car one, so a screen can print both.
+   */
+  firstInvoice: boolean;
 }
 
 /**
@@ -70,6 +85,10 @@ export interface PriceBreakdown {
  *   yearlyTotal        = monthlyAfterFleet * 12 * (1 - yearly%)
  *   finalTotal         = yearlyTotal for 'yearly', monthlyAfterFleet otherwise
  *
+ * With `firstInvoice` and a book that names `first_month_cents`, `finalTotal` and
+ * `monthlyEquivalent` are that flat figure, whatever the plan, the cars or the
+ * cycle, exactly as `compute_plan_price(…, true)` answers.
+ *
  * Computed on integers first (cents times whole percentages) with one division
  * at the end, so no binary rounding error builds up along the chain. Nothing is
  * rounded to cents: today's book always gives whole cents, and a book that did
@@ -79,7 +98,8 @@ export function calcPricing(
   book: PriceBook,
   plan: Plan,
   carLimit: number,
-  billingCycle: BillingCycle
+  billingCycle: BillingCycle,
+  firstInvoice = false
 ): PriceBreakdown {
   const pricePerCarCents  = book.price_per_car_cents[plan];
   const fleetDiscountPct  = fleetDiscountPercent(book, carLimit);
@@ -93,10 +113,14 @@ export function calcPricing(
   const monthlyAfterFleet = monthlyE4 / 10_000;
   const yearlyTotal       = yearlyE6 / 1_000_000;
 
-  const finalTotal =
-    billingCycle === 'yearly' ? yearlyTotal : monthlyAfterFleet;
-  const monthlyEquivalent =
-    billingCycle === 'yearly' ? yearlyE6 / 12_000_000 : monthlyAfterFleet;
+  const flatCents = flatFirstMonthCents(book, firstInvoice);
+
+  const finalTotal = flatCents !== null
+    ? flatCents / 100
+    : billingCycle === 'yearly' ? yearlyTotal : monthlyAfterFleet;
+  const monthlyEquivalent = flatCents !== null
+    ? flatCents / 100
+    : billingCycle === 'yearly' ? yearlyE6 / 12_000_000 : monthlyAfterFleet;
 
   return {
     pricePerCarCents,
@@ -109,7 +133,45 @@ export function calcPricing(
     finalTotal,
     monthlyEquivalent,
     yearlyTotal,
+    firstInvoice: flatCents !== null,
   };
+}
+
+/** The flat figure of a first invoice, or null when this is not one or the book names none. */
+function flatFirstMonthCents(book: PriceBook, firstInvoice: boolean): number | null {
+  return firstInvoice && book.first_month_cents !== undefined ? book.first_month_cents : null;
+}
+
+/**
+ * What one invoice costs, in integer cents: the twin of
+ * `app_private.invoice_amount_cents()`, the single place the database decides an
+ * amount.
+ *
+ *   - a first invoice and a book that names the figure: the figure;
+ *   - otherwise a yearly company: the yearly price in twelve parts;
+ *   - otherwise the monthly price per car.
+ *
+ * Rounded once, half up, on integers: the monthly price is euros x 10^4 and the
+ * yearly one euros x 10^6, so the cents are an exact integer division and the
+ * `+ half` before it is the rounding. Never a float on the way.
+ */
+export function invoiceAmountCents(
+  book: PriceBook,
+  plan: Plan,
+  carLimit: number,
+  billingCycle: BillingCycle,
+  firstInvoice: boolean
+): number {
+  const flatCents = flatFirstMonthCents(book, firstInvoice);
+  if (flatCents !== null) return flatCents;
+
+  const monthlyE4 = Math.max(carLimit, 1) * book.price_per_car_cents[plan]
+    * (100 - fleetDiscountPercent(book, carLimit));
+  if (billingCycle === 'yearly') {
+    const yearlyE6 = monthlyE4 * 12 * (100 - book.yearly_discount_percent);
+    return Math.floor((yearlyE6 + 60_000) / 120_000);
+  }
+  return Math.floor((monthlyE4 + 50) / 100);
 }
 
 export function fmt(n: number): string {
@@ -192,9 +254,14 @@ export function parsePriceBook(value: unknown): PriceBook | null {
 
   if (!isIntegerBetween(value.yearly_discount_percent, 0, 100)) return null;
 
+  // Optional: a book saved before 20261015160000 names no first month.
+  const first = value.first_month_cents;
+  if (first !== undefined && !isIntegerBetween(first, 0, MAX_PRICE_CENTS)) return null;
+
   return {
     price_per_car_cents: { basic, advanced, premium },
     fleet_discount_tiers: tiers,
     yearly_discount_percent: value.yearly_discount_percent,
+    ...(first !== undefined ? { first_month_cents: first } : {}),
   };
 }

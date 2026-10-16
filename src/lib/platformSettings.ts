@@ -195,6 +195,11 @@ export interface PriceBookForm {
   pricePerCar: Record<Plan, string>;
   tiers: { minCars: string; percent: string }[];
   yearlyDiscountPercent: string;
+  /**
+   * The flat price of a company's first invoice, typed the same way. Empty: the
+   * book names no first month and every invoice is priced per car.
+   */
+  firstMonth: string;
 }
 
 export function priceBookToForm(book: PriceBook): PriceBookForm {
@@ -209,6 +214,7 @@ export function priceBookToForm(book: PriceBook): PriceBookForm {
       percent: String(tier.percent),
     })),
     yearlyDiscountPercent: String(book.yearly_discount_percent),
+    firstMonth: book.first_month_cents === undefined ? '' : formatCentsForInput(book.first_month_cents),
   };
 }
 
@@ -254,10 +260,19 @@ export function priceBookFromForm(form: PriceBookForm): { book: PriceBook } | { 
   const yearly = wholeNumber(form.yearlyDiscountPercent);
   if (yearly === null || yearly > 100) return { error: 'price_book.yearly_discount_percent' };
 
+  // Empty is a book with no first month, not a free one: 0 is typed as "0".
+  let firstMonthCents: number | undefined;
+  if (form.firstMonth.trim() !== '') {
+    const parsed = parseGermanAmountToCents(form.firstMonth);
+    if (parsed === null || parsed > 1_000_000) return { error: 'price_book.first_month_cents' };
+    firstMonthCents = parsed;
+  }
+
   const book = parsePriceBook({
     price_per_car_cents: { basic: cents.basic, advanced: cents.advanced, premium: cents.premium },
     fleet_discount_tiers: tiers,
     yearly_discount_percent: yearly,
+    ...(firstMonthCents !== undefined ? { first_month_cents: firstMonthCents } : {}),
   });
   return book ? { book } : { error: 'price_book' };
 }
