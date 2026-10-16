@@ -23,9 +23,9 @@
                  prices alone), support holds none
     3. writing   settings.manage — owner only — for all three; every validator
                  path; the version check
-    4. the trial **the rule this slice preserves**: a signup gets a trial
-                 ending now() plus the setting's days, and changing the setting
-                 moves no trial that already exists
+    4. the trial gone (20261015170000, owner: no free trial): a signup gets
+                 status active and no trial dates whatever the stored `trial`
+                 document says, and neither config answer quotes a length
     5. audit     each write recorded under category `settings`, with the value
                  before and after; a refusal recorded as `denied`
     6. scope     a key with no validator is still refused, and neither settings
@@ -361,20 +361,14 @@ BEGIN
     AND (SELECT version = 1 FROM app_private.platform_settings WHERE key = 'trial'));
 END $$;
 
--- ─── 4. the trial: what a signup actually gets ──────────────────────────────
+-- ─── 4. the trial is gone: what a signup actually gets ──────────────────────
 
 /*
-  The rule this slice preserves:
-
-    a company created by a signup gets a trial ending now() plus the trial
-    length, and nothing recomputes the trial of a company that already exists.
-
-  So the setting is exercised the only way that proves it — by running a signup
-  through app_private.signup_insert_company, the one function that writes
-  trial_end, before and after the owner changes the length.
-
-  The whole file is one transaction, so now() does not move between the two
-  signups and the two trial_end values can be compared exactly.
+  The free trial was removed by 20261015170000 (owner, 15.10.2026). The `trial`
+  settings key is still stored and still validated (its validator is part of
+  platform_settings_problem), but nothing reads it: a signup through
+  app_private.signup_insert_company, the one function that used to write
+  trial_end, grants no trial whatever the stored length is.
 */
 
 INSERT INTO auth.users (id, email) VALUES
@@ -386,57 +380,48 @@ DECLARE
   owner   constant uuid := '3c000000-0000-4000-8000-000000000001';
   v_first   public.companies%ROWTYPE;
   v_second  public.companies%ROWTYPE;
-  v_reread  timestamptz;
+  v_refused boolean;
 BEGIN
   PERFORM _st_reset();
 
-  PERFORM _st_ok('trial: signup_trial_days() answers what the setting holds',
-    app_private.signup_trial_days() = (app_private.platform_setting_value('trial') ->> 'days')::integer
-    AND app_private.signup_trial_days() = 14);
-  PERFORM _st_ok('trial: get_public_config() quotes the same number to a visitor',
-    (public.get_public_config() ->> 'trial_days')::integer = app_private.signup_trial_days());
+  PERFORM _st_ok('no trial: neither config answer quotes a trial length, and the helper is gone',
+    NOT (public.get_public_config() ? 'trial_days')
+    AND NOT (public.get_app_config() ? 'trial_days')
+    AND to_regprocedure('app_private.signup_trial_days()') IS NULL);
 
   SELECT * INTO v_first FROM app_private.signup_insert_company(
     '3c000000-0000-4000-8000-00000000000a', 'st-signup-1@test.invalid', 'ST One',
     'ST Trial One', 'basic', 'monthly', 3, NULL, NULL, 'pending_invite');
 
-  PERFORM _st_ok('trial: a signup gets exactly the 14 days the constant used to give',
-    v_first.trial_end = now() + interval '14 days'
-    AND v_first.trial_start = now()
-    AND v_first.status = 'trial' AND v_first.approval_status = 'pending');
+  PERFORM _st_ok('no trial: a signup is a pending, inactive company with status active and no trial dates',
+    v_first.trial_end IS NULL AND v_first.trial_start IS NULL
+    AND v_first.status = 'active' AND v_first.approval_status = 'pending'
+    AND v_first.subscription_status = 'inactive');
 
-  -- The owner doubles it. version 1 -> 2.
-  PERFORM _st_ok('trial: an owner may change the length',
+  -- The stored document can still be changed (its validator survives); it has
+  -- no effect on a signup.
+  PERFORM _st_ok('no trial: an owner may still store the old key',
     _st_put(owner, 'trial', '{"days": 30}'::jsonb, 1, 'ok') = 'true');
   PERFORM _st_reset();
-
-  PERFORM _st_ok('trial: signup_trial_days() and get_public_config() both follow at once',
-    app_private.signup_trial_days() = 30
-    AND (public.get_public_config() ->> 'trial_days')::integer = 30);
 
   SELECT * INTO v_second FROM app_private.signup_insert_company(
     '3c000000-0000-4000-8000-00000000000b', 'st-signup-2@test.invalid', 'ST Two',
     'ST Trial Two', 'basic', 'monthly', 3, NULL, NULL, 'pending_invite');
 
-  PERFORM _st_ok('trial: the next signup gets the new length',
-    v_second.trial_end = now() + interval '30 days');
+  PERFORM _st_ok('no trial: …and the next signup still gets no trial dates',
+    v_second.trial_end IS NULL AND v_second.trial_start IS NULL AND v_second.status = 'active');
 
-  -- The point of the rule: a longer trial is not retroactive, and a shorter one
-  -- does not cut anybody off.
-  SELECT trial_end INTO v_reread FROM public.companies WHERE id = v_first.id;
-  PERFORM _st_ok('trial: the company created before the change keeps its own end date',
-    v_reread = now() + interval '14 days' AND v_reread <> v_second.trial_end);
-
-  -- Fail closed: with no trial document at all the signup falls back to the 14
-  -- days the constant held, never to a NULL trial_end — a company whose trial
-  -- never ends.
-  DELETE FROM app_private.platform_settings WHERE key = 'trial';
-  PERFORM _st_ok('trial: a missing document falls back to 14 days, never to a trial with no end',
-    app_private.signup_trial_days() = 14
-    AND (public.get_public_config() ->> 'trial_days')::integer = 14);
+  BEGIN
+    UPDATE public.companies SET status = 'trial' WHERE id = v_first.id;
+    v_refused := false;
+  EXCEPTION WHEN check_violation THEN
+    v_refused := true;
+  END;
+  PERFORM _st_ok('no trial: a company cannot be given status trial at all', v_refused);
 END $$;
 
 -- Put the document back, so sections 5 and 6 see the database as seeded.
+DELETE FROM app_private.platform_settings WHERE key = 'trial';
 INSERT INTO app_private.platform_settings (key, value, version)
 VALUES ('trial', '{"days": 30}'::jsonb, 2)
 ON CONFLICT (key) DO NOTHING;
@@ -521,17 +506,15 @@ BEGIN
 
   -- The signup path can reach app_private, whoever owns it. Without this every
   -- signup would fail at the first statement of signup_insert_company.
-  PERFORM _st_ok('scope: the owner of signup_insert_company may call signup_trial_days()',
+  PERFORM _st_ok('scope: the owner of signup_insert_company still reaches app_private',
     (SELECT has_schema_privilege(p.proowner, 'app_private', 'USAGE')
-            AND has_function_privilege(p.proowner, 'app_private.signup_trial_days()'::regprocedure, 'EXECUTE')
        FROM pg_proc p
       WHERE p.oid = 'app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)'::regprocedure));
 
   PERFORM _st_ok('scope: and no API role gained that reach',
     NOT has_schema_privilege('anon', 'app_private', 'USAGE')
     AND NOT has_schema_privilege('authenticated', 'app_private', 'USAGE')
-    AND NOT has_schema_privilege('service_role', 'app_private', 'USAGE')
-    AND NOT has_function_privilege('service_role', 'app_private.signup_trial_days()'::regprocedure, 'EXECUTE'));
+    AND NOT has_schema_privilege('service_role', 'app_private', 'USAGE'));
 END $$;
 
 -- ─── 7. the mail sender and the four templates ──────────────────────────────

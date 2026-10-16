@@ -7,8 +7,8 @@ import { collectCompanyCounts, UNKNOWN_COMPANY_COUNTS, type CompanyCounts } from
 import { driversAllowance } from '../lib/panelFigures';
 import {
   Building2, Users, Car, FileText, TrendingUp, AlertTriangle,
-  CheckCircle, Clock, XCircle, PauseCircle, Plus, ExternalLink,
-  RefreshCw, Zap, BarChart3, AlertCircle, ChevronRight,
+  CheckCircle, XCircle, PauseCircle, Plus, ExternalLink,
+  RefreshCw, BarChart3, AlertCircle, ChevronRight,
   ArrowUpRight, Shield, Activity, Tag, ClipboardCheck, Gift, KeyRound, PencilLine,
 } from 'lucide-react';
 import { callPlatformRpc } from '../lib/platformRpc';
@@ -16,7 +16,7 @@ import DiscountCodesManagement from '../components/DiscountCodesManagement';
 import ReferralCodesManagement from '../components/ReferralCodesManagement';
 import ActivationCodesManagement from '../components/ActivationCodesManagement';
 import ManualSubscriptionModal from '../components/ManualSubscriptionModal';
-import { format, differenceInDays, isAfter, isBefore, addDays, startOfMonth } from 'date-fns';
+import { format, isAfter, startOfMonth } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useAppConfig } from '../contexts/AppConfigContext';
@@ -24,7 +24,6 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { contextRefusalMessage } from '../lib/supportSession';
 import { ADMIN_BASE, TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
-import { subscriptionIsActive } from '../utils/planState';
 import { Alert, ConfirmDialog } from '../components/ui';
 import type { CompanyStatus } from '../contexts/AuthContext';
 import type { TranslationKey } from '../i18n';
@@ -45,8 +44,6 @@ interface CompanyRow {
   plan: Plan;
   billing_cycle: 'monthly' | 'yearly';
   subscription_car_limit: number;
-  trial_start: string | null;
-  trial_end: string | null;
   created_at: string;
   updated_at: string;
   email: string | null;
@@ -98,55 +95,15 @@ interface PlatformKPIs {
    * screen would say that every customer has no users and no drivers.
    */
   countsKnown: boolean;
-  trialCompanies: number;
   activeCompanies: number;
   suspendedCompanies: number;
   inactiveCompanies: number;
   archivedCompanies: number;
   deletedCompanies: number;
-  expiredTrials: number;
-  expiringIn7Days: number;
   newThisMonth: number;
   basicCount: number;
   advancedCount: number;
   premiumCount: number;
-}
-
-// ─── Countdown hook ───────────────────────────────────────────────────────────
-
-function useCountdown(endIso: string | null): string {
-  const [display, setDisplay] = useState('');
-  const rafRef = useRef<number>();
-  const { t } = useTranslation();
-
-  useEffect(() => {
-    if (!endIso) { setDisplay(''); return; }
-    const end = new Date(endIso).getTime();
-
-    const tick = () => {
-      const diff = end - Date.now();
-      if (diff <= 0) { setDisplay(t('sa.dash.expired')); return; }
-      const d = Math.floor(diff / 86_400_000);
-      const h = Math.floor((diff % 86_400_000) / 3_600_000);
-      const m = Math.floor((diff % 3_600_000) / 60_000);
-      const s = Math.floor((diff % 60_000) / 1_000);
-      setDisplay(
-        d > 0
-          ? t('sa.dash.countdownDays', {
-              d,
-              h: String(h).padStart(2, '0'),
-              m: String(m).padStart(2, '0'),
-              s: String(s).padStart(2, '0'),
-            })
-          : `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
-      );
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [endIso, t]);
-
-  return display;
 }
 
 // ─── Shared style helpers ─────────────────────────────────────────────────────
@@ -170,7 +127,6 @@ const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced',
 // and t() is a hook value; CompaniesPage.tsx resolves the same key set.
 const STATUS_CFG: Record<CompanyStatus, { label: TranslationKey; color: string; bg: string; Icon: React.ElementType }> = {
   active:    { label: 'sa.status.active',    color: 'var(--success)',        bg: 'var(--success-subtle)',  Icon: CheckCircle },
-  trial:     { label: 'sa.status.trial',     color: 'var(--warning)',        bg: 'var(--warning-subtle)',  Icon: Clock },
   suspended: { label: 'sa.status.suspended', color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: PauseCircle },
   inactive:  { label: 'sa.status.inactive',  color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)',        Icon: XCircle },
   archived:  { label: 'sa.status.archived',  color: '#64748b',               bg: 'rgba(100,116,139,0.12)', Icon: XCircle },
@@ -234,42 +190,6 @@ function KpiCard({ label, value, icon: Icon, color = 'var(--accent)', bg, sub, t
   );
 }
 
-// ─── Live Countdown Cell ──────────────────────────────────────────────────────
-
-function CountdownCell({ trialEnd }: { trialEnd: string | null }) {
-  const display = useCountdown(trialEnd);
-  if (!trialEnd || !display) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
-  const end = new Date(trialEnd);
-  const daysLeft = differenceInDays(end, new Date());
-  const color = daysLeft <= 1 ? 'var(--danger)' : daysLeft <= 3 ? 'var(--warning)' : 'var(--text-secondary)';
-  return (
-    <span className="font-mono text-xs tabular-nums" style={{ color }}>{display}</span>
-  );
-}
-
-/**
- * Does this company's trial clock still say anything about it?
- *
- * `redeem_activation_code` writes the five `subscription_*` columns and **never**
- * `companies.status`, so a customer who has paid keeps `status = 'trial'` and a
- * `trial_end` in the past for ever. Judging a trial by the date alone therefore
- * turns every paying customer into an expired trial: a red tile, a critical
- * *Testphase abgelaufen* and an extend-trial button, one more of each with every
- * sale — against a company that reads *Aktiv* on its own overview.
- *
- * This is `isTrialExpired` in `utils/planState.ts`, asked about another
- * company's row, and it goes through the same `subscriptionIsActive()`: the
- * trial ended only if nothing replaced it. A **running** trial is still a trial
- * whether or not a code has been redeemed, exactly as `isInTrial` ignores the
- * subscription on the customer's screens — so this can only be false past
- * `trial_end`, and the running-trial counts are unchanged by it.
- */
-const readsAsTrial = (c: CompanyRow, now: Date = new Date()): boolean => {
-  if (c.status !== 'trial' || !c.trial_end) return false;
-  if (isAfter(new Date(c.trial_end), now)) return true;
-  return !subscriptionIsActive(c.subscription_status, c.subscription_expires_at, now);
-};
-
 // ─── Attention Item ───────────────────────────────────────────────────────────
 
 interface AttentionItem {
@@ -284,13 +204,11 @@ interface AttentionItem {
 
 function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: number }) {
   if (total === 0) return null;
-  // Product tier names, plus 'Trial' which this chart has always shown in
-  // English — none of these are German, so none are translated.
+  // Product tier names, none of them German, so none are translated.
   const segments = [
     { label: 'Basic',    count: kpis.basicCount,    color: PLAN_COLOR.basic },
     { label: 'Advanced', count: kpis.advancedCount,  color: PLAN_COLOR.advanced },
     { label: 'Premium',  count: kpis.premiumCount,   color: PLAN_COLOR.premium },
-    { label: 'Trial',    count: kpis.trialCompanies, color: 'var(--text-tertiary)' },
   ].filter(s => s.count > 0);
 
   return (
@@ -334,7 +252,7 @@ export default function SuperAdminDashboard() {
   const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const { t, tPlural } = useTranslation();
+  const { t } = useTranslation();
 
   // Entering a company opens a **read** context on it (plan 3.4b): since
   // 20260917140000 the database answers a platform account with the context's
@@ -374,7 +292,6 @@ export default function SuperAdminDashboard() {
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [extendingId, setExtendingId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'overview' | 'approvals' | 'discounts' | 'referrals' | 'activation'>('overview');
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<{ company: CompanyRow } | null>(null);
@@ -396,10 +313,10 @@ export default function SuperAdminDashboard() {
   const load = useCallback(async (silent = false, readCounts = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
     try {
-      // 1. Companies with plan + trial + subscription data
+      // 1. Companies with plan + subscription data
       const { data: companiesRaw, error: cErr } = await supabase
         .from('companies')
-        .select('id, name, slug, status, approval_status, rejection_reason, plan, billing_cycle, subscription_car_limit, trial_start, trial_end, created_at, updated_at, email, city, referral_code_used, subscription_status, subscription_expires_at, subscription_started_at, subscription_duration_type')
+        .select('id, name, slug, status, approval_status, rejection_reason, plan, billing_cycle, subscription_car_limit, created_at, updated_at, email, city, referral_code_used, subscription_status, subscription_expires_at, subscription_started_at, subscription_duration_type')
         .order('created_at', { ascending: false });
 
       if (cErr) throw cErr;
@@ -477,7 +394,6 @@ export default function SuperAdminDashboard() {
       // Compute KPIs
       const now = new Date();
       const monthStart = startOfMonth(now);
-      const soon = addDays(now, 7);
 
       const totalUsers = Object.values(ucMap).reduce((a, b) => a + b, 0);
       const totalDrivers = Object.values(dcMap).reduce((a, b) => a + b, 0);
@@ -490,16 +406,11 @@ export default function SuperAdminDashboard() {
         // The totals are sums over every company, so one company whose counts
         // were not read makes them unknown too.
         countsKnown: counts.known && enriched.every(c => c.counts_known),
-        // Every trial figure below goes through readsAsTrial(), so the platform
-        // and the customer read one company the same way.
-        trialCompanies: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isAfter(new Date(c.trial_end), now)).length,
         activeCompanies: enriched.filter(c => c.status === 'active').length,
         suspendedCompanies: enriched.filter(c => c.status === 'suspended').length,
         inactiveCompanies: enriched.filter(c => c.status === 'inactive').length,
         archivedCompanies: enriched.filter(c => c.status === 'archived').length,
         deletedCompanies: enriched.filter(c => c.status === 'deleted').length,
-        expiredTrials: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isBefore(new Date(c.trial_end), now)).length,
-        expiringIn7Days: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isAfter(new Date(c.trial_end), now) && isBefore(new Date(c.trial_end), soon)).length,
         newThisMonth: enriched.filter(c => isAfter(new Date(c.created_at), monthStart)).length,
         basicCount: enriched.filter(c => (c.plan ?? 'basic') === 'basic').length,
         advancedCount: enriched.filter(c => c.plan === 'advanced').length,
@@ -523,28 +434,12 @@ export default function SuperAdminDashboard() {
   // Opening the page is a deliberate read, so it reads the counts.
   useEffect(() => { load(false, true); }, [load]);
 
-  // Auto-refresh every 60s for countdowns — and never the counts, which cost an
+  // Auto-refresh every 60s — and never the counts, which cost an
   // audit row a page.
   useEffect(() => {
     const id = setInterval(() => load(true), 60_000);
     return () => clearInterval(id);
   }, [load]);
-
-  const handleExtendTrial = async (company: CompanyRow) => {
-    if (!company.trial_end) return;
-    setExtendingId(company.id);
-    try {
-      // The database moves trial_end by whole days from the stored value, so two
-      // clicks cannot both extend from the same browser copy of the date.
-      await callPlatformRpc('platform_company_extend_trial', { p_company_id: company.id, p_days: 7 });
-      showToast('success', t('sa.dash.toast.trialExtended', { name: company.name }));
-      load(true);
-    } catch (err: any) {
-      showToast('error', err.message || t('sa.dash.errorExtend'));
-    } finally {
-      setExtendingId(null);
-    }
-  };
 
   const handleStatusChange = async (company: CompanyRow, status: CompanyStatus) => {
     try {
@@ -667,29 +562,9 @@ export default function SuperAdminDashboard() {
     for (const c of pendingCompanies) {
       attentionItems.push({ id: `${c.id}-pending`, companyName: c.name, reason: t('sa.dash.attention.pending'), severity: 'warning', company: c });
     }
-    const now = new Date();
     for (const c of companies) {
       // Skip archived/deleted companies from attention items
       if (c.status === 'archived' || c.status === 'deleted') continue;
-      const trialEnd = c.trial_end ? new Date(c.trial_end) : null;
-      const daysLeft = trialEnd ? differenceInDays(trialEnd, now) : null;
-
-      // The whole chain, not only its first branch: gating the expired branch
-      // alone would drop a paying customer into the next one, whose daysLeft is
-      // negative and so "≤ 2" — trading one wrong critical item for another.
-      const onTrialClock = readsAsTrial(c, now);
-
-      if (onTrialClock && trialEnd && isBefore(trialEnd, now)) {
-        attentionItems.push({ id: `${c.id}-expired`, companyName: c.name, reason: t('sa.dash.attention.trialExpired'), severity: 'critical', company: c });
-      } else if (onTrialClock && daysLeft !== null && daysLeft <= 2) {
-        const remaining = daysLeft <= 0
-          ? t('sa.dash.attention.lessThanOneDay')
-          : tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
-        attentionItems.push({ id: `${c.id}-critical`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'critical', company: c });
-      } else if (onTrialClock && daysLeft !== null && daysLeft <= 5) {
-        const remaining = tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
-        attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'warning', company: c });
-      }
       // Both flags read 0 as "none", so they may only be raised where this
       // company's counts were actually read. Unread, a count is 0 and means
       // "unknown": every company would look empty, and the list would name
@@ -710,12 +585,6 @@ export default function SuperAdminDashboard() {
       return rank[a.severity] - rank[b.severity];
     });
   }
-
-  const expiringSoon = companies.filter(c => {
-    if (!readsAsTrial(c) || !c.trial_end) return false;
-    const end = new Date(c.trial_end);
-    return isAfter(end, new Date()) && isBefore(end, addDays(new Date(), 7));
-  });
 
   const recentCompanies = [...companies]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -1054,7 +923,7 @@ export default function SuperAdminDashboard() {
 
       {/* ── KPI Grid ──────────────────────────────────────────────────────────── */}
       {kpis && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <KpiCard label={t('sa.dash.kpi.companies')} value={kpis.totalCompanies} icon={Building2} color="var(--accent)" trend={kpis.newThisMonth} sub={t('sa.dash.kpi.newThisMonth', { count: kpis.newThisMonth })} />
           {/* Users and drivers are summed from the audited read model. The
               receipt total has no read model at all, so it is unknown rather
@@ -1062,7 +931,6 @@ export default function SuperAdminDashboard() {
           <KpiCard label={t('sa.dash.kpi.users')} value={kpis.countsKnown ? kpis.totalUsers : '–'} icon={Users} color="#8b5cf6" />
           <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.countsKnown ? kpis.totalDrivers : '–'} icon={Car} color="#06b6d4" />
           <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts ?? '–'} icon={FileText} color="#64748b" />
-          <KpiCard label={t('sa.dash.kpi.inTrial')} value={kpis.trialCompanies} icon={Clock} color="var(--warning)" sub={kpis.expiringIn7Days > 0 ? t('sa.dash.kpi.endingSoon', { count: kpis.expiringIn7Days }) : undefined} />
         </div>
       )}
 
@@ -1076,10 +944,8 @@ export default function SuperAdminDashboard() {
             <div className="space-y-2.5">
               {([
                 // `alwaysShow` replaces a filter that matched on the German label.
-                // Active and trial stay visible at zero; the rest appear only when non-zero.
+                // Active stays visible at zero; the rest appear only when non-zero.
                 { id: 'active',       labelKey: 'sa.status.active',            value: kpis.activeCompanies,    color: 'var(--success)',        Icon: CheckCircle, alwaysShow: true },
-                { id: 'trial',        labelKey: 'sa.status.trial',             value: kpis.trialCompanies,     color: 'var(--warning)',        Icon: Clock,       alwaysShow: true },
-                { id: 'trialExpired', labelKey: 'sa.dash.dist.trialExpired',   value: kpis.expiredTrials,      color: 'var(--danger)',         Icon: AlertTriangle },
                 { id: 'suspended',    labelKey: 'sa.status.suspended',         value: kpis.suspendedCompanies, color: 'var(--danger)',         Icon: PauseCircle },
                 { id: 'inactive',     labelKey: 'sa.status.inactive',          value: kpis.inactiveCompanies,  color: 'var(--text-tertiary)',  Icon: XCircle },
                 { id: 'archived',     labelKey: 'sa.status.archived',          value: kpis.archivedCompanies,  color: '#64748b',               Icon: XCircle },
@@ -1150,18 +1016,6 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {/* Extending a trial asks companies.lifecycle, not billing.manage:
-                        plan 3.5 keeps the trial with the company's own lifecycle. */}
-                    {canLifecycle && readsAsTrial(item.company) && item.company.trial_end && (
-                      <button
-                        onClick={() => handleExtendTrial(item.company)}
-                        disabled={extendingId === item.company.id}
-                        className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                        style={{ background: 'var(--warning-solid)', color: 'white' }}
-                      >
-                        {t('sa.dash.extendSevenDays')}
-                      </button>
-                    )}
                     <button
                       hidden={!canOpenCompany} onClick={() => { void enterCompany(item.company as any); }}
                       className="p-1.5 rounded-lg transition-colors"
@@ -1176,87 +1030,6 @@ export default function SuperAdminDashboard() {
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Expiring soon (with live countdown) ──────────────────────────────── */}
-      {expiringSoon.length > 0 && (
-        <div className="p-5 space-y-3" style={cardStyle}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock size={16} style={{ color: 'var(--warning)' }} />
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                {t('sa.dash.trialEndingSoon')}
-              </h3>
-            </div>
-            <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-              {t('sa.dash.companiesCount', { count: expiringSoon.length })}
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {([
-                    'sa.dash.col.company', 'sa.dash.col.plan',
-                    'sa.dash.col.remainingTime', 'sa.dash.col.trialEnd', null,
-                  ] as const).map((h, i) => (
-                    <th key={i} className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {expiringSoon.map(c => (
-                  <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
-                          style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-                          {c.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5"><PlanBadge plan={c.plan ?? 'basic'} /></td>
-                    <td className="px-3 py-2.5"><CountdownCell trialEnd={c.trial_end} /></td>
-                    <td className="px-3 py-2.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      {c.trial_end ? format(new Date(c.trial_end), 'dd. MMM yyyy HH:mm', { locale: de }) : '—'}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-1.5 justify-end">
-                        <button
-                          onClick={() => handleExtendTrial(c)}
-                          disabled={extendingId === c.id}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canLifecycle ? 'flex' : 'hidden'} items-center gap-1`}
-                          style={{ background: 'var(--warning-solid)', color: 'white' }}
-                        >
-                          {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
-                          {t('sa.dash.extendSevenDays')}
-                        </button>
-                        <button
-                          hidden={!canLifecycle}
-                          onClick={() => handleStatusChange(c, 'active')}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                          style={{ background: 'var(--success-solid)', color: 'white' }}
-                        >
-                          {t('sa.dash.activate')}
-                        </button>
-                        <button
-                          hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                          className="p-1.5 rounded-lg transition-colors"
-                          style={{ color: 'var(--text-tertiary)' }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                        >
-                          <ExternalLink size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </div>
       )}
@@ -1287,7 +1060,7 @@ export default function SuperAdminDashboard() {
                 {([
                   'sa.dash.col.company', 'sa.dash.col.tariff', 'sa.dash.col.billing',
                   'sa.dash.col.cars', 'sa.dash.col.drivers', 'sa.dash.col.price',
-                  'common.status', 'sa.dash.col.trial', 'sa.dash.col.created', null,
+                  'common.status', 'sa.dash.col.created', null,
                 ] as const).map((h, i) => (
                   <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
                 ))}
@@ -1421,24 +1194,9 @@ export default function SuperAdminDashboard() {
                       >
                         {/* `value` is the stored companies.status — only the label is translated. */}
                         <option value="active">{t('sa.status.active')}</option>
-                        <option value="trial">{t('sa.status.trial')}</option>
                         <option value="suspended">{t('sa.status.suspended')}</option>
                         <option value="inactive">{t('sa.status.inactive')}</option>
                       </select>
-                    )}
-                  </td>
-
-                  {/* Trial countdown */}
-                  <td className="px-4 py-3">
-                    {readsAsTrial(c) && c.trial_end ? (
-                      <div>
-                        <CountdownCell trialEnd={c.trial_end} />
-                        <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                          {format(new Date(c.trial_end), 'dd.MM.yyyy', { locale: de })}
-                        </p>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-tertiary)' }}>—</span>
                     )}
                   </td>
 
@@ -1447,20 +1205,6 @@ export default function SuperAdminDashboard() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
-                      {readsAsTrial(c) && c.trial_end && (
-                        <button
-                          hidden={!canLifecycle}
-                          onClick={() => handleExtendTrial(c)}
-                          disabled={extendingId === c.id}
-                          className="p-1.5 rounded-lg transition-colors"
-                          style={{ color: 'var(--warning)' }}
-                          title={t('sa.dash.extendTrialTitle')}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--warning-subtle)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                        >
-                          {extendingId === c.id ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} />}
-                        </button>
-                      )}
                       <button
                         hidden={!canBilling}
                         onClick={() => setManualSubModal(c)}

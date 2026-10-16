@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, Car, Check, Tag, X, Zap } from 'lucide-react';
+import { AlertCircle, Car, Check, Tag, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Plan } from '../../contexts/PlanContext';
 import { calcPricing, fleetDiscountPercent, fmtPricePerCar, fmt as fmtPrice } from '../../utils/pricing';
@@ -253,8 +253,6 @@ interface PlanSelectionProps {
   onDiscountChange: (discount: DiscountResult | null) => void;
   /** Passed on to validate-discount-code; null while no company exists yet. */
   companyId?: string | null;
-  /** The trial note under the price. Off where the screen says it elsewhere. */
-  showTrialCallout?: boolean;
 }
 
 const PlanSelection: React.FC<PlanSelectionProps> = ({
@@ -267,18 +265,11 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
   onBillingCycleChange,
   onDiscountChange,
   companyId = null,
-  showTrialCallout = true,
 }) => {
   const { t } = useTranslation();
-  // Prices and the trial length come from the database (plan 3.9), so the
-  // screen quotes what the database will charge and what a signup will grant.
-  const { priceBook, trialDays } = useAppConfig();
-
-  const trialEndDate = new Date();
-  trialEndDate.setDate(trialEndDate.getDate() + trialDays);
-  const trialEndFormatted = trialEndDate.toLocaleDateString('de-DE', {
-    day: '2-digit', month: 'long', year: 'numeric',
-  });
+  // Prices come from the database (plan 3.9), so the screen quotes what the
+  // database will charge.
+  const { priceBook } = useAppConfig();
 
   const breakdown = calcPricing(priceBook, plan, carLimit, billingCycle);
 
@@ -399,18 +390,6 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
 
       {/* Price preview */}
       <PricePreview plan={plan} carLimit={carLimit} billingCycle={billingCycle} discount={discount} />
-
-      {/* Trial callout */}
-      {showTrialCallout && (
-        <div className="flex items-start gap-2.5 rounded-surface border border-brand/30 bg-brand-soft p-3.5 font-ui text-xs text-fg-muted">
-          <Zap aria-hidden className="mt-0.5 size-3.5 shrink-0 text-brand-text" />
-          <p>
-            <span className="font-semibold text-brand-text">{t('signup.trial.badge', { days: trialDays })}</span>{' '}
-            {t('signup.trial.bodyLead', { date: trialEndFormatted })}{' '}
-            <span className="font-medium text-fg">Premium</span>{t('signup.trial.bodyTail')}
-          </p>
-        </div>
-      )}
     </>
   );
 };

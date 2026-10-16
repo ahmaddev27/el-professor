@@ -6,7 +6,7 @@
  * otp-core.ts and smtp-core.ts. The Deno half, which loads the candidates,
  * resolves the recipients and sends, is notification-delivery.ts.
  *
- * ─── What the four types mean ────────────────────────────────────────────────
+ * ─── What the two types mean ─────────────────────────────────────────────────
  *
  * They are the values `notification_settings` already stores, and the screen
  * that writes them is `src/pages/NotificationsPage.tsx`:
@@ -14,80 +14,51 @@
  *   tuev_bald_ablaufend   a car's `cars.tuev_gueltig_bis` is at most
  *                         TUEV_SOON_DAYS away
  *   tuev_abgelaufen       that date has passed
- *   trial_bald_ablaufend  `companies.trial_end` is at most TRIAL_SOON_DAYS
- *                         away and nothing has replaced the trial
- *   trial_abgelaufen      the trial ended and nothing replaced it
  *
- * ─── The windows are the product's own, not new constants ────────────────────
+ * There used to be two more, `trial_bald_ablaufend` and `trial_abgelaufen`.
+ * They went with the free trial (owner, 15.10.2026: "there is no 14 day try for
+ * free version"); `20261015170000` removes them from the database too.
+ *
+ * ─── The window is the product's own, not a new constant ─────────────────────
  *
  * TUEV_SOON_DAYS is 60 because `getTuevStatus()` in `src/types/car.ts` already
  * turns the badge amber at 60 days and the Fahrzeuge screen counts
  * `bald_ablaufend` with it, and because `20260502121504_create_notification_settings.sql`
- * documents this very type as "TÜV läuft bald ab (≤60 Tage)". TRIAL_SOON_DAYS
- * is 7 because `TrialBanner` turns amber at `days <= 7` and the same migration
- * header says "Trial läuft bald ab (≤7 Tage)". A different number here would
- * make the mail and the screen disagree about the same car on the same day.
- *
- * ─── Judging a trial by the date alone is the defect this codebase has made
- *     twice, and it must not be made a third time ────────────────────────────
- *
- * `companies.status` stays `'trial'` for ever: signup writes it,
- * `redeem_activation_code` writes the five `subscription_*` columns and never
- * `status`, and approval changes only `approval_status`. So a paying customer
- * still reads as a trial company, and both `OverviewPage` (through
- * `buildPlanState`) and `SuperAdminDashboard` (through `readsAsTrial()`) once
- * told one that its trial had expired.
- *
- * A mail is worse than a screen: it cannot be corrected by a reload. So
- * `subscriptionIsActive()` below is the same predicate as
- * `src/utils/planState.ts`'s — `subscription_status = 'active' AND (expiry IS
- * NULL OR expiry > now)` — and **both trial types require it to be false**.
- * `src/utils/notificationSelection.parity.test.ts` imports both functions and
- * pins them to the same answers, so the two cannot drift apart silently.
+ * documents this very type as "TÜV läuft bald ab (≤60 Tage)". A different
+ * number here would make the mail and the screen disagree about the same car on
+ * the same day.
  *
  * ─── Every value here is a calendar day in Europe/Berlin ─────────────────────
  *
- * `cars.tuev_gueltig_bis` is a `date` and `companies.trial_end` a
- * `timestamptz`. Both are reduced to a `YYYY-MM-DD` day in Europe/Berlin and
- * compared as days, so a run at 03:00 and a run at 23:00 on the same date reach
- * the same answer, and no comparison lands on a DST boundary.
+ * `cars.tuev_gueltig_bis` is a `date`. It is reduced to a `YYYY-MM-DD` day in
+ * Europe/Berlin and compared as days, so a run at 03:00 and a run at 23:00 on
+ * the same date reach the same answer, and no comparison lands on a DST boundary.
  */
 
-// ─── The four types ──────────────────────────────────────────────────────────
+// ─── The two types ──────────────────────────────────────────────────────────
 
-export type NotificationType =
-  | 'tuev_bald_ablaufend'
-  | 'tuev_abgelaufen'
-  | 'trial_bald_ablaufend'
-  | 'trial_abgelaufen';
+export type NotificationType = 'tuev_bald_ablaufend' | 'tuev_abgelaufen';
 
 export const NOTIFICATION_TYPES: readonly NotificationType[] = [
   'tuev_bald_ablaufend',
   'tuev_abgelaufen',
-  'trial_bald_ablaufend',
-  'trial_abgelaufen',
 ];
 
 /** `cars.tuev_gueltig_bis` at most this many days away counts as "bald ablaufend". */
 export const TUEV_SOON_DAYS = 60;
-
-/** `companies.trial_end` at most this many days away counts as "bald ablaufend". */
-export const TRIAL_SOON_DAYS = 7;
 
 /**
  * What a company that has never opened the screen is subscribed to.
  *
  * `NotificationsPage` renders exactly this map when `notification_settings`
  * holds no row for the company ("No saved settings yet — keep defaults"), so a
- * company that has never saved is *shown* three of the four as on. The job has
+ * company that has never saved is *shown* both types as on. The job has
  * to agree with the screen or the screen is a lie, which is why the fallback
  * lives here and is tested rather than left to the query.
  */
 export const NOTIFICATION_DEFAULT_ENABLED: Readonly<Record<NotificationType, boolean>> = {
   tuev_bald_ablaufend: true,
   tuev_abgelaufen: true,
-  trial_bald_ablaufend: true,
-  trial_abgelaufen: false,
 };
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -141,30 +112,6 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((end - start) / 86_400_000);
 }
 
-// ─── The subscription predicate, mirrored ────────────────────────────────────
-
-/**
- * The server's own last two terms of `get_active_company_id()`, and the same
- * predicate as `subscriptionIsActive()` in `src/utils/planState.ts`.
- *
- * A missing expiry is an open subscription, as `subscription_expires_at IS
- * NULL` is on the server. A date that does not parse is not a subscription —
- * it fails closed towards "not paying", which for a *notification* is the
- * permissive direction, so the parity test pins it rather than leaving it to
- * chance.
- */
-export function subscriptionIsActive(
-  status: string | null | undefined,
-  expiresAt: string | Date | null | undefined,
-  now: Date,
-): boolean {
-  if (status !== 'active') return false;
-  if (expiresAt === null || expiresAt === undefined || expiresAt === '') return true;
-  const end = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
-  if (Number.isNaN(end.getTime())) return false;
-  return end.getTime() > now.getTime();
-}
-
 // ─── The candidate rows ──────────────────────────────────────────────────────
 
 /** One row of `notification_settings`, as the candidate query returns it. */
@@ -192,16 +139,12 @@ export interface NotificationSentRow {
  * One company as the candidate RPC returns it.
  *
  * The RPC has already dropped every company the product blocks outright — not
- * `approved`, or a `status` outside `active`/`trial` — so nothing here has to
- * re-check that. What is left for this module is the arithmetic and the
- * subscription question.
+ * `approved`, or a `status` other than `active` — so nothing here has to
+ * re-check that. What is left for this module is the arithmetic.
  */
 export interface NotificationCompany {
   company_id: string;
   company_name: string | null;
-  trial_end: string | null;
-  subscription_status: string | null;
-  subscription_expires_at: string | null;
   settings: readonly NotificationSettingRow[];
   cars: readonly NotificationCarRow[];
   sent: readonly NotificationSentRow[];
@@ -212,7 +155,7 @@ export interface PlannedNotification {
   companyId: string;
   companyName: string | null;
   type: NotificationType;
-  /** The car for a TÜV type, the company itself for a trial one. */
+  /** The car the notification is about. */
   targetId: string;
   /**
    * The occurrence this notification is about: the date the type turns on.
@@ -223,7 +166,7 @@ export interface PlannedNotification {
   periodKey: string;
   /** The car's plate, for a TÜV notification. */
   plate?: string | null;
-  /** The date the mail names: the TÜV expiry, or the end of the trial. */
+  /** The date the mail names: the TÜV expiry. */
   dueDay: string;
   /** Days from today to `dueDay`; negative once it has passed. */
   daysLeft: number;
@@ -235,7 +178,7 @@ export interface PlannedNotification {
  * Whether a company wants one type, exactly as its screen shows it.
  *
  * The master switch wins, and it is read off whichever row carries it — the
- * screen writes the same value to all four rows in one upsert, and the page
+ * screen writes the same value to every row in one upsert, and the page
  * reads `rows[0]`. Without any row at all the company has never saved, and both
  * the master switch and the type fall back to what the screen displays.
  */
@@ -257,7 +200,7 @@ export function notificationEnabled(
  * **The dedupe key is the occurrence, never the day of the run.** A
  * notification is identified by (company, type, target, `periodKey`), and
  * `periodKey` is the date the occurrence is *about*: the car's TÜV expiry, or
- * the end of the trial. That is the answer to "is a re-notification ever
+ * That is the answer to "is a re-notification ever
  * correct":
  *
  *   - A TÜV that expires and is never renewed keeps the same
@@ -270,8 +213,6 @@ export function notificationEnabled(
  *   - The two TÜV types are separate occurrences of the same date, so a car
  *     warned at 60 days is still told when the date passes. They are not one
  *     notification in two states.
- *   - A trial that is extended gets a new `trial_end` and so a new occurrence.
- *     One that is not stays one mail.
  *
  * So the rule is: **one mail per fact, and a fact that changes is a new fact.**
  * Nothing is ever re-sent because a night went by.
@@ -281,11 +222,6 @@ export function selectNotifications(
   now: Date,
 ): PlannedNotification[] {
   const today = berlinDay(now);
-  const subscribed = subscriptionIsActive(
-    company.subscription_status,
-    company.subscription_expires_at,
-    now,
-  );
 
   const planned: PlannedNotification[] = [];
 
@@ -317,40 +253,6 @@ export function selectNotifications(
       dueDay: due,
       daysLeft,
     });
-  }
-
-  // ── Trial, for the company ───────────────────────────────────────────────
-  //
-  // A company that is paying is not in a trial, whatever `companies.status`
-  // still says. Both branches therefore require `!subscribed`, and that single
-  // term is the whole of the paying-customer case.
-  const trialEndRaw = company.trial_end;
-  const trialEndDay = toBerlinDay(trialEndRaw);
-  if (trialEndDay && !subscribed) {
-    // The running/ended split is made on the instant, the way `buildPlanState`
-    // makes it (`trialEnd > now`), so the last day of a trial is still a
-    // running trial until the stored moment passes.
-    const trialEndInstant = new Date(trialEndRaw as string);
-    const running = !Number.isNaN(trialEndInstant.getTime())
-      ? trialEndInstant.getTime() > now.getTime()
-      : daysBetween(today, trialEndDay) > 0;
-    const daysLeft = daysBetween(today, trialEndDay);
-
-    const type: NotificationType | null = running
-      ? (daysLeft <= TRIAL_SOON_DAYS ? 'trial_bald_ablaufend' : null)
-      : 'trial_abgelaufen';
-
-    if (type && notificationEnabled(company.settings, type)) {
-      planned.push({
-        companyId: company.company_id,
-        companyName: company.company_name,
-        type,
-        targetId: company.company_id,
-        periodKey: trialEndDay,
-        dueDay: trialEndDay,
-        daysLeft,
-      });
-    }
   }
 
   const already = new Set(

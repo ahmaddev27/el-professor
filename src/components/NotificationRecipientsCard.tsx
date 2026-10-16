@@ -34,8 +34,6 @@ interface StoredRow extends RecipientRow {
 const KIND_LABEL_KEYS = {
   tuev_bald_ablaufend: 'settings.notifyRecipients.kind.tuev_bald_ablaufend',
   tuev_abgelaufen: 'settings.notifyRecipients.kind.tuev_abgelaufen',
-  trial_bald_ablaufend: 'settings.notifyRecipients.kind.trial_bald_ablaufend',
-  trial_abgelaufen: 'settings.notifyRecipients.kind.trial_abgelaufen',
   manager_summary: 'settings.notifyRecipients.kind.manager_summary',
 } as const satisfies Record<RecipientKind, string>;
 

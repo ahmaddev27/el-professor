@@ -106,7 +106,7 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   ['platform-staff', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   // Mails the generated code to its target address or its company's admins.
   ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
-  // The nightly TÜV / trial notifications. Called by a host cron line with the
+  // The nightly TÜV notifications. Called by a host cron line with the
   // service key, never by the browser; it is deliberately not public, and it
   // compares the bearer against SUPABASE_SERVICE_ROLE_KEY itself, because the
   // check above admits any signed-in customer's token.

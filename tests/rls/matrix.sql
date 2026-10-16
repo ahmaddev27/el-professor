@@ -117,8 +117,8 @@
   nothing — through the tables or through the planning RPCs, which ask the same
   helper. The platform branch of every write policy is gone, and the platform
   tables ask the capability that names the act instead of "is this account
-  staff". A trial company and an invited employee are the two controls that
-  stay allowed, because App.tsx admits both.
+  staff". A company with a live subscription and an invited employee are the two
+  controls that stay allowed, because App.tsx admits both.
 
   3.4 (20260917140000) closed the last of them, and no line is tagged for it any
   more. `platform_reads_company_data()` is false; the company a platform account
@@ -702,8 +702,9 @@ CREATE TEMP TABLE _mx_failures (section text, item text, detail text);
 -- account status inside company A.
 --
 -- The company states are every value the CHECK constraints allow that the UI
--- blocks today (App.tsx, AuthContext.tsx), plus one it does not block: a trial
--- company with an active subscription, the control that must stay allowed when
+-- blocks today (App.tsx, AuthContext.tsx), plus one it does not block: a company
+-- with a live subscription (it was a trial company until 20261015170000, which
+-- removed the status), the control that must stay allowed when
 -- phase 3.3 moves enforcement into the database.
 --
 -- Two states this list used to carry are gone with 20260919150000 (plan 3.F
@@ -727,7 +728,7 @@ INSERT INTO _mx_state_company VALUES
   ('suspended',       'suspended company (companies.status, the one suspension state)',
                                                                        'approved',  'suspended', 'active',    NULL),
   ('statusinactive',  'approved company whose status is inactive',     'approved',  'inactive',  'active',    NULL),
-  ('trial',           'trial company with an active subscription',     'approved',  'trial',     'active',    now() + interval '30 days');
+  ('livesub',         'company with a live subscription',              'approved',  'active',    'active',    now() + interval '30 days');
 
 INSERT INTO companies (id, name, slug, approval_status, status, plan, subscription_status, subscription_expires_at)
 SELECT _mx_id('company', s.slug), 'MX ' || s.slug, 'mx-' || s.slug, s.approval_status, s.status, 'basic',
@@ -1014,7 +1015,7 @@ INSERT INTO _mx_spec VALUES
   $q$driver_name = driver_name$q$),
 (41, 'notification_settings', $q$id = {id}$q$,
   $q$INSERT INTO notification_settings (id, company_id, notification_type) VALUES ({id}, {co}, 'tuev_abgelaufen')$q$, NULL,
-  $q$INSERT INTO notification_settings (company_id, notification_type) VALUES ({co}, 'trial_abgelaufen')$q$,
+  $q$INSERT INTO notification_settings (company_id, notification_type) VALUES ({co}, 'tuev_bald_ablaufend')$q$,
   $q$enabled = enabled$q$),
 (42, 'subscription_plans', $q$id = {id}$q$,
   $q$INSERT INTO subscription_plans (id, name, monthly_price, included_cars) VALUES ({id}, 'MX plan {s}', 20, 1)$q$, NULL,
@@ -1119,9 +1120,9 @@ INSERT INTO _mx_spec VALUES
 -- SELECT and nothing else and every I, U, D and M cell is a missing GRANT.
 (58, 'notification_deliveries', $q$id = {id}$q$,
   $q$INSERT INTO notification_deliveries (id, company_id, notification_type, target_id, period_key)
-     VALUES ({id}, {co}, 'trial_abgelaufen', {co}, '2099-01-01')$q$, NULL,
+     VALUES ({id}, {co}, 'tuev_abgelaufen', {co}, '2099-01-01')$q$, NULL,
   $q$INSERT INTO notification_deliveries (company_id, notification_type, target_id, period_key)
-     VALUES ({co}, 'trial_abgelaufen', {co}, '2098-01-01')$q$,
+     VALUES ({co}, 'tuev_abgelaufen', {co}, '2098-01-01')$q$,
   $q$recipient_count = recipient_count$q$),
 -- The monthly plan (20260930100000): the proposal, its per-driver snapshot, its
 -- blocks and the rides they are made of. 20260917130000's business shape with
@@ -2664,7 +2665,7 @@ END $$;
 -- company" (T).
 --
 -- Two lines are controls that must stay allowed, because App.tsx admits both:
--- the trial company with an active subscription, and the invited employee —
+-- the company with a live subscription, and the invited employee —
 -- an invitation that could not be completed would lock out every new employee.
 DO $$
 DECLARE
@@ -2674,7 +2675,7 @@ BEGIN
   FOR r IN
     SELECT 'admin-' || s.slug AS who, _mx_id('company', s.slug) AS co,
            _mx_id('state-driver', s.slug) AS drv, _mx_id('state-trip', s.slug) AS trip, s.label,
-           s.slug = 'trial' AS allowed,
+           s.slug = 'livesub' AS allowed,
            0 AS grp
       FROM _mx_state_company s
     UNION ALL
@@ -2698,7 +2699,7 @@ BEGIN
 
     -- 20260923130000 (slice C): the RPC asks current_role_permits('documents',
     -- true) after its own company branch. The two allowed principals are the
-    -- trial company's **administrator** (every `admin-…` row) and the invited
+    -- live-subscription company's **administrator** (every `admin-…` row) and the invited
     -- **editor**, and the editor has held can_edit = false on the Dokumente
     -- page since 20260302065621 — so its cell moves Y → T. The claim this line
     -- makes does not weaken: `Y` used to say "the state gate admitted a
@@ -2921,13 +2922,10 @@ VALUES (_mx_id('rpc_uber_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
 ON CONFLICT (id) DO NOTHING;
 
 
--- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
+-- Plan 3.5's write RPCs need a target each: an active plan
 -- to assign, an invoice that is already paid (so "mark unpaid" has something to
 -- undo), and three company-less accounts for the staff functions — one free,
 -- one on the team, one disabled.
-UPDATE companies SET trial_end = now() + interval '7 days'
- WHERE id = 'c0000000-0000-4000-8000-00000000000a' AND trial_end IS NULL;
-
 INSERT INTO subscription_plans (id, name, monthly_price, included_cars, drivers_per_car_limit, is_active)
 VALUES (_mx_id('rpc_plan', 'a'), 'MX rpc plan', 20, 1, 4, true)
 ON CONFLICT (id) DO NOTHING;
@@ -3174,9 +3172,6 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNNNY', NULL),
     ('platform_company_lifecycle(company A, archive)',
      $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'archive')::text$q$,
-     'PNNNNNY', NULL),
-    ('platform_company_extend_trial(company A, 7)',
-     $q$SELECT platform_company_extend_trial('c0000000-0000-4000-8000-00000000000a', 7)::text$q$,
      'PNNNNNY', NULL),
     ('platform_company_set_plan(company A, premium)',
      $q$SELECT platform_company_set_plan('c0000000-0000-4000-8000-00000000000a', 'premium')::text$q$,
@@ -3559,8 +3554,8 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('notification_candidates(the 60-day window, one page)',
      $q$SELECT count(*)::text FROM notification_candidates(60, 1)$q$,
      'PPPPPPP', NULL),
-    ('notification_delivery_claim(company A, its own trial)',
-     $q$SELECT notification_delivery_claim({co}, 'trial_abgelaufen', {co}, '2097-01-01')::text$q$,
+    ('notification_delivery_claim(company A, a TÜV notice)',
+     $q$SELECT notification_delivery_claim({co}, 'tuev_abgelaufen', {co}, '2097-01-01')::text$q$,
      'PPPPPPP', NULL),
     ('notification_delivery_settle(company A''s probe row)',
      $q$SELECT notification_delivery_settle({ref:notification_deliveries}, true, 1)::text$q$,

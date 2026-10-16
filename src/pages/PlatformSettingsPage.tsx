@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldAlert, Save, Plus, Trash2, Tags, SlidersHorizontal,
-  Building2, Hourglass, Receipt, Mail, Megaphone, ToggleRight, Scale, Landmark,
+  Building2, Receipt, Mail, Megaphone, ToggleRight, Scale, Landmark,
 } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAppConfig } from '../contexts/AppConfigContext';
@@ -23,7 +23,6 @@ import {
   isVersionConflict,
   parseInvoice,
   parseSeller,
-  parseTrial,
   planFeaturesFromAnswer,
   planFeaturesFromForm,
   priceBookFromAnswer,
@@ -33,19 +32,13 @@ import {
   sellerFromForm,
   sellerToForm,
   settingRefusalKey,
-  trialFromForm,
-  trialToForm,
   SELLER_FIELDS,
-  TRIAL_MAX_DAYS,
-  TRIAL_MIN_DAYS,
   type InvoiceForm,
   type InvoiceSettings,
   type PriceBookForm,
   type Seller,
   type SellerField,
   type SellerForm,
-  type TrialForm,
-  type TrialSettings,
 } from '../lib/platformSettings';
 import { getSetting, putSetting } from '../lib/platformSettingsClient';
 import {
@@ -67,7 +60,7 @@ import PrivacyTextEditor from '../components/settings/PrivacyTextEditor';
 
 /**
  * Einstellungen (plan 3.E / 3.G): the price book, the plan feature map, the
- * seller, the trial, the invoice defaults (3.9, 3.10), the mail sender and the
+ * seller, the invoice defaults (3.9, 3.10), the mail sender and the
  * code-mail templates (3.10), the announcements and the feature flags (3.11),
  * and the legal pages: the Impressum and the privacy policy (20260921120000).
  *
@@ -109,7 +102,7 @@ const PLAN_LABELS: Record<Plan, TranslationKey> = {
 };
 
 type SettingsTab =
-  | 'price_book' | 'plan_features' | 'seller' | 'trial' | 'invoice'
+  | 'price_book' | 'plan_features' | 'seller' | 'invoice'
   | 'mail' | 'announcements' | 'feature_flags' | 'impressum' | 'privacy';
 
 /**
@@ -126,7 +119,6 @@ const SETTING_TABS: {
   { id: 'price_book',    icon: Tags,              labelKey: 'admin.settings.tab.prices',   readable: a => canReadSetting(a, 'price_book') },
   { id: 'plan_features', icon: SlidersHorizontal, labelKey: 'admin.settings.tab.features', readable: a => canReadSetting(a, 'plan_features') },
   { id: 'seller',        icon: Building2,         labelKey: 'admin.settings.tab.seller',   readable: a => canReadSetting(a, 'seller') },
-  { id: 'trial',         icon: Hourglass,         labelKey: 'admin.settings.tab.trial',    readable: a => canReadSetting(a, 'trial') },
   { id: 'invoice',       icon: Receipt,           labelKey: 'admin.settings.tab.invoice',  readable: a => canReadSetting(a, 'invoice') },
   { id: 'mail',          icon: Mail,              labelKey: 'admin.settings.tab.mail',     readable: a => canReadSetting(a, 'mail.sender') },
   { id: 'announcements', icon: Megaphone,         labelKey: 'admin.settings.tab.announcements', readable: canReadAnnouncements },
@@ -186,7 +178,6 @@ const PlatformSettingsPage: React.FC = () => {
       {active === 'price_book'    ? <PriceBookEditor /> :
        active === 'plan_features' ? <PlanFeaturesEditor /> :
        active === 'seller'        ? <SellerEditor /> :
-       active === 'trial'         ? <TrialEditor /> :
        active === 'invoice'       ? <InvoiceEditor /> :
        active === 'mail'          ? <MailSettingsEditor /> :
        active === 'announcements' ? <AnnouncementsEditor /> :
@@ -696,59 +687,6 @@ const SellerEditor: React.FC = () => {
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
             )}
-          </div>
-
-          {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
-        </>
-      )}
-    </EditorShell>
-  );
-};
-
-// ─── The trial length ───────────────────────────────────────────────────────
-
-const TRIAL_EDITOR: SettingEditorConfig<TrialSettings, TrialForm> = {
-  key: 'trial',
-  read: record => parseTrial(record.value),
-  toForm: trialToForm,
-  fromForm: trialFromForm,
-};
-
-const TrialEditor: React.FC = () => {
-  const { platformAccess } = useSuperAdmin();
-  const { t } = useTranslation();
-  const maySave = canSaveSetting(platformAccess, 'trial');
-  const { loading, problem, detail, loaded, form, setForm, saving, load, save } =
-    useSettingEditor(TRIAL_EDITOR);
-
-  return (
-    <EditorShell
-      loading={loading}
-      problem={problem}
-      detail={detail}
-      onReload={() => void load()}
-      version={loaded?.version ?? null}
-      updatedAt={loaded?.updatedAt ?? null}
-    >
-      {form && loaded && (
-        <>
-          {/* A longer trial is not retroactive and a shorter one locks nobody
-              out: trial_end is written once, when a company is created. */}
-          <Note textKey="admin.settings.trial.hint" vars={{ min: TRIAL_MIN_DAYS, max: TRIAL_MAX_DAYS }} />
-          {!maySave && <Note textKey="admin.settings.readOnly" />}
-
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.trial.title')}</h2>
-            <Field
-              labelKey="admin.settings.trial.days"
-              value={form.days}
-              disabled={!maySave}
-              width="8rem"
-              onChange={days => setForm({ days })}
-            />
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {t('admin.settings.trial.current', { days: String(loaded.value.days) })}
-            </p>
           </div>
 
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}

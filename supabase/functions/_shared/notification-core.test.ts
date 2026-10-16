@@ -4,23 +4,20 @@
  * notification-core.ts imports nothing from Deno, npm: or jsr:, so Node runs it
  * unchanged, the way it runs otp-core.ts and smtp-core.ts.
  *
- * The case this file exists for is §5: **a company on `companies.status =
- * 'trial'` with a live subscription gets no trial notification.** That is a
- * paying customer, and `status` stays `'trial'` for ever, so a job that judged
- * the trial by `trial_end` alone would mail "your trial is ending" to the
- * people who are paying. The browser has made that mistake twice.
+ * The trial notices are gone (owner, 15.10.2026: no free trial). §5 pins that:
+ * the type list holds the two TÜV types and nothing else, so a trial type
+ * cannot come back through this module without this file noticing.
  */
 import { describe, expect, it } from 'vitest';
 import {
   NOTIFICATION_DEFAULT_ENABLED,
-  TRIAL_SOON_DAYS,
+  NOTIFICATION_TYPES,
   TUEV_SOON_DAYS,
   berlinDay,
   daysBetween,
   notificationEnabled,
   selectAllNotifications,
   selectNotifications,
-  subscriptionIsActive,
   toBerlinDay,
   type NotificationCompany,
   type NotificationSettingRow,
@@ -35,7 +32,7 @@ const COMPANY = 'c0000000-0000-4000-8000-00000000000a';
 const CAR = 'e0000000-0000-4000-8000-00000000000a';
 
 function allOn(): NotificationSettingRow[] {
-  return (['tuev_bald_ablaufend', 'tuev_abgelaufen', 'trial_bald_ablaufend', 'trial_abgelaufen'])
+  return (['tuev_bald_ablaufend', 'tuev_abgelaufen'])
     .map((notification_type) => ({ notification_type, enabled: true, email_global_enabled: true }));
 }
 
@@ -43,9 +40,6 @@ function company(patch: Partial<NotificationCompany> = {}): NotificationCompany 
   return {
     company_id: COMPANY,
     company_name: 'Test A',
-    trial_end: null,
-    subscription_status: 'inactive',
-    subscription_expires_at: null,
     settings: allOn(),
     cars: [],
     sent: [],
@@ -91,30 +85,6 @@ describe('calendar days', () => {
   });
 });
 
-// ─── 2. The subscription predicate ───────────────────────────────────────────
-
-describe('subscriptionIsActive', () => {
-  it('needs the word active', () => {
-    expect(subscriptionIsActive('inactive', null, NOW)).toBe(false);
-    expect(subscriptionIsActive('expired', null, NOW)).toBe(false);
-    expect(subscriptionIsActive(null, null, NOW)).toBe(false);
-  });
-
-  it('treats a missing expiry as an open subscription', () => {
-    expect(subscriptionIsActive('active', null, NOW)).toBe(true);
-    expect(subscriptionIsActive('active', '', NOW)).toBe(true);
-  });
-
-  it('compares the expiry with now', () => {
-    expect(subscriptionIsActive('active', '2026-12-31T00:00:00Z', NOW)).toBe(true);
-    expect(subscriptionIsActive('active', '2026-01-01T00:00:00Z', NOW)).toBe(false);
-  });
-
-  it('is not a subscription when the expiry does not parse', () => {
-    expect(subscriptionIsActive('active', 'nonsense', NOW)).toBe(false);
-  });
-});
-
 // ─── 3. The settings, including the company that never saved ─────────────────
 
 describe('notificationEnabled', () => {
@@ -127,7 +97,7 @@ describe('notificationEnabled', () => {
 
   it('lets the master switch win', () => {
     const off = allOn().map((row) => ({ ...row, email_global_enabled: false }));
-    for (const type of ['tuev_bald_ablaufend', 'tuev_abgelaufen', 'trial_bald_ablaufend'] as const) {
+    for (const type of ['tuev_bald_ablaufend', 'tuev_abgelaufen'] as const) {
       expect(notificationEnabled(off, type)).toBe(false);
     }
   });
@@ -137,9 +107,7 @@ describe('notificationEnabled', () => {
     // the job has to agree with it or the screen is a lie.
     expect(notificationEnabled([], 'tuev_bald_ablaufend')).toBe(true);
     expect(notificationEnabled([], 'tuev_abgelaufen')).toBe(true);
-    expect(notificationEnabled([], 'trial_bald_ablaufend')).toBe(true);
-    expect(notificationEnabled([], 'trial_abgelaufen')).toBe(false);
-    expect(NOTIFICATION_DEFAULT_ENABLED.trial_abgelaufen).toBe(false);
+    expect(NOTIFICATION_DEFAULT_ENABLED).toEqual({ tuev_bald_ablaufend: true, tuev_abgelaufen: true });
   });
 });
 
@@ -188,85 +156,15 @@ describe('TÜV', () => {
   });
 });
 
-// ─── 5. Trials — the paying customer ─────────────────────────────────────────
+// ─── 5. No trial notices ─────────────────────────────────────────────────────
 
-describe('trials', () => {
-  const trialEnd = (offset: number) => `${day(offset)}T12:00:00.000Z`;
-
-  it('warns inside the 7-day window and not outside it', () => {
-    expect(selectNotifications(company({ trial_end: trialEnd(TRIAL_SOON_DAYS) }), NOW))
-      .toHaveLength(1);
-    expect(selectNotifications(company({ trial_end: trialEnd(TRIAL_SOON_DAYS + 1) }), NOW))
-      .toHaveLength(0);
-    expect(TRIAL_SOON_DAYS).toBe(7);
+describe('no trial notices', () => {
+  it('knows exactly the two TÜV types', () => {
+    expect([...NOTIFICATION_TYPES]).toEqual(['tuev_bald_ablaufend', 'tuev_abgelaufen']);
   });
 
-  it('says trial_abgelaufen once the end has passed', () => {
-    const [item] = selectNotifications(company({ trial_end: trialEnd(-1) }), NOW);
-    expect(item.type).toBe('trial_abgelaufen');
-    expect(item.targetId).toBe(COMPANY);
-    expect(item.periodKey).toBe(day(-1));
-  });
-
-  it('mails trial_abgelaufen although the company is blocked — that is the point of it', () => {
-    // This company's access has lapsed: subscription_status is 'inactive', so
-    // get_active_company_id() answers NULL for it. Requiring a live
-    // subscription here would mean the one notification that says "your access
-    // ended" could only reach companies whose access had not ended.
-    const lapsed = company({ trial_end: trialEnd(-3), subscription_status: 'inactive' });
-    expect(selectNotifications(lapsed, NOW).map((i) => i.type)).toEqual(['trial_abgelaufen']);
-  });
-
-  // ── The case this file exists for ──────────────────────────────────────────
-
-  it('sends NO trial notification to a paying customer still on status=trial', () => {
-    // The normal path: signup writes companies.status = 'trial',
-    // redeem_activation_code writes the subscription columns and never touches
-    // status, so a paying customer reads as a trial company for ever. Its
-    // trial_end is long past — and it must hear nothing about a trial.
-    const paying = company({
-      trial_end: trialEnd(-40),
-      subscription_status: 'active',
-      subscription_expires_at: '2027-06-30T00:00:00.000Z',
-    });
-    expect(selectNotifications(paying, NOW)).toEqual([]);
-  });
-
-  it('sends no "trial ending" to a customer who paid before the trial ran out', () => {
-    const earlyPayer = company({
-      trial_end: trialEnd(2),
-      subscription_status: 'active',
-      subscription_expires_at: null,
-    });
-    expect(selectNotifications(earlyPayer, NOW)).toEqual([]);
-  });
-
-  it('still mails that customer about its TÜV', () => {
-    // Paying does not silence the vehicle types: they are about a car, not
-    // about billing.
-    const paying = company({
-      trial_end: trialEnd(-40),
-      subscription_status: 'active',
-      subscription_expires_at: null,
-      cars: [{ id: CAR, kennzeichen: 'B-EP 1234', tuev_gueltig_bis: day(3) }],
-    });
-    expect(selectNotifications(paying, NOW).map((i) => i.type)).toEqual(['tuev_bald_ablaufend']);
-  });
-
-  it('is off by default for trial_abgelaufen when the company never saved', () => {
-    expect(selectNotifications(company({ settings: [], trial_end: trialEnd(-1) }), NOW))
-      .toHaveLength(0);
-    expect(selectNotifications(company({ settings: [], trial_end: trialEnd(2) }), NOW))
-      .toHaveLength(1);
-  });
-
-  it('treats the last day of a trial as running until the stored moment passes', () => {
-    // trial_end later today: still a running trial, as buildPlanState reads it.
-    const running = company({ trial_end: '2026-09-24T20:00:00.000Z' });
-    expect(selectNotifications(running, NOW)[0].type).toBe('trial_bald_ablaufend');
-    // …and an hour ago: over.
-    const over = company({ trial_end: '2026-09-24T07:00:00.000Z' });
-    expect(selectNotifications(over, NOW)[0].type).toBe('trial_abgelaufen');
+  it('plans nothing for a company without cars', () => {
+    expect(selectNotifications(company(), NOW)).toHaveLength(0);
   });
 });
 
@@ -308,13 +206,6 @@ describe('dedupe', () => {
     const sent = [{ notification_type: 'tuev_abgelaufen', target_id: other, period_key: day(-1) }];
     expect(selectNotifications(company({ cars: [car(day(-1))], sent }), NOW)).toHaveLength(1);
   });
-
-  it('warns again when a trial is extended', () => {
-    const sent = [{ notification_type: 'trial_abgelaufen', target_id: COMPANY, period_key: day(-1) }];
-    const extended = company({ trial_end: `${day(3)}T12:00:00.000Z`, sent });
-    expect(selectNotifications(extended, NOW).map((i) => i.type))
-      .toEqual(['trial_bald_ablaufend']);
-  });
 });
 
 // ─── 7. Several companies at once ────────────────────────────────────────────
@@ -325,11 +216,11 @@ describe('selectAllNotifications', () => {
     const b = company({
       company_id: 'c0000000-0000-4000-8000-00000000000b',
       company_name: 'Test B',
-      trial_end: `${day(-2)}T12:00:00.000Z`,
+      cars: [{ id: CAR, kennzeichen: 'B', tuev_gueltig_bis: day(-2) }],
     });
     expect(selectAllNotifications([a, b], NOW).map((i) => [i.companyId, i.type])).toEqual([
       [COMPANY, 'tuev_bald_ablaufend'],
-      ['c0000000-0000-4000-8000-00000000000b', 'trial_abgelaufen'],
+      ['c0000000-0000-4000-8000-00000000000b', 'tuev_abgelaufen'],
     ]);
   });
 });

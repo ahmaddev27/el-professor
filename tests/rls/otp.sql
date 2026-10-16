@@ -140,7 +140,7 @@ INSERT INTO auth.users (id, email, email_confirmed_at, banned_until, deleted_at,
   ('0e000000-0000-4000-8000-000000000010', 'otp-pending@test.invalid',          NULL,  NULL,                    NULL,  now() - interval '5 minutes');
 
 INSERT INTO companies (id, name, slug, approval_status, status, plan, subscription_status) VALUES
-  ('c0000000-0000-4000-8000-0000000000e1', 'OTP Pending Co', 'otp-pending-co', 'pending', 'trial', 'basic', 'inactive');
+  ('c0000000-0000-4000-8000-0000000000e1', 'OTP Pending Co', 'otp-pending-co', 'pending', 'active', 'basic', 'inactive');
 
 INSERT INTO user_profiles (user_id, email, full_name, role, company_id, is_super_admin, status) VALUES
   ('0e000000-0000-4000-8000-000000000001', 'otp-active@test.invalid',           'Otto Aktiv', 'viewer', 'c0000000-0000-4000-8000-00000000000a', false, 'active'),
@@ -844,13 +844,13 @@ BEGIN
 
   PERFORM _otp_ok('the slug is company-signup''s transliteration',
     comp.slug = 'mueller-soehne-gmbh' AND r->'company'->>'slug' = comp.slug);
-  PERFORM _otp_ok('the company is a pending, inactive trial in Deutschland, named without the padding',
-    comp.name = 'Müller & Söhne GmbH' AND comp.status = 'trial' AND comp.approval_status = 'pending'
+  PERFORM _otp_ok('the company is a pending, inactive, active-status company in Deutschland, named without the padding',
+    comp.name = 'Müller & Söhne GmbH' AND comp.status = 'active' AND comp.approval_status = 'pending'
     AND comp.subscription_status = 'inactive' AND comp.country = 'Deutschland'
     AND r->'company'->>'approval_status' = 'pending' AND r->'company'->>'name' = comp.name);
-  PERFORM _otp_ok('the trial runs 14 days from now',
-    comp.trial_start = now() AND comp.trial_end = now() + interval '14 days'
-    AND (r->'company'->>'trial_end')::timestamptz = comp.trial_end);
+  PERFORM _otp_ok('there is no trial: no trial dates are written, and the answer carries none',
+    comp.trial_start IS NULL AND comp.trial_end IS NULL
+    AND (r->'company'->>'trial_end') IS NULL);
   PERFORM _otp_ok('an unknown plan becomes basic, an unknown cycle monthly, and car limit 0 becomes 3',
     comp.plan = 'basic' AND comp.billing_cycle = 'monthly' AND comp.subscription_car_limit = 3);
   PERFORM _otp_ok('the referral is recorded under its upper-cased code',

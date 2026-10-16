@@ -59,6 +59,9 @@ import {
 } from '../../supabase/functions/_shared/mail-template.ts';
 
 export const SETTING_KEYS = [
+  // `trial` stays on the list: the key is still stored (its validator is part of
+  // `platform_settings_problem`), but nothing reads it and no screen edits it
+  // since the free trial went (20261015170000).
   'price_book', 'plan_features', 'seller', 'trial', 'invoice',
   'mail.sender',
   'mail.template.signup_verify', 'mail.template.password_reset',
@@ -449,52 +452,6 @@ export function sellerAddressBlock(seller: Seller): string[] {
   if (bank) lines.push(bank);
 
   return lines;
-}
-
-// ─── The trial length (plan 3.10) ────────────────────────────────────────────
-
-/**
- * How long a company created from now on may use the product before it has to
- * pay. `app_private.signup_insert_company` reads this key through
- * `app_private.signup_trial_days()`, and `get_public_config()` quotes the same
- * number to a visitor.
- *
- * **Changing it moves no trial that already exists.** `trial_end` is written
- * once, on the row, when a company is created.
- */
-export interface TrialSettings {
-  readonly days: number;
-}
-
-/** The validator's bounds: below a day is not a trial, above a year is a typo. */
-export const TRIAL_MIN_DAYS = 1;
-export const TRIAL_MAX_DAYS = 365;
-
-export function parseTrial(value: unknown): TrialSettings | null {
-  if (!isRecord(value)) return null;
-  if (Object.keys(value).length !== 1) return null;
-  const days = value.days;
-  if (typeof days !== 'number' || !Number.isInteger(days)
-      || days < TRIAL_MIN_DAYS || days > TRIAL_MAX_DAYS) {
-    return null;
-  }
-  return { days };
-}
-
-export interface TrialForm {
-  days: string;
-}
-
-export function trialToForm(trial: TrialSettings): TrialForm {
-  return { days: String(trial.days) };
-}
-
-export function trialFromForm(form: TrialForm): { value: TrialSettings } | { error: string } {
-  const days = wholeNumber(form.days);
-  if (days === null || days < TRIAL_MIN_DAYS || days > TRIAL_MAX_DAYS) {
-    return { error: 'trial.days' };
-  }
-  return { value: { days } };
 }
 
 // ─── The invoice defaults (plan 3.10) ────────────────────────────────────────

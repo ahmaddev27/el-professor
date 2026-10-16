@@ -33,7 +33,7 @@ export interface CompanyListItem {
   postal_code: string | null;
   country: string;
   logo_url: string | null;
-  status: 'active' | 'trial' | 'suspended' | 'inactive';
+  status: 'active' | 'suspended' | 'inactive';
   created_at: string;
   updated_at: string;
   user_count?: number;

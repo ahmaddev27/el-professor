@@ -35,7 +35,6 @@ import {
   parseInvoice,
   parseSeller,
   parseSettingAnswer,
-  parseTrial,
   planFeaturesFromForm,
   priceBookFromForm,
   priceBookToForm,
@@ -43,8 +42,6 @@ import {
   sellerFromForm,
   sellerToForm,
   settingRefusalKey,
-  trialFromForm,
-  trialToForm,
   writeCapabilityFor,
   type Seller,
 } from './platformSettings';
@@ -382,36 +379,6 @@ describe('the seller', () => {
     expect(sellerAddressBlock(EMPTY_SELLER)).toEqual(['El-Professor']);
     expect(sellerAddressBlock({ ...EMPTY_SELLER, iban: 'DE02' }))
       .toEqual(['El-Professor', 'IBAN: DE02']);
-  });
-});
-
-describe('the trial length', () => {
-  it('reads the seeded document', () => {
-    expect(parseTrial({ days: 14 })).toEqual({ days: 14 });
-    expect(trialFromForm(trialToForm({ days: 14 }))).toEqual({ value: { days: 14 } });
-  });
-
-  it('refuses a document with any other key', () => {
-    expect(parseTrial({ days: 14, weeks: 2 })).toBeNull();
-    expect(parseTrial({})).toBeNull();
-  });
-
-  it('refuses a trial of no days, of half a day, or of more than a year', () => {
-    // Below a day is not a trial; above a year is a typo that would give a
-    // company free access for years.
-    expect(parseTrial({ days: 0 })).toBeNull();
-    expect(parseTrial({ days: 0.5 })).toBeNull();
-    expect(parseTrial({ days: 366 })).toBeNull();
-    expect(parseTrial({ days: '14' })).toBeNull();
-    expect(trialFromForm({ days: '0' })).toEqual({ error: 'trial.days' });
-    expect(trialFromForm({ days: '366' })).toEqual({ error: 'trial.days' });
-    expect(trialFromForm({ days: '14,5' })).toEqual({ error: 'trial.days' });
-    expect(trialFromForm({ days: '' })).toEqual({ error: 'trial.days' });
-  });
-
-  it('accepts both ends of the range the database allows', () => {
-    expect(trialFromForm({ days: '1' })).toEqual({ value: { days: 1 } });
-    expect(trialFromForm({ days: '365' })).toEqual({ value: { days: 365 } });
   });
 });
 

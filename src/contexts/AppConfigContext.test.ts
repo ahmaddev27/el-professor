@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppConfigProvider, useAppConfig } from './AppConfigContext';
+import { SEED_PRICE_BOOK } from '../lib/appConfigSeed';
 
 /**
  * Two rules live in the provider itself, where no pure function can hold them:
@@ -58,8 +59,11 @@ function Probe() {
 
 const tree = () => createElement(AppConfigProvider, null, createElement(Probe));
 
-/** What `get_app_config()` answers. The trial length says which account's. */
-const answer = (trialDays: number) => ({ data: { trial_days: trialDays }, error: null });
+/** What `get_app_config()` answers. The yearly discount says which account's. */
+const answer = (yearlyPercent: number) => ({
+  data: { price_book: { ...SEED_PRICE_BOOK, yearly_discount_percent: yearlyPercent } },
+  error: null,
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -107,7 +111,7 @@ describe('a change of account is read again', () => {
     await settle();
     expect(world.rpc).toHaveBeenCalledTimes(1);
     expect(world.rpc).toHaveBeenLastCalledWith('get_app_config');
-    expect(probe.value.trialDays).toBe(14);
+    expect(probe.value.priceBook.yearly_discount_percent).toBe(14);
 
     // A session installed straight over another, with no signed-out moment in
     // between: the RPC that answers does not change, only the account does.
@@ -119,7 +123,7 @@ describe('a change of account is read again', () => {
 
     expect(world.rpc).toHaveBeenCalledTimes(2);
     expect(world.rpc).toHaveBeenLastCalledWith('get_app_config');
-    expect(probe.value.trialDays).toBe(30);
+    expect(probe.value.priceBook.yearly_discount_percent).toBe(30);
   });
 
   it('reads the public configuration again when the account signs out', async () => {
@@ -188,7 +192,7 @@ describe('loading comes back down however the request was started', () => {
 
     expect(probe.value.loading).toBe(false);
     // …and the load the refresh overtook did not install its older answer.
-    expect(probe.value.trialDays).toBe(30);
+    expect(probe.value.priceBook.yearly_discount_percent).toBe(30);
   });
 
   it('leaves loading up while the only request is still open', async () => {

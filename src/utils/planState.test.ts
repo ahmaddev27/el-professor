@@ -13,16 +13,17 @@ import type { FeatureKey } from '../contexts/PlanContext';
 /**
  * The plan state machine, cell by cell.
  *
- * The reference is `public.get_active_company_id()` (20260917130000, kept by
- * 20260917140000): for a member of an approved company it answers a company id
- * only for `status IN ('active','trial') AND subscription_status = 'active' AND
- * (subscription_expires_at IS NULL OR > now())`. Approval and the account's own
- * status are App.tsx's gates and not this module's, so every case below assumes
- * an approved company and a good account, and asks what the browser adds.
+ * The reference is `public.get_active_company_id()`: for a member of an approved
+ * company it answers a company id only for `status = 'active' AND
+ * subscription_status = 'active' AND (subscription_expires_at IS NULL OR >
+ * now())`. Approval and the account's own status are App.tsx's gates and not
+ * this module's, so every case below assumes an approved company and a good
+ * account, and asks what the browser adds.
  *
  * The rule these tests hold: **the browser is never more permissive than the
- * server**, with one carve-out the owner named — a running trial stays premium
- * and unlocked even though a fresh company's subscription is `inactive`.
+ * server.** There is no carve-out any more: the free trial went on 15.10.2026
+ * (`20261015170000`) and with it the one cell where the browser opened what the
+ * server refused.
  */
 
 // The clock every case is judged against. Fixed, so a case cannot pass because
@@ -38,8 +39,6 @@ const PREMIUM_FEATURE: FeatureKey = 'stundennachweis';
 const row = (over: CompanyPlanRow): CompanyPlanRow => ({
   plan: 'basic',
   status: 'active',
-  trial_start: null,
-  trial_end: null,
   subscription_status: 'active',
   subscription_expires_at: FUTURE,
   subscription_car_limit: 3,
@@ -80,43 +79,27 @@ describe('subscriptionIsActive — the server\'s last two terms', () => {
   });
 });
 
-describe('a running trial — unchanged by the fix', () => {
-  const running = row({ status: 'trial', trial_start: PAST, trial_end: FUTURE, subscription_status: 'inactive', subscription_expires_at: null });
+describe('a company the old release left on status `trial`', () => {
+  // `20261015170000` moves every such row to `active`. A row that still says
+  // `trial` (a rolled-back database, a stale cache) is a status this build does
+  // not know, and the server refuses it too.
+  const legacy = row({ status: 'trial', subscription_status: 'active', subscription_expires_at: FUTURE });
 
-  it('is `trial`, active, and premium on any stored plan', () => {
-    const state = buildPlanState(running, NOW);
-    expect(state.status).toBe('trial');
-    expect(state.isInTrial).toBe(true);
-    expect(state.isTrialExpired).toBe(false);
-    expect(state.isActive).toBe(true);
-    expect(effectivePlanOf(state)).toBe('premium');
-    expect(state.trialDaysLeft).toBe(75);
-  });
-
-  it('opens a premium feature to a basic company', () => {
-    expect(can(running, BASIC_FEATURE)).toBe(true);
-    expect(can(running, PREMIUM_FEATURE)).toBe(true);
-  });
-
-  it('stays premium when the subscription is already active too', () => {
-    const paid = row({ ...running, subscription_status: 'active', subscription_expires_at: FUTURE });
-    expect(effectivePlanOf(buildPlanState(paid, NOW))).toBe('premium');
-    expect(can(paid, PREMIUM_FEATURE)).toBe(true);
+  it('locks, as the server does', () => {
+    const state = buildPlanState(legacy, NOW);
+    expect(state.status).toBe('inactive');
+    expect(state.isActive).toBe(false);
+    expect(can(legacy, BASIC_FEATURE)).toBe(false);
   });
 });
 
-describe('the defect: the trial ended while the subscription runs', () => {
-  // The normal path. signup writes status `trial` + subscription `inactive`,
-  // approval changes only approval_status, redeem_activation_code writes the
-  // subscription and never `status` — so `status` is `trial` for ever.
-  const paying = row({ status: 'trial', trial_start: PAST, trial_end: PAST, subscription_status: 'active', subscription_expires_at: FUTURE });
+describe('a paying company on the stored plan', () => {
+  const paying = row({ status: 'active', subscription_status: 'active', subscription_expires_at: FUTURE });
 
-  it('is active on the stored plan, not `trial_expired`', () => {
+  it('is active on the stored plan', () => {
     const state = buildPlanState(paying, NOW);
     expect(state.status).toBe('active');
     expect(state.isActive).toBe(true);
-    expect(state.isInTrial).toBe(false);
-    expect(state.isTrialExpired).toBe(false);
     expect(effectivePlanOf(state)).toBe('basic');
   });
 
@@ -136,29 +119,6 @@ describe('the defect: the trial ended while the subscription runs', () => {
     const openEnded = row({ ...paying, subscription_expires_at: null });
     expect(buildPlanState(openEnded, NOW).status).toBe('active');
     expect(can(openEnded, BASIC_FEATURE)).toBe(true);
-  });
-});
-
-describe('the trial ended with nothing to replace it', () => {
-  const lapsed = row({ status: 'trial', trial_start: PAST, trial_end: PAST, subscription_status: 'inactive', subscription_expires_at: null });
-
-  it('is `trial_expired` and locked past the overview', () => {
-    const state = buildPlanState(lapsed, NOW);
-    expect(state.status).toBe('trial_expired');
-    expect(state.isActive).toBe(false);
-    expect(state.isTrialExpired).toBe(true);
-    expect(state.trialDaysLeft).toBe(0);
-    expect(can(lapsed, 'overview')).toBe(true);
-    expect(can(lapsed, BASIC_FEATURE)).toBe(false);
-    expect(can(lapsed, PREMIUM_FEATURE)).toBe(false);
-  });
-
-  it('is `trial_expired` when the subscription itself has run out', () => {
-    const expiredSub = row({ ...lapsed, subscription_status: 'active', subscription_expires_at: PAST });
-    const state = buildPlanState(expiredSub, NOW);
-    expect(state.status).toBe('trial_expired');
-    expect(state.isActive).toBe(false);
-    expect(can(expiredSub, BASIC_FEATURE)).toBe(false);
   });
 });
 
@@ -183,13 +143,6 @@ describe('a company whose status is `active`', () => {
     const never = row({ status: 'active', subscription_status: 'inactive', subscription_expires_at: null });
     expect(buildPlanState(never, NOW).isActive).toBe(false);
     expect(can(never, BASIC_FEATURE)).toBe(false);
-  });
-
-  it('does not carry a stale trial banner once it is paying', () => {
-    // trial_end stays in the past for ever; before the fix this printed
-    // "Testphase endete am … · Nur Basic-Features verfügbar" to a paying customer.
-    const converted = row({ status: 'active', trial_start: PAST, trial_end: PAST, subscription_expires_at: FUTURE });
-    expect(buildPlanState(converted, NOW).isTrialExpired).toBe(false);
   });
 });
 
@@ -220,7 +173,7 @@ describe('the four blocked company states keep their meaning', () => {
 describe('the short circuits', () => {
   it('a super admin passes every gate, whatever the company row says', () => {
     for (const companyStatus of ['trial', 'active', 'suspended', 'inactive', 'archived', 'deleted']) {
-      const blocked = row({ status: companyStatus, subscription_status: 'inactive', subscription_expires_at: null, trial_end: PAST });
+      const blocked = row({ status: companyStatus, subscription_status: 'inactive', subscription_expires_at: null });
       expect(can(blocked, PREMIUM_FEATURE, true)).toBe(true);
       expect(can(blocked, 'overview', true)).toBe(true);
     }
@@ -234,7 +187,7 @@ describe('the short circuits', () => {
   });
 
   it('a status this build does not know locks, as an unknown plan does', () => {
-    // Unreachable while `companies_status_check` pins the column to six values.
+    // Unreachable while `companies_status_check` pins the column to five values.
     // It is here so that a seventh status added by a later migration — which
     // `get_active_company_id()` would refuse — cannot open the screens instead.
     const unknown = row({ status: 'dormant', subscription_status: 'active', subscription_expires_at: FUTURE });
@@ -251,7 +204,7 @@ describe('the short circuits', () => {
   });
 
   it('a feature the map does not name needs premium', () => {
-    const paying = row({ status: 'trial', trial_end: PAST, plan: 'advanced' });
+    const paying = row({ status: 'active', plan: 'advanced' });
     expect(planAllows(buildPlanState(paying, NOW), {}, BASIC_FEATURE, false)).toBe(false);
     expect(planAllows(buildPlanState(paying, NOW), {}, 'overview', false)).toBe(false);
   });
@@ -262,18 +215,12 @@ describe('the short circuits', () => {
  * company status, subscription status and expiry, the browser must not open
  * what `get_active_company_id()` closes.
  *
- * **What this does and does not prove.** The oracle below transcribes the
- * server's `status IN ('active','trial')` itself, but for the server's last two
- * terms it calls `subscriptionIsActive()` — the very function under test. For
- * that half the 126 cases assert `f(x) === f(x)`: they pin the *shape* of the
- * state machine (which branch each combination lands in, and that the one
- * permissive cell is the carve-out and no other), not the subscription rule.
- * **The rule is pinned by the five hardcoded assertions in
- * `describe('subscriptionIsActive …')` above**, which name the expected answer
- * for a future, an absent and a past expiry and for every non-`active` status.
- * Change the helper to something the SQL does not say and those five fail while
- * all 126 of these still pass — so read them as the wiring, and those as the
- * rule.
+ * **What this does and does not prove.** The oracle transcribes the server's
+ * `status = 'active'` itself, but for the server's last two terms it calls
+ * `subscriptionIsActive()` — the very function under test. For that half the
+ * cases assert `f(x) === f(x)`: they pin the *shape* of the state machine, not
+ * the subscription rule. **The rule is pinned by the hardcoded assertions in
+ * `describe('subscriptionIsActive …')` above.**
  */
 describe('the browser is never more permissive than the server', () => {
   const companyStatuses = ['trial', 'active', 'suspended', 'inactive', 'archived', 'deleted'];
@@ -286,33 +233,18 @@ describe('the browser is never more permissive than the server', () => {
     ['suspended', FUTURE],
     [null, null],
   ];
-  const trialEnds = [FUTURE, PAST, null];
 
   /** `get_active_company_id()` for an approved company and a good account. */
   const serverAdmits = (companyStatus: string, subStatus: string | null, expiry: string | null) =>
-    (companyStatus === 'active' || companyStatus === 'trial') &&
-    subscriptionIsActive(subStatus, expiry, NOW);
+    companyStatus === 'active' && subscriptionIsActive(subStatus, expiry, NOW);
 
   for (const status of companyStatuses) {
     for (const [subStatus, expiry] of subscriptions) {
-      for (const trial_end of trialEnds) {
-        const label = `${status} / ${subStatus ?? 'none'} / expiry ${expiry === FUTURE ? 'future' : expiry === PAST ? 'past' : 'none'} / trial ${trial_end === FUTURE ? 'running' : trial_end === PAST ? 'over' : 'none'}`;
-        it(label, () => {
-          const r = row({ status, subscription_status: subStatus, subscription_expires_at: expiry, trial_start: PAST, trial_end });
-          const browserAdmits = buildPlanState(r, NOW).isActive;
-          const runningTrial = status === 'trial' && trial_end === FUTURE;
-
-          if (runningTrial) {
-            // The owner's carve-out: a running trial is unlocked whatever the
-            // subscription says. SubscriptionGuard keeps such a company on
-            // /abo-aktivieren, /aktivierung and /billing, so nothing is reachable
-            // through it.
-            expect(browserAdmits).toBe(true);
-          } else {
-            expect(browserAdmits).toBe(serverAdmits(status, subStatus, expiry));
-          }
-        });
-      }
+      const label = `${status} / ${subStatus ?? 'none'} / expiry ${expiry === FUTURE ? 'future' : expiry === PAST ? 'past' : 'none'}`;
+      it(label, () => {
+        const r = row({ status, subscription_status: subStatus, subscription_expires_at: expiry });
+        expect(buildPlanState(r, NOW).isActive).toBe(serverAdmits(status, subStatus, expiry));
+      });
     }
   }
 });
