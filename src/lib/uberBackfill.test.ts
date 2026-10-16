@@ -20,6 +20,7 @@ interface World {
   /** Once the database has linked the earner, the next pull carries the link. */
   linkMade: { value: boolean };
   unmatched: { value: string[] };
+  unmatchedTrips: { value: number | null };
   resolveCalls: Array<Array<{ externalDriverId: string; name: string }>>;
   resolveAnswer: { value: 'created' | 'skipped' | 'refused' };
 }
@@ -35,6 +36,7 @@ function world(dataStart: string | null = DATA_START): World {
     unlinked: { value: false },
     linkMade: { value: false },
     unmatched: { value: [] as string[] },
+    unmatchedTrips: { value: null as number | null },
     resolveCalls: [] as World['resolveCalls'],
     resolveAnswer: { value: 'created' as World['resolveAnswer']['value'] },
   };
@@ -61,7 +63,7 @@ function world(dataStart: string | null = DATA_START): World {
       });
       const noLink = w.unlinked.value && !w.linkMade.value;
       const links: Record<string, { driverId: string; driverName: string }> = noLink ? {} : { '7': { driverId: 'd1', driverName: 'Anna' } };
-      const unmatched = w.unmatched.value.map(name => ({ name, uberDriverUuid: null, trips: null }));
+      const unmatched = w.unmatched.value.map(name => ({ name, uberDriverUuid: null, trips: w.unmatchedTrips.value }));
       return { ok: true, weeks, links, unmatched };
     },
     resolve: async earners => {
@@ -181,14 +183,35 @@ describe('runEarningsBackfill', () => {
     expect(x.income).toHaveLength(0);
   });
 
-  it('still stops on an earner Reidey cannot place, and creates no driver on the way', async () => {
+  it('writes every matched earner\'s rows although an unmatched earner exists', async () => {
     const x = world();
-    x.unlinked.value = true; // an unlinked earner in the same piece must not be created either
+    x.unmatched.value = ['Nobody Known'];
+    await runEarningsBackfill(x.deps);
+    // Only the income table is read here: whether the rows arrived, not what was reported.
+    expect(x.income).toHaveLength(diffDaysIso(DATA_START, THROUGH) + 1);
+  });
+
+  it('names the unmatched earner on the result, and a gap is not a clean success', async () => {
+    const x = world();
     x.unmatched.value = ['Nobody Known'];
     const out = await runEarningsBackfill(x.deps);
-    expect(out).toMatchObject({ status: 'failed', reason: 'import.earnings.unmatched', detail: 'Nobody Known', created: [] });
+    expect(out.status).toBe('gap');
+    expect(out).toMatchObject({ unmatched: [{ name: 'Nobody Known', uberDriverUuid: null }] });
+    // Resolving unlinked earners is a different path and is not touched by a gap.
     expect(x.resolveCalls).toHaveLength(0);
-    expect(x.income).toHaveLength(0);
+    expect(overallStatus([{ scope: 'earnings', earnings: out }])).toBe('partial');
+  });
+
+  it('sums an unmatched earner\'s trips over the pieces and keeps them when a later piece fails', async () => {
+    const x = world();
+    x.unmatched.value = ['Nobody Known'];
+    x.unmatchedTrips.value = 2;
+    x.failWriteAt.value = '2026-07-01';
+    const out = await runEarningsBackfill(x.deps);
+    expect(out.status).toBe('failed');
+    const gap = (out as { unmatched: Array<{ trips: number | null }> }).unmatched;
+    expect(gap).toHaveLength(1);
+    expect(gap[0].trips).toBeGreaterThan(2); // more than one piece named them
   });
 
   it('keeps the drivers it created in the report when a later piece fails', async () => {
