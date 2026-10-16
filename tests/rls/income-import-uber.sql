@@ -608,18 +608,18 @@ DECLARE
 BEGIN
   PERFORM _ui_rec(61, 'a negative fare is accepted, and so is a negative promotion and a negative tip',
     _ui_call(admin_a, _ui_import(jsonb_build_array(
-      _ui_row('1002', 'umsatz',    '80.00', '2026-11-09', '2026-11-15', 2, 9),
-      _ui_row('1002', 'aktionen',  '-20.00', '2026-11-09', '2026-11-15', 2),
-      _ui_row('1002', 'trinkgeld', '-5.50', '2026-11-09', '2026-11-15', 2)))) :: text,
+      _ui_row('1002', 'umsatz',    '80.00', '2026-12-07', '2026-12-13', 2, 9),
+      _ui_row('1002', 'aktionen',  '-20.00', '2026-12-07', '2026-12-13', 2),
+      _ui_row('1002', 'trinkgeld', '-5.50', '2026-12-07', '2026-12-13', 2)))) :: text,
     '{"ok": true, "drivers": 1, "inserted": 3}');
 
   PERFORM _ui_rec(62, 'the negative amounts are stored with their sign, exactly',
     (SELECT string_agg(type || ':' || amount::text, ' ' ORDER BY type)
-       FROM income WHERE source = 'uber' AND driver_name = 'Omar Khalil' AND date = '2026-11-09'),
+       FROM income WHERE source = 'uber' AND driver_name = 'Omar Khalil' AND date = '2026-12-07'),
     'aktionen:-20.00 trinkgeld:-5.50 umsatz:80.00');
 
   PERFORM _ui_rec(63, 'the week''s total follows them: 80,00 - 20,00 - 5,50',
-    (SELECT sum(amount)::text FROM income WHERE source = 'uber' AND driver_name = 'Omar Khalil' AND date = '2026-11-09'),
+    (SELECT sum(amount)::text FROM income WHERE source = 'uber' AND driver_name = 'Omar Khalil' AND date = '2026-12-07'),
     '54.50');
 
   v_before := (SELECT count(*) FROM income);
@@ -644,7 +644,7 @@ BEGIN
 
   PERFORM _ui_rec(66, 'replace mode corrects a week that holds negative rows: 3 go, 1 comes',
     _ui_call(admin_a, _ui_replace(jsonb_build_array(
-      _ui_row('1002', 'umsatz', '90.00', '2026-11-09', '2026-11-15', 2)))) :: text,
+      _ui_row('1002', 'umsatz', '90.00', '2026-12-07', '2026-12-13', 2)))) :: text,
     '{"ok": true, "deleted": 3, "drivers": 1, "inserted": 1}');
 END $$;
 
