@@ -6735,4 +6735,8 @@ export const de = {
   'admin.settings.firstMonthHint':    'Pauschal für die erste Rechnung jedes Unternehmens, unabhängig von Tarif und Fahrzeuganzahl. Ab der zweiten Rechnung gilt der Preis pro Fahrzeug. Leer lassen: kein Pauschalpreis.',
   'bill.invoice.quoteFailed':         'Die Beträge konnten nicht berechnet werden. Es wird nichts erstellt.',
   'bill.invoice.quoteHint':           'Die erste Rechnung eines Unternehmens wird zum Pauschalpreis des ersten Monats erstellt, alle weiteren nach der Preisliste pro Fahrzeug.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sa.dash.billedUnavailable': 'Der Rechnungsbetrag ist nur mit dem Recht Abrechnung sichtbar oder konnte nicht gelesen werden.',
+  'sa.dash.firstInvoice':      'Erstrechnung (Pauschale)',
 } as const;
