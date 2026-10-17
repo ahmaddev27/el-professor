@@ -560,7 +560,7 @@ const PricingSection: React.FC = () => {
   // (plan 3.9), which is also what compute_plan_price charges from. Until the
   // first answer arrives it is the seed, which is what the database was
   // seeded with, so the page never renders without prices.
-  const { priceBook, trialDays } = useAppConfig();
+  const { priceBook } = useAppConfig();
   const [billing, setBilling] = useState<'monthly'|'yearly'>('monthly');
   const [carCount, setCarCount] = useState(5);
 
@@ -699,7 +699,7 @@ const PricingSection: React.FC = () => {
                   color: '#fff',
                   boxShadow: p.highlight ? '0 4px 28px rgba(6,182,212,0.3)' : '0 0 0 1px rgba(255,255,255,0.07)',
                 }}>
-                  {t('landing.pricing.cta', { days: trialDays })}
+                  {t('landing.pricing.cta')}
                 </a>
 
                 <div style={{ height: 1, background: p.highlight ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.05)', marginBottom: 20 }} />

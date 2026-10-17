@@ -63,6 +63,8 @@ const answer = (over: Partial<SchedulePreviewAnswer> = {}): SchedulePreviewAnswe
   drivers: { sendable: 2, ambiguous: 0, no_driver: 0, inactive: 0, no_email: 1, already_claimed: 0 },
   manager_recipients: 1,
   manager_claimed: false,
+  manager_via_address: false,
+  manager_via_list: false,
   ...over,
 });
 

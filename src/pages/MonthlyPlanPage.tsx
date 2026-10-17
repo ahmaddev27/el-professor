@@ -690,9 +690,14 @@ export default function MonthlyPlanPage() {
    *
    * The owner asked for it an hour after the minimum, having read the first screen
    * the minimum produced: a ten-hour block of which six hours were idle, built by
-   * the merge chaining short runs across a quiet day. It bounds that merge; it
-   * never splits a block, because the gap rule has already split at every gap long
-   * enough for a driver to change. 0 means no maximum.
+   * the merge chaining short runs across a quiet day. It bounds that merge, and
+   * since `splitLongBlocks` it is also the threshold above which a block is split
+   * -- but only with that switch on. Off, a longer block stays whole and is
+   * reported. 0 means no threshold.
+   *
+   * It is a threshold and not a cap, which is what the labels now say: a block
+   * can end up over it (nothing is cut without the switch) and under the short
+   * threshold (a block alone on its day has nothing to merge with).
    */
   const maxBlockMinutes = useMemo(() => wholeMinutes(maxBlockText), [maxBlockText]);
 
@@ -1757,13 +1762,27 @@ export default function MonthlyPlanPage() {
                       })}</p>
                     ) : null}
                     {ceiling > 0 ? (
-                      <p className={alone > 0 ? 'mt-2' : undefined}>
-                        {t('mplan.blocks.stillShortCeiling', {
-                          count: ceiling,
-                          minutes: plan.minBlockMinutes,
-                          max: plan.maxBlockMinutes,
-                        })}
-                      </p>
+                      <>
+                        <p className={alone > 0 ? 'mt-2' : undefined}>
+                          {t('mplan.blocks.stillShortCeiling', {
+                            count: ceiling,
+                            minutes: plan.minBlockMinutes,
+                            max: plan.maxBlockMinutes,
+                          })}
+                        </p>
+                        {/* The sentence used to end in "raise it in step 2", which
+                            is a report naming a lever somewhere else. It sets no
+                            number -- how long a block may run is the operator's
+                            judgement, not ours -- it only ends the hunt. */}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => setStep(2)}
+                        >
+                          {t('mplan.blocks.adjustThreshold')}
+                        </Button>
+                      </>
                     ) : null}
                   </>
                 );
@@ -1771,10 +1790,9 @@ export default function MonthlyPlanPage() {
             </Alert>
           ) : null}
 
-          {/* Blocks over the maximum. They are reported and never split: the gap
-              rule has already split at every gap long enough for a driver to
-              change, so there is no point left inside one where a change could
-              happen, and a single ride is never cut. */}
+          {/* Blocks over the long-block threshold. With the switch off they are
+              reported and never split, which is why the banner below says which
+              of the two it is. A single ride is never cut either way. */}
           {/* What the split cost, ride by ride. The owner agreed to give these up;
               what he did not agree to is their disappearing without a name. A ride
               that leaves the plan unaccounted for is indistinguishable from a
@@ -1807,6 +1825,27 @@ export default function MonthlyPlanPage() {
                   minutes: plan.maxBlockMinutes,
                 })}
               </p>
+              {/* It turns the switch on and goes back to step 2; it does not
+                  rebuild here. Two reasons, both load-bearing: `generate` closes
+                  over `splitLongBlocks`, so calling it in the same handler would
+                  rebuild with the old value; and the invalidating effect sets
+                  `plan` to null on that change, which would empty this very step
+                  mid-flight. So the operator confirms on step 2, where the ticked
+                  box is visible -- the screen never shows a plan built with a
+                  setting other than the one on display. */}
+              {!splitLongBlocks ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => {
+                    setSplitLongBlocks(true);
+                    setStep(2);
+                  }}
+                >
+                  {t('mplan.blocks.enableSplit')}
+                </Button>
+              ) : null}
             </Alert>
           ) : null}
 

@@ -6,8 +6,8 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { Alert } from './ui';
-import { fetchAllActiveSubscriptions, fetchInvoicedCompanyIds } from '../lib/platformBillingClient';
-import type { PlatformSubscriptionRow } from '../lib/platformBilling';
+import { fetchAllActiveSubscriptions, fetchInvoiceQuotes, fetchInvoicedCompanyIds } from '../lib/platformBillingClient';
+import type { PlatformInvoiceQuote, PlatformSubscriptionRow } from '../lib/platformBilling';
 import { invoiceDueDate } from '../utils/invoiceDueDate';
 
 interface Props {
@@ -57,10 +57,33 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
     return () => { cancelled = true; };
   }, []);
 
+  /**
+   * What each invoice of the chosen period costs, decided by the database
+   * (`platform_invoice_quotes`, 20261015160000): the company's first invoice is
+   * the price book's flat first-month figure, every later one the book per car.
+   * Read again whenever the period changes, because "first" depends on it.
+   * `null` means the amounts could not be read, and then nothing is generated.
+   */
+  const [quotes, setQuotes] = useState<Map<string, PlatformInvoiceQuote> | null>(null);
+  const [quotesLoading, setQuotesLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setQuotesLoading(true);
+    fetchInvoiceQuotes(month, year)
+      .catch(() => null)
+      .then(result => {
+        if (cancelled) return;
+        setQuotes(result);
+        setQuotesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [month, year]);
+
   const companyLabel = (sub: PlatformSubscriptionRow) => sub.company_name || sub.company_id.slice(0, 8);
 
   const handleGenerate = async () => {
-    if (!user || !activeSubs) return;
+    if (!user || !activeSubs || !quotes) return;
     setGenerating(true);
     const created: string[] = [];
     const skipped: string[] = [];
@@ -77,6 +100,14 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
       for (const sub of activeSubs) {
         if (existingSet.has(sub.company_id)) {
           skipped.push(companyLabel(sub));
+          continue;
+        }
+
+        // The amount is the database's quote for this period, not the
+        // subscription's stored rate: a missing quote creates nothing.
+        const quote = quotes.get(sub.id);
+        if (!quote) {
+          errors.push(t('bill.invoice.quoteFailed') + ' ' + companyLabel(sub));
           continue;
         }
 
@@ -97,7 +128,7 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
             invoice_month: month,
             invoice_year: year,
             invoice_number: invNum,
-            amount: sub.monthly_price,
+            amount: quote.amountCents / 100,
             status: 'open',
             payment_method: 'cash',
             due_date: dueDate,
@@ -186,6 +217,12 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
             </div>
           )}
 
+          {!loading && !quotesLoading && quotes === null ? (
+            <Alert tone="critical" className="font-ui">{t('bill.invoice.quoteFailed')}</Alert>
+          ) : (
+            <p className="font-ui text-xs text-fg-muted">{t('bill.invoice.quoteHint')}</p>
+          )}
+
           {results && (
             <div className="p-3 rounded-xl text-sm space-y-1" style={{
               background: results.errors.length > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
@@ -206,9 +243,9 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
           </button>
           <button
             onClick={handleGenerate}
-            disabled={generating || loading || !activeSubs || activeSubs.length === 0}
+            disabled={generating || loading || quotesLoading || !quotes || !activeSubs || activeSubs.length === 0}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--accent)', opacity: generating || loading || !activeSubs || activeSubs.length === 0 ? 0.6 : 1 }}
+            style={{ background: 'var(--accent)', opacity: generating || loading || quotesLoading || !quotes || !activeSubs || activeSubs.length === 0 ? 0.6 : 1 }}
           >
             {generating
               ? <><Loader2 size={16} className="animate-spin" /> {t('bill.invoice.generating')}</>

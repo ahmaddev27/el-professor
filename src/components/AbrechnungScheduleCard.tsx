@@ -8,7 +8,12 @@ import {
   judgePreview, nextOccurrence, parsePreviewAnswer,
   type ChannelState, type NextOccurrence, type SchedulePreviewAnswer,
 } from '../utils/abrechnungSchedulePreview';
-import { germanDay } from '../../supabase/functions/_shared/abrechnung-schedule-core';
+import {
+  germanDay,
+  REMINDER_LEAD_DEFAULT_MINUTES,
+  REMINDER_LEAD_MAX_MINUTES,
+  REMINDER_LEAD_MIN_MINUTES,
+} from '../../supabase/functions/_shared/abrechnung-schedule-core';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect } from './ui';
 
 /**
@@ -39,9 +44,18 @@ interface ScheduleForm {
   weekday: number;
   /** `HH:MM`, the value an `<input type="time">` holds. */
   time: string;
+  /** Remind a driver who recorded nothing, `reminderLead` minutes before the driver mail. */
+  reminder: boolean;
+  reminderLead: number;
 }
 
-const DEFAULTS: ScheduleForm = { driverMail: false, managerSummary: false, weekday: 1, time: '08:00' };
+const DEFAULTS: ScheduleForm = {
+  driverMail: false, managerSummary: false, weekday: 1, time: '08:00',
+  reminder: false, reminderLead: REMINDER_LEAD_DEFAULT_MINUTES,
+};
+
+/** The leads the picker offers. A stored value outside this list is added to it, never lost. */
+const REMINDER_LEADS = [15, 30, 60, 90, 120, 180] as const;
 
 type PreviewState =
   | { status: 'idle' }
@@ -50,6 +64,13 @@ type PreviewState =
   | { status: 'ready'; next: NextOccurrence; answer: SchedulePreviewAnswer };
 
 const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed';
+
+function leadOptions(current: number): number[] {
+  const all = new Set<number>([...REMINDER_LEADS, current]);
+  return [...all]
+    .filter((m) => m >= REMINDER_LEAD_MIN_MINUTES && m <= REMINDER_LEAD_MAX_MINUTES)
+    .sort((a, b) => a - b);
+}
 
 const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) => {
   const { t } = useTranslation();
@@ -69,7 +90,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
     setLoadFailed(false);
     const { data, error } = await supabase
       .from('abrechnung_schedules')
-      .select('driver_mail_enabled, manager_summary_enabled, weekday, send_time')
+      .select('driver_mail_enabled, manager_summary_enabled, weekday, send_time, reminder_enabled, reminder_lead_minutes')
       .eq('company_id', companyId)
       .maybeSingle();
     if (error) {
@@ -80,6 +101,8 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
         managerSummary: data.manager_summary_enabled,
         weekday: data.weekday,
         time: String(data.send_time).slice(0, 5),
+        reminder: data.reminder_enabled,
+        reminderLead: data.reminder_lead_minutes,
       };
       setForm(stored);
       setSaved(stored);
@@ -119,6 +142,9 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
         manager_summary_enabled: form.managerSummary,
         weekday: form.weekday,
         send_time: form.time,
+        // The reminder warns about the drivers' mail, so it is stored off with it.
+        reminder_enabled: form.driverMail && form.reminder,
+        reminder_lead_minutes: form.reminderLead,
       }, { onConflict: 'company_id' });
     setSaving(false);
     if (error) {
@@ -152,6 +178,38 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
             <span className="block text-fg-subtle">{t('settings.abrSchedule.drivers.hint')}</span>
           </span>
         </label>
+
+        <label className="flex cursor-pointer items-start gap-3 text-sm text-fg">
+          <input
+            type="checkbox"
+            className={checkboxClass}
+            checked={form.driverMail && form.reminder}
+            disabled={!form.driverMail}
+            onChange={(e) => setForm({ ...form, reminder: e.target.checked })}
+          />
+          <span>
+            <span className="block font-medium">{t('settings.abrSchedule.reminder.label')}</span>
+            <span className="block text-fg-subtle">
+              {t('settings.abrSchedule.reminder.hint', { minutes: form.reminderLead })}
+            </span>
+          </span>
+        </label>
+
+        {form.driverMail && form.reminder && (
+          <Field label={t('settings.abrSchedule.reminder.lead')} id="abr-schedule-reminder-lead">
+            <NativeSelect
+              id="abr-schedule-reminder-lead"
+              value={form.reminderLead}
+              onChange={(e) => setForm({ ...form, reminderLead: Number(e.target.value) })}
+            >
+              {leadOptions(form.reminderLead).map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {t('settings.abrSchedule.reminder.leadOption', { minutes })}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        )}
 
         <label className="flex cursor-pointer items-start gap-3 text-sm text-fg">
           <input
@@ -303,6 +361,8 @@ const PreviewBody: React.FC<{ next: NextOccurrence; answer: SchedulePreviewAnswe
         ? t('settings.abrSchedule.preview.manager.claimed')
         : t('settings.abrSchedule.preview.manager.noOne');
     }
+    if (answer.manager_via_list) return t('settings.abrSchedule.preview.manager.goesList', { count: state.count });
+    if (answer.manager_via_address) return t('settings.abrSchedule.preview.manager.goesAddress');
     return tPlural({
       one: 'settings.abrSchedule.preview.manager.goesOne',
       other: 'settings.abrSchedule.preview.manager.goesOther',

@@ -13,8 +13,9 @@
 
     1. the helper      get_active_company_id() answers the company for a healthy
                        member and NULL for every state App.tsx refuses; the
-                       trial company and an invited employee are the two
-                       controls that must stay allowed
+                       company with a live subscription (it was the trial
+                       company until 20261015170000) and an invited employee
+                       are the two controls that must stay allowed
     2. business data   a blocked company and a blocked account read and write
                        nothing through the tables, whatever their role
    2b. attribution     the import and the assignment audit row carry the caller
@@ -148,7 +149,7 @@ CREATE TEMP TABLE _ts_company (slug text, label text, approval_status text, stat
                                subscription_status text, expires_at timestamptz, allowed boolean);
 INSERT INTO _ts_company VALUES
   ('ok',              'approved, active, subscribed',                'approved',  'active',    'active',    NULL,                      true),
-  ('trial',           'trial company with an active subscription',   'approved',  'trial',     'active',    now() + interval '30 days', true),
+  ('livesub',         'company with a live subscription',            'approved',  'active',    'active',    now() + interval '30 days', true),
   ('future',          'subscription that expires tomorrow',          'approved',  'active',    'active',    now() + interval '1 day',   true),
   ('pending',         'still waiting for approval',                  'pending',   'active',    'active',    NULL,                      false),
   ('rejected',        'rejected',                                    'rejected',  'active',    'active',    NULL,                      false),
@@ -554,7 +555,7 @@ BEGIN
     AND _ts_try(owner_u, format('DELETE FROM drivers WHERE id = %L', drv_ok)) = 'rows 0');
   PERFORM _ts_ok('staff: an owner cannot move a driver into another company',
     _ts_try(owner_u, format('UPDATE drivers SET company_id = %L WHERE id = %L',
-                            _ts_id('company:trial'), drv_ok)) = 'rows 0');
+                            _ts_id('company:livesub'), drv_ok)) = 'rows 0');
   PERFORM _ts_ok('staff: an owner writes none of a company''s business data — not its receipts, not its salaries',
     _ts_try(owner_u, format('INSERT INTO receipts (company_id, receipt_number, date, description, driver_name) VALUES (%L, %L, current_date, %L, %L)',
                             co_ok, 'BEL-TS-1', 'ts', 'TS')) LIKE 'ERR 42501%'

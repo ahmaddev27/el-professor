@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { handleDatabaseError } from '../utils/errorHandler';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -82,6 +82,7 @@ const FixedCostsManagement: React.FC = () => {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null; month: string | null }>({
     isOpen: false, id: null, month: null,
   });
@@ -268,7 +269,7 @@ const FixedCostsManagement: React.FC = () => {
     const rows = resolvedMonths.flatMap(r =>
       r.rows.map(cost => ({ month: monthLabel(r.month), description: cost.description, amount: cost.amount })),
     );
-    exportTableToExcel({
+    exportPicker.table('fixedCosts', {
       filename: `fixkosten_${new Date().toISOString().split('T')[0]}`,
       sheetTitle: t('nav.fixkosten'),
       moduleName: t('nav.fixkosten'),

@@ -61,6 +61,8 @@ export interface CashPaymentViewTarget {
   /** YYYY-MM-DD */
   periodEnd: string;
   driverName: string;
+  /** The payment's `source_type`: it decides which sentence the sheet carries. */
+  sourceType?: string | null;
   /**
    * Set when a numbered receipt can be issued for this payment from here: the
    * payment's id, and the reason the caller may not, ready to show (null when

@@ -18,6 +18,7 @@ import {
   type ReceiptPreviewRequest,
   type ReceiptStatusOnly,
 } from './salaryPaymentReceiptRow';
+import { attestsForPaymentSource } from './salaryCashReceiptDocument';
 
 const RECEIPT_A = 'a3f1c0de-0000-4000-8000-000000000001';
 const RECEIPT_B = 'a3f1c0de-0000-4000-8000-000000000002';
@@ -248,6 +249,7 @@ describe('loadReceiptForPreview', () => {
 
 describe('receiptSheet — the stored row is what prints', () => {
   const storedReceipt = {
+    attests: 'cash_handover' as const,
     receipt_number: 'GQ-2026-0012',
     status: 'confirmed' as const,
     period_start: '2026-08-03',
@@ -592,12 +594,34 @@ describe('a payment issued a receipt after the fact (issue_salary_cash_receipt)'
     ).toEqual({ kind: 'editable' });
   });
 
-  it('can be issued only while it is a manual cash payment with no live receipt', () => {
+  it('can be issued for a cash payment the sheet has a sentence for, with no live receipt', () => {
     expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'manual' })).toBe(true);
     expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: null })).toBe(true);
     expect(paymentRowCanBeIssued(issued)).toBe(false);
     expect(paymentRowCanBeIssued({ payment_type: 'bank', source_type: 'manual' })).toBe(false);
-    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'weekly_cash_difference' })).toBe(false);
     expect(paymentRowCanBeIssued(receiptPayment)).toBe(false);
+  });
+
+  // THE MOVED EXPECTATION. This asserted `false` until 20261006100000, and the
+  // reason was sound: the sheet's sentence says the amount was received from the
+  // employer, which on a "Bar zuruck" row is false twice -- not from the
+  // employer, and no handover. What changed is the document, not the rule. The
+  // owner decided it on 06.10.2026, and the argument that settled it is that a
+  // retention has no till movement to corroborate it, so the signature is the
+  // only evidence obtainable that those wages were received at all.
+  it('"Bar zuruck" is issuable since 20261006100000, and the sheet says it was retained', () => {
+    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'weekly_cash_difference' })).toBe(true);
+    expect(attestsForPaymentSource('weekly_cash_difference')).toBe('cash_retained');
+    expect(attestsForPaymentSource('manual')).toBe('cash_handover');
+    expect(attestsForPaymentSource(null)).toBe('cash_handover');
+  });
+
+  // An allow-list, mirroring the database's. `salary_payments.source_type` is
+  // `text DEFAULT 'manual'` with no CHECK, so an unknown value is storable --
+  // and under the old deny-list it would have been offered a receipt and printed
+  // as a handover that never happened.
+  it('a source_type nothing classifies is not offered a receipt', () => {
+    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'kommt_von_woanders' })).toBe(false);
+    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'gehaltsquittung' })).toBe(false);
   });
 });

@@ -335,7 +335,7 @@ describe('DocumentsPage withholds the Excel export while the archive read has fa
   const source = readFileSync(join(SRC, 'pages/DocumentsPage.tsx'), 'utf8');
 
   it('refuses in the handler', () => {
-    const handler = between(source, 'const handleExportMonth = (group: MonthGroup) => {', 'exportArchiveMonthToExcel(');
+    const handler = between(source, 'const handleExportMonth = (group: MonthGroup) => {', 'exportPicker.table(');
     expect(handler).toContain('if (archiveFailed) return;');
   });
 
@@ -344,7 +344,7 @@ describe('DocumentsPage withholds the Excel export while the archive read has fa
   });
 
   it('hands the export the month group figures the screen itself computed', () => {
-    const call = between(source, 'exportArchiveMonthToExcel({', '});');
+    const call = between(source, 'buildArchiveExportOptions({', '}));');
     expect(call).toContain('totalMinutes: group.totalMins');
     expect(call).toContain('totalGross: group.totalGross');
     expect(call).toContain('records: group.records');

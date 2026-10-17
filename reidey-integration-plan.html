@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>خطة تكامل Reidey ↔ El-Professor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;family=Noto+Kufi+Arabic:wght@600;700&amp;display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --ground:#F3F6FB; --surface:#FFFFFF; --surface-2:#E8EEF8;
+    --ink:#0C1730; --ink-2:#46536F; --line:#D3DCEA;
+    --accent:#146BFF; --accent-ink:#0B55D6; --signal:#007F99;
+    --ok:#0E7446; --ok-fill:#E3F4EA;
+    --warn:#9A4A06; --warn-fill:#FDF0DC;
+    --crit:#B3232B; --crit-fill:#FCE9EA;
+    --info:#0B55D6; --info-fill:#E6EEFE;
+    --idle:#46536F; --idle-fill:#E8EEF8;
+    --f-display:"Noto Kufi Arabic","IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;
+    --f-body:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --ground:#0A0F1C; --surface:#0C1730; --surface-2:#132043;
+      --ink:#EAF0FC; --ink-2:#A8B6D4; --line:#24335C;
+      --accent:#6FA4FF; --accent-ink:#9CC0FF; --signal:#2FD3E8;
+      --ok:#5CD39A; --ok-fill:#10301F;
+      --warn:#F0B561; --warn-fill:#3A2608;
+      --crit:#FF8A8F; --crit-fill:#3A1113;
+      --info:#9CC0FF; --info-fill:#11224A;
+      --idle:#A8B6D4; --idle-fill:#132043;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--f-body);line-height:1.75;font-size:15px}
+  a{color:var(--accent-ink)}
+  code{font-family:var(--f-mono);font-size:.875em;background:var(--surface-2);padding:.1em .35em;border-radius:5px;direction:ltr;display:inline-block}
+  .wrap{max-width:1060px;margin:0 auto;padding:28px 18px 80px}
+  .masthead{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px 24px;margin-bottom:22px}
+  .eyebrow{font-family:var(--f-mono);font-size:.75rem;letter-spacing:.08em;color:var(--signal);text-transform:uppercase;direction:ltr;text-align:right}
+  h1{font-family:var(--f-display);font-size:1.7rem;margin:.3em 0 .2em;line-height:1.35}
+  h2{font-family:var(--f-display);font-size:1.22rem;margin:0 0 .6em}
+  h3{font-size:1.02rem;margin:1.5em 0 .4em;display:flex;align-items:baseline;gap:.5em;flex-wrap:wrap}
+  .brand{color:var(--accent)}
+  .lead{color:var(--ink-2);margin:.6em 0 0}
+  .block,.phase{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin-bottom:18px}
+  .phase{border-inline-start:4px solid var(--accent)}
+  .phase.done{border-inline-start-color:var(--ok)}
+  .phase.gate0{border-inline-start-color:var(--crit)}
+  .phase.blocked{border-inline-start-color:var(--warn)}
+  .phase-head{display:flex;align-items:center;gap:.7em;margin-bottom:.2em;flex-wrap:wrap}
+  .phase-num{font-family:var(--f-mono);font-size:1.15rem;font-weight:500;color:var(--accent);background:var(--surface-2);border-radius:9px;padding:.1em .5em;direction:ltr}
+  .step-no{font-family:var(--f-mono);font-size:.82rem;color:var(--ink-2);background:var(--surface-2);border-radius:6px;padding:.1em .45em;direction:ltr;flex:none}
+  .pill{font-size:.75rem;font-weight:600;border-radius:999px;padding:.18em .7em;background:var(--idle-fill);color:var(--idle);white-space:nowrap}
+  .pill.ok{background:var(--ok-fill);color:var(--ok)}
+  .pill.warn{background:var(--warn-fill);color:var(--warn)}
+  .pill.crit{background:var(--crit-fill);color:var(--crit)}
+  .pill.info{background:var(--info-fill);color:var(--info)}
+  .list{margin:.4em 0 .9em;padding-inline-start:1.3em}
+  .list li{margin:.3em 0}
+  .muted{color:var(--ink-2)}
+  .why,.gate,.where{border-radius:11px;padding:.75em 1em;margin:.7em 0;font-size:.94rem}
+  .why{background:var(--info-fill);color:var(--ink)}
+  .gate{background:var(--warn-fill);color:var(--ink)}
+  .where{background:var(--surface-2)}
+  .crit-box{background:var(--crit-fill);border-radius:11px;padding:.8em 1em;margin:.7em 0}
+  .table-wrap{overflow-x:auto;margin:.8em 0}
+  table{border-collapse:collapse;width:100%;font-size:.92rem;min-width:520px}
+  th,td{text-align:right;padding:.55em .7em;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-weight:700;background:var(--surface-2);white-space:nowrap}
+  td code{white-space:nowrap}
+  .n{font-family:var(--f-mono);direction:ltr;color:var(--ink-2);font-size:.85em}
+  .chips{display:flex;gap:.4em;flex-wrap:wrap;margin:.5em 0}
+  .chip{font-size:.76rem;background:var(--surface-2);color:var(--ink-2);border-radius:7px;padding:.15em .55em;font-family:var(--f-mono);direction:ltr}
+  .toc{columns:2;column-gap:28px}
+  @media (max-width:640px){.toc{columns:1}}
+  .toc a{display:block;padding:.18em 0;text-decoration:none}
+  .ref{font-family:var(--f-mono);font-size:.74rem;color:var(--signal);direction:ltr}
+  hr{border:0;border-top:1px solid var(--line);margin:1.4em 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">milestone sheet · 06.10.2026</p>
+  <h1>تكامل <span class="brand">Reidey</span> ↔ <span class="brand">El-Professor</span></h1>
+  <p class="lead">
+    السائق يرفع فاتورة أو ملاحظة من تطبيق Reidey، والشركة تراجعها في El-Professor وتدخّلها دفاترها.
+    وEl-Professor يسحب من Reidey ما يقدر يسحبه. هذا الملف هو اللي نتبعه.
+  </p>
+  <div class="chips">
+    <span class="chip">repo: Pro @ feat/partner-intake</span>
+    <span class="chip">repo: DASHCAM @ feat/elprofessor-driver-documents</span>
+    <span class="chip">audit: 59 checked / 46 stood</span>
+  </div>
+</header>
+
+<section class="block">
+  <h2>كيف نستعمل هذا الملف</h2>
+  <ul class="list">
+    <li><strong>المايلستون هو «إشي بيشتغل»، مش «ملفات انكتبت».</strong> ما بينسكّر إلا لما معيار قبوله ينفحص فعلياً.</li>
+    <li><strong>كل مايلستون بينتهي بـPR</strong> — واحد عندنا أو عند Reidey أو الاتنين. ودمج الـPR قرارك إنت.</li>
+    <li><strong>الشِيت بينحدّث بنفس الـPR</strong> زي بقية ملفات الحالة — <code>PROGRESS.md</code> و<code>HANDOFF.md</code> و<code>README</code>.</li>
+    <li><strong>الملاحظات المرقّمة <span class="ref">[n]</span></strong> هي ملاحظات التدقيق اللي نجت الفحص. مكتوبة جوّا المايلستون اللي بيعالجها عشان ولا واحدة تضيع.</li>
+  </ul>
+</section>
+
+<section class="block">
+  <h2>المحتويات</h2>
+  <nav class="toc">
+    <a href="#decisions">١ · قراراتك الثابتة</a>
+    <a href="#limits">٢ · القيود اللي بتشكّل كل إشي</a>
+    <a href="#dormant">٣ · العمود الفقري: ننشر نايم</a>
+    <a href="#track">٤ · المايلستونات والتقدّم</a>
+    <a href="#m0">M0 · الورق القانوني</a>
+    <a href="#m1">M1 · الكونيكت</a>
+    <a href="#m2">M2 · ربط السائقين</a>
+    <a href="#m3">M3 · الملاحظة تعبر وترجع</a>
+    <a href="#m4">M4 · الفاتورة وصورتها</a>
+    <a href="#m5">M5 · تطبيق السائق</a>
+    <a href="#m6">M6 · لايف</a>
+    <a href="#open">٥ · قرارات مستنياك</a>
+    <a href="#out">٦ · خارج النطاق</a>
+    <a href="#audit">٧ · سجل التدقيق</a>
+  </nav>
+</section>
+
+<section class="block" id="decisions">
+  <h2>١ · قراراتك الثابتة <span class="pill info">مش للمراجعة</span></h2>
+  <p class="muted">هذه قرارات مأخوذة بتواريخها. مش بنعيد فتحها، ومن يشتغل على هذا التكامل يبني عليها.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>التاريخ</th><th>القرار</th><th>الأثر</th></tr></thead>
+      <tbody>
+        <tr><td class="n">05.10</td><td><strong>El-Professor يسحب، Reidey يدفع</strong></td><td>الاتجاه الأساسي. الكونيكت تبدأه الشركة من عندنا.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>الدفع للفواتير <em>والملاحظات</em></strong></td><td>كان للفواتير بس. الاتنين ما بينقدر يُسحبوا — ما بنعرف إنهم صاروا.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>ولا AI يقرا فاتورة</strong></td><td><code>tesseract.js</code> شغّالة عندنا أصلاً مع طبقة استخراج كاملة. القراءة بمتصفح المراجع.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>القسم يظهر للشركة المتصلة بس</strong></td><td>«متصلة» = سحبنا منها فعلياً مرة على الأقل، مش إنه توكن انصدر.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>إشعار push على الرفض فقط</strong></td><td>القبول بينشاف بالقائمة. الرفض بدّه السائق يتحرّك.</td></tr>
+        <tr><td class="n">06.10</td><td><strong><s>كل وارد بمراجعة إنسان</s></strong> <span class="pill crit">انقلب 13.10</span></td><td>كان: فاتورة <code>bar</code> بتحرّك دين السائق، وملاحظة غياب بتشيله من الخطة. <strong>صار:</strong> ولا مراجعة — انظر السطر تحت.</td></tr>
+        <tr><td class="n">13.10</td><td><strong>ولا حالة ولا مراجعة — الاعتماد تلقائي</strong></td><td>«كل سائق مسؤول عن اللي برسلو». الفاتورة والملاحظة بتدخل الدفاتر لحظة ما توصل، وانحذفت شاشات المراجعة والقبول والرفض وإشعار القرار. <strong>قيل للمالك إنّ الفاتورة النقدية بتحرّك دين السائق فوراً، واختار هيك.</strong></td></tr>
+        <tr><td class="n">13.10</td><td><strong>قائمة وحدة، و«Created by» اسم السائق</strong></td><td>تبويب «واردات من التطبيق» انحذف، والبيليج الجاي من التطبيق بيقعد مع بيليجات الشركة بنفس الجدول. الكاتب عمود جديد (<code>submitted_by_name</code>) مش العمود القديم، اللي بيحمل معرّف مستخدم وما إله مقابل عند السائق.</td></tr>
+        <tr><td class="n">13.10</td><td><strong>المرض والإجازة والغياب بيعبروا من جديد — كل الأنواع العشرة</strong></td><td>بعد ما انقال له بوضوح إنّ مرض موظف مسمّى بيصير بيانات مخزّنة بالمنتجين. القائمة بتضل قائمة سماح (من عشرة)، والتخطيط مشتق من النوع فالتلاتة بيستثنوا السائق. <strong>نص الملاحظة بيعبر زي ما هو ولا مدة احتفاظ له: تعرّض Art. 9 مفتوح.</strong></td></tr>
+        <tr><td class="n">13.10</td><td><strong>ملاحظة حادث الطريق بتسمّي السيارة</strong></td><td>الأنواع الخمسة اللي بتشتق «لازم تنحسب بالخطة» لازم معها لوحة. بتتحلّ لسيارة وحدة بالظبط، وإلا الملاحظة بتتسجّل بلا ربط — ما بنرمي شي لأنه ما في مراجعة.</td></tr>
+        <tr><td class="n">13.10</td><td><strong>بدناش اتمتة لاستيراد أرباح Uber</strong></td><td>«بدناش اتمتة انساها». الزر بيسحب من Reidey بمعاينة بتأكّدها إنت. مقصود، مش منسي.</td></tr>
+        <tr><td class="n">13.10</td><td><strong>صفحة النقد اسمها Kassenbuch</strong></td><td>بالنسختين الألمانية والإنجليزية. «Bargeldbestand» بيضل اسم المبلغ.</td></tr>
+        <tr><td class="n">13.10</td><td><strong>الخيار الثاني للدفع اسمه «Online»</strong></td><td>التسمية بس. القيمة المخزّنة <code>uberweisung</code> ما بتتحرّك لأنها بيانات.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>الربط يأكّده إنسان</strong></td><td>ولا مطابقة أسماء تلقائية. كودنا بيسجّل إنه المطابقة الضبابية أعطت مرة شهر راتب لسائق ما حد اختاره.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>برانشات فقط · ولا رفع على <code>main</code> · ولا شغل على السيرفر</strong></td><td>ريبو Reidey مفتوح محلياً على برانش. حاوياته ومضيفه و<code>main</code> ممنوعين.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>ولا بيئة اختبار لـReidey</strong></td><td>قرارك. الأثر كامل تحت.</td></tr>
+        <tr><td class="n">05.10</td><td><strong>الأرباح مؤجّلة</strong></td><td>«انسى الارباح ركز ع الكونيكت». مؤجّلة بقرارك — انظر «خارج النطاق».</td></tr>
+        <tr><td class="n">06.10</td><td><strong><s>ملاحظات المرض/العطلة/عدم التوفّر يدخّلها المشغّل</s></strong> <span class="pill crit">انقلب 13.10</span></td><td>بيانات Art. 9 <strong>بتطلع من التحويل كاملاً</strong>. استثناء التخطيط قرار المشغّل أصلاً فما بنخسر إشي. تضييق لقرار «كل العشرة أنواع» بمعلومة ما كانت موجودة وقتها. <span class="ref">[33] [41]</span></td></tr>
+        <tr><td class="n">06.10</td><td><strong>سحبة الروستر بزرّ، مش cron</strong></td><td>ولا تغيير على المضيف، وبوتيرة المشغّل. الـcron لما يثبت إنه بدّه تكرار. <span class="ref">[26]</span></td></tr>
+        <tr><td class="n">06.10</td><td><strong>اختبارات Reidey تنشغّل محلياً</strong></td><td>مش بيئة اختبار — هي الاختبارات نفسها. بلاها كل ضمانة بـM1–M4 مجرّد قراءة.</td></tr>
+        <tr><td class="n">08.10</td><td><strong>الشريك يرنّ وإحنا نسحب</strong></td><td>رايدي ما بتقدر تعيد إرسال توكنها (Sanctum بتخزّن الهاش)، فالدفع كان بدّه سرّاً ما حدا بيحمله. الجرس بلا حمولة وبلا بيانات اعتماد.</td></tr>
+        <tr><td class="n">10.10</td><td><strong>الصورة ما تنبعت أبداً — البيانات بس</strong></td><td>انقلاب كامل على M4: السائق يصوّر، التطبيق يقرا بـOCR محلي، <strong>والصورة تضلّ ع الجهاز</strong>. الباب صار بياخد فاتورة بلا مستند. كلفته: صفّ بالدفاتر وما خلفه إلا اللي السائق كتبه.</td></tr>
+        <tr><td class="n">11.10</td><td><strong>خمسة حقول زيادة، واللترات وسعر اللتر على البنزين بس</strong></td><td>اسم المكان، المدينة، وقت الفاتورة، اللترات، سعر اللتر — أعمدة حقيقية على الوارد <strong>وعلى <code>receipts</code></strong>، عشان توصل المحاسب.</td></tr>
+        <tr><td class="n">11.10</td><td><strong>صورة العدّاد إلزامية مع كل فاتورة بنزين، والتطبيق يقراها</strong></td><td>«مفش ثقة بالسائقين». الرقم ينقرا ع الجهاز، والصورة تضلّ هناك. <strong>والقاعدة بتمتنع</strong> لمّا ما تتأكّد، فيتسأل السائق بدل ما ينصدّق.</td></tr>
+        <tr><td class="n">09.10</td><td><strong>الصورة تضلّ دائماً</strong></td><td>ولا قاعدة احتفاظ. القرص يحتمل؛ النسخة الاحتياطية للـvolume لسا مفتوحة.</td></tr>
+        <tr><td class="n">09.10</td><td><strong>M0 ملغى</strong></td><td>ولا نص قانوني ولا محامي. قرار المالك، مسجّل هون لأنّ بيانات سائقين ألمان بتعبر بين منتجين.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>نص الملاحظة ما يعبر</strong></td><td>النوع والمدى بيكفّوا لتشغيل قيد التخطيط. النص الحر يوقف عند Reidey. <span class="ref">[41]</span></td></tr>
+        <tr><td class="n">06.10</td><td><strong>التطبيق منشور وشغّال</strong></td><td>مسار الإصدار شغّال (v1.0.5، وexpo-updates مربوط). فالكاميرا كلفة إصدار مش حيط — انظر 2.4.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="block" id="limits">
+  <h2>٢ · القيود اللي بتشكّل كل إشي</h2>
+
+  <h3><span class="step-no">2.1</span>‏<code>main</code> تبع Reidey = نشر إنتاج <span class="pill crit">خطر دائم</span></h3>
+  <p>دفعة على <code>main</code> بتشغّل نشر صفر-لمس على إنتاجهم، <strong>مع <code>php artisan migrate --force</code></strong>. يعني دمج الـPR <em>هو</em> النشر. ولا push على <code>main</code> بأي حال، ولا شغل على مضيفهم.</p>
+
+  <h3><span class="step-no">2.2</span>ولا بيئة اختبار لـReidey <span class="pill warn">قرارك، وهذي كلفته</span></h3>
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>أول مرة هذا الكود بيشتغل ضد API Reidey الحقيقي هي لحظة وصوله لإنتاجهم.</strong> ما في محطة بينهم.</p>
+    <p style="margin:.5em 0 .2em">النتيجة المباشرة: <strong>M0 القانوني لازم يسبق M1 فعلياً</strong>، لأنه أول سحبة روستر هي بيانات سائقين حقيقيين. والنتيجة الثانية: <strong>بوابة التحقق صارت مراجعة الـPR، مش تشغيل</strong> — وهذا أضعف، ومكتوب أضعف هون بدل ما يتزيّن. <span class="ref">[18] [19] [20]</span></p>
+  </div>
+
+  <h3><span class="step-no">2.3</span>ما عندنا scheduler <span class="pill warn">بنية</span></h3>
+  <p>ستاكنا SPA + Supabase. ولا scheduler بالستاك؛ كل مهمة متكرّرة هي سطر cron على المضيف بينتركّب <strong>باليد وبقرارك</strong>. وReidey عندهم scheduler ناضج (حاوية، نبضة كل دقيقة، ~٢٠ أمر). <strong>فاللي بيتكرّر، هم يعملوه.</strong> <span class="ref">[26]</span></p>
+
+  <h3><span class="step-no">2.4</span>الكاميرا = إصدار متجر <span class="pill info">كلفة، مش حيط</span></h3>
+  <p>ولا مكتبة كاميرا أو اختيار صور مثبّتة بالتطبيق، وسياسة <code>runtimeVersion</code> عندهم <code>fingerprint</code> — فإضافة موديول native <strong>ما بتنزل OTA</strong> ولازمها بناء وتسليم للمتجر. هذا قياس ثابت.</p>
+  <div class="why">
+    <strong>تصحيح، 06.10.2026.</strong> كنت كاتب هون إنه M5 «محجوز» و«iOS موقوف على تحقق DSA من آبل، أندرويد أول». المصدر كان توثيق Reidey نفسه — <code>README.md:50</code> («Blocked (external) — Apple's DSA trader verification in review») و<code>ROADMAP.md:14</code>. <strong>والمالك قال إنه التطبيق منشور على المتاجر وشغّال</strong> — وقياس الريبو بيتفق: <code>version 1.0.5</code>، bundle id للمنصّتين، و<code>expo-updates</code> مربوط، يعني <strong>تغيير JS بحت بينزل OTA فعلاً</strong> (فقناة الإشعارات بـM5 ما بتنتظر متجر؛ الكاميرا وحدها اللي بتنتظر). فالوصف الصحيح: <strong>مسار الإصدار شغّال، والكاميرا كلفة إصدار تنجدول مش حيط ننتظره</strong>. اللي ضايل غير محسوم هو <strong>iOS تحديداً</strong> — حقيقة خارجية ما بتنحل بقراءة الريبو، وملفاتهم ممكن تكون قديمة.
+  </div>
+
+  <h3><span class="step-no">2.5</span>الكيت هي بوابة SQL الوحيدة عندنا</h3>
+  <p><code>npm run test:rls</code> بتشتغل بحاوية مرمية على الـVPS. و«CI أخضر» ما بيقول ولا إشي عن SQL ما انقرأ. واختبارات الطرفين اليوم <strong>مكتوبة ومش مشغّلة</strong> — ما في قاعدة بيانات محلياً.</p>
+</section>
+
+<section class="block" id="dormant">
+  <h2>٣ · العمود الفقري: ننشر نايم</h2>
+  <p>بما إنه ما في محطة اختبار، الأمان ما بيجي من «نجرّب قبل»، بيجي من <strong>إنه الكود الواصل للإنتاج ما يعمل ولا إشي لحد ما إنسان يشغّله</strong>. هذا نفس نمط <code>GOOGLE_SIGNIN_ENABLED</code> عندنا: انشر مطفي، شغّل بقرار.</p>
+  <div class="why">
+    <strong>ليش هذا صحيح وقابل للفحص هون:</strong>
+    <ul class="list" style="margin-bottom:0">
+      <li>الـmigration <strong>إضافي</strong> — جداول وأعمدة جديدة، ولا تعديل على موجود.</li>
+      <li>المسارات موجودة بس <strong>ولا حد يحمل توكن</strong> يوصلها — <code>POST elprofessor/token</code> خلف <code>can:connections.manage</code> وما بيعمل إشي لحد ما مشغّل يضغطه.</li>
+      <li><code>documents_enabled</code> بترجع <code>false</code> لكل سائق، لأنه <code>first_used_at</code> فاضي لكل الشركات.</li>
+      <li>أي أمر مجدول لازم <strong>يرجع فوراً بلا شغل</strong> لما ولا شركة متصلة — وهذا شرط قبول مكتوب، مش نيّة.</li>
+    </ul>
+  </div>
+  <p class="muted">كل مايلستون بيلمس Reidey لازم يقول صراحة: <em>شو بيصير لحظة الدمج؟</em> والجواب المقبول الوحيد هو «ولا إشي، لحد ما …».</p>
+</section>
+
+<section class="block" id="track">
+  <h2>٤ · المايلستونات والتقدّم</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>المايلستون</th><th>الحالة</th><th>بينسكّر لما</th></tr></thead>
+      <tbody>
+        <tr><td class="n">M0</td><td><strong>الورق القانوني</strong> (بلا كود)</td><td><span class="pill crit">بوابة · مستني</span></td><td>الأساس القانوني وArt. 28 — <strong>نصّ الخصوصية طلع من الشروط بقرار المالك 08.10</strong></td></tr>
+        <tr><td class="n">M1</td><td><strong>الكونيكت</strong></td><td><span class="pill ok">مبني · 08.10 · مع السحبة</span></td><td>توكن أسطول (أ) ما بيقدر يتصل كشركة (ب)، والسحب والسحب-للخلف محكومين</td></tr>
+        <tr><td class="n">M2</td><td><strong>ربط السائقين</strong></td><td><span class="pill ok">مبني · 08.10</span></td><td>إنسان يأكّد اقتراح، والتأكيد مدقّق، ومصير السائق الراحل محدّد</td></tr>
+        <tr><td class="n">M3</td><td><strong>الملاحظة تعبر وترجع</strong></td><td><span class="pill ok">مبني · 08.10 · بلا مراجعة 13.10</span></td><td>ملاحظة بتمشي من التطبيق وبتنقبل لحظة وصولها — <strong>بلا صورة وبلا مراجعة</strong>. <strong>كل الأنواع العشرة بتعبر (13.10)</strong>، وحادث الطريق بيسمّي السيارة. النص: نسخة 06.10 «سبعة بس» ملغاة.</td></tr>
+        <tr><td class="n">M4</td><td><strong>الفاتورة وبياناتها</strong></td><td><span class="pill ok">مبني · 12.10 · بلا مراجعة 13.10</span></td><td>القبول صار تلقائي 13.10. انقلب 10.10: السائق يصوّر، التطبيق يقرا، <strong>والصورة ما تسافر</strong>. والقبول يكتب <code>receipts</code> بسبعة حقول زيادة — المكان والوقت واللترات وسعر اللتر (11.10) والعدّاد والمدى المتبقّي (12.10). سلسلة الصورة تبع 08.10 ما انحذفت: بناء قديم من التطبيق لسا بيبعت صورة وبتُقبل زي ما كانت</td></tr>
+        <tr><td class="n">M5</td><td><strong>تطبيق السائق</strong></td><td><span class="pill ok">APK جاهز من main · 13.10</span></td><td>بناء EAS <code>a16c6f71</code> (preview، الإصدار 1.0.5، الكوميت <code>64b130a</code> = main عند Reidey) — <strong>ما في حاجة لبناء جديد</strong>. التغييرات بالـJS بتوصل OTA لأنّ بصمة Expo (١٦١ مصدر) ما فيها ولا ملف تحت <code>app/</code> أو <code>src/</code>. التوزيع على المتاجر لسا قرارك.</td></tr>
+        <tr><td class="n">M6</td><td><strong>لايف</strong></td><td><span class="pill">لسا</span></td><td>رهيرسل كامل، وسطور الـcron بإذنك، وإنتاج الطرفين</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="gate">
+    <strong>أهم إعادة ترتيب عملها التدقيق:</strong> <strong>M3 بلا صورة إطلاقاً.</strong> الملاحظة بتثبت العبور والـidempotency والربط وشكل المراجعة ورجوع الحالة <strong>بلا ولا سطر تخزين</strong> — وهذا إثبات أول أقوى بكثير من صف فاتورة بصورة فاضية. سلسلة الصورة كلها انعزلت بـM4. <span class="ref">[29]</span>
+  </div>
+</section>
+
+<section class="phase gate0" id="m0">
+  <header class="phase-head"><span class="phase-num">M0</span><h2>الورق القانوني <span class="pill crit">ملغى بقرار المالك · 09.10.2026</span></h2></header>
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>قرار المالك 09.10.2026: ولا نص قانوني ولا محامي.</strong> M0 ما عاد بوابة، والمايلستونات اللي بعده ما بتستناه.</p>
+    <p style="margin:.5em 0 .2em">مسجّل هون لأنه قرار وُخذ بعد ما انعرض: بيانات سائقين ألمان (اسم، إيميل، تلفون، وصورة بيليج فيها مكان وتاريخ) بتعبر بين منتجين مختلفين لهم قاعدتا بيانات منفصلتان، <strong>والصورة بتضلّ دائماً</strong> (نفس اليوم). التفاصيل اللي انكتبت — خريطة البيانات حقل بحقل، وشكل العلاقة معالج↔معالج، والنصوص الألمانية — ضلّت بـ<a href="Docs/integration/reidey-m0-data-transfer.md">Docs/integration/reidey-m0-data-transfer.md</a> كمرجع، بلا أي بوابة عليها.</p>
+  </div>
+</section>
+
+
+<section class="phase" id="m1">
+  <header class="phase-head"><span class="phase-num">M1</span><h2>الكونيكت <span class="pill warn">نص مبني</span></h2></header>
+  <p><strong>الهدف:</strong> المشغّل يصدر توكن بلوحة Reidey، يلزقه عندنا، إحنا نتحقق بسحبة روستر أولى، والطرفين يقولوا «متصل» — ولا سائق ولا تطبيق.</p>
+  <div class="where"><strong>مبني ومكوميت:</strong> قدرة <code>elprofessor:read</code> وسطرها بقائمة الحصر، دورة حياة التوكن، قراءة الروستر، <code>documents_enabled</code>، وكرت على صفحة <code>/connections</code> الموجودة. <span class="muted">(DASHCAM، كوميتان)</span></div>
+
+  <h3><span class="step-no">M1.1</span>هوية الأسطول لازم تنربط <span class="pill ok">مسكّر بالطرفين · 07.10</span></h3>
+  <div class="crit-box">
+    <p style="margin:.2em 0">القراءة الوحيدة اللي توكننا يوصلها بترجع <strong>سائقين و<code>meta</code> وبس</strong> — ولا هوية أسطول. والدالة اللي بترجع <code>tenant_id</code> خلف <code>can:connections.manage</code> ومش بقائمة الحصر، فتوكننا ياخد 403. و<code>issueToken</code> بترجع الهوية <strong>لمتصفح المشغّل، مش إلنا</strong>.</p>
+    <p style="margin:.5em 0 .2em"><strong>النتيجة:</strong> إلزق توكن أسطول (أ) بـConnect شركة (ب) وبينجح — وشركة (ب) تبلّش تسحب سائقين أسطول (أ) وتأكّد ربطهم وتقبل واردات بتحرّك فلوس.</p>
+    <p style="margin:.5em 0 .2em"><strong>ومش افتراضي على هذا العميل:</strong> قياسنا المكتوب بالـmigration إنه <code>ahmedkhhemaid@gmail.com</code> يملك شركتين — نفس المشغّل اللي رح يحمل توكنين.</p>
+  </div>
+  <p><strong>العلاج:</strong> هوية الأسطول تنضاف لقائمة الحصر (بالروستر أو بـ<code>GET elprofessor/fleet</code> whoami)، وتُخزّن عند الكونيكت بـ<code>external_company_id</code>، وتُقارن <strong>كل سحبة</strong> — وعند الاختلاف الاتصال يصير <code>failed</code> بسبب مميّز، مش يسحب. و«التوكن بيسمّي أسطول متصل بشركة ثانية» <strong>رفض</strong>، مش خطأ فرادة. <span class="ref">[1] [24]</span></p>
+  <div class="why">
+    <strong>انسكّر 07.10.2026، بالطرفين:</strong>
+    <ul class="list" style="margin-bottom:0">
+      <li><strong>عند Reidey</strong> — <code>GET api/v1/elprofessor/fleet</code> بترجع ثلاث حقول بالظبط (<code>tenant_id</code>، <code>tenant_name</code>، <code>payment_reference</code>)، و<code>meta.tenant_id</code> انضافت للروستر من <strong>نفس</strong> المتغيّر اللي بيحصر الاستعلام. والمسارين مكتوبين <strong>حرفياً</strong> بـ<code>EnsureDashboardToken::CONFINED_ABILITIES</code> — بنمطين صريحين مش wildcard، لأنه قدرة مش مذكورة بتلك الخريطة <strong>مش محصورة إطلاقاً</strong>.</li>
+      <li><strong>عندنا</strong> — <code>20261007100000</code> فيه فهرس فريد جزئي على <code>(partner, external_company_id)</code> حيث الحالة مش ملغية. وهاد قابل للتنفيذ <strong>فقط</strong> بفضل الإصلاح الأول: فهرس على عمود ما حد بيعبّيه هو زينة.</li>
+      <li><strong>والاختبارات انشغّلت فعلاً</strong> — ١٥ اختباراً، ١٠٧ تحقّقات، منها واحد إنه توكن ما بيعرض هوية أسطول ثاني أبداً، وواحد إنه هوية الأسطول <strong>ما وسّعت الحصر</strong>. والحصر هو بيت القصيد.</li>
+    </ul>
+  </div>
+
+  <h3><span class="step-no">M1.2</span>التوكن ينختم بالاتجاهين، مش عندنا بس</h3>
+  <p><code>partner_credentials</code> بتخزّن الهاش فقط — صح لما التصميم «هم يدفعوا وإحنا نتحقق»، <strong>وغلط للسحب</strong>: عشان نسحب لازم <strong>نعيد إرسال</strong> التوكن. والمشكلة نفسها عندهم: Sanctum بتخزّن الهاش بس، فالنص الصريح لازم ينختم لحظة الإصدار. <strong>وM1 ما بينسكّر لحد ما Reidey تقدر تعيد إرساله</strong> — وإلا دفعة M3 بتجبر إعادة إصدار وبتهدّ M1 وM2. <span class="ref">[3]</span></p>
+
+  <h3><span class="step-no">M1.3</span>مفتاح الختم — وين بيعيش</h3>
+  <p>مفتاح منفصل باسمه، بـ<code>FUNCTION_ENV</code> لدالة الشريك وحدها، وحارس بـ<code>deploy.sh</code> زي حارس <code>OTP_PEPPER</code> (طول أدنى، والستيج ما يشارك الإنتاج). و<strong>هذا ينقلب خاصية الأمان اللي الـmigration بتدّعيها</strong> — «القاعدة ما تشوف المفتاح» بطّلت صحيحة، صارت «نسخة + مفتاح الختم = اعتماد شغّال». ينكتب بالـheader بنفس الكوميت كتغيير مقبول. و<code>app_private.partner_credentials</code> <strong>تنستثنى من نسخة الستيج</strong>، وإلا استرجاع ستيج يوصل أسطول عميل حقيقي. <span class="ref">[5] [23]</span></p>
+
+  <h3><span class="step-no">M1.4</span>السحب-للخلف لازم يسكّر البابين</h3>
+  <p>السحب اليوم باتجاه واحد: ولا مسار عندنا لإلغاء اعتماد، فباب الدفع وباب الحالة ما بينسكّروا. <strong>العلاج:</strong> RPC <code>partner_connection_revoke</code> — <code>is_company_admin()</code>، مدقّقة — بتعمل <code>status='revoked'</code> و<code>disabled_at</code> بترانزاكشن واحدة، و<code>partner_credential_company()</code> بتطلب اتصال حيّ غير مسحوب. وقرار منفصل: كيف سحب من جهة Reidey يوصلنا — <strong>401 على السحب لازم تتميّز عن انقطاع شبكة</strong>. <span class="ref">[4] [21]</span></p>
+
+  <h3><span class="step-no">M1.5</span>السبّاكة اللي ما كانت مسمّاة</h3>
+  <ul class="list">
+    <li>عنوان Reidey: التوكن ما بيحمله وولا إشي بيخزّنه — ثابت على السيرفر للشريك الواحد. <span class="ref">[42]</span></li>
+    <li>كل دالة جديدة بدها سطرها بـ<code>FUNCTION_ENV</code> وبـ<code>deploy/docker-compose.yml</code> — <strong>ناقصة من الأولى = 404 وما تشتغل أبداً</strong>. <span class="ref">[25]</span></li>
+    <li>مفتاح الـanon عندنا خاص بالبيئة وبينعاد إصداره مع أي تدوير لـ<code>JWT_SECRET</code>. <span class="ref">[44]</span></li>
+  </ul>
+
+  <h3><span class="step-no">M1.6</span>مراقبة — من هون وطالع</h3>
+  <p><code>last_pull_ok_at</code> و<code>last_pull_error</code> على <code>partner_connections</code>، و«الرابط بطّل يشتغل» بينعرض على الشاشتين. وصف تدقيق لكل سحبة بتصنيف وفعل مسمّيين بالـmigration، زي كل مسار مدقّق بهذا المنتج. <span class="ref">[16] [21]</span></p>
+
+  <div class="gate"><strong>لحظة الدمج:</strong> ولا إشي. migration إضافي، ومسارات ما حد يوصلها، وبوابة بترجع <code>false</code> لكل سائق.</div>
+</section>
+
+<section class="phase" id="m2">
+  <header class="phase-head"><span class="phase-num">M2</span><h2>ربط السائقين <span class="pill warn">الجداول مبنية</span></h2></header>
+  <p><strong>الهدف:</strong> سحبة الروستر تطلّع اقتراحات ربط، وإنسان بالشركة يأكّد أو يرفض كل واحد.</p>
+
+  <h3><span class="step-no">M2.1</span>مين بيشغّل السحبة <span class="pill warn">قرار</span></h3>
+  <p>ما في scheduler بستاكنا. يا <strong>زرّ «حدّث القائمة»</strong> على شاشة الربط (ولا تغيير على المضيف، وبوتيرة المشغّل)، يا <strong>سطر cron خامس</strong> — وهذا ملفّين بـ<code>/etc/cron.d</code> ودراي-رن معروض عليك وموافقتك. <strong>لازم ينتحدّد جوّا M2، مش ينكتشف بعدها.</strong> <span class="ref">[26]</span></p>
+
+  <h3><span class="step-no">M2.2</span>السائق اللي بيترك الشركة</h3>
+  <p>تأكيد ربط بيخلّي السائق <strong>غير قابل للحذف</strong> — الـCHECK وفعل الـFK بيتناقضوا. لازم يُختار صراحة: حالة رابعة <code>driver_deleted</code> بنفس الجملة، أو تخفيف الـCHECK، أو <code>ON DELETE RESTRICT</code> برسالة واضحة. وأي واحد منهم بدّه ملف بالكيت. <span class="ref">[27]</span></p>
+
+  <h3><span class="step-no">M2.3</span>الربط المرفوض ما يخلّي ورادة معلّقة للأبد</h3>
+  <p>رفض ربط لازم ينقل وارداته المنتظرة لـ<code>rejected</code> بسبب (الـCHECK بتطلبه أصلاً)، وشاشة المراجعة لازم يكون فيها <strong>عرض للواردات بلا سائق</strong> — عشان التراكم بينشاف مش بينخزّن بس. <span class="ref">[28]</span></p>
+
+  <h3><span class="step-no">M2.4</span>الروستر ما يبعت أكثر من اللازم</h3>
+  <p>السحبة اليوم بترجع كل سائق كان بالأسطول، <strong>بما فيهم اللي احتفاظ Reidey على وشك يمحيهم</strong>. <code>whereNull('roster_removed_at')</code> على الأقل، وأي سحب تاريخي يصير وسيط مبرّر لحاله. و<code>uber_driver_uuid</code> و<code>payment_reference</code> يطلعوا من الحمل. <span class="ref">[22]</span></p>
+
+  <div class="gate"><strong>معيار الخروج:</strong> «اقتراح بينتأكّد أو بينترفض من إنسان، والتأكيد مدقّق». وفحص «الوارد المنتظر بينتقط عند التأكيد» <strong>بينتقل لـM3</strong> — عند M2 ما في وارد حقيقي ينتظر. <span class="ref">[43]</span></div>
+</section>
+
+<section class="phase" id="m3">
+  <header class="phase-head"><span class="phase-num">M3</span><h2>الملاحظة تعبر وترجع — بلا صورة</h2></header>
+  <p><strong>الهدف:</strong> ملاحظة تمشي من تطبيق السائق، تنخزّن <code>pending</code> عندنا، إنسان يراجعها، القبول يكتب <code>driver_notes</code>، والحالة ترجع للسائق. <strong>اللوب كامل، وبلا ولا سطر تخزين صور.</strong></p>
+
+  <h3><span class="step-no">M3.0</span>المواصفة بالريبو لسا بتنص على قراءة AI <span class="pill warn">تناقض</span></h3>
+  <p><code>design-harness/prototype/ridy-integration-request.md</code> §4 لسا بيوصف «AI agent يقرا ثم السائق يأكّد» — وهذا <strong>قرارك ألغاه</strong>. وهي بطّلت وثيقة طلب لحد (إنت قررت ما تبعت لأحمد ولا لغيره)، بس هي <strong>عقد الواجهة اللي إحنا بنبني منه الطرفين</strong>، فنصّ قديم فيها فخّ لأي حد يقراها بعدين. تنعاد كتابتها — الحقول اللي السائق يكتبها هي كل الحمل، ولا نقطة قراءة موجودة، والصورة بتسافر مع الوارد — <strong>قبل أي كود بـM3</strong>، مش كترتيب أوراق. <span class="ref">[6]</span></p>
+
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>الاتجاه انقلب 08.10.2026، وقياس هو اللي قلبه.</strong> باب الاستقبال عنا بيتحقّق بالتوكن اللي رايدي أصدرته، و<strong>Sanctum بتخزّن الهاش بس</strong> — فرايدي ما بتقدر تعيد إرساله، والدفع كان بدّه بيانات اعتماد ما حدا بيحملها. وهاد كان بيحجب <strong>M3 زي M4</strong>، مش الفواتير لحالها.</p>
+    <p style="margin:.5em 0 .2em"><strong>قرار المالك:</strong> رايدي <strong>بترنّ</strong> — <code>{partner, fleet, submission, subject}</code>، بلا حمولة وبلا سرّ — و<strong>إحنا بنسحب</strong> الوارد وصورته بتوكنهم المختوم عندنا. فجرس مزوّر = نداء واحد بيرجّع 404، لأنّ ولا إشي من الجرس بينخزّن. والبديلان المرفوضان: رايدي تختم نصّها الصريح (سرّ قابل لإعادة الإرسال محفوظ عندهم)، أو مفتاح ثاني إحنا نصدره (لزقتان بـConnect اللي قرّرته لزقة وحدة).</p>
+    <p style="margin:.5em 0 .2em"><strong>والجرس بلا سرّ، فالعدّادات هي كل الحدّ:</strong> ٢٠/دقيقة للفليت، ١٢٠/ساعة للفليت، و<strong>٢٤٠/دقيقة عبر الكل</strong> — بلا الأخير مهاجم بيخترع أرقام فليتات بيصير عنده ميزانيات بلا حدّ. و<strong>الجرس الضايع ما بيضيّع فاتورة</strong>: زرّ «Eingänge abrufen» بيسأل رايدي شو مستني، لأنّ ما في scheduler بالستاك.</p>
+  </div>
+
+  <h3><span class="step-no">M3.1</span>جدول الواردات ونقاط السائق عند Reidey</h3>
+  <ul class="list">
+    <li>الطلبات <strong>ما بتحمل معرّف سائق إطلاقاً</strong> — السائق هو المستوثق، واختبار عندهم بيثبت إنه حقل <code>driver_id</code> بالـbody <strong>بينتجاهل مش بينُكرم</strong>. وتنكتب كخاصية بـheader الـmigration عندنا كمان، لأنه هناك بتنزل النتيجة. <span class="ref">[37]</span></li>
+    <li><code>note_type</code> بينفحص حرفياً من العشرة (أو السبعة — انظر M0.4)، و<code>25:00</code> بينترفض، و<code>end_date</code> قبل <code>start_date</code> بينترفض.</li>
+    <li>حدّ معدّل لكل سائق على كل POST.</li>
+  </ul>
+
+  <h3><span class="step-no">M3.2</span>الدفع job على طابور الـworker بيصرّفه فعلياً</h3>
+  <p>الـworker بيصرّف <strong>تلاتة أسماء بالظبط</strong>، مكتوبين بمكانين — واحد منهم ملف compose. job على اسم غيرهم <strong>بينتصفّ وما بيشتغل أبداً</strong>، والعطل <strong>تراكم صامت مش استثناء</strong>. نستعمل <code>default</code> مع <code>Http::timeout(15)->connectTimeout(5)</code> و<code>$timeout</code> على الـjob — فلا اسم جديد ولا تعديل compose. واختبار بيثبت إنه الطابور من اللي بينتصرّف. <span class="ref">[12] [31]</span></p>
+
+  <h3><span class="step-no">M3.3</span>باب الاستقبال عندنا — وهو أخطر نقطة بـM3</h3>
+  <div class="crit-box">
+    <p style="margin:.2em 0">الباب بيفتح بمفتاح الـanon <strong>العام</strong>، و<code>X-Partner-Key</code> بيثبت <strong>حيازة</strong> مش <strong>أصل</strong>. و<strong>El-Professor بيسلّم Reidey اعتماد الدفع على كل سحبة</strong> لو كان نفس التوكن بالاتجاهين.</p>
+    <p style="margin:.5em 0 .2em"><strong>العلاج:</strong> التوكن الملزوق للسحب <em>فقط</em>، واعتماد دخول <strong>مشتق</strong> إحنا ما بنبعته لولا مكان: عند الكونيكت <code>push_key = HMAC(seal, token || ':push')</code>، نخزّن هاشه ونرجّعه لـReidey مرة وحدة. فمراقبة bearer السحب ما بتعطي ولا قدرة دفع. <span class="ref">[8]</span></p>
+  </div>
+  <ul class="list">
+    <li><strong>حدّ معدّل حقيقي</strong> بشكل <code>receipt_ocr_allow()</code> — جدول أحداث وبوابة عدّ على معرّف الاعتماد وعلى <code>X-Client-IP</code> (Caddy بيكتبه من عنوان الاتصال فما بينتزوّر)، وبتسجّل الرفض زي ما بتسجّل السماح. <strong>هذا بالظبط العطل اللي هذا البرانش صلّحه بكوميت قبله</strong> — ما بنعيده. <span class="ref">[9] [44]</span></li>
+    <li><strong>حالة الشركة والحساب لازم تنسأل:</strong> مسار الدفع بيتخطّى كل بوابات الحالة، والآلية اللي الـmigration بتسمّيها بترجع NULL هناك. بدها predicate صريح بنفس خمس شروط <code>get_active_company_id()</code>. <span class="ref">[10]</span></li>
+    <li><strong>الـidempotency لازم تكون قاعدة مش فهرس:</strong> id عشوائي بـCHECK على شكله، وقاعدة التعارض مكتوبة بالـmigration (رجّع الصف كما هو، وارفض أي تغيير بعد ما يطلع من <code>pending</code>). وإلا الإعادة <strong>بدائية كتابة</strong> ضد الضابط البشري الوحيد بالتصميم. <span class="ref">[36]</span></li>
+    <li>الاستقبال <strong>RPC بـSECURITY DEFINER</strong> يملك EXECUTE على <code>note_behavior_for</code>؛ دور الخدمة ما بيكتب بالجداول مباشرة. وأفضل: CHECK بالدالة IMMUTABLE عشان الضمانة تكون وين التعليق بيدّعيها. <span class="ref">[30]</span></li>
+  </ul>
+
+  <h3><span class="step-no">M3.4</span>المراجعة والقبول</h3>
+  <p>القبول يكتب <code>driver_notes</code> والسلوك <strong>مشتق</strong> بـ<code>note_behavior_for</code> مش مأخوذ من الطلب. والشاشة تقول صريح إنه قبول نوع بيشيل من الخطة <strong>بيشيل السائق من تخطيط ذاك المدى</strong>. وقراءة فشلت <strong>ما تنعرض كقائمة فاضية</strong> — قاعدة مكتوبة عندنا: الصفر دعوى.</p>
+
+  <h3><span class="step-no">M3.5</span>الحالة ترجع — وسحبهم هو اللي بيجيبها</h3>
+  <ul class="list">
+    <li>قراءة حالة بمؤشّر (cursor) عندنا: <code>{submission_id, kind, status, rejected_reason, decided_at, receipt_number}</code>.</li>
+    <li>أمر مجدول عندهم كل ~١٥ دقيقة، <strong>بيرجع فوراً لما ولا شركة متصلة</strong>.</li>
+    <li><strong>FCM على الرفض فقط، وبلا محتوى:</strong> «تم رفض إحدى الإرساليات — افتحها بالتطبيق» و id بالـdata. <strong>سبب الرفض حكم تشغيلي بنص حر وما بيروح لجوجل.</strong> والقناة والعرض الصحيح بدهم تعديل بالتطبيق — بينزل OTA. <span class="ref">[39] [40]</span></li>
+  </ul>
+
+  <div class="gate"><strong>لحظة الدمج:</strong> ولا إشي — الأمر المجدول بيرجع فوراً، والنقاط محجوبة بـ<code>documents_enabled</code> اللي <code>false</code> للكل.</div>
+</section>
+
+<section class="phase blocked" id="m4">
+  <header class="phase-head"><span class="phase-num">M4</span><h2>الفاتورة وصورتها <span class="pill crit">كان عطل مانع مخفي</span></h2></header>
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>ولا مايلستون بالخطة الأصلية كان بينقل أو بيخزّن الصورة.</strong> <code>document_path</code> موجود <strong>مرة واحدة بالريبو كله</strong>: تعريف العمود نفسه. ولا bucket، ولا مسار رفع، ولا نقطة multipart عندهم.</p>
+    <p style="margin:.5em 0 .2em">و<code>extractReceiptData(file: File | Blob)</code> بدها <strong>بايتات حقيقية بمتصفح المراجع</strong> — فقرارك «القراءة بمتصفح الشركة» <strong>كان بينهار</strong>.</p>
+    <p style="margin:.5em 0 .2em">وأذكى جزء: <strong>الفحص كان بينجح وهو فاضي.</strong> القيد الوحيد <code>CHECK (category IS NOT NULL OR description &lt;&gt; '')</code> — فصف بلا صورة بيمرق. يعني بوابة التحقق اللي الترتيب مبني عليها <strong>ما بتكشف أكبر نقص فيه</strong>. <span class="ref">[2] [13] [38]</span></p>
+  </div>
+
+  <div class="why"><strong>مبني 08.10.2026:</strong> ثلاث migrations (<code>20261008140000</code> الباب والقبول والرفض بـ٩ self-checks، <code>20261008150000</code> الرفض يوصل للسائق عن البيليج كمان، <code>20261008160000</code> الوارد ما حدا يعدّله)، و<code>_shared/partner-receipt-core.ts</code> بـ٤٦ اختبار، و<code>tests/rls/partner-receipt-accept.sql</code> بـ٢٩ مسبار، وتبويب مراجعة بشاشة البيليجات <strong>بعارض صورة</strong>. و<strong>زرّ القبول بينسحب لما الصورة مش معروضة</strong> — بيليج بينقبل أعمى هو بالظبط اللي رفض <code>document_missing</code> موجود عشانه.
+  <br><strong>وانحراف واحد عن M4.2:</strong> استعملت <code>documents</code> مش bucket خاص — الـ15 سياسة تبعه معتمدة من قياس البرودكشين و<code>20260920100000</code> فيه self-check بيفشّل أي سياسة جديدة على الأربعة. الكلفة: <code>documents</code> بلا بوابة دور على القراءة، فأي عضو بالشركة يقرا الصورة — متسق مع إنّ صفّ <code>receipts</code> نفسه بيقراه أي عضو، بس هو <strong>قرارك</strong> إذا بدك bucket خاص.
+  <br><strong>واللي لسا:</strong> حدّ الحجم على Caddy (تغيير هوست)، والتصغير وشيل EXIF (M5)، وقاعدة الاحتفاظ (M4.5).</div>
+
+  <div class="note" style="margin:.8em 0"><strong>⚠ M4 انقلب 10.10.2026، وتوسّع 11–12.10.</strong> كل اللي تحت صحيح تاريخياً وبنيته كما هو مكتوب — بس <strong>الصورة ما بتسافر من هلأ</strong>: السائق يصوّر الفاتورة، التطبيق يقراها بـTesseract ع الجهاز، والبيانات لحالها بتعبر. <code>20261010100000</code> فتح الباب بقاعدة البيانات، و<code>partner-receipt-core.ts</code> صار المستند عنده اختياري. <br><strong>وخمسة حقول صاروا سبعة.</strong> <code>20261011100000</code> زاد اسم المكان ووقت الفاتورة واللترات وسعر اللتر، و<code>20261012100000</code> زاد العدّاد والمدى المتبقّي — كلهم على الوارد <strong>وعلى <code>receipts</code></strong>، مع CHECK على كل رقم، لأنّ قاعدة محفوظة بمكان واحد بتضيع بصمت مع الكاتب الجاي.<br><strong>وليش قاعدة مش موديل — مقيس على ٥٩ صورة.</strong> <code>gemma3:4b</code> جاوب على ٥٩ من ٥٩ <strong>وما امتنع ولا مرّة</strong>؛ ١٥ جواب مستحيل بالحجم، وبصورة قرا <code>691</code> — وهاد المدى — واللي العدّاد قاريه <code>25041</code>. وTesseract مع قاعدتنا اختار بـ٣٥ وامتنع بـ٢٤، و٣٤ من الـ٣٥ معقولة. الصورة بتضلّ ع الجهاز فما في مَن يتحقّق بعدين — فالامتناع هو الضمانة الوحيدة.<br><strong>ومؤشّر البنزين ما انقرا، فالمدى بداله:</strong> المؤشّر شريط مربّعات، والموديل جاوب <code>three_quarters</code> على ٤١ من ٥٩ منها واحدة شريطها ربع بالعين؛ وعدّ البكسلات والشارة الخضراء فشلوا كمان. المدى نص، بينقرا، و«باقي ١٩٩ كم» إشي بيتصرّف فيه مدير الأسطول.</div>
+  <div class="note" style="margin:.8em 0"><strong>⚠ وحقل كان بينقرا وما بينخزّن.</strong> <code>city</code> عمود على جدول الواردات من <code>20261005140000</code> و<strong>ولا حدا كتبه ولا مرّة</strong>: الباب بيقراه، ورايدي بتبعته، والقبول بينسخ <code>v_row.city</code> لـ<code>receipts</code> — عمود دايماً NULL. انسدّ بـ<code>p_city</code> بنفس <code>20261012100000</code>، بآخر قائمة الوسائط عشان أي نداء موضعي يضلّ صحيح. <br><strong>والحقول صارت تبيّن ع شاشة المراجعة</strong> (طلبك 12.10): الثمانية كانوا مخزّنين و<strong>ما حدا بيقراهم</strong>، فالمراجع كان بيحكم على فاتورة بنزين بتصنيف ومجموع. المكان والمدينة والوقت صفوف ثابتة، وأرقام التنكة بلوك بيبيّن بس لمّا تكون موجودة، وسعر اللتر بثلاث منازل، وسطر تحتهم بيقول إنّ التلفون قراهم من صورة ضلّت عندو.</div>
+  <div class="note" style="margin:.8em 0"><strong>⚠ خطوة المراجعة كلها انحذفت 13.10.2026.</strong> كل اللي تحت بـM3 وM4 عن القبول والرفض وشاشة المراجعة ورجوع الحالة <strong>صحيح تاريخياً وانبنى كما هو مكتوب</strong>، بس ما عاد موجود: <code>20261013100000</code> بيخلّي الوارد يصير بيليج أو ملاحظة لحظة وصوله، والشاشتان انحذفوا ومعهم ٩٦ مفتاح ترجمة. <br><strong>اللي ضلّ من M3/M4 وشغّال:</strong> الجرس والسحب والـidempotency وربط السواقين وتخزين المستند — كلهم ما تغيّروا. واللي راح: القبول والرفض وشاشة المراجعة ودفع الحالة للسائق. <br><strong>وحالة وحدة لسا بتستنّى:</strong> وارد سائقه مش مربوط. <code>receipts.driver_name</code> هو الرابط الوحيد بهاي السكيمة، وبلا ربط ما في اسم — فبيضلّ بجدول الوصول لحد ما إنسان يأكّد الربط، وساعتها بينطبّق لحالو.</div>
+  <h3><span class="step-no">M4.1</span>الصورة تصير تسليم مسمّى</h3>
+  <ul class="list">
+    <li><strong>الاستقبال بيكتب الملف هو</strong> باسم مشتق <code>&lt;company_id&gt;/partner/&lt;uuid&gt;</code>. <strong>ولا نقبل مسار من الطلب أبداً</strong>، و<code>CHECK</code> بيثبّت البادئة عشان الخاصية تصمد مع كاتب لاحق، والبادئة تنفحص مرة ثانية قبل أي signed URL. <span class="ref">[11]</span></li>
+    <li>قراءة M4 بـ<code>storage.from(...).download()</code> عشان tesseract ياخد Blob <strong>بنفس الأصل</strong> — رابط Reidey عابر-الأصل <strong>بيوسّخ الـcanvas</strong>. <span class="ref">[38]</span></li>
+    <li>وبوابة التحقق <strong>بتحمّل الصورة فعلياً</strong>، مش بتقرا الصف.</li>
+  </ul>
+
+  <h3><span class="step-no">M4.2</span>صورة البيليج أول صورة بنخزّنها بهذا المنتج</h3>
+  <p>bucket خاص بها بحدّ حجم وقائمة MIME و<strong>بوابة دور</strong> — بشكل <code>salary-receipts</code> مش <code>documents</code>. والـEXIF <strong>تنشال بإعادة الترميز على الجهاز</strong>، وتنترفض على السيرفر كمان عشان عميل غير-Expo ما يتخطّى. وسطر بشاشة التصوير يقول للسائق يصوّر البيليج بس. <span class="ref">[35]</span></p>
+
+  <h3><span class="step-no">M4.3</span>الحجم بيفشل بصمت</h3>
+  <p>السلسلة بتسقّف صورة تلفون عند ٨ MB، و<strong>فوق <code>post_max_size</code> الـPHP بيسلّم Laravel طلب فاضي</strong> — ولا رسالة. تصغير على الجهاز (١٦٠٠px / جودة ٠٫٧ — البيليج بدّه نص مقروء مش دقّة)، وفحص حجم على السيرفر بيرجع خطأ حقيقي، و<code>request_body { max_size }</code> على بلوكي <code>api.*</code> بـCaddy. <span class="ref">[32] [44]</span></p>
+
+  <h3><span class="step-no">M4.4</span>قاعدة التصنيف — والـTankenquote معلّقة عليها</h3>
+  <p><code>'Other'</code> sentinel ما بينخزّن، والنص الحر بينزل بـ<code>description</code>. و<code>'Tanken'</code> هي اللي بتحدّد فواتير الـ<strong>Tankenquote</strong>. القاعدة تنكتب مع اختبار: وارد مقبول بـ<code>Tanken</code> لازم يطلّع صف بيحسب بالنسبة. <span class="ref">[13]</span></p>
+
+  <h3><span class="step-no">M4.5</span>كم بتضل الصورة محفوظة <span class="pill ok">مجاب · 09.10</span></h3>
+  <p><strong>قرار المالك: الصورة تضلّ دائماً.</strong> ولا قاعدة احتفاظ، ولا محو بعد القرار، على الطرفين.</p>
+  <p>والقياس بيسند القرار: القرص <strong>788 GB فاضي من 1007</strong> (الـ٢١ GB اللي كانت مكتوبة هون رقم قديم، قِسته من جديد 09.10.2026)، و١٠٠٠ بيليج بالشهر بـ3 MB ≈ <strong>3 GB بالسنة</strong>. فالكلفة مش القرص.</p>
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>الكلفة الحقيقية هي النسخة الاحتياطية، وهي مفتوحة.</strong> النسخة اليومية (<code>/etc/cron.daily/ya-mobility-backup</code>، 06:25، ٤٤ نسخة محفوظة) هي <code>pg_dump</code> لخمس سكيمات <strong>منها <code>storage</code> — يعني صفوف الملفات، مش الملفات نفسها</strong>. البايتات بالـvolume <code>ya-mobility_storage-data</code> و<strong>ولا إشي بينسخه</strong>.</p>
+    <p style="margin:.5em 0 .2em">فلو ضاع الـvolume: <code>storage.objects</code> بترجع كاملة، وكل صورة بترجّع 404، و<code>receipts.document_path</code> مؤشّر على لا شيء — و«الصورة تضلّ دائماً» بتصير غير صحيحة بلا ما حدا يلاحظ. الحل رخيص (<code>tar</code> للـvolume جنب الـdump) <strong>وهو تغيير على الهوست، فمستني قرار المالك</strong>.</p>
+  </div>
+</section>
+
+<section class="phase" id="m5">
+  <header class="phase-head"><span class="phase-num">M5</span><h2>تطبيق السائق <span class="pill info">بدّه إصدار</span></h2></header>
+  <p><strong>شكل الشاشة انتحدّد من قياس:</strong> التابات الأربعة ثابتة وكلها بتظهر دايماً، فالقسم <strong>شاشة stack مدفوعة من Profil</strong> بشكل <code>app/settings.tsx</code> — مش تاب خامس يغيّر شكل الشريط لسائق وسائق.</p>
+  <ul class="list">
+    <li>سطر «Belege &amp; Notizen» بـProfil، بيظهر بس لما <code>documents_enabled</code>.</li>
+    <li>قائمة وارداتي بالحالات والسبب، وشاشة تصوير، ونموذج فاتورة ونموذج ملاحظة.</li>
+    <li><strong>الصورة إلزامية والحقول اختيارية</strong> — واللي السائق يكتبه إشارة ثانية المراجع يقارنها مع قراءة الـOCR.</li>
+    <li>قناة إشعارات <code>documents</code> بـ<code>push.ts</code> — <strong>هذي بتنزل OTA</strong> وما بتنتظر المتجر. <span class="ref">[39]</span></li>
+  </ul>
+  <div class="gate"><strong>الكلفة هي الكاميرا فقط:</strong> موديول native، و<code>fingerprint</code> بتمنع OTA — فبدّه بناء وتسليم للمتجر. <strong>مسار الإصدار شغّال</strong> (التطبيق منشور)، فهذا بند بينجدول مش بينتنظر. وكل اللي فوق — M1 لـM4 — بينتحقق بلا هذا الإصدار، وقناة الإشعارات بتنزل OTA.</div>
+  <div class="why"><strong>سؤال واحد بيحدّد نصّ هذا المايلستون:</strong> هل iOS نازل كمان، ولا أندرويد لحاله؟ لأنه لو أندرويد لحاله، فالفيتشر بيوصل نص السائقين — وهذا <strong>قرار منتج</strong> (نشغّلها لنص الأسطول؟) مش مسألة توقيت. وتوثيق Reidey بيقول iOS لسا بالمراجعة؛ لو بطّل صحيح، <strong>ملفّاتهم هي اللي لازم تتحدّث</strong>.</div>
+</section>
+
+<section class="phase" id="m6">
+  <header class="phase-head"><span class="phase-num">M6</span><h2>لايف</h2></header>
+  <ul class="list">
+    <li><strong>رهيرسل كامل</strong> على بيانات مصطنعة قبل أول بيانات حقيقية — وبما إنه ما في بيئة اختبار لـReidey، هذا الرهيرسل هو آخر فرصة.</li>
+    <li><strong>قاعدة تقادُم على الطرفين:</strong> Reidey بتعتبر اتصال بلا سحب لـN ساعة «غير متصل» فـ<code>documents_enabled</code> بترجع <code>false</code> <strong>والسائق يوقف يرفع بالفراغ</strong>. <span class="ref">[15]</span></li>
+    <li><strong>أمر فحص عندهم</strong> بعائلة <code>alerts:check</code> بيزعّق لما شركة متصلة وما صار تبادل ناجح لـN ساعة. وعدّاد عمر الـ<code>pending</code> على شاشة المراجعة. <strong>بلا هذا، ما حد بيلاحظ إنه التكامل سكت.</strong> <span class="ref">[16]</span></li>
+    <li>سطور الـcron <strong>بإذنك</strong>، مع الدراي-رن معروض قبلها.</li>
+    <li>إنتاج الطرفين — ودمج الـPR عند Reidey <em>هو</em> النشر.</li>
+  </ul>
+</section>
+
+<section class="block" id="open">
+  <h2>٥ · القرارات الأربعة — انجابوا <span class="pill ok">06.10.2026</span></h2>
+  <p class="muted">المالك وافق على التوصيات الأربعة كلها. مسجّلة فوق بجدول القرارات الثابتة؛ هذا الجدول محفوظ لأنه بيوثّق <strong>شو انسأل وليش</strong>، مش بس شو انتقرر.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>السؤال</th><th>اللي انتقرر <span class="pill ok">موافَق</span></th></tr></thead>
+      <tbody>
+        <tr><td class="n">١</td><td><strong>ملاحظات المرض/العطلة/عدم التوفّر</strong> — بيانات Art. 9. يرفعها السائق، أو يدخّلها المشغّل؟</td><td><strong>المشغّل.</strong> استثناء التخطيط قراره هو أصلاً، فما بنخسر إشي وبنطلّع بيانات صحية من التحويل كاملاً. <span class="ref">[33] [41]</span></td></tr>
+        <tr><td class="n">٢</td><td><strong>مين بيشغّل سحبة الروستر</strong> — زرّ، أو سطر cron؟</td><td><strong>زرّ أول.</strong> ولا تغيير على المضيف، وبوتيرتك. الـcron لما يثبت إنه بدّه تكرار. <span class="ref">[26]</span></td></tr>
+        <tr><td class="n">٣</td><td><strong>نشغّل اختبارات Reidey محلياً؟</strong> مكتوبة ومش مشغّلة — تشغيلها بدّه قاعدة بيانات محلية مرمية.</td><td><strong>نعم.</strong> مش «بيئة اختبار» — هي الاختبارات نفسها، وبلا تشغيلها كل ضمانة بـM1–M4 مجرّد قراءة.</td></tr>
+        <tr><td class="n">٤</td><td><strong>نص الملاحظة يعبر أصلاً؟</strong></td><td><strong>النوع والمدى بيكفّوا</strong> لتشغيل قيد التخطيط. ترك النص الحر عند Reidey بيطلّع بيانات صحية من التحويل. <span class="ref">[41]</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="block" id="out">
+  <h2>٦ · خارج النطاق — بقرارك</h2>
+  <p><strong>سحب الأرباح من Uber.</strong> التدقيق رفع ملاحظتين إنه ولا مايلستون بيسحب الأرباح «وهي اللي التكامل كان المفروض يستبدلها». <strong>وهذا قرارك يوم 05.10</strong> («انسى الارباح ركز ع الكونيكت») — فهي <strong>مؤجّلة مش منسية</strong>، والوكلاء ما كانوا يعرفوا. والإدخال اليدوي للأرقام الأسبوعية بيضل كما هو لحد ما تقرر. <span class="ref">[14] [46]</span></p>
+  <p><strong>تحديث 13.10: سحب أرباح Uber انبنى كميزة منفصلة، مش كمايلستون.</strong> زر على صفحة الإيرادات بيسحب من Reidey بمدى حر ومعاينة بتأكّدها، ومن غير أتمتة بقرارك («بدناش اتمتة انساها»). الدالة ما بتكتب؛ الصفوف بتدخل من <code>income_import_uber</code> بجلستك، وفهرس فريد جزئي بيرفض التكرار، والفترة المتداخلة مرفوضة. <span class="pill warn">مش مثبت</span> <strong>أول سحب حقيقي فشل بـ<code>uber_error</code>، والتعديل اللي بعده بس بيخلّي الرسالة تقول شو ردّت Uber. السحب ما نجح مرة ضد Uber لحد الآن.</strong></p>
+  <p class="muted">مكتوبة هون صريحة، لأنه السكوت عنها بيخلّي الترتيب يبدو كامل والهدف المعلن مش جوّاه.</p>
+</section>
+
+<section class="block" id="audit">
+  <h2>٧ · سجل التدقيق</h2>
+  <p>الخطة انتدقّقت من <strong>خمس زوايا مستقلة</strong> (الترتيب، العوائق المخفية، القانوني، الأمان، اللي ناقص)، وكل ملاحظة انفحصت ضد الكود الفعلي قبل ما تنجو.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>انفحصت</th><th>نجت</th><th>مغطّية أصلاً</th><th>انرفضت</th><th>وكلاء</th></tr></thead>
+      <tbody><tr><td>٥٩</td><td><strong>٤٦</strong></td><td>٣</td><td>١٠</td><td>٦٤ · صفر أخطاء</td></tr></tbody>
+    </table>
+  </div>
+  <p>إنه <strong>عشر ملاحظات انرفضت بالأدلة</strong> هو اللي بيخلّي الـ٤٦ تستاهل الثقة. والمرفوضات تشمل ادعاءات معقولة بس ما صمدت: إنه M6 محجوب بأكثر من مكتبة ناقصة، وإنه الدمج للإنتاج بيجرّ ١٣١ كوميت معه، وإنه سحبة M5 رح تشتغل inline جوّا نبضة الدقيقة.</p>
+  <div class="why">
+    <strong>عطلان مانعان، واحد منهم بكود انكتب بنفس اليوم — وواحد انسكّر:</strong>
+    <ul class="list" style="margin-bottom:0">
+      <li><strong>M1.1</strong> — توكن أسطول (أ) بيتصل كشركة (ب). <strong>انسكّر 07.10</strong> بالطرفين — انظر M1.1.</li>
+      <li><strong>M4</strong> — ولا مايلستون كان بينقل الصورة، والفحص كان بينجح وهو فاضي.</li>
+    </ul>
+  </div>
+  <p class="muted">المخرج الكامل للتدقيق محفوظ بمجلّد الجلسة. الـ٤٦ كلهم مكتوبين جوّا المايلستونات فوق بأرقامهم <span class="ref">[n]</span>.</p>
+</section>
+
+<p class="muted" style="text-align:center;margin-top:28px;font-size:.88rem">
+  آخر تحديث: 13.10.2026 · بينحدّث بنفس الـPR مع <code>PROGRESS.md</code> و<code>HANDOFF.md</code>
+</p>
+
+</div>
+</body>
+</html>

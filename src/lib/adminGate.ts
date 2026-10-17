@@ -341,9 +341,10 @@ export function googleSignInRefusal(session: {
  *    that profile happens to read `suspended`, so the account block above
  *    catches it; nothing about production's state is load-bearing here.
  * 2. **`companies.status` was tested for `'suspended'` alone**, while the column
- *    admits `active`, `trial`, `suspended`, `inactive`, `archived` and `deleted`,
+ *    admits `active`, `suspended`, `inactive`, `archived` and `deleted`
+ *    (`trial` too until 20261015170000),
  *    and `get_active_company_id()` answers NULL for everything outside
- *    `active`/`trial`. `AuthContext.checkProfileAccess` — the *sign-in* path —
+ *    `active`. `AuthContext.checkProfileAccess` — the *sign-in* path —
  *    already maps all of them, so the two paths disagreed: a restored session
  *    reached the app where a fresh sign-in was refused. Measured on staging:
  *    0 companies at `inactive`, `archived` or `deleted`, so this half is latent
@@ -351,7 +352,7 @@ export function googleSignInRefusal(session: {
  *
  * ## Two rules that are easy to lose
  *
- * **A state this build does not know locks.** Anything outside `active`/`trial`
+ * **A state this build does not know locks.** Anything outside `active`
  * ends on a block page, `''` and a future word alike, because the database is
  * the authority on what a company may do and it already refuses them.
  *
@@ -385,10 +386,11 @@ export type TenantAccessGate =
 
 /**
  * The company states a session may work in, mirroring `get_active_company_id()`
- * (`companies.status IN ('active','trial')`, plan 3.3). Every other state, known
- * or not, is refused.
+ * (`companies.status = 'active'` since 20261015170000; plan 3.3 had it admit
+ * `trial` as well). Every other state, known or not — a stale `trial`
+ * included — is refused.
  */
-const COMPANY_STATES_THAT_WORK: readonly string[] = ['active', 'trial'];
+const COMPANY_STATES_THAT_WORK: readonly string[] = ['active'];
 
 /**
  * The profile status of a platform member whose invitation is still in flight.

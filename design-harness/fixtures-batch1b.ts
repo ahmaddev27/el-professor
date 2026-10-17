@@ -182,7 +182,7 @@ export function incomeRows(): Row[] {
   ];
   const TYPES = ['umsatz', 'aktionen', 'trinkgeld', 'bargeld'] as const;
   let id = 0;
-  return weeks.flatMap(({ date, week, drivers }) =>
+  return [...weeks.flatMap(({ date, week, drivers }) =>
     drivers.flatMap(([driverId, ...values]) => {
       const trips = values[4];
       return TYPES.flatMap((type, typeIndex) => {
@@ -205,5 +205,58 @@ export function incomeRows(): Row[] {
         }];
       });
     }),
-  );
+  ), ...incomeDailyRows()];
+}
+
+/**
+ * Uber imports that carry a day each (Mon 07.09. to Sat 12.09. for three
+ * drivers), a weekly import with no day of its own, and the week of 24.08.,
+ * so the day, week and month levels of the Umsätze list have something to
+ * tell apart.
+ */
+function incomeDailyRows(): Row[] {
+  const days: Array<[string, Array<[string, number, number, number, number]>]> = [
+    ['2026-09-07', [['d01', 212.4, 0, 9.5, 88.2], ['d04', 244.8, 10, 12, 101.6]]],
+    ['2026-09-08', [['d01', 198.7, 0, 7, 79.4], ['d02', 176.25, 0, 5.5, 64.8], ['d04', 261.1, 15, 14.5, 112.3]]],
+    ['2026-09-09', [['d02', 189.9, 0, 8, 70.1], ['d05', 154.6, 0, 3, 52.7]]],
+    ['2026-09-10', [['d01', 223.35, 20, 11, 94.9], ['d04', 238.0, 0, 10.5, 99.5]]],
+    ['2026-09-11', [['d02', 201.8, 0, 9, 83.3], ['d05', 168.4, 0, 6.5, 58.9], ['d07', 190.15, 12.5, 7.75, 72.4]]],
+    ['2026-09-12', [['d01', 305.6, 25, 16, 130.2], ['d04', 322.75, 30, 18.25, 140.8]]],
+    ['2026-08-25', [['d01', 219.5, 0, 8, 90.1], ['d04', 230.9, 0, 9.5, 95.7]]],
+    ['2026-08-27', [['d02', 187.3, 0, 6, 71.6], ['d05', 160.2, 10, 4.25, 55.3]]],
+  ];
+  const TYPES = ['umsatz', 'aktionen', 'trinkgeld', 'bargeld'] as const;
+  const dayRows = days.flatMap(([date, drivers]) => drivers.flatMap(([driverId, ...values]) =>
+    TYPES.flatMap((type, i) => (values[i]! > 0 ? [{
+      id: `in-day-${date}-${driverId}-${type}`,
+      company_id: HARNESS_COMPANY_ID,
+      description: 'Uber-Import',
+      amount: values[i],
+      type,
+      driver_name: name(driverId),
+      date,
+      source: 'uber',
+      source_period_start: date,
+      source_period_end: date,
+      created_by: 0,
+      created_at: `${date}T20:00:00+00:00`,
+      updated_at: `${date}T20:00:00+00:00`,
+    }] : [])),
+  ));
+  const weekly = {
+    id: 'in-week-d07-umsatz',
+    company_id: HARNESS_COMPANY_ID,
+    description: 'Uber-Import Woche',
+    amount: 884.35,
+    type: 'umsatz',
+    driver_name: name('d07'),
+    date: '2026-08-31',
+    source: 'uber',
+    source_period_start: '2026-08-31',
+    source_period_end: '2026-09-06',
+    created_by: 0,
+    created_at: '2026-09-07T08:00:00+00:00',
+    updated_at: '2026-09-07T08:00:00+00:00',
+  };
+  return [...dayRows, weekly];
 }

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldAlert, Save, Plus, Trash2, Tags, SlidersHorizontal,
-  Building2, Hourglass, Receipt, Mail, Megaphone, ToggleRight, Scale, Landmark,
+  Building2, Receipt, Mail, Megaphone, ToggleRight, Scale, Landmark,
 } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAppConfig } from '../contexts/AppConfigContext';
@@ -11,6 +11,7 @@ import type { TranslationKey } from '../i18n';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess } from '../lib/platformAccess';
 import { calcPricing, fmt, type PriceBook } from '../utils/pricing';
+import { Field as UiField, Input as UiInput } from '../components/ui';
 import type { PlanFeatureMap } from '../utils/planFeatures';
 import {
   canReadAnnouncements,
@@ -22,7 +23,6 @@ import {
   isVersionConflict,
   parseInvoice,
   parseSeller,
-  parseTrial,
   planFeaturesFromAnswer,
   planFeaturesFromForm,
   priceBookFromAnswer,
@@ -32,19 +32,13 @@ import {
   sellerFromForm,
   sellerToForm,
   settingRefusalKey,
-  trialFromForm,
-  trialToForm,
   SELLER_FIELDS,
-  TRIAL_MAX_DAYS,
-  TRIAL_MIN_DAYS,
   type InvoiceForm,
   type InvoiceSettings,
   type PriceBookForm,
   type Seller,
   type SellerField,
   type SellerForm,
-  type TrialForm,
-  type TrialSettings,
 } from '../lib/platformSettings';
 import { getSetting, putSetting } from '../lib/platformSettingsClient';
 import {
@@ -66,7 +60,7 @@ import PrivacyTextEditor from '../components/settings/PrivacyTextEditor';
 
 /**
  * Einstellungen (plan 3.E / 3.G): the price book, the plan feature map, the
- * seller, the trial, the invoice defaults (3.9, 3.10), the mail sender and the
+ * seller, the invoice defaults (3.9, 3.10), the mail sender and the
  * code-mail templates (3.10), the announcements and the feature flags (3.11),
  * and the legal pages: the Impressum and the privacy policy (20260921120000).
  *
@@ -108,7 +102,7 @@ const PLAN_LABELS: Record<Plan, TranslationKey> = {
 };
 
 type SettingsTab =
-  | 'price_book' | 'plan_features' | 'seller' | 'trial' | 'invoice'
+  | 'price_book' | 'plan_features' | 'seller' | 'invoice'
   | 'mail' | 'announcements' | 'feature_flags' | 'impressum' | 'privacy';
 
 /**
@@ -125,7 +119,6 @@ const SETTING_TABS: {
   { id: 'price_book',    icon: Tags,              labelKey: 'admin.settings.tab.prices',   readable: a => canReadSetting(a, 'price_book') },
   { id: 'plan_features', icon: SlidersHorizontal, labelKey: 'admin.settings.tab.features', readable: a => canReadSetting(a, 'plan_features') },
   { id: 'seller',        icon: Building2,         labelKey: 'admin.settings.tab.seller',   readable: a => canReadSetting(a, 'seller') },
-  { id: 'trial',         icon: Hourglass,         labelKey: 'admin.settings.tab.trial',    readable: a => canReadSetting(a, 'trial') },
   { id: 'invoice',       icon: Receipt,           labelKey: 'admin.settings.tab.invoice',  readable: a => canReadSetting(a, 'invoice') },
   { id: 'mail',          icon: Mail,              labelKey: 'admin.settings.tab.mail',     readable: a => canReadSetting(a, 'mail.sender') },
   { id: 'announcements', icon: Megaphone,         labelKey: 'admin.settings.tab.announcements', readable: canReadAnnouncements },
@@ -185,7 +178,6 @@ const PlatformSettingsPage: React.FC = () => {
       {active === 'price_book'    ? <PriceBookEditor /> :
        active === 'plan_features' ? <PlanFeaturesEditor /> :
        active === 'seller'        ? <SellerEditor /> :
-       active === 'trial'         ? <TrialEditor /> :
        active === 'invoice'       ? <InvoiceEditor /> :
        active === 'mail'          ? <MailSettingsEditor /> :
        active === 'announcements' ? <AnnouncementsEditor /> :
@@ -282,6 +274,15 @@ const PriceBookEditor: React.FC = () => {
       })()
     : null;
 
+  // The first invoice under the typed book, when it names a first month.
+  const firstMonthPreview = form && loaded && Number.isFinite(cars) && cars > 0
+    ? (() => {
+        const parsed = priceBookFromForm(form);
+        if (!('book' in parsed) || parsed.book.first_month_cents === undefined) return null;
+        return calcPricing(parsed.book, 'premium', cars, 'monthly', true);
+      })()
+    : null;
+
   return (
     <EditorShell
       loading={loading}
@@ -317,6 +318,22 @@ const PriceBookEditor: React.FC = () => {
               ))}
             </div>
             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.perMonth')}</p>
+          </div>
+
+          {/* The owner's first-month price (15.10.2026): one flat figure for a
+              company's first invoice. Drawn with the design system's classes so
+              the file's inline-style count does not move. */}
+          <div className="space-y-4 rounded-2xl border border-line bg-raised p-5 font-ui">
+            <UiField label={t('admin.settings.firstMonth')} hint={t('admin.settings.firstMonthHint')} className="max-w-xs">
+              <UiInput
+                value={form.firstMonth}
+                disabled={!maySave}
+                onChange={e => setForm({ ...form, firstMonth: e.target.value })}
+                /* German decimal comma in both languages — src/i18n/index.ts. */
+                placeholder="200,00"
+                inputMode="decimal"
+              />
+            </UiField>
           </div>
 
           <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
@@ -406,6 +423,9 @@ const PriceBookEditor: React.FC = () => {
               <div className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
                 <p>{t('admin.settings.exampleMonthly', { amount: fmt(preview.monthlyAfterFleet), percent: String(preview.fleetDiscountPct) })}</p>
                 <p>{t('admin.settings.exampleYearly', { amount: fmt(preview.yearlyTotal) })}</p>
+                {firstMonthPreview && (
+                  <p>{t('admin.settings.exampleFirstMonth', { amount: fmt(firstMonthPreview.finalTotal) })}</p>
+                )}
               </div>
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
@@ -667,59 +687,6 @@ const SellerEditor: React.FC = () => {
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
             )}
-          </div>
-
-          {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
-        </>
-      )}
-    </EditorShell>
-  );
-};
-
-// ─── The trial length ───────────────────────────────────────────────────────
-
-const TRIAL_EDITOR: SettingEditorConfig<TrialSettings, TrialForm> = {
-  key: 'trial',
-  read: record => parseTrial(record.value),
-  toForm: trialToForm,
-  fromForm: trialFromForm,
-};
-
-const TrialEditor: React.FC = () => {
-  const { platformAccess } = useSuperAdmin();
-  const { t } = useTranslation();
-  const maySave = canSaveSetting(platformAccess, 'trial');
-  const { loading, problem, detail, loaded, form, setForm, saving, load, save } =
-    useSettingEditor(TRIAL_EDITOR);
-
-  return (
-    <EditorShell
-      loading={loading}
-      problem={problem}
-      detail={detail}
-      onReload={() => void load()}
-      version={loaded?.version ?? null}
-      updatedAt={loaded?.updatedAt ?? null}
-    >
-      {form && loaded && (
-        <>
-          {/* A longer trial is not retroactive and a shorter one locks nobody
-              out: trial_end is written once, when a company is created. */}
-          <Note textKey="admin.settings.trial.hint" vars={{ min: TRIAL_MIN_DAYS, max: TRIAL_MAX_DAYS }} />
-          {!maySave && <Note textKey="admin.settings.readOnly" />}
-
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.trial.title')}</h2>
-            <Field
-              labelKey="admin.settings.trial.days"
-              value={form.days}
-              disabled={!maySave}
-              width="8rem"
-              onChange={days => setForm({ days })}
-            />
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {t('admin.settings.trial.current', { days: String(loaded.value.days) })}
-            </p>
           </div>
 
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
+import { Check, DownloadCloud, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
 import { Income, IncomeFormData, Driver, INCOME_TYPES } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,9 +7,12 @@ import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
 import { handleDatabaseError } from '../utils/errorHandler';
-import { exportIncomeToExcel } from '../utils/excelExport';
+import { buildIncomeSheets } from '../utils/listExportSheets';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { tallyTrips } from '../utils/incomeTrips';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
+import UberEarningsImportModal from './UberEarningsImportModal';
+import IncomeGroupedList, { type IncomeLevel } from './IncomeGroupedList';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -32,6 +35,9 @@ import {
   KpiCard,
   NativeSelect,
   PageHeader,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   Tooltip,
   type DataTableColumn,
 } from './ui';
@@ -43,6 +49,8 @@ interface IncomeManagementProps {
 type DatePreset = 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
 type IncomeType = 'bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen';
+// The Umsätze list: one grouping level, or the plain table that edits a row.
+type IncomeListView = IncomeLevel | 'flat';
 
 // Values hold TranslationKeys: these maps are module-level and t() is a hook
 // value, so every consumer resolves them at the call site.
@@ -76,6 +84,9 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [loadFailed, setLoadFailed] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [uberImportOpen, setUberImportOpen] = useState(false);
+  // Day, week or month (each with its drivers) is the way in; the flat list stays for editing a row.
+  const [listView, setListView] = useState<IncomeListView>('week');
 
   // ── Batch add form state ───────────────────────────────────────────────────
   const [batchForm, setBatchForm] = useState({
@@ -120,6 +131,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { t, tPlural } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
 
   useEffect(() => {
@@ -256,8 +268,13 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     // exportIncomeToExcel hard-codes its headers inside excelExport.ts rather
     // than taking them from here, so this workbook does not follow the UI
     // language. Nothing to pass; nothing to translate at this call site.
-    exportIncomeToExcel(filteredIncomes, fromDate, toDate);
-    success(t('inc.exportSuccess'), t('inc.exportSuccessBody'));
+    exportPicker.sheets(
+      'income',
+      'umsaetze',
+      buildIncomeSheets(filteredIncomes, fromDate, toDate),
+      // The toast waits for the file: the chooser can still be cancelled.
+      () => success(t('inc.exportSuccess'), t('inc.exportSuccessBody')),
+    );
   };
 
   const parseBatchAmount = (val: string) => {
@@ -886,6 +903,12 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
             <Download aria-hidden />
             {t('common.exportExcelShort')}
           </Button>
+          {canCreate && (
+            <Button variant="secondary" onClick={() => setUberImportOpen(true)}>
+              <DownloadCloud aria-hidden />
+              {t('inc.uber.button')}
+            </Button>
+          )}
           {addButton()}
         </>,
       )}
@@ -1152,18 +1175,34 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           </section>
         )}
 
-        <DataTable
-          caption={t('inc.tableCaption')}
-          columns={columns}
-          rows={filteredIncomes}
-          getRowId={income => income.id}
-          error={loadFailed}
-          rowActions={anyRowWritable || editingId ? rowActions : undefined}
-          rowActionsLabel={t('inc.tableActions')}
-          emptyState={
-            <EmptyState size="sm" icon={Users} title={t('inc.noEntries')} action={addButton('sm')} />
-          }
-        />
+        <Tabs value={listView} onValueChange={value => setListView(value as IncomeListView)}>
+          <TabsList variant="segmented" aria-label={t('inc.group.viewLabel')}>
+            <TabsTrigger value="day">{t('inc.group.viewDay')}</TabsTrigger>
+            <TabsTrigger value="week">{t('inc.group.viewWeek')}</TabsTrigger>
+            <TabsTrigger value="month">{t('inc.group.viewMonth')}</TabsTrigger>
+            <TabsTrigger value="flat">{t('inc.group.viewFlat')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {/* The grouped list is drawn only from a successful load that has rows:
+            a failed load or no entries is the table's own error / empty state,
+            so grouping can never show an empty group or a 0,00 € total. */}
+        {listView !== 'flat' && !loadFailed && filteredIncomes.length > 0 ? (
+          <IncomeGroupedList rows={filteredIncomes} level={listView} />
+        ) : (
+          <DataTable
+            caption={t('inc.tableCaption')}
+            columns={columns}
+            rows={filteredIncomes}
+            getRowId={income => income.id}
+            error={loadFailed}
+            rowActions={anyRowWritable || editingId ? rowActions : undefined}
+            rowActionsLabel={t('inc.tableActions')}
+            emptyState={
+              <EmptyState size="sm" icon={Users} title={t('inc.noEntries')} action={addButton('sm')} />
+            }
+          />
+        )}
 
         <p className="flex items-start gap-2 text-[13px] text-fg-muted">
           <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
@@ -1181,6 +1220,12 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         description={t('inc.deleteMessage')}
         confirmLabel={t('common.delete')}
         icon={Trash2}
+      />
+
+      <UberEarningsImportModal
+        isOpen={uberImportOpen}
+        onClose={() => setUberImportOpen(false)}
+        onImported={() => { void loadIncomes(); }}
       />
     </div>
   );

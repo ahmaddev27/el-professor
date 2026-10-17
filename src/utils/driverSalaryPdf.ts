@@ -114,7 +114,7 @@ export function generateDriverSalaryPdf(opts: DriverPdfOptions): void {
 
   // ─── Salary calculation card ───
   const calcCardY = y;
-  const calcCardH = 52;
+  const calcCardH = 52 + ((salary.unrecovered ?? 0) > 0 ? 6 : 0);
   doc.setFillColor(247, 250, 255);
   doc.setDrawColor(220, 230, 245);
   doc.roundedRect(calcCardY > 0 ? marginL : marginL, calcCardY, contentW, calcCardH, 3, 3, 'FD');
@@ -131,6 +131,12 @@ export function generateDriverSalaryPdf(opts: DriverPdfOptions): void {
     [`Umsatzanteil (${(salary.salary_ratio * 100).toFixed(0)}%)`, fmtEur(salary.revenue_share)],
     ['Trinkgeld (100%)', fmtEur(salary.tips)],
   ];
+
+  // The period's clawbacks exceeded its earnings: the salary is floored at zero
+  // and the remainder is stated, not hidden.
+  if ((salary.unrecovered ?? 0) > 0) {
+    tableRows.push(['Nicht verrechnete Rückbuchungen', fmtEur(salary.unrecovered ?? 0)]);
+  }
 
   if (salary.netto_salary != null && salary.netto_salary !== salary.amount_due) {
     tableRows.push(['Berechneter Betrag (System)', fmtEur(salary.amount_due)]);

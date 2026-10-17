@@ -80,7 +80,7 @@ WITH parity AS (
       (up.company_id IS NOT NULL
        AND up.status NOT IN ('inactive', 'suspended', 'deactivated')
        AND c.approval_status = 'approved'
-       AND c.status IN ('active', 'trial')
+       AND c.status = 'active'
        AND c.subscription_status = 'active'
        AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now())
       ), false) AS db_allows,
@@ -138,7 +138,7 @@ BEGIN
           (up.company_id IS NOT NULL
            AND up.status NOT IN ('inactive', 'suspended', 'deactivated')
            AND c.approval_status = 'approved'
-           AND c.status IN ('active', 'trial')
+           AND c.status = 'active'
            AND c.subscription_status = 'active'
            AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now())
           ), false) AS db_allows,
@@ -175,7 +175,7 @@ BEGIN
       SELECT 'companies.status', c.status
         FROM public.companies c
        WHERE c.status IS NULL
-          OR c.status NOT IN ('active', 'suspended', 'inactive', 'trial', 'deleted', 'archived')
+          OR c.status NOT IN ('active', 'suspended', 'inactive', 'deleted', 'archived')
       UNION ALL
       SELECT 'companies.approval_status', c.approval_status
         FROM public.companies c
@@ -228,7 +228,7 @@ SELECT count(*)                                               AS platform_accoun
                           AND EXISTS (SELECT 1 FROM public.companies c
                                        WHERE c.id = up.company_id
                                          AND c.approval_status = 'approved'
-                                         AND c.status IN ('active', 'trial')
+                                         AND c.status = 'active'
                                          AND c.subscription_status = 'active'
                                          AND (c.subscription_expires_at IS NULL
                                               OR c.subscription_expires_at > now())))
@@ -256,7 +256,7 @@ WITH refused AS (
   SELECT c.id
   FROM public.companies c
   WHERE NOT (c.approval_status = 'approved'
-             AND c.status IN ('active', 'trial')
+             AND c.status = 'active'
              AND c.subscription_status = 'active'
              AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now()))
 )

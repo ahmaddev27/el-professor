@@ -1,5 +1,5 @@
 /**
- * The nightly notification job: TÜV expiries and trial ends.
+ * The nightly notification job: TÜV expiries.
  *
  * ─── Why this is a function of its own ───────────────────────────────────────
  *
@@ -17,14 +17,20 @@
  * functions that skips their own authorization, which is worse than a line in
  * two lists.
  *
- * ─── Two jobs, one door ──────────────────────────────────────────────────────
+ * ─── Three jobs, one door ────────────────────────────────────────────────────
+ *
+ * `{"job":"uber_pull"}` is the scheduled Uber earnings pull for the operating day
+ * that has just completed (`_shared/uber-pull-delivery.ts`). It rides the ten-minute
+ * tick that already runs the other jobs: no host change, no new function. It
+ * opens the sealed Reidey token, so this function's environment names
+ * PARTNER_SEAL_KEY and PARTNER_REIDEY_BASE_URL in `main/index.ts`.
  *
  * `{"job":"abrechnung"}` runs the scheduled weekly Abrechnung (drivers' mails and
  * the managers' summary, `_shared/abrechnung-delivery.ts`). It is a second job
  * here rather than a second function because its caller is the same kind of
  * caller — a cron line with the service key and no `auth.uid()` — and a new
  * function costs a line in `FUNCTION_ENV` and one in the compose file. A body
- * with no `job` is the TÜV / trial job, so the installed notification cron line
+ * with no `job` is the TÜV job, so the installed notification cron line
  * is unchanged. The name is the notifications' and stays, because
  * `PUBLIC_FUNCTIONS`, `FUNCTION_ENV` and the cron line name it.
  *
@@ -51,6 +57,7 @@ import { corsFor } from '../_shared/http.ts';
 import { logFailure } from '../_shared/otp-core.ts';
 import { runNotificationJob, type NotificationRunMode } from '../_shared/notification-delivery.ts';
 import { runAbrechnungJob } from '../_shared/abrechnung-delivery.ts';
+import { runUberPullJob } from '../_shared/uber-pull-delivery.ts';
 
 const FN = 'notify-expiries';
 
@@ -77,18 +84,18 @@ function bearer(req: Request): string | null {
  * The job and the mode a request asks for.
  *
  * `{"job":"abrechnung"}` is the scheduled Abrechnung; anything else, an absent
- * `job` included, is the TÜV / trial job, so the cron line installed for the
+ * `job` included, is the TÜV job, so the cron line installed for the
  * notifications keeps working unchanged. `mode` is `dry_run` for anything that
  * is not exactly `send`, and an unreadable body is a dry run of the default job.
  */
-type JobName = 'expiries' | 'abrechnung';
+type JobName = 'expiries' | 'abrechnung' | 'uber_pull';
 async function requestOf(req: Request): Promise<{ job: JobName | 'unknown'; mode: NotificationRunMode }> {
   try {
     const body = await req.json();
     const fields = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
     const mode = fields.mode === 'send' ? 'send' : 'dry_run';
     if (fields.job === undefined) return { job: 'expiries', mode };
-    if (fields.job === 'expiries' || fields.job === 'abrechnung') return { job: fields.job, mode };
+    if (fields.job === 'expiries' || fields.job === 'abrechnung' || fields.job === 'uber_pull') return { job: fields.job, mode };
     return { job: 'unknown', mode: 'dry_run' };
   } catch {
     return { job: 'expiries', mode: 'dry_run' };
@@ -126,6 +133,18 @@ Deno.serve(async (req: Request) => {
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
 
+    if (job === 'uber_pull') {
+      const report = await runUberPullJob(admin, mode);
+      // The run's shape for the cron line's log. No name and no amount appears in it.
+      console.log(JSON.stringify({
+        level: 'info', fn: FN, step: 'run', job, mode,
+        companies_scanned: report.companies_scanned, companies_due: report.companies_due,
+        claimed: report.claimed, imported: report.imported, replaced: report.replaced,
+        already_claimed: report.already_claimed, gaps: report.gaps, failed: report.failed,
+      }));
+      return respond({ ok: true, job, ...report });
+    }
+
     if (job === 'abrechnung') {
       const report = await runAbrechnungJob(admin, mode);
       // The run's shape for the cron line's log. No address and no name appears in it.
@@ -136,6 +155,9 @@ Deno.serve(async (req: Request) => {
         driver_mails_sent: report.driver_mails_sent, driver_mails_failed: report.driver_mails_failed,
         manager_summaries_sent: report.manager_summaries_sent,
         manager_summaries_failed: report.manager_summaries_failed,
+        reminders_due: report.reminders_due,
+        reminder_mails_sent: report.reminder_mails_sent,
+        reminder_mails_failed: report.reminder_mails_failed,
       }));
       return respond({ ok: true, job, ...report });
     }

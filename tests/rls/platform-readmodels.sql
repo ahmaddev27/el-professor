@@ -33,8 +33,8 @@
     7. paging       total is the whole filtered set, items are the page, and
                     two pages of the same list do not overlap. The audit list
                     pages by its (occurred_at, id) cursor
-    8. scope        audit.read reads every actor's rows; any other active role
-                    reads its own, and naming another actor is a refusal
+    8. scope        audit.read reads every actor's rows, and since 15.10.2026 all
+                    four roles hold it (D3); a company admin is refused
     9. namespace    platform_audit_record refuses the platform_read. namespace
                     the database writes itself
    10. plans        EXPLAIN ANALYZE of each statement on seeded data: no scan
@@ -275,13 +275,15 @@ INSERT INTO user_profiles (user_id, email, full_name, role, role_id, company_id,
 
 -- ─── the data the figures are read from ─────────────────────────────────────
 
--- Two more companies, so the trial states and the search have something to
--- find. Company A (seeded) is 'active', company B 'active'.
+-- Two more companies, so the trial filter and the search have something to
+-- find. They carry trial dates but, since 20261015170000, status 'active' (the
+-- CHECK refuses 'trial'), so the read model must call neither of them a trial.
+-- Company A (seeded) is 'active', company B 'active'.
 INSERT INTO companies (id, name, slug, status, approval_status, plan, billing_cycle,
                        subscription_status, subscription_car_limit, trial_start, trial_end, created_at) VALUES
-  ('cb000000-0000-4000-8000-000000000001', 'RM Trial läuft',    'rm-trial-running', 'trial', 'approved', 'advanced', 'monthly',
+  ('cb000000-0000-4000-8000-000000000001', 'RM Trial läuft',    'rm-trial-running', 'active', 'approved', 'advanced', 'monthly',
    'inactive', 5, now() - interval '9 days',  now() + interval '5 days', now() - interval '9 days'),
-  ('cb000000-0000-4000-8000-000000000002', 'RM Trial vorbei',   'rm-trial-expired', 'trial', 'pending',  'basic',    'monthly',
+  ('cb000000-0000-4000-8000-000000000002', 'RM Trial vorbei',   'rm-trial-expired', 'active', 'pending',  'basic',    'monthly',
    'inactive', 5, now() - interval '30 days', now() - interval '5 days', now() - interval '30 days'),
   ('cb000000-0000-4000-8000-000000000003', 'RM Prozent 100%',   'rm-prozent',       'active', 'approved', 'premium', 'yearly',
    'active',   5, NULL, NULL, now() - interval '3 days');
@@ -409,8 +411,7 @@ DECLARE
   v_got    jsonb;
 BEGIN
   -- companies.read: all four roles. business.read: not billing. audit.read:
-  -- owner only (open decision D3) — the audit list still answers ok for any
-  -- active role, with its own rows, which section 8 checks.
+  -- all four roles (D3, answered 15.10.2026), which section 8 checks.
   FOR p IN
     SELECT * FROM (VALUES
       ('owner',         '3b000000-0000-4000-8000-000000000001'::uuid, true,  true),
@@ -719,19 +720,19 @@ BEGIN
   PERFORM _rm_ok('an active company has no trial state', (a ->> 'trial_state') IS NULL);
 
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,'running',false,'name_asc',100,0)::text$q$);
-  PERFORM _rm_ok('trial running: exactly the companies in a trial that has not ended',
-    (v ->> 'total')::int = (SELECT count(*) FROM companies WHERE status = 'trial' AND trial_end > now())
-    AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'slug' = 'rm-trial-running')
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'trial_state' <> 'running'));
+  -- 20261015170000 removed the trial: no row can hold status 'trial', and the
+  -- read model's trial_state is derived from that status, so the filters that
+  -- still exist (the column list is a pinned shape) answer nothing.
+  PERFORM _rm_ok('trial running: nobody, because no company can be in a trial',
+    (v ->> 'total')::int = 0 AND jsonb_array_length(v -> 'items') = 0
+    AND NOT EXISTS (SELECT 1 FROM companies WHERE status = 'trial'));
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,'expired',false,'name_asc',100,0)::text$q$);
-  PERFORM _rm_ok('trial expired: exactly the companies whose trial_end has passed',
-    (v ->> 'total')::int = (SELECT count(*) FROM companies WHERE status = 'trial' AND trial_end <= now())
-    AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'slug' = 'rm-trial-expired')
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'trial_state' <> 'expired'));
+  PERFORM _rm_ok('trial expired: nobody either, even a company that still carries a past trial_end',
+    (v ->> 'total')::int = 0 AND jsonb_array_length(v -> 'items') = 0
+    AND EXISTS (SELECT 1 FROM companies WHERE slug = 'rm-trial-expired' AND trial_end <= now()));
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,'none',false,'name_asc',100,0)::text$q$);
-  PERFORM _rm_ok('trial none: every company that is not in a dated trial, and no other',
-    (v ->> 'total')::int = (SELECT count(*) FROM companies c
-                             WHERE NOT (c.status = 'trial' AND c.trial_end IS NOT NULL))
+  PERFORM _rm_ok('trial none: every company, trial dates or not',
+    (v ->> 'total')::int = (SELECT count(*) FROM companies c)
     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'trial_state' IS NOT NULL));
 
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,NULL,true,'name_asc',100,0)::text$q$);
@@ -795,7 +796,9 @@ DECLARE
   owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
   support  constant uuid := '3b000000-0000-4000-8000-000000000002';
   readonly constant uuid := '3b000000-0000-4000-8000-000000000004';
+  billing  constant uuid := '3b000000-0000-4000-8000-000000000003';
   admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  k        integer;
   v        jsonb;
   p1       jsonb;
   p2       jsonb;
@@ -814,17 +817,23 @@ BEGIN
   PERFORM _rm_ok('audit.read: the rows carry the actor''s address and the company name',
     (SELECT bool_or((i ->> 'actor_email') IS NOT NULL) FROM jsonb_array_elements(v -> 'items') i));
 
-  v := _rm_json(support, 'SELECT platform_audit_list(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,100)::text');
-  PERFORM _rm_ok('without audit.read: the scope is own, and every row is the caller''s',
-    (v ->> 'scope') = 'own'
-    AND jsonb_array_length(v -> 'items') > 0
-    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i
-                     WHERE i ->> 'actor_user_id' IS DISTINCT FROM support::text));
-  PERFORM _rm_ok('without audit.read: naming another actor is a refusal, not a filter',
-    NOT (_rm_json(support, format('SELECT platform_audit_list(%L)::text', owner)) ->> 'ok')::boolean
-    AND (_rm_json(support, format('SELECT platform_audit_list(%L)::text', support)) ->> 'scope') = 'own');
-  PERFORM _rm_ok('read_only reads its own rows too (open decision D3 keeps the whole log with the owner)',
-    (_rm_json(readonly, 'SELECT platform_audit_list()::text') ->> 'scope') = 'own');
+  -- D3 was answered on 15.10.2026: every active role holds audit.read, so
+  -- none of the four is confined to its own rows any more. The 'own' scope of
+  -- platform_audit_list is reachable by no role today; it stays in the
+  -- function as the fallback for a role a later matrix gives no audit.read.
+  FOR k IN 1..3 LOOP
+    v := _rm_json((ARRAY[support, billing, readonly])[k],
+                  'SELECT platform_audit_list(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,100)::text');
+    PERFORM _rm_ok(format('audit.read: %s reads the whole log, other actors'' rows included',
+                          (ARRAY['support', 'billing', 'read_only'])[k]),
+      (v ->> 'scope') = 'all'
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') x WHERE x ->> 'actor_user_id' = owner::text)
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') x WHERE x ->> 'actor_user_id' = support::text));
+  END LOOP;
+  PERFORM _rm_ok('audit.read: naming another actor is a filter for a role that holds it',
+    (_rm_json(readonly, format('SELECT platform_audit_list(%L)::text', owner)) ->> 'scope') = 'all'
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(_rm_json(readonly, format('SELECT platform_audit_list(%L)::text', owner)) -> 'items') x
+                     WHERE x ->> 'actor_user_id' IS DISTINCT FROM owner::text));
   PERFORM _rm_ok('a company admin reads no audit row at all',
     NOT (_rm_json(admin_a, 'SELECT platform_audit_list()::text') ->> 'ok')::boolean);
 

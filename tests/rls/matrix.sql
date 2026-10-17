@@ -117,8 +117,8 @@
   nothing — through the tables or through the planning RPCs, which ask the same
   helper. The platform branch of every write policy is gone, and the platform
   tables ask the capability that names the act instead of "is this account
-  staff". A trial company and an invited employee are the two controls that
-  stay allowed, because App.tsx admits both.
+  staff". A company with a live subscription and an invited employee are the two
+  controls that stay allowed, because App.tsx admits both.
 
   3.4 (20260917140000) closed the last of them, and no line is tagged for it any
   more. `platform_reads_company_data()` is false; the company a platform account
@@ -702,8 +702,9 @@ CREATE TEMP TABLE _mx_failures (section text, item text, detail text);
 -- account status inside company A.
 --
 -- The company states are every value the CHECK constraints allow that the UI
--- blocks today (App.tsx, AuthContext.tsx), plus one it does not block: a trial
--- company with an active subscription, the control that must stay allowed when
+-- blocks today (App.tsx, AuthContext.tsx), plus one it does not block: a company
+-- with a live subscription (it was a trial company until 20261015170000, which
+-- removed the status), the control that must stay allowed when
 -- phase 3.3 moves enforcement into the database.
 --
 -- Two states this list used to carry are gone with 20260919150000 (plan 3.F
@@ -727,7 +728,7 @@ INSERT INTO _mx_state_company VALUES
   ('suspended',       'suspended company (companies.status, the one suspension state)',
                                                                        'approved',  'suspended', 'active',    NULL),
   ('statusinactive',  'approved company whose status is inactive',     'approved',  'inactive',  'active',    NULL),
-  ('trial',           'trial company with an active subscription',     'approved',  'trial',     'active',    now() + interval '30 days');
+  ('livesub',         'company with a live subscription',              'approved',  'active',    'active',    now() + interval '30 days');
 
 INSERT INTO companies (id, name, slug, approval_status, status, plan, subscription_status, subscription_expires_at)
 SELECT _mx_id('company', s.slug), 'MX ' || s.slug, 'mx-' || s.slug, s.approval_status, s.status, 'basic',
@@ -1014,7 +1015,7 @@ INSERT INTO _mx_spec VALUES
   $q$driver_name = driver_name$q$),
 (41, 'notification_settings', $q$id = {id}$q$,
   $q$INSERT INTO notification_settings (id, company_id, notification_type) VALUES ({id}, {co}, 'tuev_abgelaufen')$q$, NULL,
-  $q$INSERT INTO notification_settings (company_id, notification_type) VALUES ({co}, 'trial_abgelaufen')$q$,
+  $q$INSERT INTO notification_settings (company_id, notification_type) VALUES ({co}, 'tuev_bald_ablaufend')$q$,
   $q$enabled = enabled$q$),
 (42, 'subscription_plans', $q$id = {id}$q$,
   $q$INSERT INTO subscription_plans (id, name, monthly_price, included_cars) VALUES ({id}, 'MX plan {s}', 20, 1)$q$, NULL,
@@ -1119,9 +1120,9 @@ INSERT INTO _mx_spec VALUES
 -- SELECT and nothing else and every I, U, D and M cell is a missing GRANT.
 (58, 'notification_deliveries', $q$id = {id}$q$,
   $q$INSERT INTO notification_deliveries (id, company_id, notification_type, target_id, period_key)
-     VALUES ({id}, {co}, 'trial_abgelaufen', {co}, '2099-01-01')$q$, NULL,
+     VALUES ({id}, {co}, 'tuev_abgelaufen', {co}, '2099-01-01')$q$, NULL,
   $q$INSERT INTO notification_deliveries (company_id, notification_type, target_id, period_key)
-     VALUES ({co}, 'trial_abgelaufen', {co}, '2098-01-01')$q$,
+     VALUES ({co}, 'tuev_abgelaufen', {co}, '2098-01-01')$q$,
   $q$recipient_count = recipient_count$q$),
 -- The monthly plan (20260930100000): the proposal, its per-driver snapshot, its
 -- blocks and the rides they are made of. 20260917130000's business shape with
@@ -1154,7 +1155,104 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, {ref:monthly_plans}, {ref:monthly_plan_blocks}, {ref:mx_plan_trip}, '2026-10-01 08:23+02', '2026-10-01 09:44+02', 81, 'instants')$q$, NULL,
   $q$INSERT INTO monthly_plan_block_trips (company_id, plan_id, block_id, trip_id, starts_at, ends_at, minutes, time_source)
      VALUES ({co}, {ref:monthly_plans}, {ref:monthly_plan_blocks}, {ref:mx_plan_trip_new}, '2026-10-01 09:50+02', '2026-10-01 10:20+02', 30, 'instants')$q$,
-  $q$minutes = minutes$q$);
+  $q$minutes = minutes$q$),
+-- The Reidey partner tables (20261005120000, 20261005130000, 20261005140000,
+-- 20261007100000). They are DORMANT -- no edge function writes them and no
+-- screen reads them -- and they are the first family in this file whose
+-- policies cover only SELECT and UPDATE: there is no INSERT policy and no
+-- DELETE policy on any of the four, deliberately, because the writer is to be
+-- a SECURITY DEFINER RPC called by an edge function. So every I cell is R for
+-- everybody -- the API roles hold the privilege from the image's default
+-- privileges, and RLS has no policy to admit the row -- and every D cell is a
+-- DELETE that matches nothing and reports success.
+--
+-- Each row's company is its own column, not a parent's, so the move probe is a
+-- plain re-pointing. Both unique keys per table name `partner` or an external
+-- id, so the I probe uses a second value rather than colliding with the row
+-- the S, U, D and M probes read.
+(63, 'partner_connections', $q$id = {id}$q$,
+  $q$INSERT INTO partner_connections (id, company_id, partner) VALUES ({id}, {co}, 'mx')$q$, NULL,
+  $q$INSERT INTO partner_connections (company_id, partner) VALUES ({co}, 'mx2')$q$,
+  $q$last_error = last_error$q$),
+(64, 'partner_driver_links', $q$id = {id}$q$,
+  $q$INSERT INTO partner_driver_links (id, company_id, partner, external_driver_id)
+     VALUES ({id}, {co}, 'mx', 'mx-4711')$q$, NULL,
+  $q$INSERT INTO partner_driver_links (company_id, partner, external_driver_id)
+     VALUES ({co}, 'mx', 'mx-4712')$q$,
+  $q$proposed_name = proposed_name$q$),
+(65, 'partner_receipt_submissions', $q$id = {id}$q$,
+  $q$INSERT INTO partner_receipt_submissions (id, company_id, partner, external_submission_id, external_driver_id, description)
+     VALUES ({id}, {co}, 'mx', 'mx-sub-1', 'mx-4711', 'mx')$q$, NULL,
+  $q$INSERT INTO partner_receipt_submissions (company_id, partner, external_submission_id, external_driver_id, description)
+     VALUES ({co}, 'mx', 'mx-sub-2', 'mx-4711', 'mx')$q$,
+  $q$city = city$q$),
+(66, 'partner_note_submissions', $q$id = {id}$q$,
+  $q$INSERT INTO partner_note_submissions (id, company_id, partner, external_submission_id, external_driver_id, note_type)
+     VALUES ({id}, {co}, 'mx', 'mx-sub-1', 'mx-4711', 'general')$q$, NULL,
+  $q$INSERT INTO partner_note_submissions (company_id, partner, external_submission_id, external_driver_id, note_type)
+     VALUES ({co}, 'mx', 'mx-sub-2', 'mx-4711', 'general')$q$,
+  $q$note_text = note_text$q$),
+-- The weekly Abrechnung's schedule and its record of what was mailed
+-- (20261003120000), uncovered since the day they were written. The schedule is
+-- one row per company and its writes ask for an ADMINISTRATOR, so it is
+-- company_settings' shape with a DELETE policy added; `ins_pre` drops the row
+-- the unique constraint would collide with, and the whole probe is rolled back
+-- so the fixture survives for the next principal. The deliveries are
+-- notification_deliveries' shape: SELECT for the company, and the two SECURITY
+-- DEFINER job functions as the only writers, so every other cell is a missing
+-- GRANT -- including anon's SELECT, which this migration revoked.
+(67, 'abrechnung_schedules', $q$company_id = {co}$q$,
+  $q$INSERT INTO abrechnung_schedules (company_id, weekday, send_time) VALUES ({co}, 1, '08:00')$q$,
+  $q$DELETE FROM abrechnung_schedules WHERE company_id = {co}$q$,
+  $q$INSERT INTO abrechnung_schedules (company_id, weekday, send_time) VALUES ({co}, 1, '08:00')$q$,
+  $q$weekday = weekday$q$),
+(68, 'abrechnung_deliveries', $q$id = {id}$q$,
+  $q$INSERT INTO abrechnung_deliveries (id, company_id, kind, target_id, period_key)
+     VALUES ({id}, {co}, 'manager_summary', {co}, '2099-01-04')$q$, NULL,
+  $q$INSERT INTO abrechnung_deliveries (company_id, kind, target_id, period_key)
+     VALUES ({co}, 'manager_summary', {co}, '2098-01-06')$q$,
+  $q$recipient_count = recipient_count$q$),
+-- The fleet import's links (20261015100000): partner_receipt_submissions' shape,
+-- SELECT for the company and the SECURITY DEFINER functions as the only writers.
+(69, 'partner_vehicle_links', $q$id = {id}$q$,
+  $q$INSERT INTO partner_vehicle_links (id, company_id, partner, external_vehicle_id)
+     VALUES ({id}, {co}, 'mx', 'mx-v1')$q$, NULL,
+  $q$INSERT INTO partner_vehicle_links (company_id, partner, external_vehicle_id)
+     VALUES ({co}, 'mx', 'mx-v2')$q$,
+  $q$proposed_plate = proposed_plate$q$),
+-- The daily Uber pull's schedule and its record (20261015130000): the
+-- abrechnung_schedules / abrechnung_deliveries shapes exactly, one table for
+-- each, so the cells below are theirs. The runs have SELECT for the company and
+-- the job's SECURITY DEFINER functions as their only writer.
+(70, 'uber_pull_schedules', $q$company_id = {co}$q$,
+  $q$INSERT INTO uber_pull_schedules (company_id, run_time) VALUES ({co}, '06:00')$q$,
+  $q$DELETE FROM uber_pull_schedules WHERE company_id = {co}$q$,
+  $q$INSERT INTO uber_pull_schedules (company_id, run_time) VALUES ({co}, '06:00')$q$,
+  $q$run_time = run_time$q$),
+-- The day differs per side on purpose. uber_pull_runs_once is UNIQUE on
+-- (company_id, day_key, pass), so with one day for both companies the MOVE
+-- probe collided with the row already standing in the other company -- and it
+-- collided for the OWNER too, which makes it a malformed statement rather than
+-- a refusal. A probe the owner cannot make measures nothing. {s} is the letter
+-- a or b, not a digit, so the side is carried in a CASE over it rather than
+-- pasted into the date -- '2099-01-0a' is not a date.
+(71, 'uber_pull_runs', $q$id = {id}$q$,
+  $q$INSERT INTO uber_pull_runs (id, company_id, day_key, pass)
+     VALUES ({id}, {co}, CASE '{s}' WHEN 'a' THEN DATE '2099-01-04' ELSE DATE '2099-01-05' END, 'first')$q$, NULL,
+  $q$INSERT INTO uber_pull_runs (company_id, day_key, pass)
+     VALUES ({co}, DATE '2098-01-06', 'first')$q$,
+  $q$detail = detail$q$),
+-- Who receives which company notice (20261015140000): the abrechnung_schedules
+-- shape, an administrator writes and everyone in the company reads. The probe
+-- address carries the side because the row is unique on the company, the kind
+-- and the lower-cased address; the insert probe uses a different address so it
+-- never collides with the fixture.
+(72, 'notification_recipients', $q$id = {id}$q$,
+  $q$INSERT INTO notification_recipients (id, company_id, notification_type, email)
+     VALUES ({id}, {co}, 'manager_summary', 'mx-{s}@firma.example')$q$, NULL,
+  $q$INSERT INTO notification_recipients (company_id, notification_type, email)
+     VALUES ({co}, 'manager_summary', 'mx-new@firma.example')$q$,
+  $q$email = email$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1198,6 +1296,33 @@ INSERT INTO _mx_move VALUES
 ('salaries',                             $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('salary_payments',                      $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('werkstatt_checks',                     $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- One live connection per company and partner, and since 20261007100000 one per
+-- partner fleet as well, so the other side's own row is cleared before the move
+-- rather than colliding with it -- the trip_analysis_settings shape.
+('partner_connections',                  $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM partner_connections WHERE company_id = {other_co} AND partner = 'mx'$q$, 'Y', 'one live connection per company and partner'),
+('partner_driver_links',                 $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM partner_driver_links WHERE company_id = {other_co} AND partner = 'mx' AND external_driver_id = 'mx-4711'$q$, 'Y', 'one link per company, partner and external driver'),
+('partner_receipt_submissions',          $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM partner_receipt_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
+-- One schedule per company, so B's own row is dropped first, as
+-- company_settings' is. The deliveries' dedupe key names the company and the
+-- probe rows carry their own company as the target, so A's row collides with
+-- nothing of B's.
+('abrechnung_schedules',                 $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM abrechnung_schedules WHERE company_id = {other_co}$q$, 'Y', 'one schedule per company'),
+('abrechnung_deliveries',                $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- One schedule per company, so B's own row is dropped first; the runs' key
+-- names the company, so A's probe row collides with nothing of B's.
+('uber_pull_schedules',                  $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM uber_pull_schedules WHERE company_id = {other_co}$q$, 'Y', 'one schedule per company'),
+('uber_pull_runs',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- The side's own address differs, so A's row moved into B collides with nothing.
+('notification_recipients',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+('partner_note_submissions',             $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
+('partner_vehicle_links',                $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM partner_vehicle_links WHERE company_id = {other_co} AND partner = 'mx' AND external_vehicle_id = 'mx-v1'$q$, 'Y', 'the external id names the company'),
 ('fahrtenbuch_imports',                  $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('fahrtenbuch_trips',                    $q$company_id = {other_co}$q$, NULL, 'T', 'protect_fahrtenbuch_immutable_fields refuses it even for the owner'),
 ('fahrtenbuch_assignment_audit',         $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
@@ -1789,7 +1914,85 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('werkstatt_checks',                   'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('werkstatt_checks',                  'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('werkstatt_checks',                  'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('werkstatt_checks',                  'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL);
+('werkstatt_checks',                  'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- The partner tables: the tenant SELECT shape, an UPDATE gated by the page
+-- that owns the subject, and no INSERT or DELETE policy at all -- so I is R
+-- for every principal and D is a DELETE that matches nothing. The gate is
+-- is_company_admin() on partner_connections, because connecting a fleet is
+-- the company's own decision, and the owning page on the other three. A
+-- viewer holds can_edit nowhere and is refused on all four.
+('partner_connections',            'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_connections',            'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
+('partner_connections',            'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('partner_connections',            'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_connections',            'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
+('partner_driver_links',           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_driver_links',           'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
+('partner_driver_links',           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_driver_links',           'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_driver_links',           'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20261008160000 dropped both submission tables' UPDATE policy: it admitted no
+-- caller (every judging path is a SECURITY DEFINER RPC) and it let a reviewer
+-- mark a submission accepted with no Beleg written, rewrite the words the driver
+-- was already told, and -- once 20261008150000 added the column -- stamp a
+-- delivery that never happened. So U and M read '.' for everyone: with no
+-- policy the statement matches no row and reports success, fahrtenbuch_trips'
+-- own shape. The view context still reads T on U, because
+-- refuse_read_only_context_write is a BEFORE STATEMENT trigger and fires before
+-- a policy is consulted.
+('partner_receipt_submissions',    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_receipt_submissions',    'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
+('partner_receipt_submissions',    'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_receipt_submissions',    'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_receipt_submissions',    'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_note_submissions',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_note_submissions',       'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
+('partner_note_submissions',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_note_submissions',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_note_submissions',       'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_vehicle_links',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_vehicle_links',          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
+('partner_vehicle_links',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_vehicle_links',          'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+('partner_vehicle_links',          'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- 20261003120000. The schedule: read by the company, written only by its
+-- administrator -- company_settings' cells plus a DELETE the administrator
+-- holds. anon reads nothing at all, this migration having revoked it, so its
+-- column is a missing GRANT and not a filtered read.
+('abrechnung_schedules',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_schedules',           'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('abrechnung_schedules',           'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('abrechnung_schedules',           'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('abrechnung_schedules',           'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+-- The deliveries: the job's own record. `authenticated` holds SELECT and
+-- nothing else and anon holds nothing, so every write cell is a missing GRANT
+-- for everyone -- notification_deliveries' shape, and the second table in this
+-- product a client cannot write at all.
+('abrechnung_deliveries',          'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_deliveries',          'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('abrechnung_deliveries',          'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('abrechnung_deliveries',          'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('abrechnung_deliveries',          'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+-- 20261015100000. The schedule is abrechnung_schedules' cells and the runs are
+-- abrechnung_deliveries': an administrator writes the first, the job's
+-- functions alone write the second, and anon's column is a missing GRANT.
+('uber_pull_schedules',            'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('uber_pull_schedules',            'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('uber_pull_schedules',            'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('uber_pull_schedules',            'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('uber_pull_schedules',            'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+('uber_pull_runs',                 'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('uber_pull_runs',                 'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('uber_pull_runs',                 'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('uber_pull_runs',                 'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('uber_pull_runs',                 'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+-- 20261015140000. abrechnung_schedules' cells exactly: an administrator writes,
+-- every member reads, anon's column is a missing GRANT.
+('notification_recipients',        'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('notification_recipients',        'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('notification_recipients',        'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('notification_recipients',        'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('notification_recipients',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -1857,7 +2060,17 @@ UPDATE _mx_expected x
      'trip_analysis_settings', 'driver_month_budget',
      -- 20260930100000: the same shape and the same two triggers
      'monthly_plans', 'monthly_plan_drivers', 'monthly_plan_blocks',
-     'monthly_plan_block_trips');
+     'monthly_plan_block_trips',
+     -- 20261003120000: the same shape and the same two triggers. The
+     -- deliveries' write cells are PP and are skipped by the WHERE above, so
+     -- what this adds for them is the SELECT line -- which cannot be left as
+     -- copied from `super`, because a context is exactly what makes the
+     -- company's rows readable.
+     'abrechnung_schedules', 'abrechnung_deliveries',
+     -- 20261015100000: the same shape and the same two triggers
+     'uber_pull_schedules', 'uber_pull_runs',
+     -- 20261015140000: the same shape and the same two triggers
+     'notification_recipients');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
@@ -1917,6 +2130,37 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     -- context and a context makes the company's rows readable — the tenant
     -- shape's whole claim, and the reason the line cannot be left as copied.
     ('notification_deliveries',  'S', 'Y.', 'Y.'),
+
+    -- The partner tables. A context makes the company's rows readable, which is
+    -- the tenant shape's whole claim; a view context is refused by the statement
+    -- trigger before any policy is asked, and a support session writes as the
+    -- company's own administrator would -- except that I has no policy to admit
+    -- a row and D has none to find one with, so those two do not become Y.
+    ('partner_connections',          'S', 'Y.', 'Y.'),
+    ('partner_connections',          'I', 'TT', 'RR'),
+    ('partner_connections',          'U', 'TT', 'Y.'),
+    ('partner_connections',          'D', 'TT', '..'),
+    ('partner_connections',          'M', '..', 'R.'),
+    ('partner_driver_links',         'S', 'Y.', 'Y.'),
+    ('partner_driver_links',         'I', 'TT', 'RR'),
+    ('partner_driver_links',         'U', 'TT', 'Y.'),
+    ('partner_driver_links',         'D', 'TT', '..'),
+    ('partner_driver_links',         'M', '..', 'R.'),
+    ('partner_receipt_submissions',  'S', 'Y.', 'Y.'),
+    ('partner_receipt_submissions',  'I', 'TT', 'RR'),
+    ('partner_receipt_submissions',  'U', 'TT', '..'),
+    ('partner_receipt_submissions',  'D', 'TT', '..'),
+    ('partner_receipt_submissions',  'M', '..', '..'),
+    ('partner_note_submissions',     'S', 'Y.', 'Y.'),
+    ('partner_note_submissions',     'I', 'TT', 'RR'),
+    ('partner_note_submissions',     'U', 'TT', '..'),
+    ('partner_note_submissions',     'D', 'TT', '..'),
+    ('partner_note_submissions',     'M', '..', '..'),
+    ('partner_vehicle_links',        'S', 'Y.', 'Y.'),
+    ('partner_vehicle_links',        'I', 'TT', 'RR'),
+    ('partner_vehicle_links',        'U', 'TT', '..'),
+    ('partner_vehicle_links',        'D', 'TT', '..'),
+    ('partner_vehicle_links',        'M', '..', '..'),
     ('roles',                    'S', 'Y.', 'Y.'),
     ('roles',                    'I', 'TT', 'YR'),
     ('roles',                    'U', 'TT', 'Y.'),
@@ -2421,7 +2665,7 @@ END $$;
 -- company" (T).
 --
 -- Two lines are controls that must stay allowed, because App.tsx admits both:
--- the trial company with an active subscription, and the invited employee —
+-- the company with a live subscription, and the invited employee —
 -- an invitation that could not be completed would lock out every new employee.
 DO $$
 DECLARE
@@ -2431,7 +2675,7 @@ BEGIN
   FOR r IN
     SELECT 'admin-' || s.slug AS who, _mx_id('company', s.slug) AS co,
            _mx_id('state-driver', s.slug) AS drv, _mx_id('state-trip', s.slug) AS trip, s.label,
-           s.slug = 'trial' AS allowed,
+           s.slug = 'livesub' AS allowed,
            0 AS grp
       FROM _mx_state_company s
     UNION ALL
@@ -2455,7 +2699,7 @@ BEGIN
 
     -- 20260923130000 (slice C): the RPC asks current_role_permits('documents',
     -- true) after its own company branch. The two allowed principals are the
-    -- trial company's **administrator** (every `admin-…` row) and the invited
+    -- live-subscription company's **administrator** (every `admin-…` row) and the invited
     -- **editor**, and the editor has held can_edit = false on the Dokumente
     -- page since 20260302065621 — so its cell moves Y → T. The claim this line
     -- makes does not weaken: `Y` used to say "the state gate admitted a
@@ -2655,13 +2899,33 @@ VALUES (_mx_id('rpc_salary', 'a'), _mx_id('drivers2', 'a'), '2026-04-01', '2026-
         'a0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a', 100)
 ON CONFLICT (id) DO NOTHING;
 
--- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
+-- A CONFIRMED partner link of company A, for partner_submission_claim_driver.
+-- It cannot be the table section's row: that one is `pending` with no driver,
+-- which is the state the claim refuses, and the two unique keys name the
+-- external id and the driver. Measured, and the reason this fixture exists at
+-- all: probed on a link that does not exist, the gate (42501) and the lookup
+-- (P0002) both raise, so every principal read T and the cell said nothing
+-- about the gate it was written for.
+INSERT INTO partner_driver_links (id, company_id, partner, external_driver_id, driver_id, status, linked_at)
+VALUES (_mx_id('rpc_partner_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
+        'mx', 'mx-rpc', _mx_id('drivers2', 'a'), 'linked', now())
+ON CONFLICT (id) DO NOTHING;
+
+-- A CONFIRMED Reidey link of company A with a digits-only external id, for
+-- income_import_uber: the function takes the partner's driver id as digits and
+-- resolves OUR driver through this table. A probe on an id nobody linked would
+-- raise driver_not_linked for every authorised caller and read T for all of
+-- them, saying nothing about the gate it was written for.
+INSERT INTO partner_driver_links (id, company_id, partner, external_driver_id, driver_id, status, linked_at)
+VALUES (_mx_id('rpc_uber_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
+        'reidey', '4711', _mx_id('drivers2', 'a'), 'linked', now())
+ON CONFLICT (id) DO NOTHING;
+
+
+-- Plan 3.5's write RPCs need a target each: an active plan
 -- to assign, an invoice that is already paid (so "mark unpaid" has something to
 -- undo), and three company-less accounts for the staff functions — one free,
 -- one on the team, one disabled.
-UPDATE companies SET trial_end = now() + interval '7 days'
- WHERE id = 'c0000000-0000-4000-8000-00000000000a' AND trial_end IS NULL;
-
 INSERT INTO subscription_plans (id, name, monthly_price, included_cars, drivers_per_car_limit, is_active)
 VALUES (_mx_id('rpc_plan', 'a'), 'MX rpc plan', 20, 1, 4, true)
 ON CONFLICT (id) DO NOTHING;
@@ -2720,6 +2984,13 @@ INSERT INTO monthly_plan_blocks (id, company_id, plan_id, block_key, car_identif
                                  starts_at, ends_at, span_minutes, ride_minutes)
 VALUES (_mx_id('rpc_monthly_block', 'a'), _mx_co('a'), _mx_id('rpc_monthly_plan', 'a'),
         'mx-rpc', 'MX-CAR', '2027-03-02 08:23+01', '2027-03-02 09:44+01', 81, 81)
+ON CONFLICT (id) DO NOTHING;
+
+-- The company platform_company_delete is probed against (20261016140000): it
+-- has to be marked deleted, or the function refuses before it reaches anything
+-- interesting. Every probe is rolled back, so each principal finds it again.
+INSERT INTO companies (id, name, slug, status)
+VALUES ('c0000000-0000-4000-8000-0000000000dd', 'MX Deleted', 'mx-deleted', 'deleted')
 ON CONFLICT (id) DO NOTHING;
 
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
@@ -2839,6 +3110,12 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_subscriptions_list() is allowed',
      $q$SELECT platform_subscriptions_list() ->> 'ok'$q$,
      'PNNNNNY', NULL),
+    -- the ninth read model, 20261015160000: what each active subscription's
+    -- invoice for a period costs, and whether it is the company's first. Same
+    -- capability and the same shape as the two above.
+    ('platform_invoice_quotes(10, 2026) is allowed',
+     $q$SELECT platform_invoice_quotes(10, 2026) ->> 'ok'$q$,
+     'PNNNNNY', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
     -- calls it signed in. It was SECURITY INVOKER and read subscription_invoices
     -- under the caller's own RLS, so every principal got a number — a company
@@ -2875,6 +3152,11 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('compute_plan_price(basic, 5, monthly)',
      $q$SELECT compute_plan_price('basic', 5, 'monthly')::text$q$,
      'PYYYYYY', NULL),
+    -- 20261015160000 gave it a fourth argument, the first invoice, and dropped
+    -- the three-argument form. The grants are restated, so no cell moves.
+    ('compute_plan_price(basic, 5, monthly, first invoice)',
+     $q$SELECT compute_plan_price('basic', 5, 'monthly', true)::text$q$,
+     'PYYYYYY', NULL),
 
     -- Plan 3.5's platform write RPCs (20260916130000, 20260916130010). Each
     -- asks platform_can for its capability and writes its own audit row, the
@@ -2897,9 +3179,6 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNNNY', NULL),
     ('platform_company_lifecycle(company A, archive)',
      $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'archive')::text$q$,
-     'PNNNNNY', NULL),
-    ('platform_company_extend_trial(company A, 7)',
-     $q$SELECT platform_company_extend_trial('c0000000-0000-4000-8000-00000000000a', 7)::text$q$,
      'PNNNNNY', NULL),
     ('platform_company_set_plan(company A, premium)',
      $q$SELECT platform_company_set_plan('c0000000-0000-4000-8000-00000000000a', 'premium')::text$q$,
@@ -2950,8 +3229,10 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_settings_get(price_book) is ok',
      $q$SELECT (platform_settings_get('price_book') ->> 'ok')::text$q$,
      'PNNNNNY', NULL),
-    ('platform_settings_put(price_book, the seeded book, version 1) is ok',
-     $q$SELECT (platform_settings_put('price_book', '{"price_per_car_cents":{"basic":2000,"advanced":4000,"premium":7000},"fleet_discount_tiers":[{"min_cars":6,"percent":5},{"min_cars":11,"percent":10}],"yearly_discount_percent":10}'::jsonb, 1) ->> 'ok')::text$q$,
+    -- version 2 and the first month since 20261015160000, which added the
+    -- figure to the stored book and raised its version
+    ('platform_settings_put(price_book, the seeded book, version 2) is ok',
+     $q$SELECT (platform_settings_put('price_book', '{"first_month_cents":20000,"price_per_car_cents":{"basic":2000,"advanced":4000,"premium":7000},"fleet_discount_tiers":[{"min_cars":6,"percent":5},{"min_cars":11,"percent":10}],"yearly_discount_percent":10}'::jsonb, 2) ->> 'ok')::text$q$,
      'PNNNNNY', NULL),
     -- the product configuration: the price book is public (the landing page
     -- prices plans before anyone signs in), the feature map is not
@@ -3280,8 +3561,8 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('notification_candidates(the 60-day window, one page)',
      $q$SELECT count(*)::text FROM notification_candidates(60, 1)$q$,
      'PPPPPPP', NULL),
-    ('notification_delivery_claim(company A, its own trial)',
-     $q$SELECT notification_delivery_claim({co}, 'trial_abgelaufen', {co}, '2097-01-01')::text$q$,
+    ('notification_delivery_claim(company A, a TÜV notice)',
+     $q$SELECT notification_delivery_claim({co}, 'tuev_abgelaufen', {co}, '2097-01-01')::text$q$,
      'PPPPPPP', NULL),
     ('notification_delivery_settle(company A''s probe row)',
      $q$SELECT notification_delivery_settle({ref:notification_deliveries}, true, 1)::text$q$,
@@ -3317,7 +3598,229 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNYYN', NULL),
     ('company_role_delete(company role of A)',
      $q$SELECT company_role_delete({ref:rpc_role}) ->> 'ok'$q$,
-     'PNNNYNN', NULL);
+     'PNNNYNN', NULL),
+
+    -- The partner functions (20261005120000, 20261005130000, 20261005140000)
+    -- and the two receipt prerequisites. The first three are the edge
+    -- function's door and are service_role only -- every revoke names anon
+    -- explicitly, so no client role reaches a body and the argument contract
+    -- behind them is never read. Their probes pass a NULL company on purpose:
+    -- were a grant ever widened, the cell would move from P to the 22023 that
+    -- contract raises, which is a mismatch rather than a write.
+    ('partner_credential_company(unknown key)',
+     $q$SELECT coalesce(partner_credential_company('mx', repeat('0', 64))::text, 'none')$q$,
+     'PPPPPPP', NULL),
+    ('partner_driver_resolve(no company)',
+     $q$SELECT partner_driver_resolve(NULL, 'mx', 'mx-4711')::text$q$,
+     'PPPPPPP', NULL),
+    -- 20261008110000 made the seal a mandatory fourth argument, and this probe
+    -- called the five-argument form: every principal read 42883 `function does
+    -- not exist` instead of the permission denial, and the matrix is what
+    -- caught it. Nothing else in the project would have — a signature change
+    -- is invisible to a typechecker on the other side of PostgREST.
+    ('partner_connection_record(no company)',
+     $q$SELECT partner_connection_record(NULL, 'mx', 'not-a-hash', NULL)::text$q$,
+     'PPPPPPP', NULL),
+    -- Granted to authenticated, and it asks get_active_company_id() and
+    -- current_role_permits('drivers', true) itself. It is probed on company A's
+    -- confirmed link, so an authorised caller succeeds and the cell measures
+    -- the gate. The first version named a link that does not exist, on the
+    -- reading that the lookup's refusal would be distinguishable from the
+    -- gate's: it is not -- both raise, the kit read T for all nine principals,
+    -- and the cell measured nothing. Read that as the rule rather than the
+    -- instance: a probe whose refusals share a class cannot separate the
+    -- branches that produce them.
+    ('partner_submission_claim_driver(confirmed link of A)',
+     $q$SELECT partner_submission_claim_driver({ref:rpc_partner_link}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+    -- The server-side Belegnummer. A NULL argument means the caller's own
+    -- company, so it is read-only; only the shape of the answer is asserted,
+    -- because the number carries a clock and four random digits.
+    ('receipt_number_next(my own company)',
+     $q$SELECT (receipt_number_next(NULL) LIKE 'BEL-%')::text$q$,
+     'PTYYYYT', NULL),
+    -- The OCR gate never raises: it returns ok=false and records why. It writes
+    -- an event row on every path, refusals included, so it is probed only
+    -- inside this file's rollback.
+    ('receipt_ocr_allow()',
+     $q$SELECT receipt_ocr_allow() ->> 'ok'$q$,
+     'PNYYYYN', NULL),
+
+    -- M3's three (20261007110000). The door is service_role's alone, like the
+    -- other partner write functions, and its probe passes a NULL company so a
+    -- widened grant would move the cell from P to the 22023 its argument
+    -- contract raises rather than recording a note.
+    ('partner_note_submission_record(no company)',
+     $q$SELECT partner_note_submission_record(NULL, 'mx', 'mx-probe', 'mx-rpc', 'general')::text$q$,
+     'PPPPPPP', NULL),
+    -- M2's two (20261008100000): the human decision about a partner driver.
+    -- Both ask get_active_company_id() and the `drivers` page themselves. The
+    -- confirm is probed on the table section's PENDING link and names a driver
+    -- no other fixture has linked, so an authorised caller succeeds and the
+    -- cell measures the gate rather than a collision; company B's admin finds
+    -- no such proposal. The confirm also claims the waiting submissions inside
+    -- the same call, which this probe exercises and `partner-link-review.sql`
+    -- asserts.
+    ('partner_driver_link_confirm(pending link of A)',
+     $q$SELECT partner_driver_link_confirm({ref:partner_driver_links}, {ref:drivers}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+    ('partner_driver_link_reject(pending link of A)',
+     $q$SELECT partner_driver_link_reject({ref:partner_driver_links}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+
+    -- M1.2's reader (20261008110000). The one function in this schema that
+    -- hands back a REPLAYABLE secret, so it is service_role's alone and every
+    -- client principal must read P. A cell that ever moves off P here is the
+    -- whole exposure, not a detail.
+    ('partner_sealed_token(company A)',
+     $q$SELECT coalesce(partner_sealed_token('c0000000-0000-4000-8000-00000000000a', 'mx'), 'none')$q$,
+     'PPPPPPP', NULL),
+
+    -- M1.5's two (20261008120000). The pull writes through them, so they are
+    -- service_role's alone: a client that could call the roster apply would
+    -- invent a partner driver and then confirm it as one of its own.
+    ('partner_roster_apply(empty page)',
+     $q$SELECT partner_roster_apply('c0000000-0000-4000-8000-00000000000a', 'mx', '[]'::jsonb) ->> 'seen'$q$,
+     'PPPPPPP', NULL),
+    ('partner_pull_record(company A)',
+     $q$SELECT partner_pull_record('c0000000-0000-4000-8000-00000000000a', 'mx') ->> 'ok'$q$,
+     'PPPPPPP', NULL),
+    ('partner_vehicle_roster_apply(empty page)',
+     $q$SELECT partner_vehicle_roster_apply('c0000000-0000-4000-8000-00000000000a', 'mx', '[]'::jsonb) ->> 'seen'$q$,
+     'PPPPPPP', NULL),
+    -- The fleet import (20261015100000). Administrator only, unlike the Uber
+    -- earnings import: an editor is refused by the gate (T). Company B's
+    -- administrator is a legitimate caller with nothing pending, so it reads Y
+    -- and the cell measures the gate and not the lookup. A platform account is
+    -- refused with no context (no company, T) and with one
+    -- (platform_session_not_allowed, T).
+    ('partner_drivers_import(administrator)',
+     $q$SELECT partner_drivers_import() ->> 'ok'$q$,
+     'PTTTYYT', NULL),
+    ('partner_vehicles_import(administrator)',
+     $q$SELECT partner_vehicles_import() ->> 'ok'$q$,
+     'PTTTYYT', NULL),
+    -- The earnings import's driver resolve (20261016110000). The same gate as
+    -- the fleet import above, so the same row; an empty list is a legitimate
+    -- call for company B's administrator, so that cell measures the gate.
+    ('partner_earners_resolve(administrator)',
+     $q$SELECT partner_earners_resolve('reidey', '[]'::jsonb) ->> 'ok'$q$,
+     'PTTTYYT', NULL),
+    -- Undo the Uber import (20261016120000). Administrator only and refused in a
+    -- platform session, like the fleet import; a dry run is the call that can
+    -- be probed here without deleting the fixtures. Company B's administrator
+    -- is a legitimate caller with nothing to undo, so that cell reads Y and
+    -- measures the gate and not the lookup. The deleting run has its own file.
+    ('uber_import_undo(administrator, dry run)',
+     $q$SELECT uber_import_undo(true) ->> 'ok'$q$,
+     'PTTTYYT', NULL),
+
+    -- M4's door (20261008140000). It is service_role's. The two reviewer
+    -- decisions that used to sit beside it were dropped by 20261013110000: a
+    -- submission is accepted on arrival, so there is nothing left to decide.
+    -- tests/rls/partner-receipt-accept.sql asserts they stay gone.
+    ('partner_receipt_submission_record(no company)',
+     $q$SELECT partner_receipt_submission_record(NULL, 'mx', 'x', 'y', '2026-10-07')::text$q$,
+     'PPPPPPP', NULL),
+
+    -- The doorbell's resolver (20261008170000). A ring carries NO credential
+    -- by the owner's decision of 08.10.2026, so this function and its rate
+    -- limits are the whole boundary: a client cell moving off P would hand
+    -- anyone with the anon key the company behind a fleet id, and a counter
+    -- they could reset. tests/rls/partner-doorbell.sql probes the limits.
+    ('partner_doorbell_resolve(unknown fleet)',
+     $q$SELECT partner_doorbell_resolve('mx', 'mx-fleet') ->> 'reason'$q$,
+     'PPPPPPP', NULL),
+
+    -- The weekly Abrechnung mail (20261003120000, 20261004100000), uncovered
+    -- since it was written. Four of the five are the job's own and are
+    -- service_role's alone: a client that could call the claim would mark a
+    -- company's mail as sent without sending it, and one that could call
+    -- `week_figures` would read any company's settlement figures by id.
+    ('abrechnung_schedule_candidates(any company)',
+     $q$SELECT abrechnung_schedule_candidates(1, NULL)::text$q$,
+     'PPPPPPP', NULL),
+    ('abrechnung_week_figures(company A)',
+     $q$SELECT abrechnung_week_figures({co}, '2026-09-28')::text$q$,
+     'PPPPPPP', NULL),
+    ('abrechnung_delivery_claim(company A)',
+     $q$SELECT abrechnung_delivery_claim({co}, 'manager_summary', {co}, '2097-01-07')::text$q$,
+     'PPPPPPP', NULL),
+    -- The reminder's facts (20261015100000): the same boundary as week_figures,
+    -- for the same reason.
+    ('abrechnung_reminder_facts(company A)',
+     $q$SELECT abrechnung_reminder_facts({co}, '2026-09-28')::text$q$,
+     'PPPPPPP', NULL),
+    ('abrechnung_delivery_settle(a delivery of A)',
+     $q$SELECT abrechnung_delivery_settle({ref:abrechnung_deliveries}, true, 1)::text$q$,
+     'PPPPPPP', NULL),
+    -- The daily Uber pull (20261015100000): all four are service_role's alone.
+    -- A client that could call the writer would put income rows into a company
+    -- with no person, no role gate and no preview; one that could call the claim
+    -- would mark a day as pulled. Behaviour: tests/rls/uber-daily-pull.sql.
+    ('uber_pull_candidates(any company)',
+     $q$SELECT uber_pull_candidates(1, NULL)::text$q$,
+     'PPPPPPP', NULL),
+    ('uber_pull_claim(company A)',
+     $q$SELECT uber_pull_claim({co}, current_date - 1, 'first')::text$q$,
+     'PPPPPPP', NULL),
+    ('uber_pull_settle(a run of A)',
+     $q$SELECT uber_pull_settle({ref:uber_pull_runs}, 'failed', NULL, 0)::text$q$,
+     'PPPPPPP', NULL),
+    ('income_import_uber_system(no run)',
+     $q$SELECT income_import_uber_system(gen_random_uuid(), '[]'::jsonb)::text$q$,
+     'PPPPPPP', NULL),
+    -- The fifth is the screen's, so `authenticated` holds EXECUTE: it is
+    -- STABLE and reads only through get_active_company_id(), so a caller with
+    -- no company reads nothing rather than being refused. The platform account
+    -- with no context is that caller, which is why its cell is not P.
+    ('abrechnung_schedule_preview(a week)',
+     $q$SELECT coalesce(abrechnung_schedule_preview('2026-09-28') ->> 'ok', 'none')$q$,
+     'PNNNYYN', NULL),
+
+    -- The two cash writers that were uncovered with them. Both are the
+    -- screen's, both resolve the caller's company themselves, and both refuse
+    -- a caller without one -- so every client principal reaches the function
+    -- and is refused by its own gate rather than by a privilege.
+    -- Measured, and it corrected a guess: the till is NOT an administrator's
+    -- alone. `record_cash_movement` asks current_role_permits('cash-balance',
+    -- true), which an editor and a supervisor hold, so three roles book it and
+    -- only the viewer is refused. A platform session is refused in either mode
+    -- with its own sentence -- the Gehaltsquittung rule of 3.13a, applied to
+    -- the till: a cash movement is witnessed by somebody in the company.
+    ('record_cash_movement(company A)',
+     $q$SELECT (record_cash_movement(gen_random_uuid(), 'in', 10.00, '2026-09-28', 'mx')).id::text$q$,
+     'PTYYYYT', NULL),
+    ('issue_salary_cash_receipt(no payment)',
+     $q$SELECT issue_salary_cash_receipt(gen_random_uuid(), gen_random_uuid(), 'mx')::text$q$,
+     'PTTTTTT', NULL),
+    -- The Uber earnings import (20261013120000). Probed on the confirmed link
+    -- above, so an authorised caller of company A succeeds and the cell measures
+    -- the gate. The viewer is refused by the gate (42501, T) and company B's
+    -- administrator by the lookup (driver_not_linked, 22023, E): B holds no such
+    -- link. They are different classes on purpose, which is what lets this row
+    -- tell the gate from the lookup; the HINTs are read apart in
+    -- tests/rls/income-import-uber.sql. A platform account is refused with no
+    -- context (no company, T) and with one (platform_session_not_allowed, T).
+    ('income_import_uber(confirmed link of A)',
+     $q$SELECT income_import_uber(jsonb_build_array(jsonb_build_object(
+        'external_driver_id', '4711', 'type', 'umsatz', 'amount', '1.00',
+        'date', '2026-01-05', 'week', 1, 'description', 'Woche 1 - Uber',
+        'trip_count', NULL, 'period_start', '2026-01-05', 'period_end', '2026-01-11')))->>'inserted'$q$,
+     'PTYYYET', NULL),
+
+    -- 20261016140000, deleting a company completely. Both ask companies.hard_delete,
+    -- the owner's alone, and write their own audit row. The preview is a read of
+    -- any company; the deletion needs one marked deleted, so the line points at
+    -- a throwaway company of its own (inserted above this list) and the probe is
+    -- rolled back with the rest. tests/rls/company-deletion.sql takes both
+    -- through every refusal, every kept account and the counts.
+    ('platform_company_delete_preview(company A)',
+     $q$SELECT platform_company_delete_preview('c0000000-0000-4000-8000-00000000000a')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_delete(company marked deleted, its name)',
+     $q$SELECT platform_company_delete('c0000000-0000-4000-8000-0000000000dd', 'MX Deleted')::text$q$,
+     'PNNNNNY', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -3379,7 +3882,45 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- may confirm a particular plan — that is the function's own gate, and it is
     -- probed per principal in tests/rls/monthly-plan.sql.
     ('monthly_plan_save(execute grant only)',                        'YY'),
-    ('monthly_plan_confirm(execute grant only)',                     'YY')
+    ('monthly_plan_confirm(execute grant only)',                     'YY'),
+    -- The partner and receipt prerequisites. Measured, and two of the three
+    -- corrected a guess of mine: a support session DRAWS a Belegnummer and
+    -- PASSES the OCR gate, because current_role_permits() has a platform branch
+    -- that grants edit inside one -- 3.4a's "as the company's own administrator
+    -- would", reaching two functions written long before it. A view context is
+    -- refused by the same branch, so the pair reads T then Y, and N then Y
+    -- where the function answers by return value instead of raising.
+    ('partner_submission_claim_driver(confirmed link of A)',         'TY'),
+    ('receipt_number_next(my own company)',                          'TY'),
+    ('receipt_ocr_allow()',                                          'NY'),
+    -- The same platform branch of current_role_permits() that lets a support
+    -- session draw a Belegnummer lets it decide a link; a view context is refused by
+    -- the gate before the tenant tables' statement trigger is reached.
+    ('partner_driver_link_confirm(pending link of A)',               'TY'),
+    ('partner_driver_link_reject(pending link of A)',                'TY'),
+    -- The till and the Gehaltsquittung: refused in BOTH context modes, by the
+    -- functions themselves and with their own sentence. A cash movement and a
+    -- receipt attest to a physical handover that no platform agent witnessed,
+    -- which is a question of attestation and not of traceability -- so 3.4c's
+    -- write-audit triggers do not reopen it.
+    ('record_cash_movement(company A)',                              'TT'),
+    ('issue_salary_cash_receipt(no payment)',                        'TT'),
+    -- The preview is the screen's and STABLE: a view context reads the opened
+    -- company through get_active_company_id() like any other read, and a
+    -- support session is that company's administrator.
+    ('abrechnung_schedule_preview(a week)',                          'NY'),
+    -- Refused in both modes, with its own reason: importing a customer's
+    -- earnings from the customer's own partner connection is not an agent's act.
+    ('income_import_uber(confirmed link of A)',                       'TT'),
+    -- Refused in both modes with the same reason as the earnings import.
+    ('partner_drivers_import(administrator)',                         'TT'),
+    ('partner_vehicles_import(administrator)',                        'TT'),
+    ('partner_earners_resolve(administrator)',                        'TT'),
+    ('uber_import_undo(administrator, dry run)',                       'TT'),
+    -- An open context of either mode makes the guard on companies refuse the
+    -- delete (company_delete_context_open), and the function answers it as a
+    -- sentence: success false, so N, not an exception.
+    ('platform_company_delete(company marked deleted, its name)',     'NN')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3408,7 +3949,20 @@ BEGIN
       ('company_role_save(a new role of A)'),
       ('company_role_delete(company role of A)'),
       ('monthly_plan_save(execute grant only)'),
-      ('monthly_plan_confirm(execute grant only)')
+      ('monthly_plan_confirm(execute grant only)'),
+      ('partner_submission_claim_driver(confirmed link of A)'),
+      ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
+      ('partner_driver_link_confirm(pending link of A)'),
+      ('partner_driver_link_reject(pending link of A)'),
+      ('record_cash_movement(company A)'),
+      ('issue_salary_cash_receipt(no payment)'),
+      ('abrechnung_schedule_preview(a week)'),
+      ('income_import_uber(confirmed link of A)'),
+      ('partner_drivers_import(administrator)'),
+      ('partner_vehicles_import(administrator)'),
+      ('partner_earners_resolve(administrator)'),
+      ('uber_import_undo(administrator, dry run)'),
+      ('platform_company_delete(company marked deleted, its name)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

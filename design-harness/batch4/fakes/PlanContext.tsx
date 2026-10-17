@@ -13,11 +13,6 @@ const value = {
   planState: {
     plan: 'premium',
     status: 'active',
-    trialStart: null,
-    trialEnd: null,
-    trialDaysLeft: 0,
-    isInTrial: false,
-    isTrialExpired: false,
     isActive: true,
     carLimit: PREVIEW_CAR_LIMIT,
     billingCycle: 'monthly',

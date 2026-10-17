@@ -84,6 +84,15 @@ const BASE_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'APP_URL', 'EXTRA_CORS_OR
 const SERVICE_ENV = ['SUPABASE_SERVICE_ROLE_KEY'] as const
 const SMTP_ENV = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_SENDER', 'SMTP_SENDER_NAME'] as const
 const OTP_MAIL_ENV = ['OTP_PEPPER', ...SMTP_ENV] as const
+// The pepper without the mail credentials. `partner-intake` hashes a partner's
+// key with it and sends nothing, so bundling it with SMTP as OTP_MAIL_ENV does
+// would hand a function the means to send mail it has no reason to.
+// `OTP_PEPPER` hashes an inbound partner key; `PARTNER_SEAL_KEY` seals the
+// partner's own token so an outbound pull can replay it. Two secrets because
+// they rotate for different reasons: the pepper is shared with every
+// one-time code, and re-keying it must not force every partner token to be
+// re-sealed.
+const PARTNER_ENV = ['OTP_PEPPER', 'PARTNER_SEAL_KEY', 'PARTNER_REIDEY_BASE_URL'] as const
 
 /** Exactly the variables each worker may see. JWT_SECRET and SUPABASE_DB_URL are never passed. */
 const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
@@ -97,11 +106,13 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   ['platform-staff', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   // Mails the generated code to its target address or its company's admins.
   ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
-  // The nightly TÜV / trial notifications. Called by a host cron line with the
+  // The nightly TÜV notifications. Called by a host cron line with the
   // service key, never by the browser; it is deliberately not public, and it
   // compares the bearer against SUPABASE_SERVICE_ROLE_KEY itself, because the
   // check above admits any signed-in customer's token.
-  ['notify-expiries', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
+  // Also opens the sealed Reidey token for the scheduled Uber pull (15.10.2026),
+  // so it holds the seal key and the endpoint, and not the pepper PARTNER_ENV adds.
+  ['notify-expiries', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV, 'PARTNER_SEAL_KEY', 'PARTNER_REIDEY_BASE_URL']],
   // Google sign-in: calls the oauth_* RPCs as service_role for the signed-in
   // caller. Needs a session, so it is deliberately not in PUBLIC_FUNCTIONS.
   ['oauth-account', [...BASE_ENV, ...SERVICE_ENV]],
@@ -112,6 +123,28 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // SMTP to send, the service role to read the driver's address — which it never
   // takes from the request body.
   ['send-document', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
+  // What a partner's driver app submits — M3 carries notes, M4 adds the receipt
+  // as a `kind` here rather than another function. Deliberately NOT public: the
+  // partner presents the anon key, which this router admits because it is a
+  // token this stack signed, and that is precisely why it is not the authority.
+  // The X-Partner-Key header is, hashed with the pepper and resolved to one
+  // company by a service-role RPC over a table in app_private. No SMTP.
+  ['partner-intake', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // Connect: a company administrator pastes the token Reidey showed once.
+  // A function rather than a route on partner-intake, because that one's
+  // authority is an X-Partner-Key header and its bearer proves nothing,
+  // while here the session is the authority and the bearer is everything.
+  // Deliberately NOT public: it needs a session, and the tenancy and role
+  // checks inside it are the authorization.
+  ['partner-connect', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // The roster pull: the only caller of partner_sealed_token, and the only
+  // place a sealed token is opened. By a button and not a schedule (the
+  // owner's decision of 06.10.2026), so it needs a session like Connect.
+  ['partner-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // The Uber earnings preview: the same shape as partner-pull (session, then the
+  // sealed token), and it writes nothing. The rows are written by the database's
+  // income_import_uber with the caller's own session.
+  ['uber-earnings-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

@@ -65,8 +65,13 @@ test('the split conserves the hours, and the salaries follow them', async ({ pag
   page.on('pageerror', e => errors.push(`UNCAUGHT ${e.message}`));
 
   await signIn(page);
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
+  // Pin the month: the list opens on the newest import, which moves when a later month is added.
+  const monthSelect = page.locator('select').first();
+  const november = await monthSelect.locator('option').filter({ hasText: /November 2026/ }).first().getAttribute('value');
+  await monthSelect.selectOption(november!);
+  await page.waitForTimeout(3000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(5000);
 
@@ -82,7 +87,7 @@ test('the split conserves the hours, and the salaries follow them', async ({ pag
   // and the test passed while proving nothing. A positional selector on a screen
   // full of checkboxes is a test that cannot fail for the right reason.
   const splitRow = page.locator('label')
-    .filter({ hasText: /Ein Block über der Höchstdauer wird an seiner größten/ });
+    .filter({ hasText: /Ein Block über der Schwelle für lange Blöcke wird an seiner größten/ });
   await expect(splitRow, 'step 2 offers the split').toHaveCount(1);
 
   const box = splitRow.locator('input[type="checkbox"]');

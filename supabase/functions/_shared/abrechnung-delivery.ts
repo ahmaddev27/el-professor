@@ -34,14 +34,23 @@ import { sendMail } from './mail.ts';
 import { loadMailDeliverySettings } from './mail-template.ts';
 import { logFailure } from './otp-core.ts';
 import { loadRecipients } from './notification-delivery.ts';
-import { renderAbrechnungMail, renderAbrechnungSummaryMail } from './abrechnung-mail.ts';
+import { renderAbrechnungMail, renderAbrechnungSummaryMail, renderReminderMail } from './abrechnung-mail.ts';
+import {
+  MAX_REMINDERS_PER_RUN,
+  planReminders,
+  type ReminderCounts,
+  type ReminderFacts,
+  type ReminderTarget,
+} from './abrechnung-reminder-core.ts';
 import {
   figuresOfRow,
   planCompany,
   planDriverMails,
+  planReminder,
   weekPeriod,
   type DriverMailTarget,
   type ScheduleCompany,
+  type ReminderPlan,
   type ScheduledPlan,
   type WeekFigureRow,
 } from './abrechnung-schedule-core.ts';
@@ -69,6 +78,14 @@ export interface AbrechnungRunItem {
     | 'no_recipients' | 'no_rows' | 'lookup_failed';
 }
 
+/** One company's line of the reminder report. Counts only: no name and no address. */
+export interface ReminderRunItem extends ReminderCounts {
+  company_id: string;
+  week_monday: string;
+  sent: number;
+  failed: number;
+}
+
 export interface AbrechnungRunReport {
   mode: AbrechnungRunMode;
   companies_scanned: number;
@@ -80,6 +97,11 @@ export interface AbrechnungRunReport {
   manager_summaries_sent: number;
   manager_summaries_failed: number;
   items: AbrechnungRunItem[];
+  /** Companies with a reminder due now. */
+  reminders_due: number;
+  reminder_mails_sent: number;
+  reminder_mails_failed: number;
+  reminder_items: ReminderRunItem[];
 }
 
 export async function runAbrechnungJob(
@@ -91,6 +113,7 @@ export async function runAbrechnungJob(
     mode, companies_scanned: 0, companies_due: 0, figures_failed: 0,
     driver_mails_sent: 0, driver_mails_failed: 0,
     manager_summaries_sent: 0, manager_summaries_failed: 0, items: [],
+    reminders_due: 0, reminder_mails_sent: 0, reminder_mails_failed: 0, reminder_items: [],
   };
 
   const appUrl = Deno.env.get('APP_URL');
@@ -101,7 +124,10 @@ export async function runAbrechnungJob(
     null,
     (err) => logFailure(FN, 'mail_settings', LOG_CONTEXT, err),
   );
-  const ctx: Context = { admin, mode, now, appUrl, fromName: settings.senderName, report };
+  const ctx: Context = {
+    admin, mode, now, appUrl, fromName: settings.senderName, report,
+    remindersLeft: MAX_REMINDERS_PER_RUN,
+  };
 
   let after: string | null = null;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -111,6 +137,7 @@ export async function runAbrechnungJob(
     after = companies[companies.length - 1].company_id;
 
     for (const company of companies) {
+      await runReminderFor(ctx, company);
       const plan = planCompany(company, now);
       if (plan && (plan.driverMail || plan.managerSummary)) {
         report.companies_due += 1;
@@ -135,6 +162,95 @@ interface Context {
   appUrl: string;
   fromName: string | null | undefined;
   report: AbrechnungRunReport;
+  /** Reminder mails this run may still take, across all companies. */
+  remindersLeft: number;
+}
+
+/** One company's reminder pass; its failure is not the run's. */
+async function runReminderFor(ctx: Context, company: ScheduleCompany): Promise<void> {
+  const plan = planReminder(company, ctx.now);
+  if (!plan) return;
+  ctx.report.reminders_due += 1;
+  try {
+    await runReminders(ctx, plan);
+  } catch (err) {
+    ctx.report.figures_failed += 1;
+    logFailure(FN, 'reminder', { ...LOG_CONTEXT, company_id: plan.companyId }, err);
+  }
+}
+
+async function runReminders(ctx: Context, plan: ReminderPlan): Promise<void> {
+  const facts = await loadReminderFacts(ctx.admin, plan);
+  if (facts === null) {
+    ctx.report.figures_failed += 1;
+    return;
+  }
+  const decided = planReminders(facts, plan.coveredDriverIds, ctx.remindersLeft);
+  ctx.remindersLeft -= decided.sendable.length;
+
+  const period = weekPeriod(plan.weekMonday);
+  const item: ReminderRunItem = {
+    company_id: plan.companyId, week_monday: plan.weekMonday, sent: 0, failed: 0, ...decided.counts,
+  };
+  ctx.report.reminder_items.push(item);
+
+  // Rendered for every target in both modes, as the driver mails are, so a
+  // mail that cannot be built is a dry-run failure and never a half delivery.
+  const mails = decided.sendable.map((target) => ({
+    target,
+    mail: renderReminderMail({
+      driverName: target.driverName,
+      companyName: plan.companyName,
+      periodLabel: period.label,
+      periodRange: period.range,
+      sendTime: plan.sendTime,
+      appUrl: ctx.appUrl,
+    }),
+  }));
+  if (ctx.mode === 'dry_run') return;
+
+  for (let i = 0; i < mails.length; i += SEND_CONCURRENCY) {
+    await Promise.all(mails.slice(i, i + SEND_CONCURRENCY).map(async ({ target, mail }) => {
+      const outcome = await deliverReminder(ctx, plan, target, mail);
+      if (outcome === 'sent') { item.sent += 1; ctx.report.reminder_mails_sent += 1; }
+      else if (outcome === 'failed') { item.failed += 1; ctx.report.reminder_mails_failed += 1; }
+      else item.already_covered += 1;
+    }));
+  }
+}
+
+async function deliverReminder(
+  ctx: Context,
+  plan: ReminderPlan,
+  target: ReminderTarget,
+  mail: { subject: string; html: string; text: string },
+): Promise<'sent' | 'failed' | 'already_covered'> {
+  // NULL is the database saying no: somebody holds this reminder, or this
+  // week's driver mail is already claimed. Either way nothing is sent.
+  const claimId = await claimKind(ctx.admin, plan.companyId, plan.weekMonday, 'driver_reminder', target.driverId);
+  if (!claimId) return 'already_covered';
+  try {
+    await sendMail({ to: target.email, ...mail, fromName: ctx.fromName });
+    await settle(ctx.admin, claimId, true, 1);
+    return 'sent';
+  } catch (err) {
+    logFailure(FN, 'send_reminder', LOG_CONTEXT, err);
+    await settle(ctx.admin, claimId, false, 0);
+    return 'failed';
+  }
+}
+
+async function loadReminderFacts(admin: SupabaseClient, plan: ReminderPlan): Promise<ReminderFacts[] | null> {
+  const { data, error } = await admin.rpc('abrechnung_reminder_facts', {
+    p_company_id: plan.companyId,
+    p_week_monday: plan.weekMonday,
+  });
+  if (error) {
+    logFailure(FN, 'reminder_facts', { ...LOG_CONTEXT, company_id: plan.companyId },
+      new Error(error.code ?? 'unknown'));
+    return null;
+  }
+  return (data ?? []) as ReminderFacts[];
 }
 
 async function runCompany(ctx: Context, plan: ScheduledPlan): Promise<void> {
@@ -229,7 +345,7 @@ async function runManagerSummary(
     item.manager_summary = 'no_rows';
     return;
   }
-  const recipients = await loadRecipients(ctx.admin, plan.companyId, ctx.now);
+  const recipients = await loadRecipients(ctx.admin, plan.companyId, ctx.now, 'manager_summary');
   if (recipients === null) {
     item.manager_summary = 'lookup_failed';
     return;
@@ -304,11 +420,21 @@ async function claim(
   kind: 'driver_abrechnung' | 'manager_summary',
   targetId: string,
 ): Promise<string | null> {
+  return claimKind(admin, plan.companyId, plan.weekMonday, kind, targetId);
+}
+
+async function claimKind(
+  admin: SupabaseClient,
+  companyId: string,
+  weekMonday: string,
+  kind: 'driver_abrechnung' | 'manager_summary' | 'driver_reminder',
+  targetId: string,
+): Promise<string | null> {
   const { data, error } = await admin.rpc('abrechnung_delivery_claim', {
-    p_company_id: plan.companyId,
+    p_company_id: companyId,
     p_kind: kind,
     p_target_id: targetId,
-    p_period_key: plan.weekMonday,
+    p_period_key: weekMonday,
   });
   if (error) throw new Error(`abrechnung_delivery_claim failed (${error.code ?? 'unknown'})`);
   return typeof data === 'string' ? data : null;

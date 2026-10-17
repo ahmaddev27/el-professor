@@ -3,7 +3,7 @@ import { Plus, CreditCard as Edit, Trash2, User, Users, Mail, Lock, Eye, EyeOff,
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { supabase } from '../lib/supabase';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { formatOtpMessage } from '../lib/otpClient';
 import { inviteCreateFailure, resendInviteOutcome } from '../lib/accountFunctionResponses';
@@ -335,6 +335,7 @@ const IconAction: React.FC<{
 
 const UserManagement: React.FC = () => {
   const { t, tPlural } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const { isAdmin, profile, loading: authLoading } = useAuth();
   // Inside a support session this screen is about the company that was opened,
   // and null everywhere else — a company user's list is scoped by the function.
@@ -769,7 +770,7 @@ const UserManagement: React.FC = () => {
     // follow the UI language — see the closed list in i18n/index.ts. The German
     // filename slug matches what WerkstattPage and BargeldbestandPage already
     // write, and the date format stays de-DE like every other figure.
-    exportTableToExcel({
+    exportPicker.table('users', {
       filename: `benutzer_${new Date().toISOString().split('T')[0]}`,
       sheetTitle: t('users.export.sheetTitle'),
       moduleName: t('nav.users'),

@@ -35,7 +35,6 @@ import {
   parseInvoice,
   parseSeller,
   parseSettingAnswer,
-  parseTrial,
   planFeaturesFromForm,
   priceBookFromForm,
   priceBookToForm,
@@ -43,8 +42,6 @@ import {
   sellerFromForm,
   sellerToForm,
   settingRefusalKey,
-  trialFromForm,
-  trialToForm,
   writeCapabilityFor,
   type Seller,
 } from './platformSettings';
@@ -204,6 +201,41 @@ describe('the price book form', () => {
     expect(priceBookFromForm(pricey)).toEqual({ error: 'price_book.price_per_car_cents.premium' });
   });
 
+  it('shows the first month the German way, reads it back as cents, and keeps it through a save', () => {
+    const form = priceBookToForm(SEED_PRICE_BOOK);
+    expect(form.firstMonth).toBe('200,00');
+
+    form.firstMonth = '149,50';
+    const result = priceBookFromForm(form);
+    expect('book' in result && result.book.first_month_cents).toBe(14950);
+  });
+
+  it('an empty first month is a book with none, and 0 is a free first month', () => {
+    const form = priceBookToForm(SEED_PRICE_BOOK);
+    form.firstMonth = '';
+    const none = priceBookFromForm(form);
+    expect('book' in none && 'first_month_cents' in none.book).toBe(false);
+
+    form.firstMonth = '0';
+    const free = priceBookFromForm(form);
+    expect('book' in free && free.book.first_month_cents).toBe(0);
+  });
+
+  it('a book saved before the decision opens with an empty first month, and saves without one', () => {
+    const { first_month_cents: _none, ...old } = SEED_PRICE_BOOK;
+    const form = priceBookToForm(old);
+    expect(form.firstMonth).toBe('');
+    expect(priceBookFromForm(form)).toEqual({ book: old });
+  });
+
+  it('names the first month when it is not an amount the database would accept', () => {
+    const form = priceBookToForm(SEED_PRICE_BOOK);
+    form.firstMonth = '20x';
+    expect(priceBookFromForm(form)).toEqual({ error: 'price_book.first_month_cents' });
+    form.firstMonth = '10001,00';
+    expect(priceBookFromForm(form)).toEqual({ error: 'price_book.first_month_cents' });
+  });
+
   it('accepts a book with no fleet tiers at all', () => {
     const form = priceBookToForm(SEED_PRICE_BOOK);
     form.tiers = [];
@@ -347,36 +379,6 @@ describe('the seller', () => {
     expect(sellerAddressBlock(EMPTY_SELLER)).toEqual(['El-Professor']);
     expect(sellerAddressBlock({ ...EMPTY_SELLER, iban: 'DE02' }))
       .toEqual(['El-Professor', 'IBAN: DE02']);
-  });
-});
-
-describe('the trial length', () => {
-  it('reads the seeded document', () => {
-    expect(parseTrial({ days: 14 })).toEqual({ days: 14 });
-    expect(trialFromForm(trialToForm({ days: 14 }))).toEqual({ value: { days: 14 } });
-  });
-
-  it('refuses a document with any other key', () => {
-    expect(parseTrial({ days: 14, weeks: 2 })).toBeNull();
-    expect(parseTrial({})).toBeNull();
-  });
-
-  it('refuses a trial of no days, of half a day, or of more than a year', () => {
-    // Below a day is not a trial; above a year is a typo that would give a
-    // company free access for years.
-    expect(parseTrial({ days: 0 })).toBeNull();
-    expect(parseTrial({ days: 0.5 })).toBeNull();
-    expect(parseTrial({ days: 366 })).toBeNull();
-    expect(parseTrial({ days: '14' })).toBeNull();
-    expect(trialFromForm({ days: '0' })).toEqual({ error: 'trial.days' });
-    expect(trialFromForm({ days: '366' })).toEqual({ error: 'trial.days' });
-    expect(trialFromForm({ days: '14,5' })).toEqual({ error: 'trial.days' });
-    expect(trialFromForm({ days: '' })).toEqual({ error: 'trial.days' });
-  });
-
-  it('accepts both ends of the range the database allows', () => {
-    expect(trialFromForm({ days: '1' })).toEqual({ value: { days: 1 } });
-    expect(trialFromForm({ days: '365' })).toEqual({ value: { days: 365 } });
   });
 });
 

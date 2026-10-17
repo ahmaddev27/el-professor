@@ -1072,6 +1072,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                               periodStart: salary.period_start ?? '',
                               periodEnd: salary.period_end ?? '',
                               driverName: salary.driver_name,
+                              sourceType: payment.source_type,
                               // A numbered receipt can be issued from the view for a payment
                               // that has none: what blocks it is the same as for a new cash
                               // payment (scope and role, plan, overlapping salary rows).

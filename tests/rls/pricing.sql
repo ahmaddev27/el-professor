@@ -26,6 +26,10 @@
                     price_book_price and by compute_plan_price. Both engines
                     read the same 42 numbers out of this file, so a formula
                     that ignores the book fails here and nowhere else
+    6b. first month  the flat price of a company's first invoice
+                    (20261015160000): the alien book's own figure, the flag's
+                    default, the invoice amount in cents, and
+                    platform_invoice_quotes on real companies and invoices
     7. audit        a row per call, refusals included, with the version read and
                     the value before and after a write — and no row at all for
                     a caller who is not platform staff
@@ -183,7 +187,8 @@ BEGIN
       ('public.platform_settings_put(text,jsonb,integer)',               false, true,  false),
       ('public.get_public_config()',                                     true,  true,  false),
       ('public.get_app_config()',                                        false, true,  false),
-      ('public.compute_plan_price(text,integer,text)',                   false, true,  true),
+      ('public.compute_plan_price(text,integer,text,boolean)',           false, true,  true),
+      ('public.platform_invoice_quotes(integer,integer)',                false, true,  false),
       ('app_private.platform_setting_value(text)',                       false, false, false),
       ('app_private.platform_setting_is_pricing(text)',                  false, false, false),
       ('app_private.platform_settings_readable(text,text)',              false, false, false),
@@ -191,8 +196,8 @@ BEGIN
       ('app_private.settings_object_keys(jsonb)',                        false, false, false),
       ('app_private.settings_integer_between(jsonb,integer,integer)',    false, false, false),
       ('app_private.platform_settings_problem(text,jsonb)',              false, false, false),
-      ('app_private.price_book_price(jsonb,text,integer,text)',          false, false, false),
-      ('app_private.signup_trial_days()',                                false, false, false)
+      ('app_private.price_book_price(jsonb,text,integer,text,boolean)',  false, false, false),
+      ('app_private.invoice_amount_cents(jsonb,text,integer,text,boolean)', false, false, false)
     ) AS t(sig, anon, authn, service)
   LOOP
     PERFORM _pr_ok(format('EXECUTE on %s: anon %s, authenticated %s, service_role %s',
@@ -208,7 +213,8 @@ BEGIN
     NOT EXISTS (SELECT 1
                   FROM pg_proc p
                   JOIN pg_roles owner_role ON owner_role.oid = p.proowner
-                 WHERE p.oid IN ('public.compute_plan_price(text,integer,text)'::regprocedure,
+                 WHERE p.oid IN ('public.compute_plan_price(text,integer,text,boolean)'::regprocedure,
+                                 'public.platform_invoice_quotes(integer,integer)'::regprocedure,
                                  'public.platform_settings_get(text)'::regprocedure,
                                  'public.platform_settings_put(text,jsonb,integer)'::regprocedure,
                                  'public.get_public_config()'::regprocedure,
@@ -240,8 +246,11 @@ BEGIN
   -- flags, and 20260921120000 legal.impressum and legal.privacy;
   -- tests/rls/settings.sql, announcements.sql and legal-pages.sql cover those.
   -- This file still owns the two keys 3.9 seeded.
-  PERFORM _pr_ok('the two keys of 3.9 are seeded, both at version 1, among the thirteen that now exist',
-    (SELECT count(*) = 2 AND bool_and(version = 1 AND updated_by IS NULL)
+  -- price_book is at version 2 since 20261015160000, which added the first
+  -- month to it by migration (so nobody saved it); plan_features is untouched.
+  PERFORM _pr_ok('the two keys of 3.9 are seeded by nobody, price_book at version 2 and plan_features at 1, among the thirteen that now exist',
+    (SELECT count(*) = 2 AND bool_and(updated_by IS NULL
+                                      AND version = CASE key WHEN 'price_book' THEN 2 ELSE 1 END)
        FROM app_private.platform_settings
       WHERE key IN ('price_book', 'plan_features'))
     AND (SELECT count(*) = 13 FROM app_private.platform_settings));
@@ -255,6 +264,10 @@ BEGIN
     v_book -> 'price_per_car_cents' = '{"basic": 2000, "advanced": 4000, "premium": 7000}'::jsonb
     AND v_book -> 'fleet_discount_tiers' = '[{"min_cars": 6, "percent": 5}, {"min_cars": 11, "percent": 10}]'::jsonb
     AND (v_book ->> 'yearly_discount_percent')::integer = 10);
+  PERFORM _pr_ok('the seeded price book carries the owner''s first month: 20000 cents, whatever the plan or the car count',
+    (v_book ->> 'first_month_cents')::integer = 20000
+    AND app_private.settings_object_keys(v_book)
+      = ARRAY['first_month_cents', 'fleet_discount_tiers', 'price_per_car_cents', 'yearly_discount_percent']);
 
   PERFORM _pr_ok('the seeded feature map names all sixteen gated screens and only the three plans',
     (SELECT count(*) = 16 AND bool_and(value #>> '{}' IN ('basic', 'advanced', 'premium'))
@@ -283,9 +296,9 @@ DECLARE
   readonly constant uuid := '3b000000-0000-4000-8000-000000000004';
   admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
 BEGIN
-  PERFORM _pr_ok('read: an owner reads both pricing keys, at version 1',
+  PERFORM _pr_ok('read: an owner reads both pricing keys, the price book at version 2',
     _pr_get(owner, 'price_book', 'ok') = 'true'
-    AND _pr_get(owner, 'price_book', 'version') = '1'
+    AND _pr_get(owner, 'price_book', 'version') = '2'
     AND _pr_get(owner, 'plan_features', 'ok') = 'true');
   PERFORM _pr_ok('read: read_only reads them too (settings.read)',
     _pr_get(readonly, 'price_book', 'ok') = 'true'
@@ -326,19 +339,19 @@ DECLARE
   v_app    jsonb;
 BEGIN
   v_public := _pr_do(NULL, 'SELECT get_public_config()::text')::jsonb;
-  PERFORM _pr_ok('get_public_config: anyone gets the price book and the trial length, and nothing else',
-    app_private.settings_object_keys(v_public) = ARRAY['price_book', 'trial_days']
-    AND v_public -> 'price_book' = app_private.platform_setting_value('price_book')
-    AND (v_public ->> 'trial_days')::integer = app_private.signup_trial_days());
+  -- 20261015170000 removed the trial length from both answers.
+  PERFORM _pr_ok('get_public_config: anyone gets the price book, and nothing else',
+    app_private.settings_object_keys(v_public) = ARRAY['price_book']
+    AND v_public -> 'price_book' = app_private.platform_setting_value('price_book'));
 
   -- Since 20260920130010 feature_flags is the stored setting (seeded {}) and
   -- announcements are the ones that apply to the caller's company now; no
   -- announcement exists in this file, so both are still empty here.
   -- tests/rls/announcements.sql fills them.
   v_app := _pr_do(admin_a, 'SELECT get_app_config()::text')::jsonb;
-  PERFORM _pr_ok('get_app_config: a signed-in company user gets prices, features, the trial, the flags and the announcements',
+  PERFORM _pr_ok('get_app_config: a signed-in company user gets prices, features, the flags and the announcements',
     app_private.settings_object_keys(v_app)
-      = ARRAY['announcements', 'feature_flags', 'plan_features', 'price_book', 'trial_days']
+      = ARRAY['announcements', 'feature_flags', 'plan_features', 'price_book']
     AND v_app -> 'price_book' = app_private.platform_setting_value('price_book')
     AND v_app -> 'plan_features' = app_private.platform_setting_value('plan_features')
     AND v_app -> 'feature_flags' = '{}'::jsonb
@@ -377,28 +390,44 @@ BEGIN
   PERFORM _pr_ok('write: a price book missing the yearly discount is refused',
     _pr_put(billing, 'price_book',
             '{"price_per_car_cents": {"basic": 1, "advanced": 2, "premium": 3}, "fleet_discount_tiers": []}'::jsonb,
-            1, 'problem') = 'price_book');
+            2, 'problem') = 'price_book');
   PERFORM _pr_ok('write: a fourth plan is refused (open decision D11: the three plans are fixed)',
     _pr_put(billing, 'price_book',
-            jsonb_set(v_book, '{price_per_car_cents,gold}', '5000'::jsonb), 1, 'problem')
+            jsonb_set(v_book, '{price_per_car_cents,gold}', '5000'::jsonb), 2, 'problem')
       = 'price_book.price_per_car_cents');
   PERFORM _pr_ok('write: a price that is not whole cents is refused',
     _pr_put(billing, 'price_book',
-            jsonb_set(v_book, '{price_per_car_cents,basic}', '2000.5'::jsonb), 1, 'problem')
+            jsonb_set(v_book, '{price_per_car_cents,basic}', '2000.5'::jsonb), 2, 'problem')
       = 'price_book.price_per_car_cents.basic');
   PERFORM _pr_ok('write: a negative price is refused',
     _pr_put(billing, 'price_book',
-            jsonb_set(v_book, '{price_per_car_cents,premium}', '-1'::jsonb), 1, 'problem')
+            jsonb_set(v_book, '{price_per_car_cents,premium}', '-1'::jsonb), 2, 'problem')
       = 'price_book.price_per_car_cents.premium');
   PERFORM _pr_ok('write: tiers that do not increase are refused — a car count must reach one tier only',
     _pr_put(billing, 'price_book',
             jsonb_set(v_book, '{fleet_discount_tiers}',
-                      '[{"min_cars": 11, "percent": 10}, {"min_cars": 6, "percent": 5}]'::jsonb), 1, 'problem')
+                      '[{"min_cars": 11, "percent": 10}, {"min_cars": 6, "percent": 5}]'::jsonb), 2, 'problem')
       = 'price_book.fleet_discount_tiers.1');
   PERFORM _pr_ok('write: a discount above 100% is refused',
     _pr_put(billing, 'price_book',
-            jsonb_set(v_book, '{yearly_discount_percent}', '101'::jsonb), 1, 'problem')
+            jsonb_set(v_book, '{yearly_discount_percent}', '101'::jsonb), 2, 'problem')
       = 'price_book.yearly_discount_percent');
+
+  -- 20261015160000: the optional first-month figure
+  PERFORM _pr_ok('write: the first month must be whole cents between 0 and the per-car ceiling, as a number',
+    _pr_put(billing, 'price_book', jsonb_set(v_book, '{first_month_cents}', '-1'::jsonb), 2, 'problem')
+      = 'price_book.first_month_cents'
+    AND _pr_put(billing, 'price_book', jsonb_set(v_book, '{first_month_cents}', '200.5'::jsonb), 2, 'problem')
+      = 'price_book.first_month_cents'
+    AND _pr_put(billing, 'price_book', jsonb_set(v_book, '{first_month_cents}', '1000001'::jsonb), 2, 'problem')
+      = 'price_book.first_month_cents'
+    AND _pr_put(billing, 'price_book', jsonb_set(v_book, '{first_month_cents}', '"20000"'::jsonb), 2, 'problem')
+      = 'price_book.first_month_cents');
+  PERFORM _pr_ok('write: a book may name no first month (the three-key book of every earlier release), or a free one',
+    app_private.platform_settings_problem('price_book', v_book - 'first_month_cents') IS NULL
+    AND app_private.platform_settings_problem('price_book', jsonb_set(v_book, '{first_month_cents}', '0'::jsonb)) IS NULL);
+  PERFORM _pr_ok('write: a fifth key that is not the first month is refused',
+    _pr_put(billing, 'price_book', v_book || '{"first_month": 20000}'::jsonb, 2, 'problem') = 'price_book');
 
   -- The feature map is settings.manage, not pricing.manage. Billing may price
   -- the plans; it may not decide what they unlock. pricing.manage is held by
@@ -456,7 +485,7 @@ BEGIN
   PERFORM _pr_ok('write: only the accepted write changed a row, and it recorded who',
     (SELECT version = 2 AND updated_by = '3b000000-0000-4000-8000-000000000001'
        FROM app_private.platform_settings WHERE key = 'plan_features')
-    AND (SELECT version = 1 FROM app_private.platform_settings WHERE key = 'price_book'));
+    AND (SELECT version = 2 FROM app_private.platform_settings WHERE key = 'price_book'));
 END $$;
 
 -- ─── 6. an alien price book, shared with pricing.parity.test.ts ─────────────
@@ -482,7 +511,8 @@ INSERT INTO _pr_alien (book, expected) VALUES ($alien_book$
     { "min_cars": 4, "percent": 25 },
     { "min_cars": 9, "percent": 50 }
   ],
-  "yearly_discount_percent": 20
+  "yearly_discount_percent": 20,
+  "first_month_cents": 31700
 }
 $alien_book$::jsonb, $alien_expected$
 {
@@ -543,9 +573,9 @@ BEGIN
   PERFORM _pr_ok(format('alien book: price_book_price answers all %s listed combinations', v_count), v_count = 42);
 
   -- and through the real entry point, once the book is the one in the table
-  PERFORM _pr_ok('alien book: billing installs it (pricing.manage), version 1 -> 2',
-    _pr_put(billing, 'price_book', v_alien, 1, 'ok') = 'true'
-    AND _pr_put(billing, 'price_book', v_alien, 2, 'version') = '3');
+  PERFORM _pr_ok('alien book: billing installs it (pricing.manage), version 2 -> 3',
+    _pr_put(billing, 'price_book', v_alien, 2, 'ok') = 'true'
+    AND _pr_put(billing, 'price_book', v_alien, 3, 'version') = '4');
 
   PERFORM _pr_reset();
   FOR r IN SELECT key, value::numeric AS want FROM jsonb_each_text(v_expected) LOOP
@@ -568,6 +598,214 @@ BEGIN
     AND public.compute_plan_price(NULL, 1, 'monthly') = 12.5
     AND public.compute_plan_price('basic', 1, 'weekly') = 12.5
     AND public.compute_plan_price('basic', 1, NULL) = 12.5);
+END $$;
+
+-- ─── 6b. the first month, under the alien book ──────────────────────────────
+
+/*
+  The alien book names a first month of 317,00 EUR (31700 cents). Nothing we
+  ship resembles it, so a formula that hard-codes the owner's 200,00, or that
+  reads the figure from anywhere but the book, fails here. The book is the one
+  section 6 installed: the table holds the alien book now.
+
+  Premium, 5 cars under it: 5 x 99,00 x (1 - 25%) = 371,25 a month; yearly
+  371,25 x 12 x (1 - 20%) = 3564,00, which is 297,00 in twelve parts.
+*/
+DO $$
+DECLARE
+  v_alien  jsonb;
+  v_plan   text;
+  v_cars   integer;
+  v_cycle  text;
+  v_count  integer := 0;
+BEGIN
+  PERFORM _pr_reset();
+  SELECT book INTO v_alien FROM _pr_alien;
+
+  FOREACH v_plan IN ARRAY ARRAY['basic', 'advanced', 'premium', 'gold'] LOOP
+    FOREACH v_cars IN ARRAY ARRAY[1, 2, 5, 9, 25] LOOP
+      FOREACH v_cycle IN ARRAY ARRAY['monthly', 'yearly'] LOOP
+        IF public.compute_plan_price(v_plan, v_cars, v_cycle, true) IS DISTINCT FROM 317
+           OR app_private.price_book_price(v_alien, v_plan, v_cars, v_cycle, true) IS DISTINCT FROM 317 THEN
+          RAISE EXCEPTION 'FAIL: the first invoice of (%, %, %) is not the alien book''s 317,00', v_plan, v_cars, v_cycle;
+        END IF;
+        -- the flag false is the per-car price, unchanged
+        IF public.compute_plan_price(v_plan, v_cars, v_cycle, false)
+             IS DISTINCT FROM app_private.price_book_price(v_alien, v_plan, v_cars, v_cycle) THEN
+          RAISE EXCEPTION 'FAIL: the flag false changed the per-car price of (%, %, %)', v_plan, v_cars, v_cycle;
+        END IF;
+        v_count := v_count + 1;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+  PERFORM _pr_ok(format('alien book: the first invoice is its 317,00 for all %s plan, car and cycle combinations', v_count), v_count = 40);
+
+  -- A book that names no first month has none: the flag changes nothing. The
+  -- 42 numbers of section 6 are the witness.
+  PERFORM _pr_ok('alien book without a first month: the flag true prices per car, all 42 listed combinations',
+    (SELECT bool_and(app_private.price_book_price(v_alien - 'first_month_cents', split_part(e.key, '|', 1),
+                                                  split_part(e.key, '|', 2)::integer, split_part(e.key, '|', 3), true)
+                       = e.value::numeric)
+       FROM _pr_alien a, jsonb_each_text(a.expected) e));
+
+  PERFORM _pr_ok('alien book: compute_plan_price defaults the flag to false (the three-argument call is the per-car price)',
+    public.compute_plan_price('premium', 5, 'monthly') = 371.25
+    AND public.compute_plan_price('premium', 5, 'monthly', true) = 317);
+
+  PERFORM _pr_ok('alien book: an invoice amount is whole cents — flat first, then per car, a yearly company in twelve parts',
+    app_private.invoice_amount_cents(v_alien, 'premium', 5, 'monthly', true)  = 31700
+    AND app_private.invoice_amount_cents(v_alien, 'premium', 5, 'yearly',  true)  = 31700
+    AND app_private.invoice_amount_cents(v_alien, 'premium', 5, 'monthly', false) = 37125
+    AND app_private.invoice_amount_cents(v_alien, 'premium', 5, 'yearly',  false) = 29700
+    AND app_private.invoice_amount_cents(v_alien - 'first_month_cents', 'premium', 5, 'monthly', true) = 37125);
+END $$;
+
+/** One quote of platform_invoice_quotes(month, year) as p_user: a field of one company's item. */
+CREATE OR REPLACE FUNCTION _pr_quote(p_user uuid, p_month integer, p_year integer, p_company uuid,
+                                     p_field text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_answer text;
+BEGIN
+  v_answer := _pr_do(p_user, format('SELECT platform_invoice_quotes(%s, %s)::text', p_month, p_year));
+  IF v_answer LIKE 'ERR %' THEN
+    RETURN v_answer;
+  END IF;
+  RETURN coalesce((SELECT i ->> p_field
+                     FROM jsonb_array_elements(v_answer::jsonb -> 'items') AS t(i)
+                    WHERE i ->> 'company_id' = p_company::text), '<absent>');
+END $$;
+
+/*
+  Real companies, subscriptions and invoices. Each case below is its own
+  assertion, so a mutation that breaks one direction does not hide behind the
+  other:
+
+    f1  premium, 5 cars, monthly, no invoice yet
+    f2  premium, 5 cars, yearly, an invoice for 10/2026
+    f3  premium, 5 cars, monthly, only a CANCELED invoice for 9/2026
+    f4  premium, 5 cars, monthly, an invoice for 12/2025 (a year boundary)
+    f5  premium, 5 cars, monthly, subscription paused
+*/
+INSERT INTO subscription_plans (id, name, monthly_price, included_cars)
+VALUES ('f1000000-0000-4000-8000-0000000000aa', 'FM plan', 200, 5);
+
+INSERT INTO companies (id, name, slug, approval_status, status, plan, subscription_status) VALUES
+  ('f1000000-0000-4000-8000-000000000001', 'FM f1', 'fm-f1', 'approved', 'active', 'basic', 'inactive'),
+  ('f1000000-0000-4000-8000-000000000002', 'FM f2', 'fm-f2', 'approved', 'active', 'basic', 'inactive'),
+  ('f1000000-0000-4000-8000-000000000003', 'FM f3', 'fm-f3', 'approved', 'active', 'basic', 'inactive'),
+  ('f1000000-0000-4000-8000-000000000004', 'FM f4', 'fm-f4', 'approved', 'active', 'basic', 'inactive'),
+  ('f1000000-0000-4000-8000-000000000005', 'FM f5', 'fm-f5', 'approved', 'active', 'basic', 'inactive');
+
+UPDATE companies
+   SET plan = 'premium', subscription_car_limit = 5,
+       billing_cycle = CASE id WHEN 'f1000000-0000-4000-8000-000000000002' THEN 'yearly' ELSE 'monthly' END
+ WHERE id::text LIKE 'f1000000-0000-4000-8000-00000000000%';
+
+INSERT INTO company_subscriptions (id, company_id, plan_id, status, billing_day, monthly_price)
+SELECT ('f2000000-0000-4000-8000-00000000000' || right(c.id::text, 1))::uuid, c.id,
+       'f1000000-0000-4000-8000-0000000000aa',
+       CASE WHEN c.id = 'f1000000-0000-4000-8000-000000000005' THEN 'paused' ELSE 'active' END,
+       1, 200
+  FROM companies c
+ WHERE c.id::text LIKE 'f1000000-0000-4000-8000-00000000000%';
+
+INSERT INTO subscription_invoices (company_id, subscription_id, invoice_month, invoice_year, invoice_number, amount, status, due_date) VALUES
+  ('f1000000-0000-4000-8000-000000000002', 'f2000000-0000-4000-8000-000000000002', 10, 2026, 'FM-2026-0002', 200, 'open',     '2026-10-05'),
+  ('f1000000-0000-4000-8000-000000000003', 'f2000000-0000-4000-8000-000000000003',  9, 2026, 'FM-2026-0003', 200, 'canceled', '2026-09-05'),
+  ('f1000000-0000-4000-8000-000000000004', 'f2000000-0000-4000-8000-000000000004', 12, 2025, 'FM-2025-0004', 200, 'paid',     '2025-12-05');
+
+DO $$
+DECLARE
+  billing  constant uuid := '3b000000-0000-4000-8000-000000000003';
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  support  constant uuid := '3b000000-0000-4000-8000-000000000002';
+  readonly constant uuid := '3b000000-0000-4000-8000-000000000004';
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  f1 constant uuid := 'f1000000-0000-4000-8000-000000000001';
+  f2 constant uuid := 'f1000000-0000-4000-8000-000000000002';
+  f3 constant uuid := 'f1000000-0000-4000-8000-000000000003';
+  f4 constant uuid := 'f1000000-0000-4000-8000-000000000004';
+  f5 constant uuid := 'f1000000-0000-4000-8000-000000000005';
+  v_before bigint;
+BEGIN
+  -- THE FIRST INVOICE is the flat price: 317,00, whatever the car count is.
+  PERFORM _pr_ok('quote: a company with no invoice at all is quoted its FIRST invoice at the flat price',
+    _pr_quote(billing, 10, 2026, f1, 'first_invoice') = 'true'
+    AND _pr_quote(billing, 10, 2026, f1, 'amount_cents') = '31700');
+
+  -- THE SECOND INVOICE is the book per car. f2 is a yearly company: 3564,00 a
+  -- year in twelve parts is 297,00.
+  PERFORM _pr_ok('quote: the month after its first invoice, a yearly company is quoted per car in twelve parts, not the flat price',
+    _pr_quote(billing, 11, 2026, f2, 'first_invoice') = 'false'
+    AND _pr_quote(billing, 11, 2026, f2, 'amount_cents') = '29700');
+
+  -- Its own period is not "earlier": the invoice that already exists is
+  -- still the first, so a re-run of generation quotes the same figure.
+  PERFORM _pr_ok('quote: the period that already holds the first invoice is still quoted as the first',
+    _pr_quote(billing, 10, 2026, f2, 'first_invoice') = 'true'
+    AND _pr_quote(billing, 10, 2026, f2, 'amount_cents') = '31700');
+
+  -- Per car for a monthly company in a later month: 5 x 99,00 less 25% = 371,25.
+  PERFORM _pr_ok('quote: a monthly company''s later invoice is its price per car, 5 x 99,00 less 25%',
+    _pr_quote(billing, 12, 2026, f4, 'first_invoice') = 'false'
+    AND _pr_quote(billing, 12, 2026, f4, 'amount_cents') = '37125');
+
+  -- Earlier means earlier in time, across a year boundary.
+  PERFORM _pr_ok('quote: an invoice of December 2025 is earlier than January 2026',
+    _pr_quote(billing, 1, 2026, f4, 'first_invoice') = 'false'
+    AND _pr_quote(billing, 1, 2026, f4, 'amount_cents') = '37125');
+  PERFORM _pr_ok('quote: an invoice of December 2025 is not earlier than November 2025 — that one would be the first',
+    _pr_quote(billing, 11, 2025, f4, 'first_invoice') = 'true'
+    AND _pr_quote(billing, 11, 2025, f4, 'amount_cents') = '31700');
+
+  -- A cancelled invoice never happened.
+  PERFORM _pr_ok('quote: a company whose only earlier invoice is cancelled is still quoted its first',
+    _pr_quote(billing, 10, 2026, f3, 'first_invoice') = 'true'
+    AND _pr_quote(billing, 10, 2026, f3, 'amount_cents') = '31700');
+
+  PERFORM _pr_ok('quote: only active subscriptions are quoted',
+    _pr_quote(billing, 10, 2026, f5, 'amount_cents') = '<absent>');
+
+  -- The item carries the company's own plan, car limit and cycle.
+  PERFORM _pr_ok('quote: the item names the company''s plan, car limit and billing cycle',
+    _pr_quote(billing, 10, 2026, f1, 'plan') = 'premium'
+    AND _pr_quote(billing, 10, 2026, f1, 'car_limit') = '5'
+    AND _pr_quote(billing, 10, 2026, f2, 'billing_cycle') = 'yearly');
+
+  -- Authority: billing.manage, which owner and billing hold.
+  PERFORM _pr_ok('quote: owner and billing are answered',
+    _pr_quote(owner, 10, 2026, f1, 'amount_cents') = '31700'
+    AND _pr_quote(billing, 10, 2026, f1, 'amount_cents') = '31700');
+  PERFORM _pr_ok('quote: support and read_only are refused with a return value, not an exception',
+    _pr_do(support,  'SELECT platform_invoice_quotes(10, 2026) ->> ''reason''') = 'not_authorized'
+    AND _pr_do(readonly, 'SELECT platform_invoice_quotes(10, 2026) ->> ''reason''') = 'not_authorized');
+  PERFORM _pr_ok('quote: a company admin is refused and writes no audit row',
+    _pr_do(admin_a, 'SELECT platform_invoice_quotes(10, 2026) ->> ''reason''') = 'not_authorized'
+    AND NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log WHERE actor_user_id = admin_a));
+  PERFORM _pr_ok('quote: anon and the service role hold no EXECUTE',
+    _pr_do(NULL, 'SELECT platform_invoice_quotes(10, 2026)::text') LIKE 'ERR 42501%'
+    AND _pr_do(NULL, 'SELECT platform_invoice_quotes(10, 2026)::text', true) LIKE 'ERR 42501%');
+  PERFORM _pr_ok('quote: a month or year out of range is a broken contract',
+    _pr_do(billing, 'SELECT platform_invoice_quotes(13, 2026)::text') LIKE 'ERR 22023%'
+    AND _pr_do(billing, 'SELECT platform_invoice_quotes(0, 2026)::text') LIKE 'ERR 22023%'
+    AND _pr_do(billing, 'SELECT platform_invoice_quotes(5, 2019)::text') LIKE 'ERR 22023%'
+    AND _pr_do(billing, 'SELECT platform_invoice_quotes(NULL, 2026)::text') LIKE 'ERR 22023%');
+
+  -- The audit: one read row per call, a refusal included.
+  PERFORM _pr_reset();
+  SELECT count(*) INTO v_before FROM app_private.platform_audit_log WHERE action = 'platform_read.invoice_quotes';
+  PERFORM _pr_do(billing, 'SELECT platform_invoice_quotes(10, 2026)::text');
+  PERFORM _pr_do(support, 'SELECT platform_invoice_quotes(10, 2026)::text');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('quote: one read row per call — ok for billing, denied for support',
+    (SELECT count(*) FROM app_private.platform_audit_log WHERE action = 'platform_read.invoice_quotes') = v_before + 2
+    AND EXISTS (SELECT 1 FROM app_private.platform_audit_log
+                 WHERE action = 'platform_read.invoice_quotes' AND category = 'read'
+                   AND outcome = 'denied' AND actor_user_id = support)
+    AND (SELECT after_value ->> 'returned' FROM app_private.platform_audit_log
+          WHERE action = 'platform_read.invoice_quotes' AND outcome = 'ok' AND actor_user_id = billing
+          ORDER BY id DESC LIMIT 1) IS NOT NULL);
 END $$;
 
 -- Fail closed: no price book, no price. Undone immediately.
@@ -626,8 +864,8 @@ BEGIN
   PERFORM _pr_ok('audit: an accepted write keeps the value before and the value after, with both versions',
     v_row.actor_user_id = billing
     AND v_row.actor_role = 'billing'
-    AND (v_row.before_value ->> 'version')::integer = 2
-    AND (v_row.after_value  ->> 'version')::integer = 3
+    AND (v_row.before_value ->> 'version')::integer = 3
+    AND (v_row.after_value  ->> 'version')::integer = 4
     AND v_row.before_value -> 'value' IS NOT NULL
     AND v_row.after_value  -> 'value' = (SELECT book FROM _pr_alien));
 

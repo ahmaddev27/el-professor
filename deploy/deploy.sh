@@ -333,6 +333,28 @@ if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
 fi
 unset OTP_PEPPER
 
+# The partner token seal (M1.2). OPTIONAL: a connection without it verifies an
+# inbound push and makes no outbound pull, so an empty value is a working
+# deployment with one feature dormant — which is why this does not `fail` on a
+# missing key the way the pepper does. What IS enforced, once a value exists:
+# the 32-character floor AES-256 needs, and that staging does not share it with
+# production, because staging runs on a copy of production's data and a shared
+# key would make one database's sealed tokens openable with the other's. Neither
+# value is ever printed.
+PARTNER_SEAL_KEY="$(grep -E '^PARTNER_SEAL_KEY=' .env | cut -d= -f2- | tr -d '\r')" || true
+if [ -n "$PARTNER_SEAL_KEY" ]; then
+  [ "${#PARTNER_SEAL_KEY}" -ge 32 ] || fail "PARTNER_SEAL_KEY is set but shorter than 32 characters; generate one with: openssl rand -base64 48"
+  if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
+    prod_seal="$(grep -E '^PARTNER_SEAL_KEY=' /srv/PRO/deploy/.env | cut -d= -f2- | tr -d '\r')" || true
+    if [ -n "$prod_seal" ]; then
+      [ "$(printf '%s' "$PARTNER_SEAL_KEY" | sha256sum | cut -c1-16)" != "$(printf '%s' "$prod_seal" | sha256sum | cut -c1-16)" ] \
+        || fail "staging and production share a PARTNER_SEAL_KEY"
+    fi
+    unset prod_seal
+  fi
+fi
+unset PARTNER_SEAL_KEY
+
 # Google sign-in (plan step 1.6). With GOOGLE_SIGNIN_ENABLED=true GoTrue opens
 # its own signup, and Kong's auth-v1-closed block is then all that keeps
 # /signup, /otp and /magiclink from creating accounts, so a release without the

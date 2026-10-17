@@ -1,6 +1,7 @@
-import React, { useState, useEffect, type ReactNode } from 'react';
-import { Plus, RotateCw, Trash2 } from 'lucide-react';
+import React, { useCallback, useState, useEffect, type ReactNode } from 'react';
+import { DownloadCloud, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
@@ -8,8 +9,16 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { Receipt, Driver } from '../types/receipt';
 import ReceiptList, { PdfFilterInfo } from '../components/ReceiptList';
 import ReceiptModal from '../components/ReceiptModal';
-import { Alert, Button, ConfirmDialog, DataTable, KpiCard, PageHeader } from '../components/ui';
-import { exportTableToExcel } from '../utils/excelExport';
+import {
+  Alert,
+  Button,
+  ConfirmDialog,
+  DataTable,
+  KpiCard,
+  PageHeader,
+} from '../components/ui';
+import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildBelegeExportOptions, type ReceiptExportFilters } from '../utils/belegeExport';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { generateReceiptPdf } from '../utils/receiptPdf';
@@ -26,7 +35,11 @@ interface ConfirmModalState {
 
 const BelegePage: React.FC = () => {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const { user } = useAuth();
+  // The company whose data this screen queries, which is the opened one
+  // inside a platform context and the membership otherwise (plan 3.4b).
+  const { effectiveCompanyId } = useSuperAdmin();
   // The rights of the company the session is in: a read context writes nothing
   // (plan 3.4b), and the database refuses these three the same way.
   const { canEdit, canDelete, canCreate } = useCompanyScope();
@@ -44,6 +57,16 @@ const BelegePage: React.FC = () => {
   // while it is set. Without it a failed read wrote a workbook whose totals row
   // claimed 0,00 € for a company that has Belege.
   const [loadFailed, setLoadFailed] = useState(false);
+  // Belege from the driver app are Belege the moment they arrive (owner,
+  // 13.10.2026), so there is no inbox and nothing to accept. What can still be
+  // waiting is one whose driver nobody has linked yet: it is recorded, and it
+  // becomes a Beleg when the link is confirmed. null means "not known": a count
+  // whose read failed must not be drawn as 0, which would claim nothing waits.
+  const [waitingForLink, setWaitingForLink] = useState<number | null>(null);
+  // The fleet the catch-up asks. Null means "no connection to ask", which is
+  // also what a failed read leaves — and then the button is not drawn, which is
+  // the honest outcome either way: there is nothing this screen can fetch.
+  const [connection, setConnection] = useState<{ partner: string; fleet: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
     isOpen: false,
     title: '',
@@ -58,6 +81,48 @@ const BelegePage: React.FC = () => {
   useEffect(() => {
     if (!dbLoading) loadData();
   }, [dbLoading]);
+
+  const loadWaitingForLink = useCallback(async () => {
+    if (!effectiveCompanyId) {
+      setWaitingForLink(null);
+      return;
+    }
+    const { count, error } = await supabase
+      .from('partner_receipt_submissions')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', effectiveCompanyId)
+      .eq('status', 'pending');
+    setWaitingForLink(error ? null : count ?? 0);
+  }, [effectiveCompanyId]);
+
+  const loadConnection = useCallback(async () => {
+    if (!effectiveCompanyId) {
+      setConnection(null);
+      return;
+    }
+    const { data } = await supabase
+      .from('partner_connections')
+      .select('partner, external_company_id')
+      .eq('company_id', effectiveCompanyId)
+      .neq('status', 'revoked')
+      .limit(1)
+      .maybeSingle();
+    const fleet = (data?.external_company_id as string | null)?.trim() ?? '';
+    // A connection recorded before the partner answered with an identity has
+    // no fleet id, and there is nothing to fetch by — so it is not one.
+    setConnection(data?.partner && fleet !== ''
+      ? { partner: data.partner as string, fleet }
+      : null);
+  }, [effectiveCompanyId]);
+
+  useEffect(() => { void loadConnection(); }, [loadConnection]);
+
+  useEffect(() => { void loadWaitingForLink(); }, [loadWaitingForLink]);
+
+  // The one recovery for a ring that never arrived (src/hooks/usePartnerCatchUp.ts):
+  // it asks the partner what is waiting and ingests it. It outlived the inbox
+  // because nothing else can retry a lost ring.
+  const { catchUp, fetching, available: canCatchUp } = usePartnerCatchUp(connection);
 
   const loadData = async () => {
     setLoading(true);
@@ -161,7 +226,7 @@ const BelegePage: React.FC = () => {
     Beleg the company had ever entered and stamped it "Gefilterte Auswahl".
   */
   const handleExportExcel = (rows: Receipt[], filters: ReceiptExportFilters) => {
-    exportTableToExcel(buildBelegeExportOptions(rows, filters, t));
+    exportPicker.table('belege', buildBelegeExportOptions(rows, filters, t));
   };
 
   const handleDownloadPdf = (filtered: Receipt[], filterInfo: PdfFilterInfo) => {
@@ -242,17 +307,53 @@ const BelegePage: React.FC = () => {
           wrapped in a fragment, which PageHeader would render as an empty
           actions row for a reader who may not add. */}
       {header(
-        canCreate ? (
-          <Button
-            onClick={() => {
-              setEditingReceipt(null);
-              setIsReceiptModalOpen(true);
-            }}
-          >
-            <Plus aria-hidden />
-            {t('belege.add')}
-          </Button>
+        canCreate || canCatchUp ? (
+          <>
+            {canCatchUp && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void (async () => {
+                    if (await catchUp()) {
+                      await loadData();
+                      await loadWaitingForLink();
+                    }
+                  })();
+                }}
+                disabled={fetching}
+                loading={fetching}
+                title={t('partner.catchup.hint')}
+              >
+                <DownloadCloud aria-hidden />
+                {t('partner.catchup.action')}
+              </Button>
+            )}
+            {canCreate && (
+              <Button
+                onClick={() => {
+                  setEditingReceipt(null);
+                  setIsReceiptModalOpen(true);
+                }}
+              >
+                <Plus aria-hidden />
+                {t('belege.add')}
+              </Button>
+            )}
+          </>
         ) : undefined,
+      )}
+
+      {/* One list. The driver app's Belege are in it beside the company's own,
+          with the driver as the author (owner, 13.10.2026: no status, no
+          review, always accepted). */}
+      {waitingForLink !== null && waitingForLink > 0 && (
+        <Alert
+          tone="caution"
+          title={t('belege.waitingForLink.title', { count: String(waitingForLink) })}
+          className="mb-4"
+        >
+          {t('belege.waitingForLink.body')}
+        </Alert>
       )}
 
       <ReceiptList

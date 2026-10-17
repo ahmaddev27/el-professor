@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import FahrtenbuchImportModal, { DriverOption, CarOption } from './FahrtenbuchImportModal';
 import { exportFahrtenbuch } from '../utils/fahrtenbuchExport';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildFahrtenlisteExport } from '../utils/tableExportRows';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -85,6 +85,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const { isAdmin, isSuperAdmin } = useAuth();
   const { success, error: showError } = useToast();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
   const {
     imports, trips,
@@ -262,7 +263,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
     filterSummary.push(t('imp.trips.activeAndCanceled', { active: activeCount, canceled: canceledCount }));
 
     try {
-      exportTableToExcel(buildFahrtenlisteExport({
+      exportPicker.table('fahrtenliste', buildFahrtenlisteExport({
         trips: filteredTrips,
         filterSummary,
         year,

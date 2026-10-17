@@ -7,6 +7,7 @@ import {
   invoiceCompanyAddress,
   invoiceRpcArgs,
   parseBillingPage,
+  parseInvoiceQuotes,
   parseInvoiceRow,
   parseInvoiceSummary,
   parseSubscriptionRow,
@@ -252,5 +253,35 @@ describe('collectAllPages', () => {
     const fetchPage = vi.fn(async (i: number) =>
       i === 0 ? page([row('a')], 9) : page([], 9));
     expect(await collectAllPages<PlatformInvoiceRow, PlatformInvoiceSummary>(fetchPage)).toBeNull();
+  });
+});
+
+describe('parseInvoiceQuotes', () => {
+  const item = (over: Record<string, unknown> = {}) => ({
+    subscription_id: 's1', company_id: 'c1', company_name: 'MoveNow', plan: 'premium',
+    car_limit: 5, billing_cycle: 'monthly', first_invoice: true, amount_cents: 20000, ...over,
+  });
+
+  it('reads each item by subscription id, in integer cents', () => {
+    const quotes = parseInvoiceQuotes({ ok: true, items: [item(), item({ subscription_id: 's2', company_id: 'c2', first_invoice: false, amount_cents: 35000 })] });
+    expect(quotes?.get('s1')).toEqual({ subscriptionId: 's1', companyId: 'c1', firstInvoice: true, amountCents: 20000 });
+    expect(quotes?.get('s2')).toEqual({ subscriptionId: 's2', companyId: 'c2', firstInvoice: false, amountCents: 35000 });
+  });
+
+  it('is null, never an empty map, for a refusal or a shape it does not know', () => {
+    expect(parseInvoiceQuotes({ ok: false, reason: 'not_authorized' })).toBeNull();
+    expect(parseInvoiceQuotes({ ok: true })).toBeNull();
+    expect(parseInvoiceQuotes(null)).toBeNull();
+  });
+
+  it('refuses the whole answer when one amount could not become an invoice', () => {
+    for (const amount_cents of [350.5, -1, '35000', null, undefined]) {
+      expect(parseInvoiceQuotes({ ok: true, items: [item(), item({ subscription_id: 's2', amount_cents })] })).toBeNull();
+    }
+    expect(parseInvoiceQuotes({ ok: true, items: [item({ first_invoice: 'yes' })] })).toBeNull();
+  });
+
+  it('an empty list of items is a valid, empty answer', () => {
+    expect(parseInvoiceQuotes({ ok: true, items: [] })?.size).toBe(0);
   });
 });

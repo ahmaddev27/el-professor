@@ -22,11 +22,12 @@ import SalaryDetailsModal from './SalaryDetailsModal';
 import SalaryPeriodsModal from './SalaryPeriodsModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
-import { exportSalariesToExcel } from '../utils/excelExport';
+import { buildSalarySheets, salaryExportFilename } from '../utils/listExportSheets';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { findOverlappingSalaryPeriods, groupSalaryPeriodsByDriver } from '../utils/salaryPeriodOverlap';
 import { formatSalaryDue, formatStoredDate, salaryRowWriteRefusal } from '../utils/salaryRowEdit';
-import { calcSalaryFromIncome, salaryBase, salaryDueState } from '../utils/salaryDue';
+import { calcSalaryFromIncome, salaryBase, salaryDueState, sumIncomeAmount } from '../utils/salaryDue';
 import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -59,6 +60,7 @@ interface SalariesManagementProps {
 
 const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [salaries, setSalaries] = useState<Salary[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [calculations, setCalculations] = useState<SalaryCalculation[]>([]);
@@ -191,18 +193,14 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       );
 
       // Online revenue = Umsatz + Aktionen
-      const revenue = driverIncomes
-        .filter(i => i.type === 'umsatz' || i.type === 'aktionen')
-        .reduce((sum, i) => sum + Number(i.amount), 0);
+      const revenue = sumIncomeAmount(driverIncomes, ['umsatz', 'aktionen']);
 
       // Tips belong 100% to driver
-      const tips = driverIncomes
-        .filter(i => i.type === 'trinkgeld')
-        .reduce((sum, i) => sum + Number(i.amount), 0);
+      const tips = sumIncomeAmount(driverIncomes, ['trinkgeld']);
 
       // (Umsatz + Aktionen) × salary_ratio + Trinkgeld × 100%, and the default
       // ratio for a driver who has none — utils/salaryDue.ts holds the rule.
-      const { salaryRatio, revenueShare, amountDue } = calcSalaryFromIncome({
+      const { salaryRatio, revenueShare, amountDue, unrecovered } = calcSalaryFromIncome({
         revenue,
         tips,
         salaryRatio: driver.salary_ratio,
@@ -243,6 +241,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         tips,
         revenue_share: revenueShare,
         amount_due: amountDue,
+        unrecovered,
         // `!= null` and not truthiness: an adjustment to zero is a decision.
         netto_salary: existingSalary?.netto_salary != null ? Number(existingSalary.netto_salary) : undefined,
         status: existingSalary?.status || 'unpaid',
@@ -327,8 +326,13 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       warning(t('sal.export.noDataTitle'), t('sal.export.noDataMessage'));
       return;
     }
-    exportSalariesToExcel(calculations, periodStart, periodEnd);
-    success(t('sal.export.successTitle'), t('sal.export.successMessage'));
+    exportPicker.sheets(
+      'salaries',
+      salaryExportFilename(periodStart, periodEnd),
+      buildSalarySheets(calculations, periodStart, periodEnd),
+      // The toast waits for the file: the chooser can still be cancelled.
+      () => success(t('sal.export.successTitle'), t('sal.export.successMessage')),
+    );
   };
 
   const openStatusModal = (salary: SalaryCalculation, newStatus: 'paid' | 'unpaid') => {
@@ -393,6 +397,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   const totalDue = calculations.reduce((sum, c) => sum + salaryBase(c), 0);
   const totalTips = calculations.reduce((sum, c) => sum + c.tips, 0);
   const totalRevenueShare = calculations.reduce((sum, c) => sum + c.revenue_share, 0);
+  const unrecoveredRows = calculations.filter(c => (c.unrecovered ?? 0) > 0);
   const paidCount = calculations.filter(c => c.status === 'paid').length;
   const unpaidCount = calculations.filter(c => c.status === 'unpaid').length;
 
@@ -516,6 +521,11 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       cell: calc => (
         <span className="inline-flex items-center justify-end gap-1 font-semibold">
           {euro(salaryBase(calc))}
+          {(calc.unrecovered ?? 0) > 0 && (
+            <span className="text-caution" title={t('sal.unrecovered.cellHint')}>
+              ↓<span className="sr-only"> {t('sal.unrecovered.cellHint')}</span>
+            </span>
+          )}
           {calc.netto_salary != null && calc.netto_salary !== calc.amount_due && (
             <span className="text-brand-text" title={t('sal.manuallyAdjusted')}>
               *<span className="sr-only"> {t('sal.manuallyAdjusted')}</span>
@@ -636,6 +646,26 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               }
             />
           </div>
+        )}
+
+        {!loadFailed && unrecoveredRows.length > 0 && (
+          // A period whose clawbacks (negative Uber figures) exceed what it earned
+          // pays no negative wage; this is the amount that could not be taken off.
+          // A figure to act on, not a carry-forward.
+          <Alert tone="caution" title={t('sal.unrecovered.title')}>
+            <p>{t('sal.unrecovered.body')}</p>
+            <ul className="mt-2 list-disc pl-5">
+              {unrecoveredRows.map(calc => (
+                <li key={calc.driver_id}>
+                  {t('sal.unrecovered.item', {
+                    name: calc.driver_name,
+                    amount: euro(calc.unrecovered ?? 0),
+                    period: `${formatStoredDate(periodStart)} – ${formatStoredDate(periodEnd)}`,
+                  })}
+                </li>
+              ))}
+            </ul>
+          </Alert>
         )}
 
         {!loadFailed && (

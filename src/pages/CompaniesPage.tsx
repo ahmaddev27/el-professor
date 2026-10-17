@@ -2,13 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, Plus, Search, Eye, CreditCard as Edit2, MoreVertical,
-  CheckCircle, XCircle, PauseCircle, AlertCircle, Users, ChevronRight,
+  CheckCircle, XCircle, PauseCircle, Users, ChevronRight,
   Globe, Mail, Phone, MapPin, Calendar, RefreshCw, ArrowLeft, User,
   Shield, X, Save, ExternalLink, Archive, Trash2, AlertTriangle,
   RotateCcw, Lock, ChevronDown, Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
+import {
+  deleteCompanyCompletely,
+  fetchDeletionPreview,
+  IncompleteDeletionError,
+} from '../lib/platformCompanyDeletion';
+import { CompanyDeletionPreview, type PreviewState } from '../components/CompanyDeletionPreview';
 import { fetchCompanies, fetchUsers } from '../lib/platformDirectoryClient';
 import { platformReadRefusalKey } from '../lib/platformReadModels';
 import { contextRefusalMessage } from '../lib/supportSession';
@@ -22,7 +28,7 @@ import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildCompaniesExport } from '../lib/panelExports';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { berlinToday } from '../utils/salaryCashReceiptFlow';
@@ -54,7 +60,7 @@ interface CompanyFormData {
   city: string;
   postal_code: string;
   country: string;
-  status: 'active' | 'trial' | 'suspended' | 'inactive';
+  status: 'active' | 'suspended' | 'inactive';
 }
 
 interface AdminFormData {
@@ -71,7 +77,6 @@ interface AdminFormData {
 // and t() is a hook value; SuperAdminDashboard.tsx resolves the same key set.
 const STATUS_CONFIG: Record<CompanyStatus, { label: TranslationKey; icon: React.ElementType; color: string; bg: string }> = {
   active:    { label: 'sa.status.active',    icon: CheckCircle,    color: 'var(--success)',        bg: 'var(--success-subtle)' },
-  trial:     { label: 'sa.status.trial',     icon: AlertCircle,    color: 'var(--warning)',        bg: 'var(--warning-subtle)' },
   suspended: { label: 'sa.status.suspended', icon: PauseCircle,    color: 'var(--danger)',         bg: 'var(--danger-subtle)' },
   inactive:  { label: 'sa.status.inactive',  icon: XCircle,        color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)' },
   archived:  { label: 'sa.status.archived',  icon: Archive,        color: '#64748b',               bg: 'rgba(100,116,139,0.12)' },
@@ -177,9 +182,30 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
   const meta = LIFECYCLE_META[action];
   const [confirmText, setConfirmText] = useState('');
   const [busy, setBusy] = useState(false);
+  // A refusal stays inside the modal: a toast behind an open overlay is easy to miss.
+  const [failure, setFailure] = useState<string | null>(null);
 
   const needsTyping = meta.dangerLevel === 'critical';
-  const canConfirm = needsTyping ? confirmText.trim() === company.name.trim() : true;
+
+  // The complete deletion shows what it will remove before it asks for the name,
+  // counted by the same database function that then carries it out. Confirming
+  // waits for it: a name typed against a preview that never loaded is a
+  // deletion of something the operator was not shown.
+  const [preview, setPreview] = useState<PreviewState>({ status: 'loading' });
+  useEffect(() => {
+    if (action !== 'hardDelete') return;
+    let current = true;
+    setPreview({ status: 'loading' });
+    fetchDeletionPreview(company.id)
+      .then(p => { if (current) setPreview({ status: 'ready', preview: p }); })
+      .catch((err: unknown) => {
+        if (current) setPreview({ status: 'failed', message: err instanceof Error ? err.message : t('common.error') });
+      });
+    return () => { current = false; };
+  }, [action, company.id, t]);
+
+  const previewReady = action !== 'hardDelete' || preview.status === 'ready';
+  const canConfirm = (needsTyping ? confirmText.trim() === company.name.trim() : true) && previewReady;
 
   const borderColor = meta.dangerLevel === 'critical'
     ? 'var(--danger)'
@@ -194,8 +220,12 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
   const handleConfirm = async () => {
     if (!canConfirm) return;
     setBusy(true);
+    setFailure(null);
     try {
       await onConfirm();
+    } catch (err: any) {
+      // callPlatformRpc throws the sentence the database wrote; a PostgREST error is not an Error but carries .message.
+      setFailure(err?.message || t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -237,6 +267,8 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
 
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{t(meta.description)}</p>
 
+          {action === 'hardDelete' && <CompanyDeletionPreview state={preview} />}
+
           {needsTyping && (
             <div>
               <label style={labelStyle}>{t('sa.lifecycle.typeNameLabel')}</label>
@@ -260,6 +292,10 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
                 {t('sa.lifecycle.criticalWarning')}
               </p>
             </div>
+          )}
+
+          {failure && (
+            <Alert tone="critical" title={t('sa.lifecycle.failedTitle')}>{failure}</Alert>
           )}
         </div>
 
@@ -467,7 +503,6 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
                 {/* `value` is the stored companies.status — only the label is translated. */}
                 <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))}>
                   <option value="active">{t('sa.status.active')}</option>
-                  <option value="trial">{t('sa.status.trial')}</option>
                   <option value="suspended">{t('sa.status.suspended')}</option>
                   <option value="inactive">{t('sa.status.inactive')}</option>
                 </select>
@@ -532,7 +567,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
     phone: company.phone || '', address: company.address || '',
     city: company.city || '', postal_code: company.postal_code || '',
     country: company.country || 'Deutschland',
-    status: (['active','trial','suspended','inactive'].includes(company.status) ? company.status : 'inactive') as any,
+    status: (['active','suspended','inactive'].includes(company.status) ? company.status : 'inactive') as any,
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -573,7 +608,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
             <div><label style={labelStyle}>{t('common.status')}</label>
               {/* `value` is the stored companies.status — only the label is translated. */}
               <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))}>
-                <option value="active">{t('sa.status.active')}</option><option value="trial">{t('sa.status.trial')}</option>
+                <option value="active">{t('sa.status.active')}</option>
                 <option value="suspended">{t('sa.status.suspended')}</option><option value="inactive">{t('sa.status.inactive')}</option>
               </select>
             </div>
@@ -1082,6 +1117,7 @@ export default function CompaniesPage() {
   const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const exportChrome = useExportChrome();
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -1172,10 +1208,26 @@ export default function CompaniesPage() {
     }
 
     if (action === 'hardDelete') {
-      // CASCADE delete handles all related rows
-      const { error } = await supabase.from('companies').delete().eq('id', company.id);
-      if (error) throw error;
-      showToast('success', t('sa.companies.toast.hardDeleted', { name: company.name }));
+      // Not a direct delete any more: login accounts and stored files cannot be
+      // removed from the browser, and the open-context guard needs the caller's
+      // own token. See platformCompanyDeletion.ts.
+      try {
+        const outcome = await deleteCompanyCompletely(company.id, company.name);
+        showToast('success', t('sa.deletion.done', {
+          name: company.name, rows: outcome.rowsTotal, accounts: outcome.accountsDeleted,
+        }));
+      } catch (err) {
+        // The company is gone but a clean-up step did not finish: say what
+        // remains, refresh the list, and do not leave the operator on a company
+        // that no longer exists.
+        if (err instanceof IncompleteDeletionError) {
+          showToast('error', err.message);
+          setViewingCompany(null);
+          await loadCompanies();
+          return;
+        }
+        throw err;
+      }
       setViewingCompany(null);
     }
 
@@ -1237,7 +1289,7 @@ export default function CompaniesPage() {
    */
   const handleExport = () => {
     try {
-      exportTableToExcel(buildCompaniesExport({
+      exportPicker.table('companies', buildCompaniesExport({
         rows: filtered.map(company => ({
           name: company.name,
           slug: company.slug,
@@ -1330,12 +1382,11 @@ export default function CompaniesPage() {
   }
 
   // ── List view ──
-  const filterOptions: Array<'all' | CompanyStatus> = ['all', 'active', 'trial', 'suspended', 'inactive', 'archived', 'deleted'];
+  const filterOptions: Array<'all' | CompanyStatus> = ['all', 'active', 'suspended', 'inactive', 'archived', 'deleted'];
   // Keys are the stored companies.status values the filter compares against.
   const filterLabels: Record<string, TranslationKey> = {
     all: 'common.all',
     active: 'sa.status.active',
-    trial: 'sa.status.trial',
     suspended: 'sa.status.suspended',
     inactive: 'sa.status.inactive',
     archived: 'sa.status.archived',

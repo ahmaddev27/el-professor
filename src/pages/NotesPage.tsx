@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2 } from 'lucide-react';
+import { Alert, Button } from '../components/ui';
+import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
 import ConfirmationModal from '../components/ConfirmationModal';
-import { exportSheetsToExcel, type ExportOptions } from '../utils/excelExport';
+import type { ExportOptions } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
@@ -36,6 +39,11 @@ interface Note {
   created_at: string;
   updated_at?: string;
   created_by?: string;
+  /**
+   * The driver's name when the note came from the driver app (20261013100000);
+   * `created_by` is NULL then, because a driver has no user account.
+   */
+  submitted_by_name?: string | null;
   note_type?: string;
   note_planning_behavior?: NotePlanningBehavior;
   is_full_day?: boolean;
@@ -187,6 +195,7 @@ function noteDateLabel(note: Note, t: (k: TranslationKey, vars?: Record<string, 
 
 export function NotesPage() {
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const [notes, setNotes]           = useState<Note[]>([]);
   const [drivers, setDrivers]       = useState<Driver[]>([]);
   const [cars, setCars]             = useState<Car[]>([]);
@@ -202,11 +211,24 @@ export function NotesPage() {
   const [weeks, setWeeks] = useState<any[]>([]);
   const { showToast } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // The fleet the catch-up asks. Null means "nothing to fetch from", which is
+  // also what a failed read leaves — and then the button is not drawn, which is
+  // the honest outcome either way.
+  const [partnerConnection, setPartnerConnection] = useState<{ partner: string; fleet: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; noteId: string }>({ open: false, noteId: '' });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+  // Notes from the driver app are notes the moment they arrive (owner,
+  // 13.10.2026), so there is no inbox. What can still be waiting is one whose
+  // driver nobody has linked yet: it is recorded and becomes a note when the
+  // link is confirmed. null means "not known" - a failed read must not be drawn
+  // as 0, which would claim nothing is waiting.
+  const [waitingForLink, setWaitingForLink] = useState<number | null>(null);
+  // The catch-up is the one recovery for a ring that never arrived. It ingests
+  // notes and Belege together, and it survives the inbox for that reason.
+  const { catchUp, fetching, available: canCatchUp } = usePartnerCatchUp(partnerConnection);
 
   useEffect(() => {
     const w = getWeeksOfMonth(selectedMonth);
@@ -221,10 +243,45 @@ export function NotesPage() {
     if (companyId) loadData();
   }, [companyId]);
 
+  useEffect(() => {
+    if (!companyId) {
+      setPartnerConnection(null);
+      return;
+    }
+    void (async () => {
+      const { data } = await supabase
+        .from('partner_connections')
+        .select('partner, external_company_id')
+        .eq('company_id', companyId)
+        .neq('status', 'revoked')
+        .limit(1)
+        .maybeSingle();
+      const fleet = (data?.external_company_id as string | null)?.trim() ?? '';
+      // A connection recorded before the partner answered with an identity has
+      // no fleet id, and there is nothing to fetch by — so it is not one.
+      setPartnerConnection(data?.partner && fleet !== ''
+        ? { partner: data.partner as string, fleet }
+        : null);
+    })();
+  }, [companyId]);
+
+  const loadWaitingForLink = async () => {
+    if (!companyId) {
+      setWaitingForLink(null);
+      return;
+    }
+    const { count, error } = await supabase
+      .from('partner_note_submissions')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .eq('status', 'pending');
+    setWaitingForLink(error ? null : count ?? 0);
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([loadNotes(), loadDrivers(), loadCars()]);
+      await Promise.all([loadNotes(), loadDrivers(), loadCars(), loadWaitingForLink()]);
     } catch (error: any) {
       showToast('error', error.message || t('salaries.loadFailed'));
     } finally {
@@ -465,7 +522,8 @@ export function NotesPage() {
           text: note.note_text,
           createdAt: fmtDateTime(note.created_at),
           updatedAt: fmtDateTime(note.updated_at),
-          createdBy: note.created_by ?? '',
+          // A note from the driver app has no user; its author is the driver.
+          createdBy: note.submitted_by_name ?? note.created_by ?? '',
         })),
       };
 
@@ -531,7 +589,8 @@ export function NotesPage() {
       };
 
       const today = format(new Date(), 'yyyy-MM-dd');
-      exportSheetsToExcel(
+      exportPicker.sheets(
+        'notes',
         `Notizen_${today}.xlsx`,
         // The exclusions sheet is dropped when it would be empty, as it always
         // was: an empty sheet in a workbook reads as "nothing is excluded", which
@@ -599,6 +658,18 @@ export function NotesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {canCatchUp && (
+            <Button
+              variant="secondary"
+              onClick={() => { void (async () => { if (await catchUp()) await loadData(); })(); }}
+              disabled={fetching}
+              loading={fetching}
+              title={t('partner.catchup.hint')}
+            >
+              <DownloadCloud aria-hidden />
+              {t('partner.catchup.action')}
+            </Button>
+          )}
           <div className="flex flex-col items-end gap-1">
             <button
               onClick={() => void handleExportXlsx()}
@@ -630,6 +701,12 @@ export function NotesPage() {
             <Plus className="w-5 h-5" />{t('notes.new')}</button>
         </div>
       </div>
+
+      {waitingForLink !== null && waitingForLink > 0 && (
+        <Alert tone="caution" title={t('notes.waitingForLink.title', { count: String(waitingForLink) })}>
+          {t('notes.waitingForLink.body')}
+        </Alert>
+      )}
 
       {/* Filters */}
       <div className="rounded-lg p-4 space-y-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
@@ -753,6 +830,11 @@ export function NotesPage() {
                       Shown from the note's own joined row, so a plate is never
                       guessed: no car, or a plate that did not load, shows nothing.
                     */}
+                    {note.submitted_by_name && (
+                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--bg-muted)] text-[var(--text-secondary)]">
+                        {t('notes.fromApp')}
+                      </span>
+                    )}
                     {note.cars?.kennzeichen && (
                       <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--bg-muted)] text-[var(--text-secondary)]">
                         {note.cars.kennzeichen}
@@ -797,6 +879,7 @@ export function NotesPage() {
       )}
 
       {/* Modal */}
+
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"

@@ -8,6 +8,7 @@ export interface CompanySettings {
   mobile?: string;
   website?: string;
   support_email?: string;
+  notification_email?: string | null;
   street?: string;
   house_number?: string;
   postal_code?: string;

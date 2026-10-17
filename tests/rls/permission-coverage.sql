@@ -635,4 +635,237 @@ BEGIN
     v_wrong IS NULL);
 END $$;
 
+-- ─── 7. company_settings.notification_email (20261015100000) ────────────────
+--
+-- The address the company's own mail is sent to. It lives on a table whose
+-- policies this migration did not touch, so what is claimed is exactly that:
+-- the existing administrator gate covers the new column, an editor and a viewer
+-- are refused, another company's row is out of reach, and the CHECK admits NULL
+-- and an address and refuses an empty string, because NULL is the one
+-- representation of "not set". The support-session record of a write to the
+-- column is in support-write-audit.sql, beside the other company_settings writes.
+
+DO $$
+DECLARE
+  co_a    constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  co_b    constant uuid := 'c0000000-0000-4000-8000-00000000000b';
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  editor  constant uuid := 'a0000000-0000-4000-8000-000000000002';
+  viewer  constant uuid := 'a0000000-0000-4000-8000-000000000003';
+  admin_b constant uuid := 'b0000000-0000-4000-8000-000000000001';
+  v_set   text := format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L',
+                         'buero@firma.example', co_a);
+BEGIN
+  PERFORM _pk_ok('notification address: the company administrator writes it',
+    _pk_try(admin_a, v_set) = 'rows 1');
+  PERFORM _pk_ok('notification address: …and clears it back to NULL',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = NULL WHERE company_id = %L', co_a)) = 'rows 1');
+  PERFORM _pk_ok('notification address: an editor may not write it',
+    _pk_try(editor, v_set) = 'rows 0');
+  PERFORM _pk_ok('notification address: a viewer may not write it',
+    _pk_try(viewer, v_set) = 'rows 0');
+  PERFORM _pk_ok('notification address: an editor may not create the row by upsert either',
+    _pk_try(editor, format('INSERT INTO company_settings (company_id, notification_email) VALUES (%L, %L) ON CONFLICT (company_id) DO UPDATE SET notification_email = EXCLUDED.notification_email',
+                           co_a, 'buero@firma.example')) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('notification address: an editor and a viewer still read it',
+    _pk_try(editor, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_a)) = '1'
+    AND _pk_try(viewer, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_a)) = '1');
+
+  PERFORM _pk_ok('notification address: another company''s administrator reaches nothing of company A',
+    _pk_try(admin_b, v_set) = 'rows 0');
+  PERFORM _pk_ok('notification address: …nor can company A''s administrator write company B''s row',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L',
+                            'buero@firma.example', co_b)) = 'rows 0');
+  PERFORM _pk_ok('notification address: company B''s row is still unset after all of the above',
+    (SELECT notification_email IS NULL FROM company_settings WHERE company_id = co_b)
+    AND (SELECT notification_email IS NULL FROM company_settings WHERE company_id = co_a));
+
+  PERFORM _pk_ok('notification address: the CHECK refuses an empty string, so NULL is the only "not set"',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', '', co_a)) LIKE 'ERR 23514%');
+  PERFORM _pk_ok('notification address: the CHECK refuses text with no @',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', 'kein-at.de', co_a)) LIKE 'ERR 23514%');
+  PERFORM _pk_ok('notification address: the CHECK refuses two @ and whitespace',
+    _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', 'a@@b.de', co_a)) LIKE 'ERR 23514%'
+    AND _pk_try(admin_a, format('UPDATE company_settings SET notification_email = %L WHERE company_id = %L', 'a b@c.de', co_a)) LIKE 'ERR 23514%');
+
+  PERFORM _pk_ok('notification address: the policies on company_settings are still exactly the four',
+    (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'company_settings') = 4);
+
+  -- The recipient rule is written TWICE -- once in notification-recipients.ts,
+  -- which decides who is actually mailed, and once in SQL inside
+  -- abrechnung_schedule_preview, which is what the settings card SHOWS. The
+  -- migration's self-check only asserts that the body names the two columns;
+  -- a body that names them and still answers the old way would pass it. These
+  -- two probes assert the ANSWER, so the screen cannot promise one thing while
+  -- the job does another.
+  -- Two probes on what the settings card SHOWS, because the recipient rule is
+  -- written twice: once in notification-recipients.ts, which decides who is
+  -- mailed, and once in SQL inside abrechnung_schedule_preview. The migration's
+  -- self-check only asserts that the body NAMES the two columns; a body that
+  -- names them and still answers the old way would pass it.
+  --
+  -- The block seeds both rows it depends on, as the owner. The first version of
+  -- these probes assumed they were there: company_settings had no row for this
+  -- company, so the UPDATE matched nothing, and with no schedule row the
+  -- preview answers `schedule: null` with every count at zero. Both times the
+  -- probe measured its own missing fixture rather than the product.
+  INSERT INTO company_settings (company_id) VALUES (co_a) ON CONFLICT (company_id) DO NOTHING;
+  INSERT INTO abrechnung_schedules (company_id, manager_summary_enabled, weekday, send_time)
+  VALUES (co_a, true, 1, '08:00')
+  ON CONFLICT (company_id) DO UPDATE SET manager_summary_enabled = true;
+
+  UPDATE company_settings SET notification_email = NULL WHERE company_id = co_a;
+  PERFORM _pk_ok('notification address: with none set the preview does not claim an address',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_address'$q$) = 'false');
+
+  UPDATE company_settings SET notification_email = 'buero@firma.example' WHERE company_id = co_a;
+  PERFORM _pk_ok('notification address: with one set the preview says so',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_address'$q$) = 'true');
+  PERFORM _pk_ok('notification address: …and it names exactly one recipient, not the administrators',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_recipients'$q$) = '1');
+  UPDATE company_settings SET notification_email = NULL WHERE company_id = co_a;
+END $$;
+
+-- ─── per-kind notification recipients (20261015140000) ─────────────────────
+--
+-- A company table with an ADMINISTRATOR gate, not a page: deciding who receives
+-- the company's mail is configuration like notification_settings. Probed with
+-- the administrator (may), an editor and a viewer (may not, on all three
+-- writes, while all of them READ: SELECT is never gated by a role), another
+-- company's administrator, and the constraints the policies do not express.
+
+DO $$
+DECLARE
+  co_a    constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  co_b    constant uuid := 'c0000000-0000-4000-8000-00000000000b';
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  editor  constant uuid := 'a0000000-0000-4000-8000-000000000002';
+  viewer  constant uuid := 'a0000000-0000-4000-8000-000000000003';
+  admin_b constant uuid := 'b0000000-0000-4000-8000-000000000001';
+  v_ins   text := format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)',
+                         co_a, 'manager_summary', 'chef@firma.example');
+  v_id    uuid;
+BEGIN
+  PERFORM _pk_ok('recipients: the administrator adds an address',
+    _pk_try(admin_a, v_ins) = 'rows 1');
+  PERFORM _pk_ok('recipients: an editor may not add one',
+    _pk_try(editor, v_ins) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('recipients: a viewer may not add one',
+    _pk_try(viewer, v_ins) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('recipients: company B''s administrator may not add one for company A',
+    _pk_try(admin_b, v_ins) LIKE 'ERR 42501%');
+
+  INSERT INTO notification_recipients (company_id, notification_type, email)
+  VALUES (co_a, 'tuev_abgelaufen', 'tuev@firma.example') RETURNING id INTO v_id;
+  INSERT INTO notification_recipients (company_id, notification_type, email)
+  VALUES (co_b, 'tuev_abgelaufen', 'b@firma.example');
+
+  PERFORM _pk_ok('recipients: an editor and a viewer still READ the company''s rows, the administrator too',
+    _pk_try(editor, format('SELECT count(*)::text FROM notification_recipients WHERE company_id = %L', co_a)) = '1'
+    AND _pk_try(viewer, format('SELECT count(*)::text FROM notification_recipients WHERE company_id = %L', co_a)) = '1'
+    AND _pk_try(admin_a, format('SELECT count(*)::text FROM notification_recipients WHERE company_id = %L', co_a)) = '1');
+  PERFORM _pk_ok('recipients: nobody reads another company''s rows',
+    _pk_try(admin_a, format('SELECT count(*)::text FROM notification_recipients WHERE company_id = %L', co_b)) = '0'
+    AND _pk_try(admin_b, format('SELECT count(*)::text FROM notification_recipients WHERE company_id = %L', co_a)) = '0');
+
+  PERFORM _pk_ok('recipients: the administrator changes an address',
+    _pk_try(admin_a, format('UPDATE notification_recipients SET email = %L WHERE id = %L', 'neu@firma.example', v_id)) = 'rows 1');
+  PERFORM _pk_ok('recipients: an editor and a viewer change nothing',
+    _pk_try(editor, format('UPDATE notification_recipients SET email = %L WHERE id = %L', 'neu@firma.example', v_id)) = 'rows 0'
+    AND _pk_try(viewer, format('UPDATE notification_recipients SET email = %L WHERE id = %L', 'neu@firma.example', v_id)) = 'rows 0');
+  PERFORM _pk_ok('recipients: an editor and a viewer delete nothing',
+    _pk_try(editor, format('DELETE FROM notification_recipients WHERE id = %L', v_id)) = 'rows 0'
+    AND _pk_try(viewer, format('DELETE FROM notification_recipients WHERE id = %L', v_id)) = 'rows 0');
+  PERFORM _pk_ok('recipients: another company''s administrator changes and deletes nothing',
+    _pk_try(admin_b, format('UPDATE notification_recipients SET email = %L WHERE id = %L', 'neu@firma.example', v_id)) = 'rows 0'
+    AND _pk_try(admin_b, format('DELETE FROM notification_recipients WHERE id = %L', v_id)) = 'rows 0');
+  PERFORM _pk_ok('recipients: the administrator may not move a row to company B',
+    _pk_try(admin_a, format('UPDATE notification_recipients SET company_id = %L WHERE id = %L', co_b, v_id)) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('recipients: the administrator deletes an address',
+    _pk_try(admin_a, format('DELETE FROM notification_recipients WHERE id = %L', v_id)) = 'rows 1');
+
+  PERFORM _pk_ok('recipients: anon holds nothing on the table',
+    NOT has_table_privilege('anon', 'public.notification_recipients', 'SELECT,INSERT,UPDATE,DELETE'));
+
+  -- What the policies do not say.
+  PERFORM _pk_ok('recipients: the CHECK refuses an unknown kind',
+    _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)',
+                            co_a, 'driver_abrechnung', 'x@firma.example')) LIKE 'ERR 23514%');
+  PERFORM _pk_ok('recipients: the CHECK refuses a malformed address, an empty one and two @',
+    _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'manager_summary', 'kein-at.de')) LIKE 'ERR 23514%'
+    AND _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'manager_summary', '')) LIKE 'ERR 23514%'
+    AND _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'manager_summary', 'a@@b.de')) LIKE 'ERR 23514%');
+
+  -- The probes roll back, so seed one row as the owner for the duplicate checks.
+  INSERT INTO notification_recipients (company_id, notification_type, email)
+  VALUES (co_a, 'manager_summary', 'chef@firma.example');
+  PERFORM _pk_ok('recipients: the same mailbox twice for one kind is refused, whatever its case',
+    _pk_try(admin_a, v_ins) LIKE 'ERR 23505%'
+    AND _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'manager_summary', 'CHEF@Firma.example')) LIKE 'ERR 23505%');
+  PERFORM _pk_ok('recipients: …but the same mailbox for another kind is fine',
+    _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'tuev_bald_ablaufend', 'chef@firma.example')) = 'rows 1');
+  PERFORM _pk_ok('recipients: surrounding whitespace is trimmed before the CHECK, not refused',
+    _pk_try(admin_a, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)', co_a, 'tuev_abgelaufen', '  spaces@firma.example ')) = 'rows 1');
+
+  -- The cap, seeded as the owner so RLS is out of the way; the trigger is the subject.
+  INSERT INTO notification_recipients (company_id, notification_type, email)
+  SELECT co_b, 'tuev_bald_ablaufend', 'cap' || g || '@firma.example' FROM generate_series(1, 10) g;
+  PERFORM _pk_ok('recipients: an eleventh address for one kind is refused',
+    _pk_try(admin_b, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)',
+                            co_b, 'tuev_bald_ablaufend', 'cap11@firma.example')) LIKE 'ERR 23514%at most 10%');
+  PERFORM _pk_ok('recipients: …while another kind of the same company still takes one',
+    _pk_try(admin_b, format('INSERT INTO notification_recipients (company_id, notification_type, email) VALUES (%L, %L, %L)',
+                            co_b, 'tuev_abgelaufen', 'cap11@firma.example')) = 'rows 1');
+
+  -- The preview restates the rule in SQL, and the list is its first step.
+  INSERT INTO company_settings (company_id) VALUES (co_a) ON CONFLICT (company_id) DO NOTHING;
+  INSERT INTO abrechnung_schedules (company_id, manager_summary_enabled, weekday, send_time)
+  VALUES (co_a, true, 1, '08:00')
+  ON CONFLICT (company_id) DO UPDATE SET manager_summary_enabled = true;
+  DELETE FROM notification_recipients WHERE company_id = co_a;
+  UPDATE company_settings SET notification_email = 'buero@firma.example' WHERE company_id = co_a;
+  PERFORM _pk_ok('recipients: with no list the preview still says "the single address"',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_address'$q$) = 'true'
+    AND _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_list'$q$) = 'false'
+    AND _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_recipients'$q$) = '1');
+  INSERT INTO notification_recipients (company_id, notification_type, email)
+  VALUES (co_a, 'manager_summary', 'eins@firma.example'), (co_a, 'manager_summary', 'zwei@firma.example'),
+         (co_a, 'tuev_abgelaufen', 'nur-tuev@firma.example');
+  PERFORM _pk_ok('recipients: with two listed for the summary the preview counts two and not the single address',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_list'$q$) = 'true'
+    AND _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_via_address'$q$) = 'false'
+    AND _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_recipients'$q$) = '2');
+  DELETE FROM notification_recipients WHERE company_id = co_a AND notification_type = 'manager_summary';
+  PERFORM _pk_ok('recipients: a list for ANOTHER kind does not change the summary''s count',
+    _pk_try(admin_a, $q$SELECT abrechnung_schedule_preview('2026-09-28') ->> 'manager_recipients'$q$) = '1');
+  UPDATE company_settings SET notification_email = NULL WHERE company_id = co_a;
+END $$;
+
+-- ─── 8. uber_import_undo (20261016120000) ───────────────────────────────────
+--
+-- Administrator only, and `current_role_permits` is not the gate: a supervisor
+-- holds can_edit on every page and is refused all the same, which is the one
+-- probe that tells the administrator gate from a page gate. Deleting is
+-- uber-import-undo.sql's; this is who may ask.
+
+DO $$
+DECLARE
+  admin_a      constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  supervisor_a constant uuid := 'a0000000-0000-4000-8000-000000000009';
+  editor_a     constant uuid := 'a0000000-0000-4000-8000-000000000002';
+  viewer_a     constant uuid := 'a0000000-0000-4000-8000-000000000003';
+  v_call       constant text := 'SELECT uber_import_undo(true) ->> ''ok''';
+BEGIN
+  PERFORM _pk_ok('undo import: the administrator may preview',
+    _pk_try(admin_a, v_call) = 'true');
+  PERFORM _pk_ok('undo import: a supervisor, who may edit every page, may not',
+    _pk_try(supervisor_a, v_call) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('undo import: an editor may not',
+    _pk_try(editor_a, v_call) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('undo import: a viewer may not',
+    _pk_try(viewer_a, v_call) LIKE 'ERR 42501%');
+  PERFORM _pk_ok('undo import: the supervisor''s real run is refused too, before the name is read',
+    _pk_try(supervisor_a, 'SELECT uber_import_undo(false, ''Test A'', ''{"income":0,"drivers":0,"cars":0}''::jsonb)::text') LIKE 'ERR 42501%');
+END $$;
+
 ROLLBACK;

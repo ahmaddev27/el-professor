@@ -144,11 +144,19 @@ describe('platform-staff routes', () => {
     expect(route.action.startsWith('platform_staff.')).toBe(false);
   });
 
-  it('needs staff.manage for every route', () => {
+  it('needs staff.manage for every team route, and companies.hard_delete for the company delete', () => {
     for (const route of PLATFORM_STAFF_ROUTES) {
-      expect(route.capability).toBe('staff.manage');
+      expect(route.capability).toBe(route.name === 'delete-company' ? 'companies.hard_delete' : 'staff.manage');
       expect(route.category).toBe('write');
     }
+  });
+
+  it('resolves the complete company delete added by 20261016140000', () => {
+    const route = resolvePlatformStaffRoute('POST', '/platform-staff/delete-company');
+    expect(route?.name).toBe('delete-company');
+    expect(route?.action).toBe('platform_company_hard_delete.execute');
+    expect(resolvePlatformStaffRoute('GET', '/platform-staff/delete-company')).toBeNull();
+    expect(route!.action.startsWith('platform_staff.')).toBe(false);
   });
 
   /*

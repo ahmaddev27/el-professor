@@ -48,12 +48,10 @@ describe('describeCar', () => {
   });
 });
 
-describe('the four mails', () => {
+describe('the two mails', () => {
   const cases: Array<[PlannedNotification['type'], Partial<PlannedNotification>, string, string]> = [
     ['tuev_bald_ablaufend',  { daysLeft: 38 },                     'TÜV läuft ab: B-EP 1234 – El-Professor', '/fahrzeuge'],
     ['tuev_abgelaufen',      { daysLeft: -4 },                     'TÜV abgelaufen: B-EP 1234 – El-Professor', '/fahrzeuge'],
-    ['trial_bald_ablaufend', { daysLeft: 3, plate: null },         'Ihre Testphase läuft bald ab – El-Professor', '/abo-aktivieren'],
-    ['trial_abgelaufen',     { daysLeft: -1, plate: null },        'Ihre Testphase ist abgelaufen – El-Professor', '/abo-aktivieren'],
   ];
 
   for (const [type, patch, subject, path] of cases) {
@@ -75,7 +73,7 @@ describe('the four mails', () => {
 
   it('escapes a company name that contains markup', () => {
     const mail = buildNotificationMail(
-      planned({ type: 'trial_abgelaufen', daysLeft: -1, companyName: 'Taxi <script>x</script> & Co' }),
+      planned({ type: 'tuev_abgelaufen', daysLeft: -1, plate: 'Taxi <script>x</script> & Co' }),
       APP_URL,
     );
     expect(mail.html).not.toContain('<script>');

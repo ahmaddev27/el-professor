@@ -203,6 +203,25 @@ BEGIN
   END IF;
 END $$;
 
+/**
+  An e-mail account that exists already (confirmed, with the profile
+  handle_new_user wrote) and then signs in with Google: GoTrue links the
+  identity and inserts nothing into auth.users, so no trigger marks it.
+  p_google = false leaves it a plain e-mail account.
+*/
+CREATE OR REPLACE FUNCTION _oauth_linked_account(p_id uuid, p_email text, p_google boolean)
+RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM _oauth_insert_user(p_id, p_email, '{"provider": "email", "providers": ["email"]}'::jsonb);
+  INSERT INTO auth.identities (provider_id, user_id, identity_data, provider, created_at, updated_at)
+  VALUES (p_id::text, p_id, jsonb_build_object('sub', p_id::text, 'email', p_email), 'email', now(), now());
+  UPDATE auth.users SET email_confirmed_at = now() WHERE id = p_id;
+  IF p_google THEN
+    PERFORM _oauth_link_google(p_id);
+  END IF;
+END $$;
+
 /** The account company-signup creates: admin createUser, unconfirmed, with its email identity. */
 CREATE OR REPLACE FUNCTION _oauth_password_signup_account(p_id uuid, p_email text)
 RETURNS void
@@ -472,7 +491,6 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  c_trial_length  CONSTANT interval := interval '14 days';
   c_slug_attempts CONSTANT integer  := 10;
 
   v_email         text := lower(trim(p_email));
@@ -557,8 +575,8 @@ BEGIN
       (v_company_name,
        CASE WHEN i = 1 THEN v_base_slug
             ELSE v_base_slug || '-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 6) END,
-       'trial', 'pending', v_plan, v_cycle, v_car_limit,
-       v_now, v_now + c_trial_length, 'Deutschland', 'inactive',
+       'active', 'pending', v_plan, v_cycle, v_car_limit,
+       NULL, NULL, 'Deutschland', 'inactive',
        v_referral_id,
        CASE WHEN v_referral_id IS NOT NULL THEN v_ref_code END,
        CASE WHEN v_referral_id IS NOT NULL THEN v_now END)
@@ -814,6 +832,15 @@ DECLARE
   c_deleted uuid := '9a000004-0000-4000-8000-00000000000a';
   c_susp    uuid := '9a000004-0000-4000-8000-00000000000b';
   c_ref     uuid := '9a000004-0000-4000-8000-00000000000c';
+  -- Born as e-mail accounts and linked to Google later: GoTrue inserts nothing,
+  -- so the trigger never marks them. 20261016160000 is about exactly these.
+  l_ok      uuid := '9a000004-0000-4000-8000-00000000000d';
+  l_staff   uuid := '9a000004-0000-4000-8000-00000000000e';
+  l_company uuid := '9a000004-0000-4000-8000-00000000000f';
+  l_banned  uuid := '9a000004-0000-4000-8000-000000000010';
+  l_deleted uuid := '9a000004-0000-4000-8000-000000000011';
+  l_susp    uuid := '9a000004-0000-4000-8000-000000000012';
+  l_noid    uuid := '9a000004-0000-4000-8000-000000000013';
   sys_admin uuid := '84626035-c3a2-4ff5-96b9-a95cceb85cb0';   -- roles-seed.sql
   company_a uuid := 'c0000000-0000-4000-8000-00000000000a';
   ref_on    uuid;
@@ -831,6 +858,13 @@ BEGIN
   PERFORM _oauth_google_signup(c_staff,   'oauth-c-staff@test.invalid');
   PERFORM _oauth_google_signup(c_company, 'oauth-c-company@test.invalid');
   PERFORM _oauth_google_signup(c_nopend,  'oauth-c-nopend@test.invalid');
+  PERFORM _oauth_linked_account(l_ok,      'oauth-l-ok@test.invalid',      true);
+  PERFORM _oauth_linked_account(l_staff,   'oauth-l-staff@test.invalid',   true);
+  PERFORM _oauth_linked_account(l_company, 'oauth-l-company@test.invalid', true);
+  PERFORM _oauth_linked_account(l_banned,  'oauth-l-banned@test.invalid',  true);
+  PERFORM _oauth_linked_account(l_deleted, 'oauth-l-deleted@test.invalid', true);
+  PERFORM _oauth_linked_account(l_susp,    'oauth-l-susp@test.invalid',    true);
+  PERFORM _oauth_linked_account(l_noid,    'oauth-l-noid@test.invalid',    false);
   PERFORM _oauth_google_signup(c_banned,  'oauth-c-banned@test.invalid');
   PERFORM _oauth_google_signup(c_deleted, 'oauth-c-deleted@test.invalid');
   PERFORM _oauth_google_signup(c_susp,    'oauth-c-susp@test.invalid');
@@ -846,6 +880,19 @@ BEGIN
   UPDATE auth.users SET banned_until = now() + interval '1 day' WHERE id = c_banned;
   UPDATE auth.users SET deleted_at = now() WHERE id = c_deleted;
   UPDATE user_profiles SET status = 'suspended' WHERE user_id = c_susp;
+
+  -- The orphan: an e-mail account whose company was deleted, so it has no profile.
+  DELETE FROM user_profiles WHERE user_id IN (l_ok, l_staff, l_banned, l_deleted, l_noid);
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (l_staff, 'read_only', 'oauth test');
+  UPDATE user_profiles SET company_id = company_a, status = 'active' WHERE user_id = l_company;
+  UPDATE user_profiles SET status = 'suspended' WHERE user_id = l_susp;
+  UPDATE auth.users SET banned_until = now() + interval '1 day' WHERE id = l_banned;
+  UPDATE auth.users SET deleted_at = now() WHERE id = l_deleted;
+  PERFORM _oauth_ok('the linked accounts are unmarked, as GoTrue leaves them: the premise of the fix',
+    NOT EXISTS (SELECT 1 FROM app_private.pending_oauth_signups
+                 WHERE user_id IN (l_ok, l_staff, l_company, l_banned, l_deleted, l_susp, l_noid))
+    AND (SELECT raw_app_meta_data ->> 'provider' FROM auth.users WHERE id = l_ok) = 'email'
+    AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = l_ok));
 
   INSERT INTO referrals (ref_code, name, is_active) VALUES
     ('G-ON', 'Google active', true),
@@ -878,8 +925,25 @@ BEGIN
     _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', c_staff, 'X', 'X GmbH')) = 'OA005');
   PERFORM _oauth_ok('an account in a company raises OA006 company_exists',
     _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', c_company, 'X', 'X GmbH')) = 'OA006');
-  PERFORM _oauth_ok('a Google account that is no pending signup raises OA007 no_pending_signup',
-    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', c_nopend, 'X', 'X GmbH')) = 'OA007');
+  -- The same refusals on the shape that has no marker. With the marker check
+  -- gone each of these is answered by its own check, so none of them is a
+  -- shadow of another.
+  PERFORM _oauth_ok('a linked account that is banned raises OA002 account_blocked',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_banned, 'X', 'X GmbH')) = 'OA002');
+  PERFORM _oauth_ok('a linked account that is soft-deleted raises OA002 account_blocked',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_deleted, 'X', 'X GmbH')) = 'OA002');
+  PERFORM _oauth_ok('a linked account with a suspended profile raises OA002 account_blocked',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_susp, 'X', 'X GmbH')) = 'OA002');
+  PERFORM _oauth_ok('an e-mail account with no google identity raises OA004 not_google_account',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_noid, 'X', 'X GmbH')) = 'OA004');
+  PERFORM _oauth_ok('a linked platform account raises OA005 platform_staff',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_staff, 'X', 'X GmbH')) = 'OA005');
+  PERFORM _oauth_ok('a linked account that already has a company raises OA006 company_exists',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_company, 'X', 'X GmbH')) = 'OA006');
+  PERFORM _oauth_ok('and none of those refusals created a company or touched a profile',
+    NOT EXISTS (SELECT 1 FROM companies WHERE name = 'X GmbH')
+    AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE user_id IN (l_staff, l_banned, l_deleted, l_noid))
+    AND (SELECT company_id FROM user_profiles WHERE user_id = l_company) = company_a);
 
   SELECT (SELECT count(*) FROM companies) + (SELECT count(*) FROM company_settings)
        + (SELECT count(*) FROM discount_code_redemptions) INTO n_before;
@@ -904,13 +968,13 @@ BEGIN
     AND r->'company'->>'slug' = 'strassen-soehne-taxi' AND r->'company'->>'approval_status' = 'pending');
   co := (r->'company'->>'id')::uuid;
   SELECT * INTO comp FROM companies WHERE id = co;
-  PERFORM _oauth_ok('the company waits for approval: a pending, inactive trial in Deutschland',
-    comp.approval_status = 'pending' AND comp.status = 'trial' AND comp.subscription_status = 'inactive'
+  PERFORM _oauth_ok('the company waits for approval: pending, inactive, in Deutschland',
+    comp.approval_status = 'pending' AND comp.status = 'active' AND comp.subscription_status = 'inactive'
     AND comp.country = 'Deutschland' AND comp.approved_at IS NULL);
-  PERFORM _oauth_ok('plan, cycle, cars and the 14-day trial as asked',
+  PERFORM _oauth_ok('plan, cycle and cars as asked, and no trial',
     comp.plan = 'premium' AND comp.billing_cycle = 'yearly' AND comp.subscription_car_limit = 12
-    AND comp.trial_start = now() AND comp.trial_end = now() + interval '14 days'
-    AND (r->'company'->>'trial_end')::timestamptz = comp.trial_end);
+    AND comp.trial_start IS NULL AND comp.trial_end IS NULL
+    AND (r->'company'->>'trial_end') IS NULL);
   PERFORM _oauth_ok('the referral is recorded under its upper-cased code',
     comp.referral_id = ref_on AND comp.referral_code_used = 'G-ON' AND comp.referred_at = now());
 
@@ -938,6 +1002,27 @@ BEGIN
     (SELECT company_id FROM user_profiles WHERE user_id = c_ok) = co
     AND NOT EXISTS (SELECT 1 FROM companies WHERE name = 'Zweite GmbH')
     AND (SELECT used_count FROM discount_codes WHERE id = dc) = 1);
+
+  -- THE REPORTED CASE: an e-mail account with no profile and no marker, now
+  -- presenting a Google identity. It registers a company; before 20261016160000
+  -- this was OA007 for ever.
+  r := public.oauth_signup_create_company(l_ok, 'Olga Orphan', 'Orphan Taxi GmbH', NULL, NULL, NULL, NULL);
+  co := (r->'company'->>'id')::uuid;
+  SELECT * INTO prof FROM user_profiles WHERE user_id = l_ok;
+  PERFORM _oauth_ok('an unmarked, profile-less e-mail account linked to Google registers a company',
+    r->>'ok' = 'true' AND prof.company_id = co AND prof.role = 'admin' AND prof.status = 'active'
+    AND NOT prof.is_super_admin AND prof.email = 'oauth-l-ok@test.invalid'
+    AND EXISTS (SELECT 1 FROM company_settings WHERE company_id = co));
+  PERFORM _oauth_ok('and the account is still an e-mail account, and still unmarked (so never purgeable)',
+    (SELECT raw_app_meta_data ->> 'provider' FROM auth.users WHERE id = l_ok) = 'email'
+    AND NOT EXISTS (SELECT 1 FROM app_private.pending_oauth_signups WHERE user_id = l_ok));
+  PERFORM _oauth_ok('a second submission by it raises OA006 company_exists',
+    _oauth_sqlstate(format('SELECT public.oauth_signup_create_company(%L, %L, %L, NULL, NULL, NULL, NULL)', l_ok, 'X', 'Zweite Orphan GmbH')) = 'OA006');
+
+  -- A Google-born account whose marker is gone registers as well.
+  r := public.oauth_signup_create_company(c_nopend, 'Nora Nomark', 'Nomark GmbH', NULL, NULL, NULL, NULL);
+  PERFORM _oauth_ok('a Google-born account without its marker registers (the marker is not a precondition)',
+    r->>'ok' = 'true' AND (SELECT company_id FROM user_profiles WHERE user_id = c_nopend) = (r->'company'->>'id')::uuid);
 
   -- success without referral or discount, through the parameter default
   r := public.oauth_signup_create_company(c_plain, 'Paul Plain', 'Plain GmbH', 'platinum', 'weekly', 0, NULL);

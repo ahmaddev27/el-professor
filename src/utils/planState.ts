@@ -8,11 +8,11 @@
  *
  * ─── The rule it has to mirror ───────────────────────────────────────────────
  *
- * The boundary is `public.get_active_company_id()` (20260917130000, kept by
- * 20260917140000). For a member of a company it answers a company id only when
+ * The boundary is `public.get_active_company_id()`. For a member of a company
+ * it answers a company id only when
  *
  *   company.approval_status = 'approved'
- *   AND company.status IN ('active', 'trial')
+ *   AND company.status = 'active'
  *   AND company.subscription_status = 'active'
  *   AND (company.subscription_expires_at IS NULL OR … > now())
  *
@@ -20,29 +20,26 @@
  * reads and writes nothing. Approval and the account's own status are App.tsx's
  * gates 3 and 5 and are not this module's business; the last two lines are.
  *
- * Until today this module's ancestor read `status` and `trial_end` and never
- * the subscription, which broke the normal path: signup writes `status =
- * 'trial'` with `subscription_status = 'inactive'`
- * (`app_private.signup_insert_company`), approval changes only
- * `approval_status`, and `redeem_activation_code` writes the five
- * `subscription_*` columns and never `status`. So a paying customer keeps
- * `status = 'trial'` for ever, and on the day the trial window closed the
- * browser — and only the browser — locked every screen but the overview, while
- * the server went on answering. The owner approved the fix on 17.09.2026 as
- * class 3 of the subscription decision sheet: **a company whose subscription is
- * active and unexpired is active on its stored plan, whatever `status` still
- * says.**
+ * ─── There is no trial (owner, 15.10.2026) ───────────────────────────────────
+ *
+ * "There is no 14 day try for free version." A company has access while its
+ * subscription is live — an activation code or a period an operator recorded —
+ * and not otherwise. `20261015170000` moved every `status = 'trial'` row to
+ * `'active'` and narrowed the server's `status IN ('active','trial')` to
+ * `status = 'active'`, so this module no longer has a running trial that
+ * unlocks premium, a trial that expires, or a `trial_end` to read.
+ *
+ * A `status` of `'trial'` that still reaches the browser (a rolled-back
+ * database, a stale cache) is a status this build does not know, and an unknown
+ * status locks: the server refuses it too, and a browser more permissive than
+ * the server shows empty screens.
  *
  * ─── Never more permissive than the server ───────────────────────────────────
  *
- * The subscription term is therefore part of `active` as well, not only of the
- * expired trial: a company the server refuses is not shown as active. The one
- * deliberate exception is a *running* trial, which the owner kept as it is
- * (premium, unlocked) even though a fresh company's `subscription_status` is
- * `inactive` and the server refuses it. Nothing is reachable through that gap:
- * `SubscriptionGuard` in App.tsx sends a company without an active subscription
- * to `/abo-aktivieren` and lets only that page, `/aktivierung` and `/billing`
- * through.
+ * The subscription term is part of `active`: a company the server refuses is
+ * not shown as active. `SubscriptionGuard` in App.tsx sends a company without
+ * an active subscription to `/abo-aktivieren` and lets only that page,
+ * `/aktivierung` and `/billing` through.
  */
 
 import type { FeatureKey, Plan, PlanState, SubscriptionStatus } from '../contexts/PlanContext';
@@ -53,8 +50,6 @@ import { planHasFeature, type PlanFeatureMap } from './planFeatures';
 export interface CompanyPlanRow {
   plan?: string | null;
   status?: string | null;
-  trial_start?: string | null;
-  trial_end?: string | null;
   subscription_status?: string | null;
   subscription_expires_at?: string | null;
   subscription_car_limit?: number | null;
@@ -74,20 +69,10 @@ export interface CompanyPlanRow {
 export const UNRESOLVED_PLAN_STATE: PlanState = {
   plan: 'basic',
   status: 'active',
-  trialStart: null,
-  trialEnd: null,
-  trialDaysLeft: 0,
-  isInTrial: false,
-  isTrialExpired: false,
   isActive: true,
   carLimit: 3,
   billingCycle: 'monthly',
 };
-
-function daysLeft(end: Date, now: Date): number {
-  const ms = end.getTime() - now.getTime();
-  return ms > 0 ? Math.ceil(ms / (1000 * 60 * 60 * 24)) : 0;
-}
 
 /**
  * The server's last two terms, and the only place the browser spells them.
@@ -122,21 +107,11 @@ export function buildPlanState(
   if (!raw) return { ...UNRESOLVED_PLAN_STATE };
 
   const plan: Plan = (raw.plan as Plan) ?? 'basic';
-  const trialEnd = raw.trial_end ? new Date(raw.trial_end) : null;
-  const trialStart = raw.trial_start ? new Date(raw.trial_start) : null;
-
-  const isInTrial = !!(trialEnd && trialEnd > now);
-  const trialIsOver = !!(trialEnd && trialEnd <= now);
   const subscribed = subscriptionIsActive(raw.subscription_status, raw.subscription_expires_at, now);
   const rawStatus = raw.status ?? 'active';
 
   let status: SubscriptionStatus;
-  if (rawStatus === 'trial') {
-    // A running trial is unchanged. Past it, the subscription decides: this is
-    // the defect's cell — `status` stays `trial` for ever, so without the
-    // subscription term a paying customer is `trial_expired` for ever too.
-    status = isInTrial ? 'trial' : subscribed ? 'active' : 'trial_expired';
-  } else if (rawStatus === 'suspended') {
+  if (rawStatus === 'suspended') {
     status = 'suspended';
   } else if (rawStatus === 'inactive') {
     status = 'inactive';
@@ -149,24 +124,14 @@ export function buildPlanState(
     // say `active` where `get_active_company_id()` answers NULL.
     status = subscribed ? 'active' : 'inactive';
   } else {
-    // A status this build does not know — today unreachable, because
-    // `companies_status_check` (20260916130000) pins the column to six values.
-    // It locks rather than opens, for the same reason an unknown *plan* ranks
-    // below every feature: `get_active_company_id()` admits `active` and `trial`
-    // and nothing else, so a seventh status added by a later migration would be
-    // refused by the server while an opening browser showed empty screens — the
-    // failure this module exists to remove.
+    // A status this build does not know — `trial` included, since
+    // 20261015170000 — locks rather than opens, for the same reason an unknown
+    // *plan* ranks below every feature: the server admits `active` and nothing
+    // else.
     status = 'inactive';
   }
 
-  // `isActive` reads as it always did; what changed is that `active` and
-  // `trial` are now reached only where the server agrees.
-  const isActive = status === 'trial' || status === 'active';
-
-  // "The trial ended and nothing replaced it." The two screens that read it —
-  // TrialBanner and the overview's plan card — say *Testphase abgelaufen · nur
-  // Basic-Features*, which is the wrong sentence to show someone who is paying.
-  const isTrialExpired = trialIsOver && !subscribed;
+  const isActive = status === 'active';
 
   const carLimit = raw.subscription_car_limit ?? 3;
   const billingCycle: BillingCycle = raw.billing_cycle === 'yearly' ? 'yearly' : 'monthly';
@@ -174,20 +139,15 @@ export function buildPlanState(
   return {
     plan,
     status,
-    trialStart,
-    trialEnd,
-    trialDaysLeft: isInTrial && trialEnd ? daysLeft(trialEnd, now) : 0,
-    isInTrial,
-    isTrialExpired,
     isActive,
     carLimit,
     billingCycle,
   };
 }
 
-/** Premium for as long as the trial runs, the stored plan afterwards. */
+/** The plan the company holds. Since the trial went, nothing lifts it. */
 export function effectivePlanOf(planState: PlanState): Plan {
-  return planState.isInTrial ? 'premium' : planState.plan;
+  return planState.plan;
 }
 
 /**

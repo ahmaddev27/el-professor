@@ -362,7 +362,9 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
       .lte('date', to);
 
     if (error) throw error;
-    return (data ?? []).reduce((sum, row) => sum + toCents(row.amount), 0);
+    // Negative Uber tips are stored (a reversed tip). A Quittung attests tips
+    // handed over, and a net reversal hands nothing over: never prefill below zero.
+    return Math.max(0, (data ?? []).reduce((sum, row) => sum + toCents(row.amount), 0));
   }, [companyId]);
 
   const handleGenerate = async () => {

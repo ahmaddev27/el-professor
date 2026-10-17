@@ -39,17 +39,42 @@ async function signIn(page: Page) {
   await page.waitForURL(/\/(overview|uebersicht)/, { timeout: 40_000 });
 }
 
-/** Screens 1 to 3, leaving the summary with its confirm button. */
+/**
+ * Steps 1 to 4 of the eight, leaving the summary (step 4) with its first
+ * "Plan bestätigen" button. That button only moves to step 6 ("Bestätigen"),
+ * where a second "Plan bestätigen" saves; callers press it twice.
+ */
 async function walkToSummary(page: Page) {
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(6000);
+  // The month list now opens on November 2026, whose seeded import carries no
+  // source_columns_json, so the planned Fahrtenbuch (§10) cannot be built from it
+  // (fixture gap, see report). October's import has its columns; pick it, as the
+  // spec did when October was the only/first month.
+  const monthSelect = page.locator('select').first();
+  const october = await monthSelect.locator('option').filter({ hasText: /Oktober 2026/ }).first().getAttribute('value');
+  await monthSelect.selectOption(october!);
+  await page.waitForTimeout(3000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(4000);
   await page.getByRole('button', { name: /Bestätigen und Plan erzeugen/ }).click();
-  await page.waitForTimeout(8000);
+  await page.waitForTimeout(12_000);
+  // Step 3 (blocks) -> step 4 (distribution / summary).
+  await page.getByRole('button', { name: /Auf Fahrer verteilen/ }).first().click();
+  await page.waitForTimeout(10_000);
+}
+
+/** Step 4 -> step 6: the first "Plan bestätigen" only opens the confirmation step. */
+async function toConfirmStep(page: Page) {
+  const first = page.getByRole('button', { name: /^Plan bestätigen$/ });
+  await expect(first, 'the summary offers confirmation').toBeEnabled({ timeout: 30_000 });
+  await first.click();
+  await page.waitForTimeout(2000);
 }
 
 test('confirming writes the plan, and the planned Fahrtenbuch becomes producible', async ({ page }) => {
+  test.setTimeout(300_000); // the eight-step walk on staging is slow
+
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(`UNCAUGHT ${e.message}`));
   page.on('console', m => {
@@ -59,8 +84,9 @@ test('confirming writes the plan, and the planned Fahrtenbuch becomes producible
   await signIn(page);
   await walkToSummary(page);
 
+  await toConfirmStep(page);
   const confirm = page.getByRole('button', { name: /^Plan bestätigen$/ });
-  await expect(confirm, 'the summary offers confirmation').toBeEnabled();
+  await expect(confirm, 'the confirmation step offers the save').toBeEnabled();
   await confirm.click();
 
   // The month may already hold a plan from an earlier run. §9's choice is the
@@ -70,6 +96,9 @@ test('confirming writes the plan, and the planned Fahrtenbuch becomes producible
   if (await replace.count() > 0) {
     await replace.click();
   }
+
+  // A confirmed plan lands on step 7 (Schichten); the documents are step 8.
+  await page.getByRole('button', { name: /Weiter zu den Dokumenten/ }).click({ timeout: 45_000 });
 
   await expect(page.getByRole('tab', { name: /Stundennachweis/ }),
     'the documents step opens once the plan is confirmed').toBeVisible({ timeout: 45_000 });
@@ -108,10 +137,13 @@ test('confirming writes the plan, and the planned Fahrtenbuch becomes producible
 });
 
 test('a second confirmation offers to replace rather than writing a second plan', async ({ page }) => {
+  test.setTimeout(300_000); // the eight-step walk on staging is slow
+
   // The test above leaves October confirmed, so this one's premise holds
   // whatever ran before either of them.
   await signIn(page);
   await walkToSummary(page);
+  await toConfirmStep(page);
   await page.getByRole('button', { name: /^Plan bestätigen$/ }).click();
 
   await expect(page.getByText(/bereits eine bestätigte Planung/),

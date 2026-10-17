@@ -1,5 +1,5 @@
 /**
- * The four notification mails, and who receives them.
+ * The two notification mails, and who receives them.
  *
  * No Deno, npm: or jsr: import: vitest runs this file in Node, like
  * activation-code-mail.ts, whose rules hold here too:
@@ -17,7 +17,7 @@
  * would have to restate.
  *
  * These mails carry no code and no one-time link, so nothing here goes near
- * `safeSubject()`'s territory: the subject names the car or the trial and
+ * `safeSubject()`'s territory: the subject names the car and
  * nothing secret.
  */
 import { emphasis, escapeHtml, renderEmailHtml, renderEmailText } from './email-layout.mjs';
@@ -68,7 +68,6 @@ const SETTINGS_NOTE = 'Diese Benachrichtigung können Sie in El-Professor unter 
 
 function copyFor(item: PlannedNotification): MailCopy {
   const due = formatGermanDay(item.dueDay);
-  const company = item.companyName?.trim() || null;
 
   switch (item.type) {
     case 'tuev_bald_ablaufend': {
@@ -96,35 +95,6 @@ function copyFor(item: PlannedNotification): MailCopy {
         bodyHtml: `Der TÜV für ${emphasis(car)} ist am ${emphasis(due)} abgelaufen, also ${escapeHtml(sinceDays(item.daysLeft))}. Ein Fahrzeug ohne gültige Hauptuntersuchung darf nicht eingesetzt werden.`,
         note: SETTINGS_NOTE,
         cta: { label: 'Fahrzeuge öffnen', path: '/fahrzeuge' },
-      };
-    }
-    case 'trial_bald_ablaufend': {
-      const when = item.daysLeft === 0 ? 'heute' : `in ${inDays(item.daysLeft)}`;
-      const who = company ? `Die Testphase von ${company}` : 'Ihre Testphase';
-      const whoHtml = company ? `Die Testphase von ${emphasis(company)}` : 'Ihre Testphase';
-      return {
-        eyebrow: 'Abonnement',
-        subject: 'Ihre Testphase läuft bald ab – El-Professor',
-        heading: 'Testphase läuft bald ab',
-        preheader: `Die Testphase endet am ${due}.`,
-        bodyText: `${who} endet am ${due}, also ${when}. Lösen Sie Ihren Aktivierungscode ein, damit Sie ohne Unterbrechung weiterarbeiten können.`,
-        bodyHtml: `${whoHtml} endet am ${emphasis(due)}, also ${escapeHtml(when)}. Lösen Sie Ihren Aktivierungscode ein, damit Sie ohne Unterbrechung weiterarbeiten können.`,
-        note: SETTINGS_NOTE,
-        cta: { label: 'Abo aktivieren', path: '/abo-aktivieren' },
-      };
-    }
-    case 'trial_abgelaufen': {
-      const who = company ? `Die Testphase von ${company}` : 'Ihre Testphase';
-      const whoHtml = company ? `Die Testphase von ${emphasis(company)}` : 'Ihre Testphase';
-      return {
-        eyebrow: 'Abonnement',
-        subject: 'Ihre Testphase ist abgelaufen – El-Professor',
-        heading: 'Testphase ist abgelaufen',
-        preheader: `Die Testphase ist am ${due} abgelaufen.`,
-        bodyText: `${who} ist am ${due} abgelaufen. Ihre Daten bleiben vollständig erhalten. Lösen Sie einen Aktivierungscode ein, um El-Professor weiter zu nutzen.`,
-        bodyHtml: `${whoHtml} ist am ${emphasis(due)} abgelaufen. Ihre Daten bleiben vollständig erhalten. Lösen Sie einen Aktivierungscode ein, um El-Professor weiter zu nutzen.`,
-        note: SETTINGS_NOTE,
-        cta: { label: 'Abo aktivieren', path: '/abo-aktivieren' },
       };
     }
   }

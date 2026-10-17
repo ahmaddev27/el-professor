@@ -209,10 +209,6 @@ INSERT INTO app_private.platform_staff (user_id, role, note) VALUES
 
 -- ─── fixtures the write RPCs act on ─────────────────────────────────────────
 
--- A trial to extend, so platform_company_extend_trial has something to move.
-UPDATE companies SET trial_end = now() + interval '7 days'
- WHERE id = 'c0000000-0000-4000-8000-00000000000a';
-
 INSERT INTO subscription_plans (id, name, monthly_price, included_cars, drivers_per_car_limit, is_active)
 VALUES ('3b100000-0000-4000-8000-000000000001', 'PR Plan', 49, 5, 4, true)
 ON CONFLICT (id) DO NOTHING;
@@ -252,7 +248,6 @@ BEGIN
       'public.platform_company_set_approval(uuid,text,text)',
       'public.platform_company_set_status(uuid,text)',
       'public.platform_company_lifecycle(uuid,text)',
-      'public.platform_company_extend_trial(uuid,integer)',
       'public.platform_company_set_plan(uuid,text,text,integer)',
       'public.platform_subscription_assign(uuid,uuid,integer,text)',
       'public.platform_invoice_mark_paid(uuid,bigint,timestamptz,text)',
@@ -302,23 +297,21 @@ BEGIN
   CREATE TEMP TABLE _pr_rpc (ord serial, label text, stmt text, want text) ON COMMIT DROP;
 
   INSERT INTO _pr_rpc (label, stmt, want) VALUES
-    -- companies.lifecycle: owners only, open decision D2
+    -- companies.lifecycle: owners and support (D2, answered 15.10.2026)
     ('platform_company_create',
-     $q$SELECT platform_company_create('PR Neu', 'pr-neu')::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_create('PR Neu', 'pr-neu')::text$q$, 'YYNNN'),
     ('platform_company_update',
-     $q$SELECT platform_company_update('c0000000-0000-4000-8000-00000000000a', 'Test A', 'test-a')::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_update('c0000000-0000-4000-8000-00000000000a', 'Test A', 'test-a')::text$q$, 'YYNNN'),
     ('platform_company_set_approval(approve)',
-     $q$SELECT platform_company_set_approval('c0000000-0000-4000-8000-00000000000a', 'approve')::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_set_approval('c0000000-0000-4000-8000-00000000000a', 'approve')::text$q$, 'YYNNN'),
     ('platform_company_set_approval(reject)',
-     $q$SELECT platform_company_set_approval('c0000000-0000-4000-8000-00000000000a', 'reject', 'pr')::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_set_approval('c0000000-0000-4000-8000-00000000000a', 'reject', 'pr')::text$q$, 'YYNNN'),
     ('platform_company_set_status(suspended)',
-     $q$SELECT platform_company_set_status('c0000000-0000-4000-8000-00000000000a', 'suspended')::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_set_status('c0000000-0000-4000-8000-00000000000a', 'suspended')::text$q$, 'YYNNN'),
     ('platform_company_lifecycle(suspend)',
-     $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'suspend')::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'suspend')::text$q$, 'YYNNN'),
     ('platform_company_lifecycle(archive)',
-     $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'archive')::text$q$, 'YNNNN'),
-    ('platform_company_extend_trial(7)',
-     $q$SELECT platform_company_extend_trial('c0000000-0000-4000-8000-00000000000a', 7)::text$q$, 'YNNNN'),
+     $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'archive')::text$q$, 'YYNNN'),
     -- billing.manage: owners and billing
     ('platform_company_set_plan',
      $q$SELECT platform_company_set_plan('c0000000-0000-4000-8000-00000000000a', 'premium')::text$q$, 'YNYNN'),
@@ -372,10 +365,10 @@ BEGIN
     RAISE NOTICE 'ok  role x rpc  %  (%)', r.label, r.want;
   END LOOP;
 
-  -- The refusal is the capability's, not the staff row's: support holds a row
-  -- and is still refused, and says so with the same reason a stranger gets.
+  -- The refusal is the capability's, not the staff row's: billing holds a row
+  -- and is still refused (support no longer is: D2 was answered 15.10.2026), and says so with the same reason a stranger gets.
   PERFORM _pr_ok('a refused platform role is told it lacks permission, not that the row is missing',
-    _pr_reason(_pr_try(support, $q$SELECT platform_company_set_status('c0000000-0000-4000-8000-00000000000a', 'active')::text$q$)) = 'denied'
+    _pr_reason(_pr_try(billing, $q$SELECT platform_company_set_status('c0000000-0000-4000-8000-00000000000a', 'active')::text$q$)) = 'denied'
     AND _pr_reason(_pr_try(admin_a, $q$SELECT platform_company_set_status('c0000000-0000-4000-8000-00000000000a', 'active')::text$q$)) = 'denied');
 END $$;
 
@@ -411,23 +404,20 @@ BEGIN
     v_row.before_value ->> 'status' IS NOT NULL
     AND v_row.after_value ->> 'status' = 'suspended');
 
-  -- An error inside a call that passed authorization is recorded as an error,
-  -- with its reason, and the call changes nothing.
-  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
-  PERFORM _pr_ok('extending a trial on a company that has none answers no_trial',
-    _pr_reason(_pr_do(owner, format('SELECT platform_company_extend_trial(%L, 7)::text',
-      'c0000000-0000-4000-8000-00000000000b'))) = 'no_trial');
-  SELECT * INTO v_row FROM app_private.platform_audit_log WHERE id > v_from;
-  PERFORM _pr_ok('…and that is one audit row, outcome error, naming the reason',
-    v_row.action = 'company.extend_trial' AND v_row.outcome = 'error'
-    AND v_row.after_value ->> 'reason' = 'no_trial');
+  -- There is no trial to extend (20261015170000 dropped the RPC), so the call
+  -- cannot be made at all, and a status of 'trial' is refused as invalid.
+  PERFORM _pr_ok('platform_company_extend_trial does not exist any more',
+    to_regprocedure('public.platform_company_extend_trial(uuid,integer)') IS NULL);
+  PERFORM _pr_ok('setting a company to status trial is refused as invalid, and writes no company row',
+    _pr_reason(_pr_do(owner, format('SELECT platform_company_set_status(%L, %L)::text',
+      'c0000000-0000-4000-8000-00000000000b', 'trial'))) = 'invalid');
 END $$;
 
 -- ─── 4. a refused call is audited too ───────────────────────────────────────
 
 DO $$
 DECLARE
-  support constant uuid := '3b000000-0000-4000-8000-000000000003';
+  billing constant uuid := '3b000000-0000-4000-8000-000000000004';
   admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
   co_a    constant uuid := 'c0000000-0000-4000-8000-00000000000a';
   v_from  bigint;
@@ -436,11 +426,11 @@ DECLARE
   i       integer;
 BEGIN
   SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
-  PERFORM _pr_do(support, format('SELECT platform_company_lifecycle(%L, %L)::text', co_a, 'archive'));
+  PERFORM _pr_do(billing, format('SELECT platform_company_lifecycle(%L, %L)::text', co_a, 'archive'));
   SELECT * INTO v_row FROM app_private.platform_audit_log WHERE id > v_from;
   PERFORM _pr_ok('a platform role without the capability leaves a denied row naming what it lacked',
     v_row.action = 'company.archive' AND v_row.outcome = 'denied'
-    AND v_row.actor_user_id = support AND v_row.actor_role = 'support'
+    AND v_row.actor_user_id = billing AND v_row.actor_role = 'billing'
     AND v_row.after_value ->> 'capability' = 'companies.lifecycle');
 
   SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;

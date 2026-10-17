@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renderAbrechnungMail,
   renderAbrechnungSummaryMail,
+  renderReminderMail,
   attachmentName,
   euro,
   percent,
@@ -202,5 +203,57 @@ describe('renderAbrechnungSummaryMail', () => {
       expect(text).not.toMatch(/Quittung|Lohnabrechnung|Gehaltsabrechnung/);
     }
     expect(mail.text).toContain('keine Rechnung');
+  });
+});
+
+describe('renderReminderMail', () => {
+  const reminder = () => renderReminderMail({
+    driverName: 'Ahmed Hemaid',
+    companyName: 'Y&A Mobility',
+    periodLabel: 'Woche 5 - August 2026',
+    periodRange: '31.08.2026 – 06.09.2026',
+    sendTime: '08:00',
+    appUrl: 'https://app.elprofessor.eu',
+  });
+
+  it('says which week, what is missing and when the figures go out', () => {
+    const { text } = reminder();
+    expect(text).toContain('Woche 5 - August 2026');
+    expect(text).toContain('31.08.2026 – 06.09.2026');
+    expect(text).toContain('weder Bargeld noch Barbelege');
+    expect(text).toContain('08:00 Uhr');
+  });
+
+  it('states no amount anywhere, because the figures are what is incomplete', () => {
+    const mail = reminder();
+    for (const part of [mail.html, mail.text, mail.subject]) {
+      expect(part).not.toMatch(/€|\d,\d\d/);
+    }
+  });
+
+  it('carries no link and no figure in the subject', () => {
+    const mail = reminder();
+    expect(mail.text).not.toMatch(/https?:\/\//);
+    expect(mail.subject).toBe('Erinnerung: Abrechnung Woche 5 - August 2026 – Y&A Mobility');
+  });
+
+  it('tells a driver with nothing to hand in that he can ignore it', () => {
+    expect(reminder().text).toContain('ignorieren');
+  });
+
+  it('escapes a driver name', () => {
+    const mail = renderReminderMail({
+      driverName: '<b>Muster</b>', companyName: 'X', periodLabel: 'Woche 1',
+      periodRange: 'a – b', sendTime: '08:00', appUrl: 'https://app.elprofessor.eu',
+    });
+    expect(mail.html).not.toContain('<b>Muster</b>');
+    expect(mail.html).toContain('&lt;b&gt;Muster&lt;/b&gt;');
+  });
+
+  it('never calls itself an invoice, a receipt or a payslip', () => {
+    const mail = reminder();
+    for (const text of [mail.html, mail.text, mail.subject]) {
+      expect(text).not.toMatch(/Quittung|Lohnabrechnung|Gehaltsabrechnung/);
+    }
   });
 });

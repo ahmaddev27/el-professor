@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
-import { exportTableToExcel } from '../utils/excelExport';
+import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { usePlan } from '../contexts/PlanContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -48,6 +48,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const { planState } = usePlan();
   const { settings: companySettings } = useCompanySettings();
   const { t } = useTranslation();
+  const exportPicker = useColumnPickerExport();
   const driversPerCar = companySettings?.drivers_per_car_limit ?? 4;
   const driverLimit = planState.carLimit * driversPerCar;
   const driverLimitReached = activeDrivers.length >= driverLimit;
@@ -93,7 +94,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       t('fleet.weekday.thu'), t('fleet.weekday.fri'), t('fleet.weekday.sat'),
     ];
     const yesNo = (v: unknown) => v === true ? t('common.yes') : v === false ? t('common.no') : '';
-    exportTableToExcel({
+    exportPicker.table('drivers', {
       filename: `fahrer_${new Date().toISOString().split('T')[0]}`,
       sheetTitle: t('fleet.driversSheetTitle'),
       moduleName: t('nav.fahrer'),

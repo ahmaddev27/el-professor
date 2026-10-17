@@ -6,6 +6,7 @@ import { getBusinessMonthRange, getBusinessWeeksForMonth, WeekOfMonth } from '..
 import type { ReceiptExportFilters } from '../utils/belegeExport';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { receiptAuthor, receiptFuelParts, receiptSourceParts } from '../utils/receiptDisplay';
 import {
   Badge,
   Button,
@@ -95,10 +96,10 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
 }) => {
   const { t, tPlural } = useTranslation();
 
-  const resolveCreator = (createdBy: string | undefined): string => {
-    if (!createdBy) return t('rec.unknownUser');
-    return userDisplayNames.get(createdBy) ?? t('rec.unknownUser');
-  };
+  // A Beleg from the driver app names the driver (owner, 13.10.2026): there is
+  // no user behind it to resolve.
+  const resolveCreator = (receipt: Receipt): string =>
+    receiptAuthor(receipt, userDisplayNames, t('rec.unknownUser'));
   const now = new Date();
   const currentMonthStr = format(now, 'yyyy-MM');
   const currentMonth0 = getMonth(now);
@@ -182,7 +183,8 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
         receipt.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
         receipt.date.includes(searchTerm) ||
         receipt.receiptNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        receipt.driverName.toLowerCase().includes(searchTerm.toLowerCase())
+        receipt.driverName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (receipt.merchantName ?? '').toLowerCase().includes(searchTerm.toLowerCase())
       );
 
       let matchesDate = true;
@@ -335,6 +337,10 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     );
   };
 
+  const sourceParts = (receipt: Receipt) => receiptSourceParts(receipt);
+  const fuelParts = (receipt: Receipt) =>
+    receiptFuelParts(receipt, { odometer: t('rec.odometer'), rangeLeft: t('rec.rangeLeft') });
+
   const paymentLabel = (receipt: Receipt) =>
     // PAYMENT_METHODS is a shared constant in types/receipt.ts that
     // utils/receiptPdf.ts also reads, so it is not translated in place; the
@@ -369,7 +375,12 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
             <span className="tabular-nums sm:hidden">{formatDate(receipt.date)} · </span>
             {receipt.driverName}
           </span>
-          {receipt.city ? <span className="text-[13px] text-fg-muted">{receipt.city}</span> : null}
+          {sourceParts(receipt).length > 0 ? (
+            <span className="text-[13px] text-fg-muted">{sourceParts(receipt).join(' · ')}</span>
+          ) : null}
+          {fuelParts(receipt).length > 0 ? (
+            <span className="text-[13px] tabular-nums text-fg-muted">{fuelParts(receipt).join(' · ')}</span>
+          ) : null}
         </span>
       ),
       // At 375 px the Beleg, the amount and both row actions share the width;
@@ -409,8 +420,8 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       id: 'createdBy',
       header: t('rec.createdBy'),
       cell: receipt => (
-        <span className="text-fg-muted" title={receipt.createdBy || ''}>
-          {resolveCreator(receipt.createdBy)}
+        <span className="text-fg-muted" title={receipt.submittedByName || receipt.createdBy || ''}>
+          {resolveCreator(receipt)}
         </span>
       ),
       hideBelow: 'lg',
