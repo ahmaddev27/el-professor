@@ -6820,4 +6820,16 @@ export const en: PartialDictionary = {
   'rec.section.identity':     'Beleg',
   'rec.section.money':        'Amount',
   'rec.section.whereWhen':    'Where and when',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.odo.failed':              'The photo could not be read. Please enter the odometer.',
+  'rec.odo.photo':               'Read odometer photo',
+  'rec.odo.photoHint':           'The photo is only read, never stored or uploaded.',
+  'rec.odo.problem.no_km_value': 'No value with “km” was found on the photo. Please enter the odometer.',
+  'rec.odo.problem.no_text':     'No text was found on the photo. Please enter the odometer.',
+  'rec.odo.problem.too_small':   'The km value found has fewer than five digits and is not an odometer. Please enter the odometer.',
+  'rec.odo.rangeOnly':           'Range read.',
+  'rec.odo.readBoth':            'Odometer and range read. Please check against the cluster.',
+  'rec.odo.readOdometer':        'Odometer read. Please check against the cluster.',
+  'rec.odo.reading':             'Reading the photo …',
 };

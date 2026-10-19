@@ -74,3 +74,19 @@ export async function extractReceiptData(
     await worker.terminate();
   }
 }
+
+/**
+ * The text lines found on a photo of a car's cluster. The image is read in the
+ * browser and dropped; nothing is uploaded or stored. The rule that turns the
+ * lines into an odometer is `odometerRead.ts`.
+ */
+export async function extractClusterLines(file: File | Blob): Promise<string[]> {
+  const dataUrl = await preprocessImage(file);
+  const worker = await createWorker('deu+eng');
+  try {
+    const { data: { text } } = await worker.recognize(dataUrl);
+    return text.split(/\r?\n/);
+  } finally {
+    await worker.terminate();
+  }
+}

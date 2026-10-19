@@ -6876,4 +6876,16 @@ export const de = {
   'rec.section.identity':     'Beleg',
   'rec.section.money':        'Betrag',
   'rec.section.whereWhen':    'Wo und wann',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.odo.failed':              'Das Foto konnte nicht gelesen werden. Bitte den Kilometerstand eintragen.',
+  'rec.odo.photo':               'Tacho-Foto lesen',
+  'rec.odo.photoHint':           'Das Foto wird nur gelesen und weder gespeichert noch hochgeladen.',
+  'rec.odo.problem.no_km_value': 'Auf dem Foto wurde kein Wert mit „km“ gefunden. Bitte den Kilometerstand eintragen.',
+  'rec.odo.problem.no_text':     'Auf dem Foto wurde kein Text erkannt. Bitte den Kilometerstand eintragen.',
+  'rec.odo.problem.too_small':   'Der gefundene km-Wert hat weniger als fünf Ziffern und ist kein Kilometerstand. Bitte den Kilometerstand eintragen.',
+  'rec.odo.rangeOnly':           'Restreichweite gelesen.',
+  'rec.odo.readBoth':            'Kilometerstand und Restreichweite gelesen. Bitte mit dem Tacho abgleichen.',
+  'rec.odo.readOdometer':        'Kilometerstand gelesen. Bitte mit dem Tacho abgleichen.',
+  'rec.odo.reading':             'Foto wird gelesen …',
 } as const;

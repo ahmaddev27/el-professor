@@ -3,7 +3,8 @@ import { AlertCircle, Camera, CheckCircle, ChevronRight, Loader2, Receipt as Rec
 import { Receipt, ReceiptFormData, Driver } from '../types/receipt';
 import { getCityFromPostalCode, isValidGermanPostalCode } from '../utils/germanPostalCodes';
 import { useToast } from '../contexts/ToastContext';
-import { extractReceiptData, OcrResult, formatAmountDE } from '../utils/receiptOcr';
+import { extractReceiptData, extractClusterLines, OcrResult, formatAmountDE } from '../utils/receiptOcr';
+import { readOdometer } from '../utils/odometerRead';
 import { useTranslation } from '../contexts/LanguageContext';
 import { localReceiptNumber, nextReceiptNumber } from '../lib/receiptNumber';
 import type { TranslationKey } from '../i18n';
@@ -91,6 +92,11 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
   // stay in formData; the rest are typed text until saved
   // (utils/receiptFormRules.ts decides what they mean and what is refused).
   const [details, setDetails] = useState<ReceiptDetailsFields>(EMPTY_DETAILS);
+  // The odometer photo is read and dropped, like the Beleg photo: only the text
+  // result is kept, and the file is never uploaded (utils/odometerRead.ts).
+  const odoInputRef = useRef<HTMLInputElement>(null);
+  const [odoReading, setOdoReading] = useState(false);
+  const [odoMessage, setOdoMessage] = useState<{ text: string; tone: 'ok' | 'problem' } | null>(null);
   const setDetail = (key: keyof ReceiptDetailsFields, value: string) =>
     setDetails(prev => ({ ...prev, [key]: value }));
   const [customDescription, setCustomDescription] = useState('');
@@ -162,6 +168,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
         paymentMethod: receipt.paymentMethod || 'bar',
       });
       setDetails(detailsFieldsFromReceipt(receipt));
+      setOdoMessage(null);
       const category = RECEIPT_CATEGORIES.find(cat => cat === receipt.description);
       if (category) {
         setSelectedCategory(category);
@@ -235,6 +242,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setSelectedCategory('Tanken');
     setCustomDescription('');
     setDetails(EMPTY_DETAILS);
+    setOdoMessage(null);
   };
 
   const handlePostalCodeChange = async (value: string) => {
@@ -379,6 +387,31 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setScanMessage('');
     setOcrResult(null);
     setShowOcrDebug(false);
+  };
+
+  const readOdometerPhoto = async (file: File) => {
+    setOdoReading(true);
+    setOdoMessage(null);
+    try {
+      const reading = readOdometer(await extractClusterLines(file));
+      if (reading.rangeKm !== null) setDetail('rangeKm', String(reading.rangeKm));
+      if (reading.odometerKm === null) {
+        // It abstained: say which case, and leave the odometer for a person.
+        const key = `rec.odo.problem.${reading.problem ?? 'no_km_value'}` as TranslationKey;
+        setOdoMessage({ text: t(key), tone: 'problem' });
+        return;
+      }
+      setDetail('odometerKm', String(reading.odometerKm));
+      setOdoMessage({
+        text: t(reading.rangeKm === null ? 'rec.odo.readOdometer' : 'rec.odo.readBoth'),
+        tone: 'ok',
+      });
+    } catch (err) {
+      console.error('Odometer OCR error:', err);
+      setOdoMessage({ text: t('rec.odo.failed'), tone: 'problem' });
+    } finally {
+      setOdoReading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -825,6 +858,39 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {t('rec.section.fuel')}
                 </h3>
                   <p className="-mt-2 text-xs text-fg-subtle">{t('rec.section.fuelHint')}</p>
+                  <div className="grid gap-1.5">
+                    <input
+                      ref={odoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) void readOdometerPhoto(file);
+                        e.target.value = '';
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full sm:w-auto sm:justify-self-start"
+                      disabled={odoReading}
+                      onClick={() => odoInputRef.current?.click()}
+                    >
+                      {odoReading ? <Loader2 aria-hidden className="motion-safe:animate-spin" /> : <Camera aria-hidden />}
+                      {odoReading ? t('rec.odo.reading') : t('rec.odo.photo')}
+                    </Button>
+                    <p className="text-xs text-fg-subtle">{t('rec.odo.photoHint')}</p>
+                    {odoMessage && (
+                      <p
+                        role="status"
+                        className={cn('text-xs', odoMessage.tone === 'ok' ? 'text-positive' : 'text-critical')}
+                      >
+                        {odoMessage.text}
+                      </p>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Field label={t('rec.litres')} required={!receipt}>
                       <Input
