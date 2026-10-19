@@ -10,16 +10,18 @@
  * no fallback to a JavaScript writer, because that file would carry the wrong
  * signature and nobody would know.
  *
- * Formatting is plain, like the files these customers already get from other
- * tools: no fonts, fills, borders, alignment, widths, freeze pane, filter or
- * merges. The `s` styles, `!cols`, `!rows`, `!merges`, `!freeze` and
- * `!autofilter` that `buildTableSheet` still describes are NOT SENT, and the
- * contract has nowhere to put them (`src/lib/workbookContract.ts`). What is sent
- * is the value of each cell, whether it is a number, and the number format when
- * it is one the contract lists. A number stays a number so an accountant can sum
- * a column. This reverses the look the owner asked for on 01.10.2026; the
- * descriptions are left in place for now and are dead weight until a follow-up
- * removes them.
+ * The file has the SHAPE of the files these customers already get from other
+ * tools (Uber's): headers in row 1, data from row 2, nothing else. No title
+ * band, filter line or totals row is built at all (`buildPlainWorkbook`; its
+ * comment says what that removes). `buildTableWorkbook` and its seven-band
+ * drawing (`buildTableSheet`) are UNCHANGED: the monthly plan documents still
+ * use them and are not on the service yet. No fonts, fills, borders,
+ * alignment, widths, freeze pane, filter or merges are sent; the contract has
+ * nowhere to put them (`src/lib/workbookContract.ts`) apart from the one bold,
+ * bordered header row Uber's own files have. A number stays a number so an
+ * accountant can sum a column. This reverses the look the owner asked for on
+ * 01.10.2026; `buildTableSheet`'s drawing is dead weight for the lists until a
+ * follow-up removes it.
  *
  * `xlsx@0.20.3` is used HERE only as a data structure (`XLSX.WorkBook` is what
  * `buildTableWorkbook` returns and the tests read cell by cell) and never as a
@@ -274,6 +276,21 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 
 // ─── Main export function ─────────────────────────────────────────────────────
 
+/**
+ * The totals contract, checked by both builders even though the plain one never
+ * writes a totals row: a caller that names the first column here is a wrong
+ * program, and it should fail the first click whichever shape the file has.
+ */
+function assertTotalsContract(columns: ExportColumn[], totals: ExportOptions['totals']): void {
+  if (totals && columns.length > 0 && Object.prototype.hasOwnProperty.call(totals, columns[0].key)) {
+    throw new Error(
+      `exportTableToExcel: totals['${columns[0].key}'] can never be rendered — the first ` +
+      `column of the totals row is that row's label. Pass wording as labels.totalsRow, ` +
+      `and put a figure in any column but the first.`,
+    );
+  }
+}
+
 /** A drawn sheet and the name it goes into the workbook under. */
 interface BuiltSheet {
   name: string;
@@ -310,13 +327,7 @@ function buildTableSheet(opts: ExportOptions): BuiltSheet {
   // Loud, not a console warning: every call site is in this repository, so this
   // is a wrong program rather than wrong data, and it is meant to fail the first
   // click and the test rather than reach a customer's file.
-  if (totals && columns.length > 0 && Object.prototype.hasOwnProperty.call(totals, columns[0].key)) {
-    throw new Error(
-      `exportTableToExcel: totals['${columns[0].key}'] can never be rendered — the first ` +
-      `column of the totals row is that row's label. Pass wording as labels.totalsRow, ` +
-      `and put a figure in any column but the first.`,
-    );
-  }
+  assertTotalsContract(columns, totals);
 
   const N = columns.length;
   const exportedDate = new Date().toLocaleDateString('de-DE');
@@ -712,6 +723,69 @@ export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
   return wb;
 }
 
+// ─── The plain shape: what is actually sent to the export service ─────────────
+
+/**
+ * One sheet in the shape of the files these customers already receive from other
+ * tools: the column headers in row 1, the data from row 2, and NOTHING else.
+ *
+ * No title, no module name, no timestamp, no filter line, no totals row, no
+ * empty-state sentence, no footer note. That is information removed, on the
+ * owner's instruction ("literally the same as Uber's file"), not decoration:
+ * the file no longer records which filter produced it, no longer carries a sum,
+ * and an empty list is a header with no rows below it. `filterSummary`,
+ * `totals` and the chrome labels are accepted and ignored, so no caller changes.
+ *
+ * What stays is what is data: a numeric column is a number under its number
+ * format, a value that cannot be read as a number is never turned into 0 (it
+ * takes the text path, empty when there is nothing), and header text is whatever
+ * the screen passed, in the UI language.
+ */
+function buildPlainSheet(opts: ExportOptions): BuiltSheet {
+  const { moduleName, columns, rows, totals } = opts;
+  assertTotalsContract(columns, totals);
+  const ws: XLSX.WorkSheet = {};
+  columns.forEach((col, c) => {
+    ws[XLSX.utils.encode_cell({ r: 0, c })] = { t: 's', v: col.label };
+  });
+  rows.forEach((dataRow, i) => {
+    columns.forEach((col, c) => {
+      const rawVal = dataRow[col.key];
+      const numeric = numericCell(col, rawVal);
+      const addr = XLSX.utils.encode_cell({ r: i + 1, c });
+      if (numeric) {
+        ws[addr] = { t: 'n', v: numeric.value, z: numeric.z };
+        return;
+      }
+      const text = col.format ? col.format(rawVal) : rawVal == null ? '' : String(rawVal);
+      ws[addr] = { t: 's', v: text };
+    });
+  });
+  const lastColumn = Math.max(columns.length - 1, 0);
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: lastColumn } });
+  return { name: moduleName.slice(0, 31), sheet: ws };
+}
+
+/** Several plain sheets in one workbook; a repeated sheet name gets a numeric suffix. */
+export function buildPlainWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
+  if (sheets.length === 0) {
+    throw new Error('buildPlainWorkbook: a workbook needs at least one sheet');
+  }
+  const wb = XLSX.utils.book_new();
+  const used = new Set<string>();
+  for (const opts of sheets) {
+    const built = buildPlainSheet(opts);
+    let name = built.name;
+    for (let n = 2; used.has(name); n++) {
+      const suffix = ` (${n})`;
+      name = `${built.name.slice(0, 31 - suffix.length)}${suffix}`;
+    }
+    used.add(name);
+    XLSX.utils.book_append_sheet(wb, built.sheet, name);
+  }
+  return wb;
+}
+
 /**
  * Writes a multi-sheet workbook through the export service.
  *
@@ -721,16 +795,16 @@ export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
  * has nowhere to show it.
  */
 export function exportSheetsToExcel(filename: string, sheets: ExportOptions[]): void {
-  const wb = buildSheetsWorkbook(sheets);
+  const wb = buildPlainWorkbook(sheets);
   const safeFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-  deliverWorkbook(wb, safeFilename);
+  deliverWorkbook(wb, safeFilename, { headerRow: true });
 }
 
 export function exportTableToExcel(opts: ExportOptions): void {
-  const wb = buildTableWorkbook(opts);
+  const wb = buildPlainWorkbook([opts]);
   const safeFilename = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`;
   // The guard against a file that claims nought after a failed read stays at the
   // call site either way: this still builds a workbook for whatever rows it is
   // handed.
-  deliverWorkbook(wb, safeFilename);
+  deliverWorkbook(wb, safeFilename, { headerRow: true });
 }

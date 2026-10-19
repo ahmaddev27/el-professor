@@ -9,6 +9,7 @@ import io
 
 from openpyxl import Workbook as OpenpyxlWorkbook
 from openpyxl.cell.cell import Cell as OpenpyxlCell
+from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils.exceptions import IllegalCharacterError
 
 from .contract import CREATOR, ContractError, Moment, Number, Sheet, Text, Workbook
@@ -23,9 +24,25 @@ def build_xlsx(workbook: Workbook) -> bytes:
         target = book.active if index == 0 else book.create_sheet()
         target.title = sheet.name
         _write_sheet(target, sheet)
+        if sheet.header:
+            _style_header_row(target)
     buffer = io.BytesIO()
     book.save(buffer)
     return buffer.getvalue()
+
+
+def _style_header_row(target) -> None:
+    """Uber's header cells, which are the only styled cells in its files: bold,
+    a thin border on all four sides, centred horizontally and top-aligned."""
+    side = Side(style="thin")
+    border = Border(left=side, right=side, top=side, bottom=side)
+    alignment = Alignment(horizontal="center", vertical="top")
+    for cell in target[1]:
+        if cell.value is None:
+            continue
+        cell.font = Font(bold=True)
+        cell.border = border
+        cell.alignment = alignment
 
 
 def _write_sheet(target, sheet: Sheet) -> None:

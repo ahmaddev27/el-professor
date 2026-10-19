@@ -25,11 +25,18 @@ import {
   type WorkbookPayload,
 } from '../lib/workbookContract';
 
-export function workbookToPayload(source: XLSX.WorkBook): WorkbookPayload {
+export interface PayloadOptions {
+  /** Row 1 of every sheet is a header row; the service gives it Uber's one header style. */
+  headerRow?: boolean;
+}
+
+export function workbookToPayload(source: XLSX.WorkBook, options: PayloadOptions = {}): WorkbookPayload {
   const sheets: PayloadSheet[] = [];
   for (const name of source.SheetNames) {
     const sheet = source.Sheets[name];
-    if (sheet) sheets.push({ name, rows: sheetRows(sheet, name) });
+    if (!sheet) continue;
+    const rows = sheetRows(sheet, name);
+    sheets.push(options.headerRow ? { name, rows, header: true } : { name, rows });
   }
   return { version: CONTRACT_VERSION, sheets };
 }
