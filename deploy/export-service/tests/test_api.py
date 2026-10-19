@@ -152,13 +152,21 @@ def test_concurrency_cap_answers_503_busy(monkeypatch):
 
 def test_a_build_past_its_deadline_is_504_and_frees_its_slot(monkeypatch):
     real = main.build_xlsx
+    real_deadline = main.BUILD_DEADLINE_SECONDS
     monkeypatch.setattr(main, "BUILD_DEADLINE_SECONDS", 0.2)
     monkeypatch.setattr(main, "build_xlsx", lambda w: (time.sleep(0.6), real(w))[1])
     c = client(limiter=RateLimiter(per_window=100))
     r = post(c)
     assert r.status_code == 504 and r.json()["error"]["code"] == "timeout"
     time.sleep(0.8)
+    # The deadline goes back with the build. This last request is the "frees its
+    # slot" half of the name; left at 0.2 s it instead measures how fast a real
+    # openpyxl build runs on the machine, which is not this test's subject and
+    # not a property the service promises. That is what failed it on a loaded CI
+    # runner on 19.10.2026 (504 where 200 was expected, the other 132 passing)
+    # while it passed on every other run.
     monkeypatch.setattr(main, "build_xlsx", real)
+    monkeypatch.setattr(main, "BUILD_DEADLINE_SECONDS", real_deadline)
     assert post(c).status_code == 200
 
 
