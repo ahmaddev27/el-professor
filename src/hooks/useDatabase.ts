@@ -397,6 +397,12 @@ export const useDatabase = () => {
           user_id: user?.id || null,
           created_by: user?.id || null,
           payment_method: receipt.paymentMethod || 'bar',
+          merchant_name: receipt.merchantName ?? null,
+          receipt_time: receipt.receiptTime ?? null,
+          litres: receipt.litres ?? null,
+          price_per_litre: receipt.pricePerLitre ?? null,
+          odometer_km: receipt.odometerKm ?? null,
+          range_km: receipt.rangeKm ?? null,
           company_id: companyId
         })
         .select()
@@ -445,7 +451,13 @@ export const useDatabase = () => {
           expense: receipt.expense,
           postal_code: receipt.postalCode || null,
           city: receipt.city || null,
-          payment_method: receipt.paymentMethod || 'bar'
+          payment_method: receipt.paymentMethod || 'bar',
+          merchant_name: receipt.merchantName ?? null,
+          receipt_time: receipt.receiptTime ?? null,
+          litres: receipt.litres ?? null,
+          price_per_litre: receipt.pricePerLitre ?? null,
+          odometer_km: receipt.odometerKm ?? null,
+          range_km: receipt.rangeKm ?? null,
         })
         .eq('id', id);
       

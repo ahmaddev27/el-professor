@@ -38,6 +38,18 @@ export interface ReceiptFormData {
   postalCode?: string;
   city?: string;
   paymentMethod?: 'bar' | 'uberweisung';
+  /**
+   * What the Beleg itself says, as the driver app captures it. An absent figure
+   * is `undefined` and reaches the column as NULL, never 0. The fuel figures
+   * exist only for the refuel category (see utils/receiptFormRules.ts).
+   */
+  merchantName?: string;
+  /** `HH:MM`, the time printed on the Beleg - not when it was entered. */
+  receiptTime?: string;
+  litres?: number;
+  pricePerLitre?: number;
+  odometerKm?: number;
+  rangeKm?: number;
 }
 
 export interface Income {
