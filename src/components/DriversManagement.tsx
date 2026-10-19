@@ -105,9 +105,12 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'status',                        label: t('common.status'),                width: 12, format: v => v === 'active' ? t('overview.status.active') : t('overview.status.inactive') },
         { key: 'gender',                        label: t('fleet.salutation'),             width: 10, format: v => v === 'male' ? t('fleet.salutationMr') : v === 'female' ? t('fleet.salutationMrs') : '' },
         { key: 'employment_type',               label: t('fleet.employmentType'),         width: 22, format: v => v === 'company_owner' ? t('fleet.companyOwner') : v === 'employee' ? t('fleet.employed') : '' },
-        // drivers.salary_ratio is numeric(5,4) between 0 and 1 — the fraction
-        // Excel's percent format expects, since it multiplies by 100 itself.
-        { key: 'salaryRatio',                   label: t('fleet.salaryShare'),            width: 16, align: 'right' as const, type: 'percent' },
+        // drivers.salary_ratio is numeric(5,4) between 0 and 1. Since 19.10.2026
+        // the file carries no number format at all, so `fractionToPercent` in
+        // excelExport.ts scales it and the cell holds 42, not 0.42 — which is
+        // why the unit belongs in the header. It is appended here and not in
+        // the dictionary, because the screen uses the same key for its label.
+        { key: 'salaryRatio',                   label: `${t('fleet.salaryShare')} (%)`,   width: 16, align: 'right' as const, type: 'percent' },
         { key: 'planning_enabled',              label: t('fleet.planningActive'),         width: 14, format: yesNo },
         // Euros, not cents: planning_hourly_rate is numeric and both salary
         // bounds are numeric(10,2), all of them stored as euro amounts.
