@@ -6847,6 +6847,10 @@ export const de = {
   'sal.unrecovered.title':    'Rückbuchungen übersteigen den Verdienst',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.litres':        'Liter',
+  'rec.merchant':      'Händler',
+  'rec.place':         'Ort',
+  'rec.pricePerLitre': 'Preis je Liter (€/l)',
   'fleet.mailLanguage':     'E-Mail-Sprache',
   'fleet.mailLanguageHint': 'In dieser Sprache erhält der Fahrer seine Abrechnung per E-Mail. Standard ist Englisch. Beträge und Daten bleiben deutsch formatiert.',
 } as const;

@@ -41,6 +41,7 @@ vi.mock('./styledWorkbookDownload', () => ({ downloadStyledWorkbook }))
 
 import * as excelExport from './excelExport'
 import { exportTableToExcel } from './excelExport'
+import { buildBelegeExportOptions, NO_RECEIPT_FILTERS } from './belegeExport'
 import type { Receipt } from '../types/receipt'
 
 const ONE: Receipt[] = [{
@@ -87,5 +88,20 @@ describe('the Belege Excel export', () => {
     // the two fields to a row and the report would still be built on a model the
     // database does not have.
     expect(Object.keys(excelExport)).not.toContain('exportToExcel')
+  })
+
+  it('gives each Beleg detail its own column; an absent figure is empty, not 0', () => {
+    const t = ((key: string) => key) as never
+    const fuel: Receipt = { ...ONE[0], merchantName: 'Star', city: 'Solingen', receiptTime: '03:15:00',
+      litres: 25.87, pricePerLitre: 2.049, odometerKm: 20140, rangeKm: 793 }
+    const options = buildBelegeExportOptions([fuel, ONE[0]], NO_RECEIPT_FILTERS, t)
+    const keys = options.columns.map(c => c.key)
+    expect(keys).toEqual(expect.arrayContaining(
+      ['merchantName', 'city', 'receiptTime', 'litres', 'pricePerLitre', 'odometerKm', 'rangeKm']))
+    expect(options.rows[0]).toMatchObject({ merchantName: 'Star', city: 'Solingen', receiptTime: '03:15',
+      litres: 25.87, pricePerLitre: 2.049, odometerKm: 20140, rangeKm: 793 })
+    expect(options.rows[1]).toMatchObject({ merchantName: null, city: null, receiptTime: null,
+      litres: null, pricePerLitre: null, odometerKm: null, rangeKm: null })
+    expect(options.columns.find(c => c.key === 'pricePerLitre')?.type).toBe('number3')
   })
 })

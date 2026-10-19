@@ -75,7 +75,7 @@ export const exportSalariesToExcel = (
 
 // ─── Generic reusable table export ────────────────────────────────────────────
 
-export type ExportColumnType = 'text' | 'number' | 'integer' | 'money' | 'percent' | 'kilometres';
+export type ExportColumnType = 'text' | 'number' | 'number3' | 'integer' | 'money' | 'percent' | 'kilometres';
 
 export interface ExportColumn {
   key: string;
@@ -197,6 +197,8 @@ const T = {
 // English, so it carries no language and stays out of the dictionaries.
 const NUMBER_FORMATS: Record<Exclude<ExportColumnType, 'text'>, string> = {
   number:     '#,##0.00',
+  // A unit price at a pump has three decimals; 'number' would show 2,05 for 2,049.
+  number3:    '#,##0.000',
   integer:    '#,##0',
   money:      '#,##0.00\\ "€"',
   percent:    '0.0%',

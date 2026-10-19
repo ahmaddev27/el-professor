@@ -4,7 +4,9 @@ import {
   clockTime,
   numberOrUndefined,
   receiptAuthor,
+  receiptFuelFigures,
   receiptFuelParts,
+  textOrNull,
   receiptSourceParts,
 } from './receiptDisplay';
 
@@ -93,5 +95,23 @@ describe('receiptAuthor', () => {
   it('does not treat a blank driver name as an author', () => {
     expect(receiptAuthor({ ...BASE, createdBy: 'u1', submittedByName: '   ' }, names, 'x'))
       .toBe('Y&A Mobility Verwaltung');
+  });
+});
+
+describe('receiptFuelFigures', () => {
+  it('formats each figure alone, the price at three places', () => {
+    expect(receiptFuelFigures({ ...BASE, litres: 25.87, pricePerLitre: 2.049, odometerKm: 20140, rangeKm: 793 }))
+      .toEqual({ litres: '25,87', pricePerLitre: '2,049', odometerKm: '20.140', rangeKm: '793' });
+  });
+
+  it('an absent figure is null, and a real zero is kept as 0', () => {
+    expect(receiptFuelFigures(BASE)).toEqual({ litres: null, pricePerLitre: null, odometerKm: null, rangeKm: null });
+    expect(receiptFuelFigures({ ...BASE, rangeKm: 0 }).rangeKm).toBe('0');
+  });
+
+  it('textOrNull drops blanks', () => {
+    expect(textOrNull('  ')).toBeNull();
+    expect(textOrNull(undefined)).toBeNull();
+    expect(textOrNull('Solingen')).toBe('Solingen');
   });
 });

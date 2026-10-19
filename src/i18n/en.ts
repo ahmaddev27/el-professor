@@ -6791,6 +6791,10 @@ export const en: PartialDictionary = {
   'sal.unrecovered.title':    'Clawbacks exceed earnings',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.litres':        'Litres',
+  'rec.merchant':      'Merchant',
+  'rec.place':         'Place',
+  'rec.pricePerLitre': 'Price per litre (€/l)',
   'fleet.mailLanguage':     'E-mail language',
   'fleet.mailLanguageHint': 'The driver receives their settlement e-mails in this language. The default is English. Amounts and dates keep their German format.',
 };

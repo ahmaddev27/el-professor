@@ -27,26 +27,50 @@ export function receiptSourceParts(receipt: Receipt): string[] {
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '');
 }
 
+/** A text datum trimmed, or null when it is absent or blank. */
+export function textOrNull(value: string | undefined): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
 export interface FuelLabels {
   odometer: string;
   rangeLeft: string;
 }
 
+/** The refuel's figures formatted without their units; null where the Beleg has none. */
+export interface FuelFigures {
+  litres: string | null;
+  pricePerLitre: string | null;
+  odometerKm: string | null;
+  rangeKm: string | null;
+}
+
+/**
+ * Each fuel figure as a German number, one per table column. A figure the Beleg
+ * does not carry is null - never `0`, which would claim a reading. The unit
+ * price keeps three places: a pump prints three, and two is a silent rounding.
+ */
+export function receiptFuelFigures(receipt: Receipt): FuelFigures {
+  return {
+    litres: receipt.litres === undefined ? null : formatNumber(receipt.litres, 2),
+    pricePerLitre: receipt.pricePerLitre === undefined ? null : formatNumber(receipt.pricePerLitre, 3),
+    odometerKm: receipt.odometerKm === undefined ? null : formatNumber(receipt.odometerKm),
+    rangeKm: receipt.rangeKm === undefined ? null : formatNumber(receipt.rangeKm),
+  };
+}
+
 /**
  * The refuel's figures as display strings, in the order a person reads a pump
- * ticket: litres, unit price, then the cluster's odometer and range. A figure
- * the Beleg does not carry is absent - never `0`, which would claim a reading.
+ * ticket: litres, unit price, then the cluster's odometer and range. This is
+ * what a phone shows in the first cell, where the per-figure columns are hidden.
  */
 export function receiptFuelParts(receipt: Receipt, labels: FuelLabels): string[] {
+  const figures = receiptFuelFigures(receipt);
   const parts: string[] = [];
-  if (receipt.litres !== undefined) parts.push(`${formatNumber(receipt.litres, 2)} l`);
-  if (receipt.pricePerLitre !== undefined) parts.push(`${formatNumber(receipt.pricePerLitre, 3)} €/l`);
-  if (receipt.odometerKm !== undefined) {
-    parts.push(`${labels.odometer} ${formatNumber(receipt.odometerKm)} km`);
-  }
-  if (receipt.rangeKm !== undefined) {
-    parts.push(`${labels.rangeLeft} ${formatNumber(receipt.rangeKm)} km`);
-  }
+  if (figures.litres !== null) parts.push(`${figures.litres} l`);
+  if (figures.pricePerLitre !== null) parts.push(`${figures.pricePerLitre} €/l`);
+  if (figures.odometerKm !== null) parts.push(`${labels.odometer} ${figures.odometerKm} km`);
+  if (figures.rangeKm !== null) parts.push(`${labels.rangeLeft} ${figures.rangeKm} km`);
   return parts;
 }
 
