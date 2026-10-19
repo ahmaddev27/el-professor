@@ -84,9 +84,22 @@ describe('the compose service holds no credential and no data path', () => {
     expect(block).toMatch(/read_only: true/);
     expect(block).toMatch(/cap_drop: \[ALL\]/);
     expect(block).toMatch(/no-new-privileges:true/);
-    expect(block).toMatch(/pids_limit: \d+/);
+    expect(block).toMatch(/pids: \d+/);
     expect(block).toMatch(/memory: 512M/);
     expect(block).toMatch(/tmpfs:/);
+  });
+
+  // The process cap was first written as a top-level `pids_limit`, which is
+  // what compose refused the whole project over: it normalises the key into
+  // `deploy.resources.limits.pids`, reads the absent key in an explicit limits
+  // map as 0, and then rejects 128 against 0 with "can't set distinct values".
+  // `deploy.sh`'s first guard is `docker compose config`, so the staging
+  // releases of #251 and #252 both failed before touching anything. Nothing
+  // here parses the compose file, so this is the only place that can hold the
+  // spelling.
+  it('writes the process cap inside the limits map, never as a top-level pids_limit', () => {
+    expect(block).not.toMatch(/^\s+pids_limit:/m);
+    expect(block).toMatch(/limits: \{ memory: 512M, pids: \d+ \}/);
   });
 
   it('is built from the release, not pulled', () => {
