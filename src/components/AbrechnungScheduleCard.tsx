@@ -10,6 +10,7 @@ import {
 } from '../utils/abrechnungSchedulePreview';
 import {
   germanDay,
+  nextMoments,
   REMINDER_LEAD_DEFAULT_MINUTES,
   REMINDER_LEAD_MAX_MINUTES,
   REMINDER_LEAD_MIN_MINUTES,
@@ -82,6 +83,8 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
   const [saving, setSaving] = useState(false);
   /** The stored row: null when the company has none. The preview describes this, not the form. */
   const [saved, setSaved] = useState<ScheduleForm | null>(null);
+  /** When the stored row last changed: a moment at or before it never fires (the job's rule 3). */
+  const [armedAt, setArmedAt] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: 'idle' });
 
   const load = useCallback(async () => {
@@ -90,7 +93,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
     setLoadFailed(false);
     const { data, error } = await supabase
       .from('abrechnung_schedules')
-      .select('driver_mail_enabled, manager_summary_enabled, weekday, send_time, reminder_enabled, reminder_lead_minutes')
+      .select('driver_mail_enabled, manager_summary_enabled, weekday, send_time, reminder_enabled, reminder_lead_minutes, armed_at')
       .eq('company_id', companyId)
       .maybeSingle();
     if (error) {
@@ -106,9 +109,11 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
       };
       setForm(stored);
       setSaved(stored);
+      setArmedAt(data.armed_at ?? null);
     } else {
       setForm(DEFAULTS);
       setSaved(null);
+      setArmedAt(null);
     }
     setLoading(false);
   }, [companyId]);
@@ -249,6 +254,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
 
         <SchedulePreview
           saved={saved}
+          armedAt={armedAt}
           loading={loading}
           preview={preview}
           dirty={JSON.stringify(form) !== JSON.stringify(saved ?? DEFAULTS)}
@@ -283,6 +289,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
 
 interface SchedulePreviewProps {
   saved: ScheduleForm | null;
+  armedAt: string | null;
   loading: boolean;
   preview: PreviewState;
   dirty: boolean;
@@ -293,7 +300,7 @@ interface SchedulePreviewProps {
  * The statement of what the next send does. An empty preview and a confident
  * "0 drivers" are different claims: a failed load shows the failure and no figure.
  */
-const SchedulePreview: React.FC<SchedulePreviewProps> = ({ saved, loading, preview, dirty, onRetry }) => {
+const SchedulePreview: React.FC<SchedulePreviewProps> = ({ saved, armedAt, loading, preview, dirty, onRetry }) => {
   const { t } = useTranslation();
   if (loading) return null;
 
@@ -311,7 +318,7 @@ const SchedulePreview: React.FC<SchedulePreviewProps> = ({ saved, loading, previ
       </Alert>
     );
   } else {
-    body = <PreviewBody next={preview.next} answer={preview.answer} saved={saved} />;
+    body = <PreviewBody next={preview.next} answer={preview.answer} saved={saved} armedAt={armedAt} />;
   }
 
   return (
@@ -331,8 +338,24 @@ const SKIP_KEYS = {
   claimed: 'settings.abrSchedule.preview.skip.claimed',
 } as const;
 
-const PreviewBody: React.FC<{ next: NextOccurrence; answer: SchedulePreviewAnswer; saved: ScheduleForm }> = ({ next, answer, saved }) => {
+interface PreviewBodyProps {
+  next: NextOccurrence;
+  answer: SchedulePreviewAnswer;
+  saved: ScheduleForm;
+  armedAt: string | null;
+}
+
+const PreviewBody: React.FC<PreviewBodyProps> = ({ next, answer, saved, armedAt }) => {
   const { t, tPlural } = useTranslation();
+  // The saved schedule's reminder, by the job's own rules; a reminder moment the
+  // schedule was armed after is not offered, so the line names the week it really fires.
+  const reminder = armedAt
+    ? nextMoments({
+      weekday: saved.weekday, send_time: saved.time, armed_at: armedAt,
+      reminder_lead_minutes: saved.reminderLead,
+      reminder_enabled: saved.reminder, driver_mail_enabled: saved.driverMail,
+    }, new Date())?.reminder ?? null
+    : null;
   const verdict = judgePreview(answer, saved.driverMail, saved.managerSummary);
   const skips: Array<[keyof typeof SKIP_KEYS, number]> = [
     ['noEmail', answer.drivers.no_email],
@@ -378,6 +401,15 @@ const PreviewBody: React.FC<{ next: NextOccurrence; answer: SchedulePreviewAnswe
           time: next.time,
         })}
       </p>
+      {reminder && (
+        <p>
+          {t('settings.abrSchedule.preview.nextReminder', {
+            weekday: t(WEEKDAY_KEYS[reminder.weekday]),
+            date: germanDay(reminder.day),
+            time: reminder.time,
+          })}
+        </p>
+      )}
       <p>{t('settings.abrSchedule.preview.week', { range: next.weekRange })}</p>
       {verdict.noBookings ? (
         <p className="font-medium">{t('settings.abrSchedule.preview.noBookings')}</p>
