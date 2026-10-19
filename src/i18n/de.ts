@@ -6845,4 +6845,10 @@ export const de = {
   'sal.unrecovered.cellHint': 'Rückbuchungen übersteigen den Verdienst: Gehalt auf 0,00 € gesetzt',
   'sal.unrecovered.item':     '{name}: {amount} nicht verrechnet ({period})',
   'sal.unrecovered.title':    'Rückbuchungen übersteigen den Verdienst',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.litres':        'Liter',
+  'rec.merchant':      'Händler',
+  'rec.place':         'Ort',
+  'rec.pricePerLitre': 'Preis je Liter (€/l)',
 } as const;

@@ -29,6 +29,7 @@ import type { TranslationKey, TranslationVars } from '../i18n';
 import type { ExportColumn, ExportOptions } from './excelExport';
 import { formatDate } from '../components/ui/format';
 import { toCents } from './money';
+import { clockTime, textOrNull } from './receiptDisplay';
 
 /** `useTranslation().t`, as much of it as this module needs. */
 export type Translate = (key: TranslationKey, vars?: TranslationVars) => string;
@@ -148,6 +149,15 @@ export function receiptExportColumns(t: Translate): ExportColumn[] {
     { key: 'date', label: t('common.date'), width: 14, format: v => (typeof v === 'string' ? formatDate(v) : '') },
     { key: 'driverName', label: t('common.driver'), width: 22 },
     { key: 'description', label: t('common.description'), width: 40 },
+    // The Beleg's own details, one column each as on the screen. A figure the
+    // Beleg does not carry is an empty cell, never 0 (see types/receipt.ts).
+    { key: 'merchantName', label: t('rec.merchant'), width: 22 },
+    { key: 'city', label: t('rec.place'), width: 18 },
+    { key: 'receiptTime', label: t('common.time'), width: 10 },
+    { key: 'litres', label: t('rec.litres'), width: 10, align: 'right', type: 'number' },
+    { key: 'pricePerLitre', label: t('rec.pricePerLitre'), width: 14, align: 'right', type: 'number3' },
+    { key: 'odometerKm', label: t('rec.odometer'), width: 16, align: 'right', type: 'kilometres' },
+    { key: 'rangeKm', label: t('rec.rangeLeft'), width: 16, align: 'right', type: 'kilometres' },
     {
       key: 'paymentMethod', label: t('belege.paymentMethod'), width: 16,
       format: v => (v === 'uberweisung' ? t('belege.transfer') : t('belege.cash')),
@@ -187,6 +197,13 @@ export function buildBelegeExportOptions(
       date: r.date,
       driverName: r.driverName,
       description: r.description,
+      merchantName: textOrNull(r.merchantName),
+      city: textOrNull(r.city),
+      receiptTime: clockTime(r.receiptTime),
+      litres: r.litres ?? null,
+      pricePerLitre: r.pricePerLitre ?? null,
+      odometerKm: r.odometerKm ?? null,
+      rangeKm: r.rangeKm ?? null,
       paymentMethod: r.paymentMethod ?? 'bar',
       expense: r.expense,
     })),

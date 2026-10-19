@@ -6789,4 +6789,10 @@ export const en: PartialDictionary = {
   'sal.unrecovered.cellHint': 'Clawbacks exceed earnings: salary set to 0.00 €',
   'sal.unrecovered.item':     '{name}: {amount} not recovered ({period})',
   'sal.unrecovered.title':    'Clawbacks exceed earnings',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.litres':        'Litres',
+  'rec.merchant':      'Merchant',
+  'rec.place':         'Place',
+  'rec.pricePerLitre': 'Price per litre (€/l)',
 };
