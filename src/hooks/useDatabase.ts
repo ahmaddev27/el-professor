@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Receipt, Driver, DriverContact } from '../types/receipt';
+import { DEFAULT_DRIVER_LANGUAGE } from '../lib/driverLanguage';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -204,6 +205,8 @@ export const useDatabase = () => {
           // reads to mean "skip this driver and name them".
           email: contact?.email ?? null,
           phone: contact?.phone ?? null,
+          // Absent means the owner's default; the column also defaults to it.
+          preferred_language: contact?.preferred_language ?? DEFAULT_DRIVER_LANGUAGE,
           user_id: user?.id || null,
           created_by: user?.id || null,
           company_id: companyId,
@@ -252,6 +255,7 @@ export const useDatabase = () => {
       if (contact !== undefined) {
         updateData.email = contact.email;
         updateData.phone = contact.phone;
+        updateData.preferred_language = contact.preferred_language;
       }
 
       const { error } = await supabase

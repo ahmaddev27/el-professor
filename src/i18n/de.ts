@@ -6845,4 +6845,8 @@ export const de = {
   'sal.unrecovered.cellHint': 'Rückbuchungen übersteigen den Verdienst: Gehalt auf 0,00 € gesetzt',
   'sal.unrecovered.item':     '{name}: {amount} nicht verrechnet ({period})',
   'sal.unrecovered.title':    'Rückbuchungen übersteigen den Verdienst',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.mailLanguage':     'E-Mail-Sprache',
+  'fleet.mailLanguageHint': 'In dieser Sprache erhält der Fahrer seine Abrechnung per E-Mail. Standard ist Englisch. Beträge und Daten bleiben deutsch formatiert.',
 } as const;

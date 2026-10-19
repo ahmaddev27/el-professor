@@ -22,6 +22,7 @@
  * in the export and in `canEditDriver`.
  */
 import type { Driver } from '../types/receipt';
+import { toDriverLanguage } from './driverLanguage';
 
 export interface DriverRow {
   id: string;
@@ -34,6 +35,7 @@ export interface DriverRow {
   gender?: string | null;
   email?: string | null;
   phone?: string | null;
+  preferred_language?: string | null;
   employment_type?: string | null;
   driver_usage_type?: string | null;
   planning_target_salary?: number | null;
@@ -65,6 +67,8 @@ export function mapDriverRow(d: DriverRow): Driver {
     // same as no address, and the send path reads null to mean "skip and say so".
     email: d.email || null,
     phone: d.phone || null,
+    // English for a row that does not carry the column (read before the migration).
+    preferred_language: toDriverLanguage(d.preferred_language),
     employment_type: (d.employment_type ?? 'employee') as 'employee' | 'company_owner',
     // Planning fields
     driver_usage_type:      (d.driver_usage_type ?? 'regular') as 'regular' | 'coverage_only',
