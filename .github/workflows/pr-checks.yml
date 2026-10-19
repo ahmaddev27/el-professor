@@ -49,3 +49,37 @@ jobs:
           # the design preview (staging and dev server only) must be absent.
           if grep -rq 'data-design-preview' dist/assets; then echo "::error::the design preview is in a production-shaped build"; exit 1; fi
           echo "bundle clean"
+
+  # The Excel export service (deploy/export-service) is Python, and `npm run
+  # build` never runs it. Without this job a change to the service, or to the
+  # contract it shares with the browser, would merge untested while the build
+  # claimed exports work. The second step builds the real image, which installs
+  # with --require-hashes, so a stale hash fails here and not on the host in the
+  # middle of a release.
+  export-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: deploy/export-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the pinned runtime, then the test tools
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: --no-deps -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+      - name: Service tests (contract, signature, auth, limits, API)
+        run: python -m pytest -q tests
+      - name: The image builds with hash-checked packages and starts
+        run: |
+          docker build -t export-service-ci .
+          docker run -d --name export-ci --read-only --tmpfs /tmp --cap-drop ALL -p 8080:8080 export-service-ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs export-ci
+          exit 1

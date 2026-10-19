@@ -437,6 +437,41 @@ services:
       resources:
         limits: { memory: 512M }
 
+  # ── Excel export service ──────────────────────────────────────────────────
+  # Writes every operational Excel file with Python's openpyxl, because the
+  # companies that receive those files check the writer. The browser posts the
+  # rows it already holds and gets the same rows back as a workbook; this
+  # service has no database connection, no volume and no credential, which is
+  # what makes "a user can only receive what they sent" true by construction.
+  # Give it a database connection or a service-role key and that argument is
+  # gone (deploy/export-service/README.md).
+  #
+  # The one image in this stack that is BUILT here: deploy.sh runs
+  # `compose build export-service` from the release archive before anything
+  # starts and fails the release when the build fails. No host port. Kong
+  # routes /export/v1/ to it (kong.yml), so Caddy and ridy's Caddyfile are
+  # untouched. It asks GoTrue who a caller is (GOTRUE_URL) instead of holding
+  # JWT_SECRET, so it cannot mint a token either.
+  export-service:
+    build:
+      context: ./export-service
+    restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    environment:
+      GOTRUE_URL: http://auth:9999
+    expose:
+      - '8080'
+    deploy:
+      resources:
+        limits: { memory: 512M }
+
   # ── Gateway — the single origin the browser talks to ──────────────────────
   kong:
     image: kong:2.8.1
