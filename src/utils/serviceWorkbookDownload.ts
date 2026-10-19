@@ -11,15 +11,16 @@ import type * as XLSX from 'xlsx';
 import { ExportServiceError, fetchWorkbook, type ExportServiceDeps } from '../lib/exportService';
 import { reportExportFailure } from '../lib/exportFeedback';
 import { triggerDownload } from './browserDownload';
-import { workbookToPayload } from './workbookPayload';
+import { workbookToPayload, type PayloadOptions } from './workbookPayload';
 
 /** Rejects with an ExportServiceError when the service cannot deliver the file. */
 export async function downloadServiceWorkbook(
   source: XLSX.WorkBook,
   filename: string,
   deps?: ExportServiceDeps,
+  options?: PayloadOptions,
 ): Promise<void> {
-  const blob = await fetchWorkbook(workbookToPayload(source), deps);
+  const blob = await fetchWorkbook(workbookToPayload(source, options), deps);
   triggerDownload(blob, filename);
 }
 
@@ -27,14 +28,14 @@ export async function downloadServiceWorkbook(
  * The fire-and-forget shape every export button is written against. A failure
  * goes to the sink with a retry that reuses the already-built workbook.
  */
-export function deliverWorkbook(source: XLSX.WorkBook, filename: string): void {
-  void downloadServiceWorkbook(source, filename).catch((error: unknown) => {
+export function deliverWorkbook(source: XLSX.WorkBook, filename: string, options?: PayloadOptions): void {
+  void downloadServiceWorkbook(source, filename, undefined, options).catch((error: unknown) => {
     const failure = error instanceof Error ? error : new Error(String(error));
     const retryable = failure instanceof ExportServiceError && failure.retryable;
     reportExportFailure({
       error: failure,
       filename,
-      retry: retryable ? () => deliverWorkbook(source, filename) : undefined,
+      retry: retryable ? () => deliverWorkbook(source, filename, options) : undefined,
     });
   });
 }

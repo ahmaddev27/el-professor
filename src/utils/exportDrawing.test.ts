@@ -27,7 +27,7 @@
 import { describe, it, expect } from 'vitest';
 import type * as XLSX from 'xlsx';
 
-import { buildSheetsWorkbook, buildTableWorkbook, type ExportOptions } from './excelExport';
+import { buildPlainWorkbook, type ExportOptions } from './excelExport';
 import { buildIncomeSheets, buildSalarySheets } from './listExportSheets';
 import { workbookToPayload } from './workbookPayload';
 import { isNumberFormat, type PayloadCell } from '../lib/workbookContract';
@@ -107,13 +107,13 @@ const LIST_WITH_NOTE: ExportOptions = {
 };
 
 const EXPORTS: [name: string, build: () => XLSX.WorkBook][] = [
-  ['a generic list',            () => buildTableWorkbook(GENERIC_LIST)],
-  ['a list with a footer note', () => buildTableWorkbook(LIST_WITH_NOTE)],
-  ['Umsätze (3 sheets)', () => buildSheetsWorkbook(buildIncomeSheets(
+  ['a generic list',            () => buildPlainWorkbook([GENERIC_LIST])],
+  ['a list with a footer note', () => buildPlainWorkbook([LIST_WITH_NOTE])],
+  ['Umsätze (3 sheets)', () => buildPlainWorkbook(buildIncomeSheets(
     [income({ trip_count: 12 }), income({ type: 'trinkgeld', amount: 20, driver_name: 'Berta', trip_count: null })],
     '2026-10-01', '2026-10-31',
   ))],
-  ['Gehälter (2 sheets)', () => buildSheetsWorkbook(buildSalarySheets(
+  ['Gehälter (2 sheets)', () => buildPlainWorkbook(buildSalarySheets(
     [salary({}), salary({ driver_name: 'Berta', total_paid: 890 })],
     '2026-10-01', '2026-10-31',
   ))],
@@ -133,7 +133,7 @@ describe('the payload: plain, numeric and unsigned', () => {
   }
 
   it('the Umsätze money columns are numbers, not strings', () => {
-    const r = report(buildSheetsWorkbook(buildIncomeSheets([income({ amount: 1234.56 })], '2026-10-01', '2026-10-31')));
+    const r = report(buildPlainWorkbook(buildIncomeSheets([income({ amount: 1234.56 })], '2026-10-01', '2026-10-31')));
     // One amount cell and one totals cell, both numeric and both formatted.
     expect(r.numbers).toBeGreaterThanOrEqual(2);
     expect(r.formattedNumbers).toBeGreaterThanOrEqual(2);

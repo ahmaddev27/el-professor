@@ -41,6 +41,14 @@ def test_the_shape_is_closed(bad):
     code(bad)
 
 
+def test_header_is_the_one_optional_sheet_key_and_only_true():
+    base = {"name": "A", "rows": []}
+    assert parse({"version": 1, "sheets": [{**base, "header": True}]}).sheets[0].header is True
+    assert parse({"version": 1, "sheets": [base]}).sheets[0].header is False
+    for bad in (False, 1, "true", None):
+        assert code({"version": 1, "sheets": [{**base, "header": bad}]}).code == "invalid_payload"
+
+
 @pytest.mark.parametrize("key", ["font", "fill", "border", "alignment", "width", "freeze", "autofilter", "merge", "style"])
 def test_there_is_no_field_for_formatting(key):
     assert code(sheet([[{"t": "n", "v": 1, key: "x"}]])).code == "invalid_cell"

@@ -14,6 +14,10 @@ files this product's customers already receive from other tools.
          | {"t": "d", "v": "2026-10-19" or "2026-10-19T08:30[:00]", "fmt": F}
                                            a date or date-time, no time zone
 
+A sheet may carry `"header": true`: row 1 is then a header row and gets the one
+style Uber's own files give theirs (bold, thin border all round, centred). It is
+the only styling the contract can ask for.
+
 F is one of `numberFormats` in contract.json, which the browser client keeps a
 copy of; a test fails when the two lists differ.
 """
@@ -87,6 +91,7 @@ Cell = Union[Text, Number, Moment, None]
 class Sheet:
     name: str
     rows: list[list[Cell]]
+    header: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,13 +137,15 @@ def _unique_names(sheets: list[Sheet]) -> None:
 
 
 def _sheet(item: object, budget: list[int]) -> Sheet:
-    if not isinstance(item, dict) or set(item) != {"name", "rows"}:
-        raise ContractError("invalid_payload", "a sheet has exactly the keys name and rows")
+    if not isinstance(item, dict) or not {"name", "rows"} <= set(item) <= {"name", "rows", "header"}:
+        raise ContractError("invalid_payload", "a sheet has the keys name and rows, and optionally header")
+    if "header" in item and item["header"] is not True:
+        raise ContractError("invalid_payload", "header, when present, is true")
     name = _sheet_name(item["name"])
     rows = item["rows"]
     if not isinstance(rows, list) or len(rows) > LIMITS["maxRowsPerSheet"]:
         raise ContractError("too_many_rows", f"at most {LIMITS['maxRowsPerSheet']} rows", sheet=name)
-    return Sheet(name, [_row(row, name, index, budget) for index, row in enumerate(rows, 1)])
+    return Sheet(name, [_row(row, name, index, budget) for index, row in enumerate(rows, 1)], "header" in item)
 
 
 def _sheet_name(name: object) -> str:

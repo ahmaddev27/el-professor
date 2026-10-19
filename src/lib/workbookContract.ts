@@ -53,6 +53,12 @@ export type PayloadCell =
 export interface PayloadSheet {
   name: string;
   rows: PayloadCell[][];
+  /**
+   * Row 1 is a header row. The one piece of styling the contract carries,
+   * because Uber's own files have it: bold, thin border on all sides, centred.
+   * Everything else stays unstyled.
+   */
+  header?: true;
 }
 
 export interface WorkbookPayload {
