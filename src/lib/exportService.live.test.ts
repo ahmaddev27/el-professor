@@ -13,7 +13,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildTableWorkbook } from '../utils/excelExport';
+import { buildPlainWorkbook } from '../utils/excelExport';
 import { workbookToPayload } from '../utils/workbookPayload';
 import { ExportServiceError, fetchWorkbook } from './exportService';
 
@@ -21,7 +21,7 @@ const url = process.env.EXPORT_LIVE_URL;
 const token = process.env.EXPORT_LIVE_TOKEN;
 const out = process.env.EXPORT_LIVE_OUT;
 
-const payload = workbookToPayload(buildTableWorkbook({
+const payload = workbookToPayload(buildPlainWorkbook([{
   filename: 'live', sheetTitle: 'Belege', moduleName: 'Belege',
   columns: [
     { key: 'nr', label: 'Belegnummer' },
@@ -34,7 +34,7 @@ const payload = workbookToPayload(buildTableWorkbook({
     { nr: 'BEL-2', preis: 1.989, betrag: 1234.5, text: '+SUM(A1) Müller € 🚕' },
   ],
   totals: { betrag: 1275.97 },
-}));
+}]), { headerRow: true });
 
 describe.skipIf(!url || !token)('the live export service', () => {
   it('writes the workbook for a signed-in user', { timeout: 30_000 }, async () => {

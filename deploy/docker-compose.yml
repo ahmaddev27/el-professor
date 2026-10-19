@@ -463,14 +463,22 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 128
     environment:
       GOTRUE_URL: http://auth:9999
     expose:
       - '8080'
+    # The process cap is `pids` INSIDE the limits map, not a top-level
+    # `pids_limit`. Compose normalises `pids_limit` into
+    # `deploy.resources.limits.pids`, and when the limits map is written out
+    # explicitly it reads the absent key as 0 — then refuses the file with
+    # "can't set distinct values on 'pids_limit' and
+    # 'deploy.resources.limits.pids'" because 128 is not 0. That is what
+    # refused the staging releases of #251 and #252 (compose v5.5.0, measured
+    # on the host against all four spellings). No other service here sets a
+    # process cap, so this is the only place it bites.
     deploy:
       resources:
-        limits: { memory: 512M }
+        limits: { memory: 512M, pids: 128 }
 
   # ── Gateway — the single origin the browser talks to ──────────────────────
   kong:

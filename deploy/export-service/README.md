@@ -7,7 +7,7 @@ decision of 19.10.2026 and it is not reopened here.
 
 The browser posts the rows it already holds; the service answers the same rows
 as an `.xlsx`. Formatting is plain, like the files the same companies get from
-other tools: values, numbers as numbers, and a number format where a value needs
+other tools (headers in row 1, data from row 2): values, numbers as numbers, and a number format where a value needs
 one. No fonts, fills, borders, alignment, widths, freeze panes, filters or
 merges, and the payload has no field to ask for any of them.
 
@@ -47,6 +47,8 @@ formula, whatever it starts with), a number, or a tagged object:
 `fmt` must be one of `numberFormats` in `export_service/contract.json`; the
 browser keeps a copy of that list in `src/lib/workbookContract.ts` and a test
 fails when the two differ. The same file holds the limits.
+
+A sheet may carry `"header": true` (the only optional sheet key, and only `true`): row 1 then gets the one style the header cells of Uber's own files have, bold with a thin border on all four sides, centred horizontally and top-aligned. It is the only styling the contract can ask for.
 
 `GET /healthz` answers `{"status":"ok"}` with no token.
 

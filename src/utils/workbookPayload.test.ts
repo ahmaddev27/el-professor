@@ -44,6 +44,12 @@ describe('workbookToPayload', () => {
     expect(json).toBe('{"version":1,"sheets":[{"name":"S","rows":[["x"]]}]}');
   });
 
+  it('marks every sheet as having a header row only when asked, and sends no other style', () => {
+    const wb = book({ A1: { t: 's', v: 'Kopf' } }, 'A1:A1');
+    expect(workbookToPayload(wb).sheets[0]).toEqual({ name: 'S', rows: [['Kopf']] });
+    expect(workbookToPayload(wb, { headerRow: true }).sheets[0]).toEqual({ name: 'S', rows: [['Kopf']], header: true });
+  });
+
   it('turns an empty string into nothing and drops trailing empty cells', () => {
     const payload = workbookToPayload(book({ A1: { t: 's', v: 'a' }, B1: { t: 's', v: '' }, C1: { t: 's', v: '' } }, 'A1:C1'));
     expect(payload.sheets[0].rows).toEqual([['a']]);

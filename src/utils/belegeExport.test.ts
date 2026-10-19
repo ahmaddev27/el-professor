@@ -64,15 +64,17 @@ describe('the Belege Excel export', () => {
       totals: { expense: '42,50 EUR' },
     })).not.toThrow()
     expect(deliverWorkbook).toHaveBeenCalledTimes(1)
-    // The workbook that reached the write is a real one with the row in it, not
-    // an empty object the exporter happened to hand over. A6 is the first data
-    // row: rows 0-4 are accent, title, meta, spacer and the column header.
-    const [workbook, filename] = deliverWorkbook.mock.calls[0] as unknown as [
+    // The workbook that reached the write is a real one with the row in it, in
+    // the plain shape: headers in row 1, the first data row is A2, nothing above.
+    const [workbook, filename, options] = deliverWorkbook.mock.calls[0] as unknown as [
       { Sheets: Record<string, Record<string, { v?: unknown } | undefined>> },
       string,
+      unknown,
     ]
     expect(filename).toBe('belege_test.xlsx')
-    expect(workbook.Sheets.Belege.A6?.v).toBe('BEL-1')
+    expect(workbook.Sheets.Belege.A1?.v).toBe('Belegnummer')
+    expect(workbook.Sheets.Belege.A2?.v).toBe('BEL-1')
+    expect(options).toEqual({ headerRow: true })
     // Negative control: not through the writer that would have dropped every
     // fill, font and border on the way out.
     expect(writeFile).not.toHaveBeenCalled()

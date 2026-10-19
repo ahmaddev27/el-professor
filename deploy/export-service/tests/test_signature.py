@@ -80,6 +80,28 @@ def test_plain_means_no_style_beyond_openpyxls_defaults():
     assert '<fills count="2">' in styles
 
 
+def test_header_true_gives_row_one_ubers_style_and_nothing_else_is_styled():
+    import json
+
+    payload = {"version": 1, "sheets": [{"name": "A", "header": True, "rows": [["Kopf", "Zahl"], ["x", 1.5]]}]}
+    data = build_xlsx(parse_payload(json.dumps(payload).encode()))
+    ws = load_workbook(io.BytesIO(data))["A"]
+    for cell in ws[1]:
+        assert cell.font.b is True
+        assert (cell.border.left.style, cell.border.right.style, cell.border.top.style, cell.border.bottom.style) == ("thin",) * 4
+        assert (cell.alignment.horizontal, cell.alignment.vertical) == ("center", "top")
+    for cell in ws[2]:
+        assert not cell.font.b and cell.border.left.style is None and cell.alignment.horizontal is None
+    sheet = parts(data).read("xl/worksheets/sheet1.xml").decode()
+    for absent in ("<cols", "<pane", "<autoFilter", "<mergeCell"):
+        assert absent not in sheet
+
+
+def test_no_header_flag_leaves_the_sheet_unstyled():
+    ws = load_workbook(io.BytesIO(write(("A", [["Kopf"]]))))["A"]
+    assert not ws["A1"].font.b and ws["A1"].border.left.style is None
+
+
 def test_numbers_stay_numbers_and_dates_stay_dates():
     data = write(
         (

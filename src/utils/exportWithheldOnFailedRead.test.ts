@@ -211,8 +211,8 @@ describe('the exporter still has no failure channel, so the guard belongs at the
    */
   it('writes a workbook for whatever rows it is handed', () => {
     const body = between(source, 'export function exportTableToExcel(opts: ExportOptions): void {', '\n}');
-    expect(body).toContain('buildTableWorkbook(opts)');
-    expect(body).toContain('deliverWorkbook(wb, safeFilename)');
+    expect(body).toContain('buildPlainWorkbook([opts])');
+    expect(body).toContain('deliverWorkbook(wb, safeFilename, { headerRow: true })');
     expect(body).not.toMatch(/\breturn\b/);
   });
 
