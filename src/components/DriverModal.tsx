@@ -3,6 +3,13 @@ import { ChevronDown, Save, User } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
 import { useTranslation } from '../contexts/LanguageContext';
 import { formatPhone, normalizePhone } from '../utils/phoneNumber';
+import {
+  DEFAULT_DRIVER_LANGUAGE,
+  DRIVER_LANGUAGES,
+  DRIVER_LANGUAGE_NAMES,
+  toDriverLanguage,
+  type DriverLanguage,
+} from '../lib/driverLanguage';
 import type { TranslationKey } from '../i18n';
 import {
   Button,
@@ -102,6 +109,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
   const [personalnummer, setPersonalnummer] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [preferredLanguage, setPreferredLanguage] = useState<DriverLanguage>(DEFAULT_DRIVER_LANGUAGE);
   const [gender, setGender] = useState<Gender>('');
   const [planning, setPlanning] = useState<DriverPlanningFields>(DEFAULT_PLANNING);
   const [showPlanning, setShowPlanning] = useState(false);
@@ -141,6 +149,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
       setEmail(driver.email || '');
       // Shown as the operator reads it; `normalizePhone` takes it back either way.
       setPhone(formatPhone(driver.phone ?? null));
+      setPreferredLanguage(toDriverLanguage(driver.preferred_language));
       setGender((driver.gender as Gender) || '');
       setPlanning({
         employment_type: driver.employment_type ?? 'employee',
@@ -168,6 +177,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
       setPersonalnummer('');
       setEmail('');
       setPhone('');
+      setPreferredLanguage(DEFAULT_DRIVER_LANGUAGE);
       setGender('');
       setPlanning(DEFAULT_PLANNING);
     }
@@ -205,12 +215,14 @@ const DriverModal: React.FC<DriverModalProps> = ({
       onSave(name.trim(), ratio, personalnummer.trim(), genderValue, planning, {
         email: contact.email,
         phone: contact.phone,
+        preferred_language: preferredLanguage,
       });
       setName('');
       setSalaryRatio('50');
       setPersonalnummer('');
       setEmail('');
       setPhone('');
+      setPreferredLanguage(DEFAULT_DRIVER_LANGUAGE);
       setGender('');
       setPlanning(DEFAULT_PLANNING);
     }
@@ -292,6 +304,19 @@ const DriverModal: React.FC<DriverModalProps> = ({
                 />
               </Field>
             </div>
+
+            {/* The language of this driver's e-mails. Each option is the language's
+                own name, so it is found whatever the screen's language is. */}
+            <Field label={t('fleet.mailLanguage')} hint={t('fleet.mailLanguageHint')}>
+              <NativeSelect
+                value={preferredLanguage}
+                onChange={(e) => setPreferredLanguage(toDriverLanguage(e.target.value))}
+              >
+                {DRIVER_LANGUAGES.map(code => (
+                  <option key={code} value={code}>{DRIVER_LANGUAGE_NAMES[code]}</option>
+                ))}
+              </NativeSelect>
+            </Field>
 
             <Field label={t('fleet.personalnummer')} hint={t('fleet.personalnummerHint')} required>
               <Input

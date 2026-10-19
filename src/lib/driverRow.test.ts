@@ -41,6 +41,8 @@ describe('mapDriverRow', () => {
       // nothing. The mapper uses `|| null` for exactly that.
       email: null,
       phone: null,
+      // Added by the language slice; English is the default for a row without one.
+      preferred_language: 'en',
       employment_type: 'employee',
       driver_usage_type: 'regular',
       // The two monthly-hours columns are gone from the mapping: the plan works

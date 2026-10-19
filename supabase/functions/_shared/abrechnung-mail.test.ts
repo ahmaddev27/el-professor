@@ -18,6 +18,7 @@ import {
 } from './abrechnung-mail.ts';
 
 const input = (over: Partial<AbrechnungMailInput> = {}): AbrechnungMailInput => ({
+  language: 'de',
   driverName: 'Ahmed Hemaid',
   companyName: 'Y&A Mobility',
   periodLabel: 'Woche 5',
@@ -208,6 +209,7 @@ describe('renderAbrechnungSummaryMail', () => {
 
 describe('renderReminderMail', () => {
   const reminder = () => renderReminderMail({
+    language: 'de',
     driverName: 'Ahmed Hemaid',
     companyName: 'Y&A Mobility',
     periodLabel: 'Woche 5 - August 2026',
@@ -243,6 +245,7 @@ describe('renderReminderMail', () => {
 
   it('escapes a driver name', () => {
     const mail = renderReminderMail({
+      language: 'de',
       driverName: '<b>Muster</b>', companyName: 'X', periodLabel: 'Woche 1',
       periodRange: 'a – b', sendTime: '08:00', appUrl: 'https://app.elprofessor.eu',
     });

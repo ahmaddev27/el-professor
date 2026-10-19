@@ -31,6 +31,12 @@ export interface EmailHtmlContent {
   link?: EmailLink;
   /** Trusted markup, like bodyHtml. */
   noteHtml: string;
+  /** `<html lang>`; absent means `de`, today's bytes. */
+  lang?: string;
+  /** `rtl` stamps `dir` on html, body, the outer table and the card; absent changes nothing. */
+  dir?: 'ltr' | 'rtl';
+  /** The two footer lines, plain text; absent means the German pair. */
+  footer?: readonly [string, string];
 }
 
 export interface EmailTextContent {
@@ -40,6 +46,8 @@ export interface EmailTextContent {
   codeCaption?: string;
   link?: EmailLink;
   noteText: string;
+  /** The two footer lines, plain text; absent means the German pair. */
+  footer?: readonly [string, string];
 }
 
 export declare const EMAIL_FONT: string;

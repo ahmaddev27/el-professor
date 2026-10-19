@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
+import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { usePlan } from '../contexts/PlanContext';
@@ -217,6 +218,19 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       sortable: true,
       cell: statusBadge,
       hideBelow: 'sm',
+    },
+    {
+      id: 'mailLanguage',
+      header: t('fleet.mailLanguage'),
+      value: driver => toDriverLanguage(driver.preferred_language),
+      sortable: true,
+      cell: driver => (
+        // The language's own name, so `dir="auto"` keeps Arabic reading right.
+        <span dir="auto" className="text-fg-muted">
+          {DRIVER_LANGUAGE_NAMES[toDriverLanguage(driver.preferred_language)]}
+        </span>
+      ),
+      hideBelow: 'lg',
     },
     {
       id: 'createdBy',

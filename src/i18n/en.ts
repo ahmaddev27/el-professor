@@ -6795,4 +6795,6 @@ export const en: PartialDictionary = {
   'rec.merchant':      'Merchant',
   'rec.place':         'Place',
   'rec.pricePerLitre': 'Price per litre (€/l)',
+  'fleet.mailLanguage':     'E-mail language',
+  'fleet.mailLanguageHint': 'The driver receives their settlement e-mails in this language. The default is English. Amounts and dates keep their German format.',
 };
