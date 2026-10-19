@@ -736,11 +736,39 @@ export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
  * and an empty list is a header with no rows below it. `filterSummary`,
  * `totals` and the chrome labels are accepted and ignored, so no caller changes.
  *
- * What stays is what is data: a numeric column is a number under its number
- * format, a value that cannot be read as a number is never turned into 0 (it
- * takes the text path, empty when there is nothing), and header text is whatever
- * the screen passed, in the UI language.
+ * What stays is what is data: a numeric column is a number, a value that cannot
+ * be read as a number is never turned into 0 (it takes the text path, empty when
+ * there is nothing), and header text is whatever the screen passed, in the UI
+ * language.
+ *
+ * **A data cell carries no style at all, not even a number format**, because
+ * Uber's data cells do not (uber.xlsx: zero `<numFmt>` entries, no `s` attribute
+ * on any data cell). So a kilometre reading is the bare number, not "25,880 km";
+ * money is the bare number, not "55.11 €"; the column's `width` and `align` are
+ * not sent either, so there is no `<cols>`.
+ *
+ * **A percent column is the one whose VALUE changes, not only its look.** A
+ * `'percent'` column holds the fraction (0.42), which Excel's `0.0%` format used
+ * to display as 42,0 %. With no format that fraction would read as a different
+ * quantity, so the plain sheet writes the number a reader expects, 42, scaled
+ * HERE and not at the three call sites (Umsätze `Anteil`, Gehälter `Anteil`, the
+ * Fahrer `Gehaltsanteil`), so a fourth caller cannot get it wrong. There is no %
+ * sign: like Uber's money, the unit lives in the header, if anywhere.
+ * The stored value is exact and still sums. What the file no longer shows is the
+ * unit, the currency symbol, forced decimals (55.1 shows as 55.1, not 55,10) and
+ * the % sign. That is the owner's decision, so do not "fix" it back by passing a
+ * `z` below or drop the scaling. Dates are untouched: they stay the formatted text the screens pass.
  */
+/**
+ * 0.42 -> 42. Multiplying a float by 100 leaves noise (0.29 * 100 is
+ * 28.999999999999996), and the stored fractions have at most four decimals
+ * (`drivers.salary_ratio` is numeric(5,4)), so twelve significant digits keep
+ * every real digit and drop only the noise.
+ */
+export function fractionToPercent(fraction: number): number {
+  return Number((fraction * 100).toPrecision(12));
+}
+
 function buildPlainSheet(opts: ExportOptions): BuiltSheet {
   const { moduleName, columns, rows, totals } = opts;
   assertTotalsContract(columns, totals);
@@ -754,7 +782,7 @@ function buildPlainSheet(opts: ExportOptions): BuiltSheet {
       const numeric = numericCell(col, rawVal);
       const addr = XLSX.utils.encode_cell({ r: i + 1, c });
       if (numeric) {
-        ws[addr] = { t: 'n', v: numeric.value, z: numeric.z };
+        ws[addr] = { t: 'n', v: col.type === 'percent' ? fractionToPercent(numeric.value) : numeric.value };
         return;
       }
       const text = col.format ? col.format(rawVal) : rawVal == null ? '' : String(rawVal);

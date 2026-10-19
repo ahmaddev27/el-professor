@@ -128,14 +128,16 @@ describe('the payload: plain, numeric and unsigned', () => {
       expect(r.strings.filter(s => /professor/i.test(s)), `${name}: the file is signed`).toEqual([]);
       // At least one figure is a number under a real format. Writing money as
       // text is what made these files unusable: a column to add up by hand.
-      expect(r.numbers > 0 && r.formattedNumbers > 0, `${name}: every figure in the workbook is text`).toBe(true);
+      expect(r.numbers > 0, `${name}: every figure in the workbook is text`).toBe(true);
+      // Uber's data cells carry no number format, so neither do ours.
+      expect(r.formattedNumbers, `${name}: a number carries a format`).toBe(0);
     });
   }
 
   it('the Umsätze money columns are numbers, not strings', () => {
     const r = report(buildPlainWorkbook(buildIncomeSheets([income({ amount: 1234.56 })], '2026-10-01', '2026-10-31')));
-    // One amount cell and one totals cell, both numeric and both formatted.
+    // The amount cells are numeric, and bare.
     expect(r.numbers).toBeGreaterThanOrEqual(2);
-    expect(r.formattedNumbers).toBeGreaterThanOrEqual(2);
+    expect(r.formattedNumbers).toBe(0);
   });
 });
