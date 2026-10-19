@@ -14,6 +14,7 @@ import {
   berlinParts,
   dueOccurrence,
   dueReminder,
+  nextMoments,
   REMINDER_WINDOW_MINUTES,
   planReminder,
   figuresOfRow,
@@ -311,5 +312,74 @@ describe('planReminder', () => {
       ],
     }), mondayAt('07:00'));
     expect([...plan!.coveredDriverIds]).toEqual([DRIVER_A]);
+  });
+});
+
+describe('nextMoments', () => {
+  // Berlin is UTC+2 until 2026-10-25. Monday 2026-10-19 is the owner's day.
+  const owner = (patch: Partial<ScheduleCompany> = {}) => schedule({
+    send_time: '13:40', reminder_lead_minutes: 15,
+    armed_at: '2026-10-19T11:25:42.000Z', // 13:25:42 Berlin, 42 s after the reminder moment
+    ...patch,
+  });
+  const at = (iso: string) => new Date(iso);
+
+  it('names the next send and reminder of an ordinary schedule', () => {
+    // Wednesday 2026-10-14 10:00 Berlin; armed long ago.
+    const got = nextMoments(schedule({ send_time: '13:40', reminder_lead_minutes: 15 }), at('2026-10-14T08:00:00Z'));
+    expect(got).toEqual({
+      send: { day: '2026-10-19', time: '13:40', weekday: 1 },
+      reminder: { day: '2026-10-19', time: '13:25', weekday: 1 },
+    });
+  });
+
+  it('skips a reminder moment that passed before the schedule was armed (the owner, 19.10.2026)', () => {
+    // 13:30 Berlin: the send is still ahead, but the 13:25 reminder was armed out.
+    const got = nextMoments(owner(), at('2026-10-19T11:30:00Z'));
+    expect(got?.send).toEqual({ day: '2026-10-19', time: '13:40', weekday: 1 });
+    expect(got?.reminder).toEqual({ day: '2026-10-26', time: '13:25', weekday: 1 });
+    // And the job agrees: nothing is due at 13:25 that day.
+    expect(dueReminder(owner(), at('2026-10-19T11:26:00Z')).due).toBeNull();
+  });
+
+  it('after the send has passed, both are next Monday', () => {
+    const got = nextMoments(owner(), at('2026-10-19T13:20:00Z')); // 15:20 Berlin
+    expect(got?.send.day).toBe('2026-10-26');
+    expect(got?.reminder).toEqual({ day: '2026-10-26', time: '13:25', weekday: 1 });
+  });
+
+  it('puts a reminder whose lead crosses midnight on the previous day', () => {
+    // Tuesday 02:00 with a 12-hour lead reminds Monday 14:00.
+    const tue = schedule({ weekday: 2, send_time: '02:00', reminder_lead_minutes: 720 });
+    expect(nextMoments(tue, at('2026-10-13T08:00:00Z'))).toEqual({
+      send: { day: '2026-10-20', time: '02:00', weekday: 2 },
+      reminder: { day: '2026-10-19', time: '14:00', weekday: 1 },
+    });
+    // Tuesday 00:10, 15 minutes: Monday 23:55.
+    const early = schedule({ weekday: 2, send_time: '00:10', reminder_lead_minutes: 15 });
+    expect(nextMoments(early, at('2026-10-13T08:00:00Z'))?.reminder)
+      .toEqual({ day: '2026-10-19', time: '23:55', weekday: 1 });
+  });
+
+  it('finds a reminder that lies on the day before the weekday when now is already past it', () => {
+    // Monday 2026-10-19 15:00 Berlin; Tuesday 02:00 send, lead 12 h: reminder Monday 14:00 + 30 min window is over.
+    const tue = schedule({ weekday: 2, send_time: '02:00', reminder_lead_minutes: 720 });
+    const got = nextMoments(tue, at('2026-10-19T13:00:00Z'));
+    expect(got?.send.day).toBe('2026-10-20');
+    expect(got?.reminder?.day).toBe('2026-10-26');
+  });
+
+  it('has no reminder when it is off or when the driver mail is off', () => {
+    const now = at('2026-10-14T08:00:00Z');
+    expect(nextMoments(schedule({ reminder_enabled: false }), now)?.reminder).toBeNull();
+    expect(nextMoments(schedule({ driver_mail_enabled: false }), now)?.reminder).toBeNull();
+    expect(nextMoments(schedule({ driver_mail_enabled: false }), now)?.send).toBeTruthy();
+  });
+
+  it('is null for an invalid schedule', () => {
+    const now = at('2026-10-14T08:00:00Z');
+    expect(nextMoments(schedule({ send_time: 'soon' }), now)).toBeNull();
+    expect(nextMoments(schedule({ weekday: 7 }), now)).toBeNull();
+    expect(nextMoments(schedule({ armed_at: 'never' }), now)).toBeNull();
   });
 });

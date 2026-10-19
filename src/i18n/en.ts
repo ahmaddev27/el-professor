@@ -6876,4 +6876,7 @@ export const en: PartialDictionary = {
   'abr.handover.status.open':    'Still with driver',
   'abr.handover.status.partial': 'Partly',
   'abr.handover.title':          'Confirm the cash hand-over',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.preview.nextReminder': 'Next reminder: {weekday}, {date}, {time} (German time).',
 };
