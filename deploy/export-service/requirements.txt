@@ -1,0 +1,23 @@
+# Resolved with: pip download --platform manylinux2014_x86_64 --python-version 3.12
+#   --only-binary=:all: for openpyxl==3.1.5 starlette==1.9.0 uvicorn==0.54.0.
+# Every wheel's hash was checked against the digest PyPI serves for it.
+# Installed with: pip install --require-hashes --only-binary=:all: --no-deps -r requirements.txt
+
+anyio==4.15.1 \
+    --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+click==8.5.0 \
+    --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+et-xmlfile==2.0.0 \
+    --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa
+h11==0.16.0 \
+    --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+openpyxl==3.1.5 \
+    --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2
+starlette==1.9.0 \
+    --hash=sha256:fd3f159936e882d06c1108f84688f7cda2cf85fc6a592a50edbd175e882c2ddc
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+uvicorn==0.54.0 \
+    --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf

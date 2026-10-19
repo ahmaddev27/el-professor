@@ -27,7 +27,7 @@ import * as XLSX from 'xlsx';
  * written. `XLSX.utils` stays real, so the sheet is read back the way Excel would.
  * Since 01.10.2026 no export in this module uses it: `exportTableToExcel`,
  * `exportSheetsToExcel` and so both legacy dumps all write through
- * `downloadStyledWorkbook`, xlsx 0.20.3 having discarded every fill, font and
+ * `deliverWorkbook`, xlsx 0.20.3 having discarded every fill, font and
  * border it was handed. Both writers are mocked, so "nothing was written" below
  * still means it — and §3's last assertion is that `writeFile` stays unused.
  */
@@ -37,13 +37,12 @@ vi.mock('xlsx', async (importOriginal) => {
   return { ...real, writeFile, default: { ...real, writeFile } };
 });
 
-// Resolves, because `exportTableToExcel` attaches a `.catch` to what it returns.
-// A bare factory rather than one spreading the real module: that module lazily
-// imports exceljs, and nothing here needs it loaded.
-const { downloadStyledWorkbook } = vi.hoisted(() => ({
-  downloadStyledWorkbook: vi.fn(() => Promise.resolve()),
+// A bare factory rather than one spreading the real module: that module reaches
+// the network, and nothing here needs it loaded.
+const { deliverWorkbook } = vi.hoisted(() => ({
+  deliverWorkbook: vi.fn(),
 }));
-vi.mock('./styledWorkbookDownload', () => ({ downloadStyledWorkbook }));
+vi.mock('./serviceWorkbookDownload', () => ({ deliverWorkbook }));
 
 import * as excelExport from './excelExport';
 import {
@@ -100,7 +99,7 @@ const TWO_COLUMNS: ExportColumn[] = [
 
 beforeEach(() => {
   writeFile.mockClear();
-  downloadStyledWorkbook.mockClear();
+  deliverWorkbook.mockClear();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,7 +160,7 @@ describe('2 — a totals value on the first column is refused, not dropped', () 
     // `exportTableToExcel` no longer being the one that calls `XLSX.writeFile`.
     // The refusal is still SYNCHRONOUS — it is raised in `buildTableWorkbook`,
     // ahead of the asynchronous write — which is what lets `toThrow` see it.
-    expect(downloadStyledWorkbook).not.toHaveBeenCalled();
+    expect(deliverWorkbook).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
   });
 
@@ -340,17 +339,17 @@ describe('3 — the Gehälter export reads the same due and status as the screen
   });
 
   /**
-   * And the file is written by the styled writer, not by `xlsx`.
+   * And the file is written through the export service, not by `xlsx`.
    *
    * The whole reason this export was rebuilt: `xlsx@0.20.3` discards every fill,
    * font and border on write, so the Gehälter file came out an unstyled grid of
    * strings. A regression to `XLSX.writeFile` would satisfy every assertion above
    * and still produce that file.
    */
-  it('writes through the styled writer and never through xlsx', () => {
+  it('writes through the export service and never through xlsx', () => {
     exportSalariesToExcel([salary({ driver_name: 'Ali' })], '2026-09-01', '2026-09-30');
-    expect(downloadStyledWorkbook).toHaveBeenCalledTimes(1);
+    expect(deliverWorkbook).toHaveBeenCalledTimes(1);
     expect(writeFile).not.toHaveBeenCalled();
-    expect(downloadStyledWorkbook.mock.calls[0][1]).toBe('salaries_01-09-2026_to_30-09-2026.xlsx');
+    expect(deliverWorkbook.mock.calls[0][1]).toBe('salaries_01-09-2026_to_30-09-2026.xlsx');
   });
 });

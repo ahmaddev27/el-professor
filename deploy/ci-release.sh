@@ -19,7 +19,9 @@
 # wrapper a release could overwrite is a wrapper a release could widen.
 #
 # Protocol:
-#   release <env> [<sha>]  a gzipped tar on stdin with dist/, deploy/,
+#   release <env> [<sha>]  a gzipped tar on stdin with dist/, deploy/ (the
+#                          compose, Kong and nginx files, init-db and, since the
+#                          Excel export service, export-service/),
 #                          supabase/functions and supabase/migrations. Nothing
 #                          named .env is accepted. The sha is optional only so an
 #                          older workflow keeps working during a change-over.
@@ -96,6 +98,11 @@ install_release() {
     sed -i 's/\r$//' "$DIR/deploy/deploy.sh"
   fi
   rm -rf "$DIR/deploy/init-db";      cp -r "$src/deploy/init-db"      "$DIR/deploy/init-db"
+  # The export service is built on this host from these files. An earlier
+  # release that predates it has no such directory, and a rollback onto it must
+  # not fail here: compose removes the service as an orphan instead.
+  rm -rf "$DIR/deploy/export-service"
+  if [ -d "$src/deploy/export-service" ]; then cp -r "$src/deploy/export-service" "$DIR/deploy/export-service"; fi
   rm -rf "$DIR/supabase/functions";  cp -r "$src/supabase/functions"  "$DIR/supabase/functions"
   rm -rf "$DIR/supabase/migrations"; cp -r "$src/supabase/migrations" "$DIR/supabase/migrations"
   rm -rf "$DIR/deploy/dist.new";     cp -r "$src/dist"                "$DIR/deploy/dist.new"
@@ -199,6 +206,8 @@ if [ "$VERB" = release ]; then
   cp "$work/deploy/docker-compose.yml" "$work/deploy/deploy.sh" "$work/deploy/kong.yml" \
      "$work/deploy/nginx-spa.conf" "$rel/deploy/"
   cp -r "$work/deploy/init-db" "$rel/deploy/init-db"
+  # Optional, so an archive from before the export service is still accepted.
+  if [ -d "$work/deploy/export-service" ]; then cp -r "$work/deploy/export-service" "$rel/deploy/export-service"; fi
   cp -r "$work/supabase/functions" "$work/supabase/migrations" "$rel/supabase/"
   epoch=1
   if [ -f "$work/deploy/SCHEMA_EPOCH" ]; then

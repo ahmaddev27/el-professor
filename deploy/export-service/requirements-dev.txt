@@ -1,0 +1,7 @@
+# Tests only; never installed in the image. The runtime packages come from
+# requirements.txt, which is hash-pinned and must be installed FIRST and on its
+# own (pip refuses a mixed file once any line carries a hash):
+#   pip install --require-hashes --only-binary=:all: --no-deps -r requirements.txt
+#   pip install -r requirements-dev.txt
+pytest==9.1.1
+httpx==0.28.1

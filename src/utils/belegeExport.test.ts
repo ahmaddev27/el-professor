@@ -15,13 +15,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
   The write is mocked at the module boundary, because the real one is a DOM
   download and this suite runs in node. Since the ExcelJS swap that write is
-  `downloadStyledWorkbook`, not `XLSX.writeFile`: xlsx 0.20.3 discards every
-  fill, font, border and alignment the exporter describes (`get_cell_style` reads
-  only `cell.z`), so a styled table written through it came out plain. The
-  assertion is the same one — the exporter reaches its write with real rows —
-  against the writer that now performs it, and `XLSX.writeFile` stays mocked as
-  the negative control: a regression back onto the styleless writer fails here
-  rather than silently producing an unstyled file.
+  `deliverWorkbook`, which posts the rows to the export service (openpyxl), not
+  `XLSX.writeFile`. The assertion is that the exporter reaches its write with
+  real rows, and `XLSX.writeFile` stays mocked as the negative control: a
+  regression back onto a browser-side writer fails here rather than silently
+  producing a file with the wrong signature.
 */
 // vi.mock is hoisted above every other statement, so the spy has to be created
 // inside vi.hoisted or the factory closes over a variable that does not exist yet.
@@ -31,13 +29,12 @@ vi.mock('xlsx', async (importOriginal) => {
   return { ...real, writeFile, default: { ...real, writeFile } }
 })
 
-// Resolves, because `exportTableToExcel` attaches a `.catch` to what it returns.
-// A bare factory rather than one spreading the real module: that module lazily
-// imports exceljs, and nothing here needs it loaded.
-const { downloadStyledWorkbook } = vi.hoisted(() => ({
-  downloadStyledWorkbook: vi.fn(() => Promise.resolve()),
+// A bare factory rather than one spreading the real module: that module reaches
+// the network, and nothing here needs it loaded.
+const { deliverWorkbook } = vi.hoisted(() => ({
+  deliverWorkbook: vi.fn(),
 }))
-vi.mock('./styledWorkbookDownload', () => ({ downloadStyledWorkbook }))
+vi.mock('./serviceWorkbookDownload', () => ({ deliverWorkbook }))
 
 import * as excelExport from './excelExport'
 import { exportTableToExcel } from './excelExport'
@@ -52,7 +49,7 @@ const ONE: Receipt[] = [{
 
 beforeEach(() => {
   writeFile.mockClear()
-  downloadStyledWorkbook.mockClear()
+  deliverWorkbook.mockClear()
 })
 
 describe('the Belege Excel export', () => {
@@ -66,11 +63,11 @@ describe('the Belege Excel export', () => {
       rows: ONE.map(r => ({ receiptNumber: r.receiptNumber, expense: r.expense })),
       totals: { expense: '42,50 EUR' },
     })).not.toThrow()
-    expect(downloadStyledWorkbook).toHaveBeenCalledTimes(1)
+    expect(deliverWorkbook).toHaveBeenCalledTimes(1)
     // The workbook that reached the write is a real one with the row in it, not
     // an empty object the exporter happened to hand over. A6 is the first data
     // row: rows 0-4 are accent, title, meta, spacer and the column header.
-    const [workbook, filename] = downloadStyledWorkbook.mock.calls[0] as unknown as [
+    const [workbook, filename] = deliverWorkbook.mock.calls[0] as unknown as [
       { Sheets: Record<string, Record<string, { v?: unknown } | undefined>> },
       string,
     ]
