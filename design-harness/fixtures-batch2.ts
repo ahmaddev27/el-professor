@@ -165,6 +165,8 @@ export function batch2Tables(scenario: HarnessScenario): Array<[string, Row[]]> 
     ['salaries', empty ? [] : salaryRows()],
     ['cash_movements', empty ? [] : cashMovementRows()],
     ['salary_cash_receipts', empty ? [] : salaryCashReceiptRows()],
+    // Written by the hand-over flow itself (flows-handover.mjs); starts empty.
+    ['abrechnung_handovers', []],
   ];
 }
 

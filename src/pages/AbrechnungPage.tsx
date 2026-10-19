@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
+  AlertCircle,
   Calendar,
   CalendarRange,
+  CheckCircle2,
+  CircleDashed,
   Copy,
   DollarSign,
   Download,
   FileText,
   Filter,
   Fuel,
+  HandCoins,
+  Minus,
   Receipt as ReceiptIcon,
   RotateCw,
   Mail,
@@ -33,8 +38,23 @@ import {
 import { buildAbrechnungExport } from '../utils/tableExportRows';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { formatCentsForInput, formatCentsForNumeric, parseGermanAmountToCents, toCents } from '../utils/money';
+import {
+  defaultHandoverCents,
+  deriveHandover,
+  indexWeeklyHandovers,
+  monthlyGivenCents,
+  sumGivenCents,
+  weeklyGivenCents,
+  type HandoverKey,
+  type HandoverRecord,
+  type HandoverState,
+} from '../utils/abrechnungHandover';
 import {
   Alert,
+  Badge,
   Button,
   Card,
   cn,
@@ -49,6 +69,7 @@ import {
   EmptyState,
   Field,
   formatEuro,
+  Input,
   formatNumber,
   PageHeader,
   Select,
@@ -130,6 +151,25 @@ export function AbrechnungPage() {
   const [isSharing, setIsSharing] = useState(false);
 
   /**
+   * The hand-over record: which driver gave the cash back, and how much.
+   *
+   * A record only (owner, 19.10.2026): nothing here touches the Bargeldbestand,
+   * which already counts a driver's cash as in the till from the day it is dated.
+   * The rows are the month's weekly records; the weekly table looks one up by the
+   * identity the Abrechnung itself uses, the monthly table sums them. Their
+   * status is derived (utils/abrechnungHandover.ts), never stored.
+   */
+  const { can } = useCompanyScope();
+  const { effectiveCompanyId } = useSuperAdmin();
+  // The Abrechnung is built on `income`, and so is the table's write policy.
+  const canRecordHandover = can('income', 'edit') && effectiveCompanyId !== null;
+  const [handovers, setHandovers] = useState<HandoverRecord[]>([]);
+  const [handoverTarget, setHandoverTarget] = useState<{ key: HandoverKey; state: HandoverState } | null>(null);
+  const [handoverText, setHandoverText] = useState('');
+  const [handoverSaving, setHandoverSaving] = useState(false);
+  const [handoverError, setHandoverError] = useState<string | null>(null);
+
+  /**
    * The company's drivers with their ids and addresses.
    *
    * The Abrechnung itself carries **no driver id** — its rows name a driver and
@@ -153,6 +193,17 @@ export function AbrechnungPage() {
     }
   }, [selectedYear, selectedMonth, viewMode]);
 
+  // No company filter, as for the drivers below: the policy answers it.
+  const fetchHandovers = async (): Promise<HandoverRecord[]> => {
+    const { data, error } = await supabase
+      .from('abrechnung_handovers')
+      .select('year, month, week_number, driver_name, amount')
+      .eq('year', selectedYear)
+      .eq('month', selectedMonth);
+    if (error) throw error;
+    return (data ?? []) as HandoverRecord[];
+  };
+
   const loadWeeklyData = async () => {
     try {
       setLoading(true);
@@ -163,6 +214,10 @@ export function AbrechnungPage() {
       });
 
       if (error) throw error;
+      // Read with the rows, and a failure fails the load: a status computed from
+      // hand-overs that did not arrive would read "still with the driver" for
+      // everybody, which is a claim.
+      setHandovers(await fetchHandovers());
       setWeeklyData(data || []);
 
       const uniqueDrivers = Array.from(new Set(data?.map((d: WeeklyAbrechnung) => d.driver_name) || []));
@@ -188,6 +243,7 @@ export function AbrechnungPage() {
       });
 
       if (error) throw error;
+      setHandovers(await fetchHandovers());
       setMonthlyData(data || []);
 
       const uniqueDrivers = Array.from(new Set(data?.map((d: MonthlyAbrechnung) => d.driver_name) || []));
@@ -730,6 +786,52 @@ export function AbrechnungPage() {
     }
   };
 
+  const openHandover = (item: WeeklyAbrechnung, state: HandoverState) => {
+    setHandoverError(null);
+    setHandoverText(formatCentsForInput(state.recorded ? state.givenCents : defaultHandoverCents(state.dueCents)));
+    setHandoverTarget({
+      key: { year: item.year, month: item.month, week_number: item.week_number, driver_name: item.driver_name },
+      state,
+    });
+  };
+
+  const saveHandover = async () => {
+    if (!handoverTarget || !effectiveCompanyId || handoverSaving) return;
+    const cents = parseGermanAmountToCents(handoverText);
+    if (cents === null) {
+      setHandoverError(t('abr.handover.invalidAmount'));
+      return;
+    }
+    setHandoverSaving(true);
+    setHandoverError(null);
+    try {
+      // 0 is written as 0: "he handed nothing over" is an answer, and no row at
+      // all is "nobody confirmed anything".
+      const { error } = await supabase.from('abrechnung_handovers').upsert(
+        {
+          company_id: effectiveCompanyId,
+          ...handoverTarget.key,
+          amount: formatCentsForNumeric(cents),
+        },
+        { onConflict: 'company_id,year,month,week_number,driver_name' },
+      );
+      if (error) throw error;
+      showToast('success', t('abr.handover.saved'));
+      setHandoverTarget(null);
+      // A list that cannot be re-read is not shown as if it were current.
+      try {
+        setHandovers(await fetchHandovers());
+      } catch (reloadError: any) {
+        setLoadFailed(true);
+        showToast('error', t('abr.loadFailed'), reloadError.message);
+      }
+    } catch (error: any) {
+      setHandoverError(error.message || t('abr.handover.saveFailed'));
+    } finally {
+      setHandoverSaving(false);
+    }
+  };
+
   const getFilteredMonthlyData = () => {
     let filtered = [...monthlyData];
 
@@ -834,10 +936,53 @@ export function AbrechnungPage() {
 
   const barZurueck = (amount: number) => (
     <span className={cn('inline-flex items-center justify-end gap-1 font-semibold', amount >= 0 ? 'text-positive' : 'text-critical')}>
-      {amount >= 0 ? <TrendingUp aria-hidden className="size-4" /> : <TrendingDown aria-hidden className="size-4" />}
+      {/* Below `sm` the row carries two 40 px actions and a status under the name, so
+          the arrow goes: the sign and the colour still say which way it points. */}
+      {amount >= 0 ? <TrendingUp aria-hidden className="hidden size-4 sm:block" /> : <TrendingDown aria-hidden className="hidden size-4 sm:block" />}
       {euro(amount)}
     </span>
   );
+
+  /**
+   * One row's hand-over state. The weekly table looks its record up by the
+   * Abrechnung's own identity; the monthly one sums the driver's weekly records
+   * and derives against the monthly Difference, exactly as the weekly one does.
+   */
+  const weeklyIndex = indexWeeklyHandovers(handovers);
+  const handoverStateOf = (row: WeeklyAbrechnung | MonthlyAbrechnung): HandoverState => {
+    const due = toCents(Number(row.bar_zuruck));
+    const given = 'week_count' in row
+      ? monthlyGivenCents(handovers, row.year, row.month, row.driver_name)
+      : weeklyGivenCents(weeklyIndex, row);
+    return deriveHandover(due, given);
+  };
+
+  const statusBadge = (state: HandoverState) => {
+    switch (state.status) {
+      case 'given':
+        return (
+          <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+            <Badge tone="positive" className="px-1.5 sm:px-2"><CheckCircle2 aria-hidden />{t('abr.handover.status.given')}</Badge>
+            {state.excessCents > 0 ? (
+              <span className="text-xs text-fg-muted">{t('abr.handover.excess', { amount: euro(state.excessCents / 100) })}</span>
+            ) : null}
+          </span>
+        );
+      case 'partial':
+        return (
+          <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+            <Badge tone="caution" className="px-1.5 sm:px-2"><CircleDashed aria-hidden />{t('abr.handover.status.partial')}</Badge>
+            <span className="text-xs text-fg-muted">{t('abr.handover.remaining', { amount: euro(state.remainingCents / 100) })}</span>
+          </span>
+        );
+      case 'open':
+        return (
+          <Badge tone="critical" className="px-1.5 sm:px-2"><AlertCircle aria-hidden />{t('abr.handover.status.open')}</Badge>
+        );
+      default:
+        return <Badge tone="neutral" className="px-1.5 sm:px-2"><Minus aria-hidden />{t('abr.handover.status.noneDue')}</Badge>;
+    }
+  };
 
   // How many rows the export would write, so the button is offered for neither an
   // empty month nor a filter that matches nothing.
@@ -852,19 +997,26 @@ export function AbrechnungPage() {
         header: t('common.driver'),
         value: item => item.driver_name,
         sortable: true,
-        className: 'pr-2 sm:pr-4',
+        className: 'pl-3 pr-1 sm:px-4',
         cell: row => {
           // Widened to the union, where `in` narrows; a type parameter does not.
           const item: WeeklyAbrechnung | MonthlyAbrechnung = row;
+          // Below `sm` the Status column is hidden, so the status moves under the
+          // name: the table has room for the name, the Difference and two actions.
+          const phoneStatus = <span className="mt-1 block sm:hidden">{statusBadge(handoverStateOf(item))}</span>;
           return 'week_count' in item ? (
             <span className="font-medium">
               {item.driver_name}
               <span className="ml-2 whitespace-nowrap text-xs font-normal text-fg-subtle">
                 ({item.week_count} {item.week_count === 1 ? t('common.week') : t('common.weeks')})
               </span>
+              {phoneStatus}
             </span>
           ) : (
-            <span className="font-medium">{item.driver_name}</span>
+            <span className="font-medium">
+              {item.driver_name}
+              {phoneStatus}
+            </span>
           );
         },
       },
@@ -875,21 +1027,60 @@ export function AbrechnungPage() {
         id: 'barZurueck',
         header: t('abr.col.barZurueck'),
         kind: 'currency',
-        className: 'pl-2 pr-3 sm:px-4',
+        className: 'pl-1 pr-1 sm:px-4',
         value: item => Number(item.bar_zuruck),
         sortable: true,
         cell: item => barZurueck(Number(item.bar_zuruck)),
       },
+      {
+        id: 'handoverGiven',
+        header: t('abr.handover.col.given'),
+        kind: 'currency',
+        hideBelow: 'sm',
+        value: item => handoverStateOf(item).givenCents / 100,
+        // The dash is no record; 0,00 is a record of nothing handed over.
+        cell: item => {
+          const state = handoverStateOf(item);
+          return state.recorded ? euro(state.givenCents / 100) : <span className="text-fg-subtle">—</span>;
+        },
+      },
+      {
+        id: 'handoverStatus',
+        header: t('abr.handover.col.status'),
+        hideBelow: 'sm',
+        className: 'pl-2 pr-3 sm:px-4',
+        value: item => handoverStateOf(item).status,
+        cell: item => statusBadge(handoverStateOf(item)),
+      },
     ];
   }
 
-  const totalsRow = (totals: AbrechnungTotals) => ({
+  const totalsRow = (totals: AbrechnungTotals, rows: (WeeklyAbrechnung | MonthlyAbrechnung)[]) => ({
     driver: t('overview.common.gesamt'),
     belege: formatNumber(totals.anzahl_belege),
     spent: euro(totals.ausgegebene_bargeld),
     cash: euro(totals.bargeld),
     barZurueck: barZurueck(totals.bar_zuruck),
+    handoverGiven: euro(sumGivenCents(rows.map(handoverStateOf)) / 100),
   });
+
+  const handoverButton = (item: WeeklyAbrechnung) => {
+    const state = handoverStateOf(item);
+    // Nothing to hand over and nothing recorded: no action to offer.
+    if (!canRecordHandover || (state.status === 'none_due' && !state.recorded)) return null;
+    return (
+      <Tooltip content={t('abr.handover.action')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('abr.handover.actionFor', { name: item.driver_name })}
+          onClick={() => openHandover(item, state)}
+        >
+          <HandCoins aria-hidden />
+        </Button>
+      </Tooltip>
+    );
+  };
 
   const detailsButton = (driverName: string, open: () => void) => (
     <Tooltip content={t('abr.details')}>
@@ -924,9 +1115,14 @@ export function AbrechnungPage() {
                 columns={abrechnungColumns<WeeklyAbrechnung>()}
                 rows={weekData}
                 getRowId={item => `${item.week_number}-${item.driver_name}`}
-                rowActions={item => detailsButton(item.driver_name, () => handleRowClick(item))}
+                rowActions={item => (
+                  <>
+                    {handoverButton(item)}
+                    {detailsButton(item.driver_name, () => handleRowClick(item))}
+                  </>
+                )}
                 rowActionsLabel={t('abr.details')}
-                totals={totalsRow(totals)}
+                totals={totalsRow(totals, weekData)}
                 totalsActions={
                   // Same shape as the per-row details button directly above it, so
                   // the column reads as one column rather than two controls that
@@ -968,9 +1164,10 @@ export function AbrechnungPage() {
           getRowId={item => item.driver_name}
           rowActions={item => detailsButton(item.driver_name, () => handleMonthlyRowClick(item))}
           rowActionsLabel={t('abr.details')}
-          totals={totalsRow(totals)}
+          totals={totalsRow(totals, filteredData)}
           emptyState={noMatches}
         />
+        <p className="text-xs text-fg-muted">{t('abr.handover.monthlyNote')}</p>
       </section>
     );
   };
@@ -1242,6 +1439,57 @@ export function AbrechnungPage() {
               {sending && sendProgress
                 ? t('abr.mail.sendingProgress', { done: sendProgress.done, total: sendProgress.total })
                 : t('abr.mail.confirmSend')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── The hand-over confirmation ───────────────────────────────────────
+          A `Dialog`, not a `ConfirmDialog`: it stays open and shows its own
+          failure. One amount, which starts at the row's Difference and can be
+          changed, because a partial hand-over is the normal case. A record only:
+          nothing here moves the Bargeldbestand. */}
+      <Dialog
+        open={handoverTarget !== null}
+        onOpenChange={open => { if (!open && !handoverSaving) setHandoverTarget(null); }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('abr.handover.title')}</DialogTitle>
+            <DialogDescription>
+              {handoverTarget
+                ? t('abr.handover.lede', {
+                    name: handoverTarget.key.driver_name,
+                    period: `${getWeekLabel(handoverTarget.key.week_number)} - ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`,
+                  })
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          {handoverTarget ? (
+            <div className="grid grid-cols-1 gap-4">
+              <p className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-fg-muted">{t('abr.difference')}</span>
+                <span className="font-semibold tabular-nums">{euro(handoverTarget.state.dueCents / 100)}</span>
+              </p>
+              <Field label={t('abr.handover.amount')} hint={t('abr.handover.amountHint')} error={handoverError ?? undefined} required>
+                <Input
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={handoverText}
+                  onChange={event => setHandoverText(event.target.value)}
+                  disabled={handoverSaving}
+                />
+              </Field>
+              <p className="text-xs text-fg-muted">{t('abr.handover.recordOnly')}</p>
+            </div>
+          ) : null}
+          <DialogFooter className="sm:justify-between">
+            <DialogClose asChild>
+              <Button variant="secondary" disabled={handoverSaving}>{t('common.cancel')}</Button>
+            </DialogClose>
+            <Button onClick={() => void saveHandover()} disabled={handoverSaving || !handoverTarget}>
+              <HandCoins aria-hidden />
+              {t('abr.handover.confirm')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1252,7 +1252,18 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'manager_summary', 'mx-{s}@firma.example')$q$, NULL,
   $q$INSERT INTO notification_recipients (company_id, notification_type, email)
      VALUES ({co}, 'manager_summary', 'mx-new@firma.example')$q$,
-  $q$email = email$q$);
+  $q$email = email$q$),
+-- Who handed the cash back (20261019110000): the business shape with the income
+-- page on every write -- cash_transactions' cells, with anon holding no
+-- privilege at all. The key is (company, year, month, week, driver name), so
+-- the fixture's name carries the side and the insert probe uses another week;
+-- moving A's row into B then collides with nothing of B's.
+(73, 'abrechnung_handovers', $q$id = {id}$q$,
+  $q$INSERT INTO abrechnung_handovers (id, company_id, year, month, week_number, driver_name, amount)
+     VALUES ({id}, {co}, 2099, 1, 1, 'MX Fahrer {s}', 10.00)$q$, NULL,
+  $q$INSERT INTO abrechnung_handovers (company_id, year, month, week_number, driver_name, amount)
+     VALUES ({co}, 2099, 1, 2, 'MX Fahrer neu', 5.00)$q$,
+  $q$amount = amount$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1319,6 +1330,8 @@ INSERT INTO _mx_move VALUES
 ('uber_pull_runs',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 -- The side's own address differs, so A's row moved into B collides with nothing.
 ('notification_recipients',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- The side's own driver name differs, so A's row moved into B collides with nothing.
+('abrechnung_handovers',                 $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
 ('partner_vehicle_links',                $q$company_id = {other_co}$q$,
@@ -1992,7 +2005,14 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('notification_recipients',        'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('notification_recipients',        'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('notification_recipients',        'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
-('notification_recipients',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
+('notification_recipients',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+-- 20261019110000: cash_transactions' cells (the income page gates every write),
+-- anon holding no privilege at all.
+('abrechnung_handovers',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_handovers',           'I', 'PP', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('abrechnung_handovers',           'U', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_handovers',           'D', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_handovers',           'M', 'PP', '..', 'R.', 'R.', 'R.', '.R', '..', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -2070,7 +2090,9 @@ UPDATE _mx_expected x
      -- 20261015100000: the same shape and the same two triggers
      'uber_pull_schedules', 'uber_pull_runs',
      -- 20261015140000: the same shape and the same two triggers
-     'notification_recipients');
+     'notification_recipients',
+     -- 20261019110000: the same shape and the same two triggers
+     'abrechnung_handovers');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),

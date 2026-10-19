@@ -13,6 +13,7 @@
  *           drivers-error: Gehälter only, the driver list itself fails to load
  *           next-month-fails: Abrechnung and Bargeldbestand, September loads and
  *                    every read of October fails — the month after a good one
+ *           handovers-fail: Abrechnung only, the rows load and the hand-over records do not
  *   role   admin | viewer | view | billing                (viewer may read, not edit)
  *           view:    a platform account inside a read-only view context
  *           billing: a platform billing account inside a view context; it
@@ -31,7 +32,7 @@ export type HarnessScreen =
   | 'belege'
   | 'fahrer'
   | 'umsaetze';
-export type HarnessData = 'default' | 'empty' | 'limit' | 'error' | 'missing' | 'loading' | 'drivers-error' | 'next-month-fails';
+export type HarnessData = 'default' | 'empty' | 'limit' | 'error' | 'missing' | 'loading' | 'drivers-error' | 'next-month-fails' | 'handovers-fail';
 export type HarnessRole = 'admin' | 'viewer' | 'view' | 'billing';
 export type HarnessOcr = 'ok' | 'uncertain' | 'fail';
 
@@ -55,7 +56,7 @@ export const scenario: HarnessScenario = {
     ['fahrzeuge', 'fixkosten', 'gehaelter', 'abrechnung', 'bargeld', 'belege', 'fahrer', 'umsaetze'] as const,
     'fahrzeuge',
   ),
-  data: pick('data', ['default', 'empty', 'limit', 'error', 'missing', 'loading', 'drivers-error', 'next-month-fails'] as const, 'default'),
+  data: pick('data', ['default', 'empty', 'limit', 'error', 'missing', 'loading', 'drivers-error', 'next-month-fails', 'handovers-fail'] as const, 'default'),
   role: pick('role', ['admin', 'viewer', 'view', 'billing'] as const, 'admin'),
   ocr: pick('ocr', ['ok', 'uncertain', 'fail'] as const, 'uncertain'),
 };
