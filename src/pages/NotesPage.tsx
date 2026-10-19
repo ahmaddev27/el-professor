@@ -12,6 +12,7 @@ import { getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { noteVehicleMissing, noteVehicleRequired } from '../utils/noteRules';
 
 interface Driver {
   id: string;
@@ -333,11 +334,23 @@ export function NotesPage() {
     setCars(data || []);
   };
 
+  // The five incident types must name a vehicle (utils/noteRules.ts). A note
+  // saved before that rule, edited without changing its type, keeps its gap.
+  const keepsLegacyVehicleGap =
+    editingNote !== null && !editingNote.car_id && editingNote.note_type === formData.note_type;
+  const vehicleRequired =
+    noteVehicleRequired(formData.note_type) && !keepsLegacyVehicleGap;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.driver_id) {
       showToast('error', t('notes.selectDriver'));
+      return;
+    }
+
+    if (noteVehicleMissing(formData.note_type, formData.car_id, keepsLegacyVehicleGap)) {
+      showToast('error', t('notes.vehicleRequired'));
       return;
     }
 
@@ -946,10 +959,13 @@ export function NotesPage() {
               <div>
                 <label htmlFor="note-car" className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
                   {t('ta.col.vehicle')}{' '}
-                  <span className="font-normal text-[var(--text-tertiary)]">{t('notes.descriptionOptional')}</span>
+                  {vehicleRequired
+                    ? <span aria-hidden className="text-[var(--danger)]">*</span>
+                    : <span className="font-normal text-[var(--text-tertiary)]">{t('notes.descriptionOptional')}</span>}
                 </label>
                 <select
                   id="note-car"
+                  required={vehicleRequired}
                   value={formData.car_id}
                   onChange={e => setFormData(p => ({ ...p, car_id: e.target.value }))}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"

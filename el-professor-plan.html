@@ -1241,6 +1241,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>لما قاعدة البيانات ما ترد:</strong> الشاشات بتقول إنها ما قدرت تحمّل، بدل «ما في شي» و«0,00 €»؛ وبـ Umsätze كمان لما بس جدول الإيرادات يفشل.</li>
           <li><strong>جلسة القراءة من المنصّة:</strong> ما بتشوف ولا زر كتابة.</li>
           <li><strong>لقطات وفحوصات:</strong> <span class="num">65</span> لقطة قبل و<span class="num">65</span> بعد بـ <code>Docs/design/phase5/batch1b/</code>، و<span class="num">27</span> فحص بيضغطوا كل إضافة وتعديل وحذف ورفض.</li>
+          <li><strong>19.10.2026:</strong> فورم الـ Beleg بلوحة الشركة صار بنفس حقول وقواعد تطبيق السائق (Händler، الوقت، Liter، Preis je Liter، Kilometerstand، Restreichweite؛ الوقود بس لـ Tanken)، والـ Notizen بتلزم سيارة للأنواع الخمسة. بلا migration.</li>
           <li><strong>عيوب طلعت:</strong> تعديل «Inhaber» من شاشة Fahrer كان بيرجّعه «موظف» — انصلح بـ #102؛ وفلتر الأسبوع بـ Belege بيشيل يوم الأحد — لسا مفتوح، بـ PR لحاله.</li>
         </ul>
       </div>

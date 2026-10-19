@@ -3,10 +3,21 @@ import { AlertCircle, Camera, CheckCircle, ChevronRight, Loader2, Receipt as Rec
 import { Receipt, ReceiptFormData, Driver } from '../types/receipt';
 import { getCityFromPostalCode, isValidGermanPostalCode } from '../utils/germanPostalCodes';
 import { useToast } from '../contexts/ToastContext';
-import { extractReceiptData, OcrResult, formatAmountDE } from '../utils/receiptOcr';
+import { extractReceiptData, extractClusterLines, OcrResult, formatAmountDE } from '../utils/receiptOcr';
+import { readOdometer } from '../utils/odometerRead';
 import { useTranslation } from '../contexts/LanguageContext';
 import { localReceiptNumber, nextReceiptNumber } from '../lib/receiptNumber';
 import type { TranslationKey } from '../i18n';
+import {
+  EMPTY_DETAILS,
+  RECEIPT_CATEGORIES,
+  detailsFieldsFromReceipt,
+  hasFuelFigures,
+  receiptDetailsProblem,
+  receiptDetailsValues,
+  type ReceiptCategory,
+  type ReceiptDetailsFields,
+} from '../utils/receiptFormRules';
 import {
   Badge,
   Button,
@@ -33,18 +44,10 @@ interface ReceiptModalProps {
   existingReceipts: Receipt[];
 }
 
-// These values are written to `receipts.description` and compared on read.
-// `Tanken` in particular selects the receipts that feed the Tankenquote, so the
-// stored string must stay byte-identical. Only the label below is translated.
-const RECEIPT_CATEGORIES = [
-  'Tanken',
-  'Autowäsche',
-  'Autozubehör',
-  'Öl wechseln',
-  'Other'
-] as const;
-
-type ReceiptCategory = typeof RECEIPT_CATEGORIES[number];
+// The category values (utils/receiptFormRules.ts) are written to
+// `receipts.description` and compared on read. `Tanken` in particular selects
+// the receipts that feed the Tankenquote, so the stored string must stay
+// byte-identical. Only the label below is translated.
 
 // `label` holds a TranslationKey: this map is module-level and t() is a hook
 // value, so every consumer resolves it at the call site.
@@ -85,6 +88,17 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
   });
 
   const [selectedCategory, setSelectedCategory] = useState<ReceiptCategory>('Tanken');
+  // What the driver app captures beyond the base fields. Postal code and city
+  // stay in formData; the rest are typed text until saved
+  // (utils/receiptFormRules.ts decides what they mean and what is refused).
+  const [details, setDetails] = useState<ReceiptDetailsFields>(EMPTY_DETAILS);
+  // The odometer photo is read and dropped, like the Beleg photo: only the text
+  // result is kept, and the file is never uploaded (utils/odometerRead.ts).
+  const odoInputRef = useRef<HTMLInputElement>(null);
+  const [odoReading, setOdoReading] = useState(false);
+  const [odoMessage, setOdoMessage] = useState<{ text: string; tone: 'ok' | 'problem' } | null>(null);
+  const setDetail = (key: keyof ReceiptDetailsFields, value: string) =>
+    setDetails(prev => ({ ...prev, [key]: value }));
   const [customDescription, setCustomDescription] = useState('');
 
   // Image scanning state
@@ -153,6 +167,8 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
         city: receipt.city || '',
         paymentMethod: receipt.paymentMethod || 'bar',
       });
+      setDetails(detailsFieldsFromReceipt(receipt));
+      setOdoMessage(null);
       const category = RECEIPT_CATEGORIES.find(cat => cat === receipt.description);
       if (category) {
         setSelectedCategory(category);
@@ -225,6 +241,8 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setDisplayAmount('');
     setSelectedCategory('Tanken');
     setCustomDescription('');
+    setDetails(EMPTY_DETAILS);
+    setOdoMessage(null);
   };
 
   const handlePostalCodeChange = async (value: string) => {
@@ -371,6 +389,31 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setShowOcrDebug(false);
   };
 
+  const readOdometerPhoto = async (file: File) => {
+    setOdoReading(true);
+    setOdoMessage(null);
+    try {
+      const reading = readOdometer(await extractClusterLines(file));
+      if (reading.rangeKm !== null) setDetail('rangeKm', String(reading.rangeKm));
+      if (reading.odometerKm === null) {
+        // It abstained: say which case, and leave the odometer for a person.
+        const key = `rec.odo.problem.${reading.problem ?? 'no_km_value'}` as TranslationKey;
+        setOdoMessage({ text: t(key), tone: 'problem' });
+        return;
+      }
+      setDetail('odometerKm', String(reading.odometerKm));
+      setOdoMessage({
+        text: t(reading.rangeKm === null ? 'rec.odo.readOdometer' : 'rec.odo.readBoth'),
+        tone: 'ok',
+      });
+    } catch (err) {
+      console.error('Odometer OCR error:', err);
+      setOdoMessage({ text: t('rec.odo.failed'), tone: 'problem' });
+    } finally {
+      setOdoReading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalDescription = selectedCategory === 'Other' ? customDescription : selectedCategory;
@@ -382,7 +425,24 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
       return;
     }
 
-    await onSave({ ...formData, description: finalDescription });
+    const fields: ReceiptDetailsFields = {
+      ...details,
+      postalCode: formData.postalCode ?? '',
+      city: formData.city ?? '',
+    };
+    const problem = receiptDetailsProblem(finalDescription, fields, receipt ? 'edit' : 'create');
+    if (problem) {
+      showError(t(problem));
+      return;
+    }
+
+    await onSave({
+      ...formData,
+      description: finalDescription,
+      postalCode: fields.postalCode.trim() || undefined,
+      city: fields.city.trim() || undefined,
+      ...receiptDetailsValues(finalDescription, fields),
+    });
     showSuccess(t('rec.saved'));
 
     if (!receipt) {
@@ -606,154 +666,275 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             {/* ── Main form ── */}
             <form id={formId} onSubmit={handleSubmit} className="grid gap-5">
-              <Field label={t('rec.receiptNumber')} required>
-                <Input
-                  type="text"
-                  value={formData.receiptNumber}
-                  onChange={e => setFormData(prev => ({ ...prev, receiptNumber: e.target.value }))}
-                  className="tabular-nums"
-                  placeholder={t('rec.autoGenerated')}
-                  required
-                />
-              </Field>
-
-              <Field
-                label={labelWithCheck(t('common.date'), dateUncertain)}
-                // dateReason is OCR diagnostics produced in German by receiptOcr.ts.
-                hint={ocrResult?.dateReason ? <>OCR: {ocrResult.dateReason}</> : undefined}
-              >
-                {/* The mask is day-first in both languages, because displayToIso
-                    parses DD.MM.YYYY / DD/MM/YYYY only and the figure matches the
-                    Beleg. Only the letters naming the fields follow the UI
-                    language (TT/MM/JJJJ → DD/MM/YYYY); the order never does. */}
-                <Input
-                  ref={dateInputRef}
-                  type="text"
-                  inputMode="numeric"
-                  placeholder={t('rec.datePlaceholder')}
-                  value={displayDate}
-                  onChange={e => {
-                    const raw = e.target.value;
-                    setDisplayDate(raw);
-                    const iso = displayToIso(raw);
-                    if (iso) setFormData(prev => ({ ...prev, date: iso }));
-                  }}
-                  onBlur={e => {
-                    // On blur, re-format if valid so partial entries become clean
-                    const iso = displayToIso(e.target.value);
-                    if (iso) setDisplayDate(isoToDisplay(iso));
-                  }}
-                  className={cn(dateUncertain && uncertainField)}
-                />
-              </Field>
-              {/* Hidden native date for form validation — keeps formData.date in sync */}
-              <input
-                type="hidden"
-                name="date"
-                value={formData.date}
-                required
-              />
-
-              <Field label={t('common.driver')} required>
-                <NativeSelect
-                  value={formData.driverName}
-                  onChange={e => setFormData({ ...formData, driverName: e.target.value })}
-                  required
-                >
-                  <option value="">{t('rec.selectDriver')}</option>
-                  {drivers.filter(d => d.status !== 'inactive').map(d => (
-                    <option key={d.id} value={d.name}>{d.name}</option>
-                  ))}
-                </NativeSelect>
-              </Field>
-
-              <Field label={t('rec.category')} required>
-                <NativeSelect
-                  value={selectedCategory}
-                  onChange={e => handleCategoryChange(e.target.value as ReceiptCategory)}
-                  required
-                >
-                  {/* The option value is the persisted category; only the label translates. */}
-                  {RECEIPT_CATEGORIES.map(cat => (
-                    <option key={cat} value={cat}>{t(RECEIPT_CATEGORY_LABELS[cat])}</option>
-                  ))}
-                </NativeSelect>
-              </Field>
-
-              {selectedCategory === 'Other' && (
-                <Field label={t('common.description')} required>
+              {/* One form, four groups. The fuel group is the driver app's
+                  refuel step: it exists only for the refuel category, and the
+                  rules behind every field are utils/receiptFormRules.ts. */}
+              <section className="grid gap-4">
+                <h3 className="border-b border-line pb-1.5 text-[13px] font-semibold text-fg">
+                  {t('rec.section.identity')}
+                </h3>
+                <Field label={t('rec.receiptNumber')} required>
                   <Input
                     type="text"
-                    value={customDescription}
-                    onChange={e => handleCustomDescriptionChange(e.target.value)}
-                    placeholder={t('rec.descriptionPlaceholder')}
+                    value={formData.receiptNumber}
+                    onChange={e => setFormData(prev => ({ ...prev, receiptNumber: e.target.value }))}
+                    className="tabular-nums"
+                    placeholder={t('rec.autoGenerated')}
                     required
                   />
                 </Field>
-              )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <Field label={t('rec.postalCode')}>
+                <Field label={t('common.driver')} required>
+                  <NativeSelect
+                    value={formData.driverName}
+                    onChange={e => setFormData({ ...formData, driverName: e.target.value })}
+                    required
+                  >
+                    <option value="">{t('rec.selectDriver')}</option>
+                    {drivers.filter(d => d.status !== 'inactive').map(d => (
+                      <option key={d.id} value={d.name}>{d.name}</option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+
+                <Field label={t('rec.category')} required>
+                  <NativeSelect
+                    value={selectedCategory}
+                    onChange={e => handleCategoryChange(e.target.value as ReceiptCategory)}
+                    required
+                  >
+                    {/* The option value is the persisted category; only the label translates. */}
+                    {RECEIPT_CATEGORIES.map(cat => (
+                      <option key={cat} value={cat}>{t(RECEIPT_CATEGORY_LABELS[cat])}</option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+
+                {selectedCategory === 'Other' && (
+                  <Field label={t('common.description')} required>
+                    <Input
+                      type="text"
+                      value={customDescription}
+                      onChange={e => handleCustomDescriptionChange(e.target.value)}
+                      placeholder={t('rec.descriptionPlaceholder')}
+                      required
+                    />
+                  </Field>
+                )}
+              </section>
+
+              <section className="grid gap-4">
+                <h3 className="border-b border-line pb-1.5 text-[13px] font-semibold text-fg">
+                  {t('rec.section.whereWhen')}
+                </h3>
+                <Field label={t('rec.merchant')} required={!receipt}>
+                  <Input
+                    type="text"
+                    value={details.merchant}
+                    onChange={e => setDetail('merchant', e.target.value)}
+                    placeholder={t('rec.merchantPlaceholder')}
+                  />
+                </Field>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label={t('rec.postalCode')}>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={formData.postalCode || ''}
+                      onChange={e => handlePostalCodeChange(e.target.value)}
+                      placeholder={t('rec.postalCodePlaceholder')}
+                      maxLength={5}
+                    />
+                  </Field>
+                  <Field label={t('rec.city')} hint={t('rec.autoDetected')} required={!receipt}>
+                    <Input
+                      type="text"
+                      value={formData.city || ''}
+                      onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
+                    />
+                  </Field>
+                </div>
+
+                <Field
+                  label={labelWithCheck(t('common.date'), dateUncertain)}
+                  // dateReason is OCR diagnostics produced in German by receiptOcr.ts.
+                  hint={ocrResult?.dateReason ? <>OCR: {ocrResult.dateReason}</> : undefined}
+                >
+                  {/* The mask is day-first in both languages, because displayToIso
+                      parses DD.MM.YYYY / DD/MM/YYYY only and the figure matches the
+                      Beleg. Only the letters naming the fields follow the UI
+                      language (TT/MM/JJJJ → DD/MM/YYYY); the order never does. */}
+                  <Input
+                    ref={dateInputRef}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder={t('rec.datePlaceholder')}
+                    value={displayDate}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      setDisplayDate(raw);
+                      const iso = displayToIso(raw);
+                      if (iso) setFormData(prev => ({ ...prev, date: iso }));
+                    }}
+                    onBlur={e => {
+                      // On blur, re-format if valid so partial entries become clean
+                      const iso = displayToIso(e.target.value);
+                      if (iso) setDisplayDate(isoToDisplay(iso));
+                    }}
+                    className={cn(dateUncertain && uncertainField)}
+                  />
+                </Field>
+                {/* Hidden native date for form validation — keeps formData.date in sync */}
+                <input
+                  type="hidden"
+                  name="date"
+                  value={formData.date}
+                  required
+                />
+
+                <Field label={t('rec.receiptTime')} hint={t('rec.receiptTimeHint')} required={!receipt}>
                   <Input
                     type="text"
                     inputMode="numeric"
-                    value={formData.postalCode || ''}
-                    onChange={e => handlePostalCodeChange(e.target.value)}
-                    placeholder={t('rec.postalCodePlaceholder')}
+                    value={details.receiptTime}
+                    onChange={e => setDetail('receiptTime', e.target.value)}
+                    placeholder="14:32"
                     maxLength={5}
+                    className="tabular-nums"
                   />
                 </Field>
-                <Field label={t('rec.city')}>
+              </section>
+
+              <section className="grid gap-4">
+                <h3 className="border-b border-line pb-1.5 text-[13px] font-semibold text-fg">
+                  {t('rec.section.money')}
+                </h3>
+                <Field
+                  label={labelWithCheck(t('rec.expensesEuro'), amountUncertain)}
+                  // amountReason is OCR diagnostics produced in German by receiptOcr.ts.
+                  hint={ocrResult?.amountReason ? <>OCR: {ocrResult.amountReason}</> : undefined}
+                >
                   <Input
                     type="text"
-                    value={formData.city || ''}
-                    readOnly
-                    className="bg-sunken"
-                    placeholder={t('rec.autoDetected')}
+                    inputMode="decimal"
+                    value={displayAmount}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      setDisplayAmount(raw);
+                      const n = parseDisplayAmount(raw);
+                      setFormData(prev => ({ ...prev, expense: n }));
+                    }}
+                    onBlur={e => {
+                      const n = parseDisplayAmount(e.target.value);
+                      if (n > 0) {
+                        setDisplayAmount(formatAmountDE(n));
+                        setFormData(prev => ({ ...prev, expense: n }));
+                      }
+                    }}
+                    className={cn('tabular-nums', amountUncertain && uncertainField)}
+                    placeholder="0,00"
                   />
                 </Field>
-              </div>
 
-              <Field
-                label={labelWithCheck(t('rec.expensesEuro'), amountUncertain)}
-                // amountReason is OCR diagnostics produced in German by receiptOcr.ts.
-                hint={ocrResult?.amountReason ? <>OCR: {ocrResult.amountReason}</> : undefined}
-              >
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  value={displayAmount}
-                  onChange={e => {
-                    const raw = e.target.value;
-                    setDisplayAmount(raw);
-                    const n = parseDisplayAmount(raw);
-                    setFormData(prev => ({ ...prev, expense: n }));
-                  }}
-                  onBlur={e => {
-                    const n = parseDisplayAmount(e.target.value);
-                    if (n > 0) {
-                      setDisplayAmount(formatAmountDE(n));
-                      setFormData(prev => ({ ...prev, expense: n }));
-                    }
-                  }}
-                  className={cn('tabular-nums', amountUncertain && uncertainField)}
-                  placeholder="0,00"
-                />
-              </Field>
+                <Field label={t('rec.paymentMethod')} required>
+                  <NativeSelect
+                    value={formData.paymentMethod || 'bar'}
+                    onChange={e => setFormData({ ...formData, paymentMethod: e.target.value as 'bar' | 'uberweisung' })}
+                    required
+                  >
+                    {/* PAYMENT_METHODS is a shared constant in types/receipt.ts that
+                        utils/receiptPdf.ts also reads, so it is not translated in
+                        place; the on-screen option label is resolved here instead. */}
+                    <option value="bar">{t('rec.payment.bar')}</option>
+                    <option value="uberweisung">{t('rec.payment.uberweisung')}</option>
+                  </NativeSelect>
+                </Field>
+              </section>
 
-              <Field label={t('rec.paymentMethod')} required>
-                <NativeSelect
-                  value={formData.paymentMethod || 'bar'}
-                  onChange={e => setFormData({ ...formData, paymentMethod: e.target.value as 'bar' | 'uberweisung' })}
-                  required
-                >
-                  {/* PAYMENT_METHODS is a shared constant in types/receipt.ts that
-                      utils/receiptPdf.ts also reads, so it is not translated in
-                      place; the on-screen option label is resolved here instead. */}
-                  <option value="bar">{t('rec.payment.bar')}</option>
-                  <option value="uberweisung">{t('rec.payment.uberweisung')}</option>
-                </NativeSelect>
-              </Field>
+              {hasFuelFigures(selectedCategory) && (
+                <section className="grid gap-4">
+                <h3 className="border-b border-line pb-1.5 text-[13px] font-semibold text-fg">
+                  {t('rec.section.fuel')}
+                </h3>
+                  <p className="-mt-2 text-xs text-fg-subtle">{t('rec.section.fuelHint')}</p>
+                  <div className="grid gap-1.5">
+                    <input
+                      ref={odoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) void readOdometerPhoto(file);
+                        e.target.value = '';
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full sm:w-auto sm:justify-self-start"
+                      disabled={odoReading}
+                      onClick={() => odoInputRef.current?.click()}
+                    >
+                      {odoReading ? <Loader2 aria-hidden className="motion-safe:animate-spin" /> : <Camera aria-hidden />}
+                      {odoReading ? t('rec.odo.reading') : t('rec.odo.photo')}
+                    </Button>
+                    <p className="text-xs text-fg-subtle">{t('rec.odo.photoHint')}</p>
+                    {odoMessage && (
+                      <p
+                        role="status"
+                        className={cn('text-xs', odoMessage.tone === 'ok' ? 'text-positive' : 'text-critical')}
+                      >
+                        {odoMessage.text}
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label={t('rec.litres')} required={!receipt}>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={details.litres}
+                        onChange={e => setDetail('litres', e.target.value)}
+                        placeholder="41,47"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                    <Field label={t('rec.pricePerLitre')} required={!receipt}>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={details.pricePerLitre}
+                        onChange={e => setDetail('pricePerLitre', e.target.value)}
+                        placeholder="2,049"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                    <Field label={t('rec.odometerKm')} hint={t('rec.odometerHint')} required={!receipt}>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={details.odometerKm}
+                        onChange={e => setDetail('odometerKm', e.target.value)}
+                        placeholder="123456"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                    <Field label={t('rec.rangeKm')} hint={t('rec.rangeHint')}>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={details.rangeKm}
+                        onChange={e => setDetail('rangeKm', e.target.value)}
+                        placeholder="480"
+                        className="tabular-nums"
+                      />
+                    </Field>
+                  </div>
+                </section>
+              )}
             </form>
           </div>
         </SheetBody>
