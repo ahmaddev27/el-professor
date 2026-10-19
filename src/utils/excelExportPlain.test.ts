@@ -139,7 +139,7 @@ describe('the plain export shape', () => {
     const income = (type: string, amount: number) => ({ id: type, driver_name: 'Ali', type, amount, description: '', date: '2026-10-01' }) as unknown as Income;
     const [, byType] = buildIncomeSheets([income('umsatz', 75), income('trinkgeld', 25)], '2026-10-01', '2026-10-31');
     const sheet = workbookToPayload(buildPlainWorkbook([byType]), { headerRow: true }).sheets[0];
-    expect(sheet.rows[0]).toEqual(['Typ', 'Betrag', 'Anteil']);
+    expect(sheet.rows[0]).toEqual(['Typ', 'Betrag', 'Anteil (%)']);
     const shares = sheet.rows.slice(1).map(row => row[2]).filter(v => v !== undefined && v !== null);
     expect(shares).toContain(75);
     expect(shares).toContain(25);
