@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import { buildPlainWorkbook, buildTableWorkbook, type ExportOptions } from './excelExport';
 import { workbookToPayload } from './workbookPayload';
+import { buildIncomeSheets } from './listExportSheets';
+import type { Income } from '../types/receipt';
 
 const OPTIONS: ExportOptions = {
   filename: 'belege',
@@ -70,11 +72,40 @@ describe('the plain export shape', () => {
       columns: types.map(type => ({ key: type, label: type, type, width: 30, align: 'right' as const })),
       rows: [Object.fromEntries(types.map(type => [type, 1234.5678]))],
     });
-    expect(sheet.rows[1]).toEqual(types.map(() => 1234.5678));
+    // Every type is the stored number except percent, whose fraction becomes the
+    // percentage a reader expects (below).
+    expect(sheet.rows[1]).toEqual(types.map(type => (type === 'percent' ? 123456.78 : 1234.5678)));
     expect(JSON.stringify(sheet)).not.toMatch(/fmt|"t":/);
     const raw = buildPlainWorkbook([{ ...OPTIONS, columns: OPTIONS.columns.map(col => ({ ...col, width: 40, align: 'right' as const })) }]);
     const cells = Object.entries(raw.Sheets.Belege).filter(([k]) => !k.startsWith('!')).map(([, v]) => v as { z?: unknown; s?: unknown });
     expect(cells.filter(cell => cell.z !== undefined || cell.s !== undefined)).toEqual([]);
+  });
+
+  it('writes a percent column as the percentage, stored value times 100, bare', () => {
+    const fractions = [0.42, 0.29, 0.4147, 0.1, 0, 1, 0.3333333333333333];
+    const sheet = rowsOf({
+      ...OPTIONS,
+      columns: [{ key: 'anteil', label: 'Anteil', type: 'percent' }],
+      rows: fractions.map(anteil => ({ anteil })),
+    });
+    // 0.29 * 100 is 28.999999999999996 in floating point; the noise is dropped.
+    expect(sheet.rows.slice(1)).toEqual([[42], [29], [41.47], [10], [0], [100], [33.3333333333]]);
+    const json = JSON.stringify(sheet);
+    expect(json).not.toMatch(/fmt|%/);
+    const raw = buildPlainWorkbook([{ ...OPTIONS, columns: [{ key: 'anteil', label: 'Anteil', type: 'percent' }], rows: [{ anteil: 0.42 }] }]);
+    expect(raw.Sheets.Belege.A2).toEqual({ t: 'n', v: 42 });
+  });
+
+  it('does not scale anything that is not a percent column, nor a value it cannot read', () => {
+    const sheet = rowsOf({
+      ...OPTIONS,
+      columns: [
+        { key: 'n', label: 'N', type: 'number' },
+        { key: 'p', label: 'P', type: 'percent' },
+      ],
+      rows: [{ n: 0.42, p: null }, { n: 0.42, p: 'kein Wert' }],
+    });
+    expect(sheet.rows.slice(1)).toEqual([[0.42], [0.42, 'kein Wert']]);
   });
 
   it('describes no style, width, merge, freeze or filter on the sheet', () => {
@@ -102,5 +133,15 @@ describe('the plain export shape', () => {
     const sheet = buildTableWorkbook(OPTIONS).Sheets.Belege;
     expect(XLSX.utils.encode_cell({ r: 1, c: 0 })).toBe('A2');
     expect((sheet.A2 as { v: string }).v).toBe('BELEGE-TITEL');
+  });
+
+  it('a real caller (Umsätze, Anteil by type) reaches the file as a percentage without touching its own code', () => {
+    const income = (type: string, amount: number) => ({ id: type, driver_name: 'Ali', type, amount, description: '', date: '2026-10-01' }) as unknown as Income;
+    const [, byType] = buildIncomeSheets([income('umsatz', 75), income('trinkgeld', 25)], '2026-10-01', '2026-10-31');
+    const sheet = workbookToPayload(buildPlainWorkbook([byType]), { headerRow: true }).sheets[0];
+    expect(sheet.rows[0]).toEqual(['Typ', 'Betrag', 'Anteil']);
+    const shares = sheet.rows.slice(1).map(row => row[2]).filter(v => v !== undefined && v !== null);
+    expect(shares).toContain(75);
+    expect(shares).toContain(25);
   });
 });

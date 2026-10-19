@@ -25,7 +25,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **20.10.2026 (branch `feat/export-uber-columns`, PR against `staging`, not merged):** the operational Excel exports carry bare numbers like Uber's file: no number format, so no `km` or currency suffix, no forced decimals and no percent sign, and no column widths or alignment. The stored values are exact and still sum. Dates are unchanged. Details in HANDOFF.md.
+> **20.10.2026 (branch `feat/export-uber-columns`, PR against `staging`, not merged):** the operational Excel exports carry bare numbers like Uber's file: no number format, so no `km` or currency suffix, no forced decimals and no percent sign, and no column widths or alignment; a percent column is written as the percentage (42, not 0.42), the one column whose value changed. The stored values are exact and still sum. Dates are unchanged. Details in HANDOFF.md.
 >
 > **19.10.2026 (branch `feat/openpyxl-export-service`, PR against `staging`, not merged):** every operational Excel file (the generic table exports, Umsätze, Gehälter, the Fahrtenanalyse report) is now written by a small Python service using `openpyxl` (`deploy/export-service`), reached through Kong at `/export/v1/`; the browser posts the rows and downloads what comes back. Files have Uber's shape (headers in A1, data from A2, no title, filter line or totals row) with numbers as numbers. If the service is down the user gets a message with a retry and no file; there is no fallback writer. The statutory and Fahrtenbuch exports and all PDFs are unchanged and are the follow-up. The host release wrapper (`deploy/ci-release.sh`) must be reinstalled before the first release that carries it. Details in HANDOFF.md.
 >
