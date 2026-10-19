@@ -6932,4 +6932,7 @@ export const de = {
   'abr.handover.status.open':    'Noch beim Fahrer',
   'abr.handover.status.partial': 'Teilweise',
   'abr.handover.title':          'Rückgabe des Bargelds bestätigen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.preview.nextReminder': 'Nächste Erinnerung: {weekday}, {date}, {time} Uhr (deutsche Zeit).',
 } as const;
