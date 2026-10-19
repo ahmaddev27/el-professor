@@ -8,8 +8,11 @@
  * - Every interpolated value is escaped. A driver's name can contain anything,
  *   and so can a week label that came from a screen.
  *
- * German whatever language the sender uses in the app, like every other
- * transactional mail this product sends. **The wording is fixed in this file and
+ * The two DRIVER mails (the Abrechnung and its reminder) are written in the
+ * driver's `preferred_language` (`ar`, `en`, `de`; English when unknown), with the
+ * words in `driver-mail-copy.ts`. The manager summary is a mail to the company
+ * and stays German. Money and dates stay German in every language.
+ * **The wording is fixed in code and
  * is deliberately not a `mail.template.*` settings key in this slice:** a new key
  * means restating `app_private.platform_settings_problem` with every existing
  * branch carried over character for character, which is a slice of its own. The
@@ -32,6 +35,20 @@
  */
 import { escapeHtml, renderEmailHtml, renderEmailText } from './email-layout.mjs';
 import { appOrigin, type RenderedMail } from './otp-mail.ts';
+import {
+  DRIVER_MAIL_COPY,
+  fillTemplate,
+  localizePeriodLabel,
+  type DriverMailCopy,
+} from './driver-mail-copy.ts';
+import {
+  isRtl,
+  ltrRunHtml,
+  ltrRunText,
+  nameRunHtml,
+  nameRunText,
+  type MailLanguage,
+} from './mail-language.ts';
 
 /** The figures the Abrechnung screen shows, as it shows them. */
 export interface AbrechnungFigures {
@@ -47,23 +64,18 @@ export interface AbrechnungFigures {
   tankenquote: number | null;
 }
 
-/**
- * The footer every one of these carries.
- *
- * It names what the mail is for the one reader who did not ask for it: a driver
- * who gets an unexpected message about their own money needs to know who sent it
- * and that it is not a demand.
- */
-const NOTE = 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres '
-  + 'Unternehmens erstellt. Sie ist eine Übersicht, keine Rechnung und keine '
-  + 'Zahlungsaufforderung.';
-
 export interface AbrechnungMailInput {
+  /**
+   * The language to write in. **Required, with no default here**: an optional
+   * parameter would be a place for German (or anything else) to be chosen by
+   * accident. Callers pass `resolveMailLanguage(driver.preferred_language)`.
+   */
+  language: MailLanguage;
   driverName: string;
   companyName: string;
   /** "Woche 5" / "Woche 5 - August 2026", as the screen labels it. */
   periodLabel: string;
-  /** "31.08.2026 – 06.09.2026". Already German, already formatted. */
+  /** "31.08.2026 – 06.09.2026". Already formatted, and German in every language. */
   periodRange: string;
   figures: AbrechnungFigures;
   /**
@@ -104,96 +116,168 @@ export function percent(value: number): string {
 }
 
 /**
+ * How a driver mail is spoken: the copy table, and the two ways a sentence is
+ * filled (HTML and plain text).
+ *
+ * Names, labels and ranges go into a sentence as isolated runs in Arabic (see
+ * `mail-language.ts`) and as they are everywhere else, so English and German
+ * bytes are not touched by the right-to-left work.
+ */
+interface Voice {
+  language: MailLanguage;
+  rtl: boolean;
+  copy: DriverMailCopy;
+  html: (template: string, slots: Slots) => string;
+  text: (template: string, slots: Slots) => string;
+}
+
+interface Slots {
+  name?: string;
+  label?: string;
+  range?: string;
+  company?: string;
+  count?: string;
+  clock?: string;
+  /** The bare `HH:MM`, for the sentence that turns it into a clock time. */
+  time?: string;
+}
+
+function voice(language: MailLanguage): Voice {
+  const html = (template: string, slots: Slots) => fillTemplate(
+    template,
+    {
+      name: nameRunHtml(escapeHtml(slots.name ?? ''), language),
+      label: nameRunHtml(escapeHtml(slots.label ?? ''), language),
+      company: nameRunHtml(escapeHtml(slots.company ?? ''), language),
+      range: ltrRunHtml(escapeHtml(slots.range ?? ''), language),
+      count: ltrRunHtml(escapeHtml(slots.count ?? ''), language),
+      clock: ltrRunHtml(escapeHtml(slots.clock ?? ''), language),
+      time: escapeHtml(slots.time ?? ''),
+    },
+    escapeHtml,
+  );
+  const text = (template: string, slots: Slots) => fillTemplate(
+    template,
+    {
+      name: nameRunText(slots.name ?? '', language),
+      label: nameRunText(slots.label ?? '', language),
+      company: nameRunText(slots.company ?? '', language),
+      range: ltrRunText(slots.range ?? '', language),
+      count: ltrRunText(slots.count ?? '', language),
+      clock: ltrRunText(slots.clock ?? '', language),
+      time: slots.time ?? '',
+    },
+    (literal) => literal,
+  );
+  return { language, rtl: isRtl(language), copy: DRIVER_MAIL_COPY[language], html, text };
+}
+
+/**
  * One row of the figures table, in HTML.
  *
  * A table and not a list: a reader comparing four amounts wants them aligned, and
  * every mail client renders a table the same way where a flex row is anybody's
- * guess.
+ * guess. The value sits at the end of the line in the reading direction, so in
+ * Arabic it is on the left, and it is its own left-to-right run so `506,95 €`
+ * keeps its euro sign on the right of the figure.
  */
-function row(label: string, value: string, strong = false): string {
+function row(v: Voice, labelHtml: string, value: string, strong = false): string {
   const weight = strong ? 'font-weight:600;' : '';
+  const align = v.rtl ? 'left' : 'right';
   return (
     '<tr>'
-    + `<td style="padding:6px 0;color:#475569;font-size:14px;">${escapeHtml(label)}</td>`
-    + `<td style="padding:6px 0;text-align:right;font-size:14px;${weight}white-space:nowrap;">`
-    + `${escapeHtml(value)}</td>`
+    + `<td style="padding:6px 0;color:#475569;font-size:14px;">${labelHtml}</td>`
+    + `<td style="padding:6px 0;text-align:${align};font-size:14px;${weight}white-space:nowrap;">`
+    + `${ltrRunHtml(escapeHtml(value), v.language)}</td>`
     + '</tr>'
   );
 }
 
 export function renderAbrechnungMail(input: AbrechnungMailInput): RenderedMail {
-  const { driverName, companyName, periodLabel, periodRange, figures } = input;
+  const { driverName, companyName, periodRange, figures } = input;
+  const v = voice(input.language);
+  const { copy } = v;
+  const c = copy.abrechnung;
+  const periodLabel = localizePeriodLabel(input.periodLabel, input.language);
   const withImage = input.imageAttached ?? true;
   const origin = appOrigin(input.appUrl);
+  const slots: Slots = {
+    name: driverName, label: periodLabel, range: periodRange, company: companyName,
+    count: String(figures.belegeCount),
+  };
 
   // The driver hands money IN when the difference is positive and is owed money
   // when it is negative. Saying "Betrag" for both would make the one case a driver
   // most needs to understand the one the mail is silent about.
   const owesCompany = figures.difference >= 0;
-  const differenceLabel = owesCompany ? 'Abzugeben' : 'Guthaben';
+  const differenceTemplate = owesCompany ? c.owes : c.credit;
 
   const lines = [
-    row('Bargeld eingenommen', euro(figures.cash)),
-    row(`Belege (${figures.belegeCount})`, euro(figures.belege)),
-    row(differenceLabel, euro(Math.abs(figures.difference)), true),
+    row(v, v.html(c.cash, slots), euro(figures.cash)),
+    row(v, v.html(c.belege, slots), euro(figures.belege)),
+    row(v, v.html(differenceTemplate, slots), euro(Math.abs(figures.difference)), true),
   ];
   if (figures.tankenquote !== null) {
-    lines.push(row('Tankenquote', percent(figures.tankenquote)));
+    lines.push(row(v, v.html(c.tankenquote, slots), percent(figures.tankenquote)));
   }
 
   const bodyHtml =
-    `<p style="margin:0 0 16px;">Hallo ${escapeHtml(driverName)},</p>`
-    + `<p style="margin:0 0 16px;">hier ist deine Abrechnung für ${escapeHtml(periodLabel)} `
-    + `(${escapeHtml(periodRange)}).</p>`
-    + '<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 16px;">'
+    `<p style="margin:0 0 16px;">${v.html(copy.hello, slots)}</p>`
+    + `<p style="margin:0 0 16px;">${v.html(c.intro, slots)}</p>`
+    + `<table role="presentation"${v.rtl ? ' dir="rtl"' : ''} `
+    + 'style="width:100%;border-collapse:collapse;margin:0 0 16px;">'
     + lines.join('')
     + '</table>'
-    + (withImage
-      ? '<p style="margin:0 0 16px;">Die Übersicht hängt dieser E-Mail auch als Bild an.</p>'
-      : '')
-    + '<p style="margin:0;">Die Zahlen stammen aus den Aufzeichnungen von '
-    + `${escapeHtml(companyName)}. Bei Fragen wende dich bitte an das Büro.</p>`;
+    + (withImage ? `<p style="margin:0 0 16px;">${v.html(c.imageNote, slots)}</p>` : '')
+    + `<p style="margin:0;">${v.html(c.sources, slots)}</p>`;
 
   const textLines = [
-    `Hallo ${driverName},`,
+    v.text(copy.hello, slots),
     '',
-    `hier ist deine Abrechnung für ${periodLabel} (${periodRange}).`,
+    v.text(c.intro, slots),
     '',
-    `Bargeld eingenommen: ${euro(figures.cash)}`,
-    `Belege (${figures.belegeCount}): ${euro(figures.belege)}`,
-    `${differenceLabel}: ${euro(Math.abs(figures.difference))}`,
+    `${v.text(c.cash, slots)}: ${ltrRunText(euro(figures.cash), v.language)}`,
+    `${v.text(c.belege, slots)}: ${ltrRunText(euro(figures.belege), v.language)}`,
+    `${v.text(differenceTemplate, slots)}: ${ltrRunText(euro(Math.abs(figures.difference)), v.language)}`,
   ];
   if (figures.tankenquote !== null) {
-    textLines.push(`Tankenquote: ${percent(figures.tankenquote)}`);
+    textLines.push(`${v.text(c.tankenquote, slots)}: ${ltrRunText(percent(figures.tankenquote), v.language)}`);
   }
-  if (withImage) textLines.push('', 'Die Übersicht hängt dieser E-Mail auch als Bild an.');
-  textLines.push(
-    '',
-    `Die Zahlen stammen aus den Aufzeichnungen von ${companyName}. `
-    + 'Bei Fragen wende dich bitte an das Büro.',
-  );
+  if (withImage) textLines.push('', v.text(c.imageNote, slots));
+  textLines.push('', v.text(c.sources, slots));
 
   return {
     // The subject names the driver's own week and nothing else. No figure in it:
     // a subject line is shown on a lock screen, and what a driver owes is not for
     // whoever is holding the phone.
-    subject: `Abrechnung ${periodLabel} – ${companyName}`,
+    subject: v.text(c.subject, slots),
     html: renderEmailHtml({
       logoUrl: `${origin}/email-templates/logo.png`,
       eyebrow: companyName,
-      heading: `Abrechnung ${periodLabel}`,
-      preheader: `Deine Abrechnung für ${periodRange}`,
+      heading: v.text(c.heading, slots),
+      preheader: v.text(c.preheader, slots),
       bodyHtml,
       // No call to action and no link: this mail asks the driver to do nothing on
       // a screen, and a link into the app would be one they cannot open — a driver
       // has no account here.
-      noteHtml: escapeHtml(NOTE),
+      noteHtml: escapeHtml(c.note),
+      ...layoutLocale(v),
     }),
     text: renderEmailText({
-      heading: `Abrechnung ${periodLabel}`,
+      heading: v.text(c.heading, slots),
       bodyText: textLines.join('\n'),
-      noteText: NOTE,
+      noteText: c.note,
+      footer: copy.footer,
     }),
+  };
+}
+
+/** The layout options that make a mail the driver's language and direction. */
+function layoutLocale(v: Voice) {
+  return {
+    lang: v.language,
+    ...(v.rtl ? { dir: 'rtl' as const } : {}),
+    footer: v.copy.footer,
   };
 }
 
@@ -324,11 +408,9 @@ export function renderAbrechnungSummaryMail(input: AbrechnungSummaryInput): Rend
   };
 }
 
-const REMINDER_NOTE = 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres '
-  + 'Unternehmens erstellt. Sie ist eine Erinnerung, keine Rechnung und keine '
-  + 'Zahlungsaufforderung.';
-
 export interface ReminderMailInput {
+  /** Required, like `AbrechnungMailInput.language`. */
+  language: MailLanguage;
   driverName: string;
   companyName: string;
   periodLabel: string;
@@ -351,53 +433,53 @@ export interface ReminderMailInput {
  * account here.
  */
 export function renderReminderMail(input: ReminderMailInput): RenderedMail {
-  const { driverName, companyName, periodLabel, periodRange, sendTime } = input;
+  const { driverName, companyName, periodRange, sendTime } = input;
+  const v = voice(input.language);
+  const { copy } = v;
+  const c = copy.reminder;
+  const periodLabel = localizePeriodLabel(input.periodLabel, input.language);
   const origin = appOrigin(input.appUrl);
-  const clock = `${sendTime} Uhr`;
-
-  const missing = 'Für diese Woche hast du bisher weder Bargeld noch Barbelege '
-    + 'erfasst.';
-  const when = `Um ${clock} verschickt ${companyName} die Abrechnung für diese Woche `
-    + 'automatisch per E-Mail. Wenn du noch etwas einzutragen hast, mach das bitte '
-    + `vor ${clock}, sonst fehlt es in den Zahlen.`;
-  const ignore = 'Hast du nichts abzugeben oder einzutragen, kannst du diese '
-    + 'E-Mail einfach ignorieren.';
+  const clock = fillTemplate(c.clock, { time: sendTime }, (literal) => literal);
+  const slots: Slots = {
+    name: driverName, label: periodLabel, range: periodRange, company: companyName, clock,
+  };
 
   const bodyHtml =
-    `<p style="margin:0 0 16px;">Hallo ${escapeHtml(driverName)},</p>`
-    + `<p style="margin:0 0 16px;">das ist eine Erinnerung zur Abrechnung für ${escapeHtml(periodLabel)} `
-    + `(${escapeHtml(periodRange)}).</p>`
-    + `<p style="margin:0 0 16px;">${escapeHtml(missing)}</p>`
-    + `<p style="margin:0 0 16px;">${escapeHtml(when)}</p>`
-    + `<p style="margin:0;">${escapeHtml(ignore)}</p>`;
+    `<p style="margin:0 0 16px;">${v.html(copy.hello, slots)}</p>`
+    + `<p style="margin:0 0 16px;">${v.html(c.intro, slots)}</p>`
+    + `<p style="margin:0 0 16px;">${v.html(c.missing, slots)}</p>`
+    + `<p style="margin:0 0 16px;">${v.html(c.when, slots)}</p>`
+    + `<p style="margin:0;">${v.html(c.ignore, slots)}</p>`;
 
   const bodyText = [
-    `Hallo ${driverName},`,
+    v.text(copy.hello, slots),
     '',
-    `das ist eine Erinnerung zur Abrechnung für ${periodLabel} (${periodRange}).`,
+    v.text(c.intro, slots),
     '',
-    missing,
+    v.text(c.missing, slots),
     '',
-    when,
+    v.text(c.when, slots),
     '',
-    ignore,
+    v.text(c.ignore, slots),
   ].join('\n');
 
   return {
     // No figure in it, and nothing a lock screen should not show.
-    subject: `Erinnerung: Abrechnung ${periodLabel} – ${companyName}`,
+    subject: v.text(c.subject, slots),
     html: renderEmailHtml({
       logoUrl: `${origin}/email-templates/logo.png`,
       eyebrow: companyName,
-      heading: 'Erinnerung zur Abrechnung',
-      preheader: `Die Abrechnung für ${periodRange} geht um ${clock} raus`,
+      heading: c.heading,
+      preheader: v.text(c.preheader, slots),
       bodyHtml,
-      noteHtml: escapeHtml(REMINDER_NOTE),
+      noteHtml: escapeHtml(c.note),
+      ...layoutLocale(v),
     }),
     text: renderEmailText({
-      heading: 'Erinnerung zur Abrechnung',
+      heading: c.heading,
       bodyText,
-      noteText: REMINDER_NOTE,
+      noteText: c.note,
+      footer: copy.footer,
     }),
   };
 }

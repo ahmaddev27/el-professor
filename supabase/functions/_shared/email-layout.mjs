@@ -62,6 +62,8 @@ export const EMAIL_FOOTER_TEXT =
   'El-Professor · Lohn- und Planungsverwaltung für Taxi- und Mietwagenunternehmen\n' +
   'Diese E-Mail wurde automatisch versendet. Antworten auf diese Adresse werden nicht gelesen.';
 
+const DEFAULT_FOOTER_LINES = EMAIL_FOOTER_TEXT.split('\n');
+
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 /** Escapes text for element content and double-quoted attribute values. */
@@ -90,7 +92,15 @@ function requireHref(href) {
 }
 
 /**
- * A full HTML document, lang="de".
+ * A full HTML document, lang="de" unless `content.lang` says otherwise.
+ *
+ * **Language and direction are opt-in and the defaults are today's bytes.** A
+ * mail that passes none of `lang`, `dir`, `footer` gets exactly the document it
+ * always got, which is what keeps the five byte-pinned templates (and the code
+ * mails) unchanged. `dir: 'rtl'` is stamped on `<html>`, `<body>`, the outer
+ * table and the card, not on `<html>` alone, because several mail clients drop
+ * attributes from the root element. `footer` replaces the two German footer
+ * lines; both are plain text and escaped here.
  *
  * `eyebrow`, `heading`, `preheader`, labels and captions are plain text and
  * escaped here. `bodyHtml` and `noteHtml` are trusted markup: callers escape
@@ -99,6 +109,9 @@ function requireHref(href) {
 export function renderEmailHtml(content) {
   const { logoUrl, eyebrow, heading, preheader, bodyHtml, code, codeCaption, cta, link, noteHtml } = content;
   requireCode(code);
+  const lang = escapeHtml(content.lang ?? 'de');
+  const dirAttr = content.dir === 'rtl' ? ' dir="rtl"' : '';
+  const footerLines = content.footer ?? DEFAULT_FOOTER_LINES;
 
   // Each block ends with a newline and blocks are separated by one empty line,
   // which is exactly the whitespace of the original single template.
@@ -147,7 +160,7 @@ export function renderEmailHtml(content) {
 `);
 
   return `<!DOCTYPE html>
-<html lang="de" xmlns="http://www.w3.org/1999/xhtml">
+<html lang="${lang}"${dirAttr} xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -162,9 +175,9 @@ export function renderEmailHtml(content) {
   }
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:${C.canvas};-webkit-text-size-adjust:100%;">
+<body${dirAttr} style="margin:0;padding:0;background-color:${C.canvas};-webkit-text-size-adjust:100%;">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">${escapeHtml(preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.canvas};">
+<table role="presentation"${dirAttr} width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.canvas};">
 <tr><td align="center" style="padding:40px 16px;">
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;table-layout:fixed;">
@@ -178,7 +191,7 @@ export function renderEmailHtml(content) {
       </tr></table>
     </td></tr>
 
-    <tr><td class="card" style="background-color:${C.card};border:1px solid ${C.border};border-radius:8px;padding:40px 40px 36px 40px;">
+    <tr><td class="card"${dirAttr} style="background-color:${C.card};border:1px solid ${C.border};border-radius:8px;padding:40px 40px 36px 40px;">
 
       <p style="margin:0 0 12px 0;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${C.muted};">${escapeHtml(eyebrow)}</p>
       <h1 class="h1" style="margin:0 0 20px 0;font-family:${FONT};font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-0.02em;color:${C.ink};">${escapeHtml(heading)}</h1>
@@ -186,8 +199,8 @@ ${blocks.join('\n')}
     </td></tr>
 
     <tr><td style="padding:24px 4px 0 4px;font-family:${FONT};font-size:12px;line-height:1.6;color:${C.muted};">
-      El-Professor · Lohn- und Planungsverwaltung für Taxi- und Mietwagenunternehmen<br>
-      Diese E-Mail wurde automatisch versendet. Antworten auf diese Adresse werden nicht gelesen.
+      ${escapeHtml(footerLines[0])}<br>
+      ${escapeHtml(footerLines[1])}
     </td></tr>
 
   </table>
@@ -205,6 +218,7 @@ ${blocks.join('\n')}
  */
 export function renderEmailText(content) {
   const { heading, bodyText, code, codeCaption, link, noteText } = content;
+  const footerText = content.footer ? content.footer.join('\n') : EMAIL_FOOTER_TEXT;
   requireCode(code);
   const lines = ['El-Professor', '', heading, '', bodyText, ''];
   if (code !== undefined) {
@@ -216,6 +230,6 @@ export function renderEmailText(content) {
     requireHref(link.href);
     lines.push(`${link.label}:`, link.href, '');
   }
-  lines.push(noteText, '', '-- ', EMAIL_FOOTER_TEXT, '');
+  lines.push(noteText, '', '-- ', footerText, '');
   return lines.join('\n');
 }
