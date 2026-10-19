@@ -736,10 +736,20 @@ export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
  * and an empty list is a header with no rows below it. `filterSummary`,
  * `totals` and the chrome labels are accepted and ignored, so no caller changes.
  *
- * What stays is what is data: a numeric column is a number under its number
- * format, a value that cannot be read as a number is never turned into 0 (it
- * takes the text path, empty when there is nothing), and header text is whatever
- * the screen passed, in the UI language.
+ * What stays is what is data: a numeric column is a number, a value that cannot
+ * be read as a number is never turned into 0 (it takes the text path, empty when
+ * there is nothing), and header text is whatever the screen passed, in the UI
+ * language.
+ *
+ * **A data cell carries no style at all, not even a number format**, because
+ * Uber's data cells do not (uber.xlsx: zero `<numFmt>` entries, no `s` attribute
+ * on any data cell). So a kilometre reading is the bare number, not "25,880 km";
+ * money is the bare number, not "55.11 €"; a percent column shows its fraction;
+ * the column's `width` and `align` are not sent either, so there is no `<cols>`.
+ * The stored value is exact and still sums. What the file no longer shows is the
+ * unit, the currency symbol, forced decimals (55.1 shows as 55.1, not 55,10) and
+ * the % sign. That is the owner's decision, so do not "fix" it back by passing a
+ * `z` below. Dates are untouched: they stay the formatted text the screens pass.
  */
 function buildPlainSheet(opts: ExportOptions): BuiltSheet {
   const { moduleName, columns, rows, totals } = opts;
@@ -754,7 +764,7 @@ function buildPlainSheet(opts: ExportOptions): BuiltSheet {
       const numeric = numericCell(col, rawVal);
       const addr = XLSX.utils.encode_cell({ r: i + 1, c });
       if (numeric) {
-        ws[addr] = { t: 'n', v: numeric.value, z: numeric.z };
+        ws[addr] = { t: 'n', v: numeric.value };
         return;
       }
       const text = col.format ? col.format(rawVal) : rawVal == null ? '' : String(rawVal);

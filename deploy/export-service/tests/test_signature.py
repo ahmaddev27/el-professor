@@ -97,6 +97,45 @@ def test_header_true_gives_row_one_ubers_style_and_nothing_else_is_styled():
         assert absent not in sheet
 
 
+def _data_cells_with_a_style(sheet_xml):
+    """Cells below row 1 that carry an s attribute (a style index)."""
+    import re
+
+    return [
+        cell
+        for row, body in re.findall(r'<row r="(\d+)"[^>]*>(.*?)</row>', sheet_xml)
+        if row != "1"
+        for cell in re.findall(r"<c [^>]*>", body)
+        if ' s="' in cell
+    ]
+
+
+def test_bare_numbers_leave_data_cells_with_no_style_index_no_numfmt_and_no_cols():
+    """Uber's file: header cells s="1", data cells no s attribute, zero numFmt, no cols."""
+    import json
+
+    # Built with the header flag, as the browser sends an operational export.
+    payload = {"version": 1, "sheets": [{"name": "A", "header": True, "rows": [["Datum", "Kilometer", "Betrag"], ["13.10.2026", 25880, 55.1], ["14.10.2026", 341, 0]]}]}
+    data = build_xlsx(parse_payload(json.dumps(payload).encode()))
+    sheet = parts(data).read("xl/worksheets/sheet1.xml").decode()
+    styles = parts(data).read("xl/styles.xml").decode()
+    assert _data_cells_with_a_style(sheet) == []
+    assert "<numFmt " not in styles
+    assert "<cols" not in sheet
+    assert sheet.count(' s="1"') == 3  # exactly the three header cells
+    assert 'count="2"' in styles.split("<cellXfs")[1].split(">")[0]  # the whole style table: default + header
+
+
+def test_negative_control_a_number_format_or_a_style_would_be_caught():
+    """The assertions above are not vacuous: put a format back and they fail."""
+    import json
+
+    payload = {"version": 1, "sheets": [{"name": "A", "header": True, "rows": [["Kopf"], [{"t": "n", "v": 55.1, "fmt": '#,##0.00\\ "€"'}]]}]}
+    data = build_xlsx(parse_payload(json.dumps(payload).encode()))
+    assert _data_cells_with_a_style(parts(data).read("xl/worksheets/sheet1.xml").decode()) != []
+    assert "<numFmt " in parts(data).read("xl/styles.xml").decode()
+
+
 def test_no_header_flag_leaves_the_sheet_unstyled():
     ws = load_workbook(io.BytesIO(write(("A", [["Kopf"]]))))["A"]
     assert not ws["A1"].font.b and ws["A1"].border.left.style is None

@@ -43,12 +43,8 @@ describe('the plain export shape', () => {
     expect(sheet.header).toBe(true);
     expect(sheet.rows).toHaveLength(3);
     expect(sheet.rows[0]).toEqual(['Belegnummer', 'Literpreis', 'Betrag', 'Kilometer']);
-    expect(sheet.rows[1]).toEqual([
-      'BEL-1',
-      { t: 'n', v: 2.049, fmt: '#,##0.000' },
-      { t: 'n', v: 41.47, fmt: '#,##0.00\\ "€"' },
-      { t: 'n', v: 120345, fmt: '#,##0\\ "km"' },
-    ]);
+    // Bare numbers: no unit, no currency symbol, no forced decimals.
+    expect(sheet.rows[1]).toEqual(['BEL-1', 2.049, 41.47, 120345]);
   });
 
   it('writes no title, module name, timestamp, filter line, totals row, footer or empty-state text', () => {
@@ -64,7 +60,21 @@ describe('the plain export shape', () => {
     const [, , second] = rowsOf(OPTIONS).rows;
     // preis is missing: an empty cell in its place (null), never 0; the real 0
     // in betrag stays a number; the trailing missing km is simply not sent.
-    expect(second).toEqual(['BEL-2', null, { t: 'n', v: 0, fmt: '#,##0.00\\ "€"' }]);
+    expect(second).toEqual(['BEL-2', null, 0]);
+  });
+
+  it('puts no number format on any data cell, whichever column type it is (Uber has none)', () => {
+    const types = ['number', 'number3', 'integer', 'money', 'percent', 'kilometres'] as const;
+    const sheet = rowsOf({
+      ...OPTIONS,
+      columns: types.map(type => ({ key: type, label: type, type, width: 30, align: 'right' as const })),
+      rows: [Object.fromEntries(types.map(type => [type, 1234.5678]))],
+    });
+    expect(sheet.rows[1]).toEqual(types.map(() => 1234.5678));
+    expect(JSON.stringify(sheet)).not.toMatch(/fmt|"t":/);
+    const raw = buildPlainWorkbook([{ ...OPTIONS, columns: OPTIONS.columns.map(col => ({ ...col, width: 40, align: 'right' as const })) }]);
+    const cells = Object.entries(raw.Sheets.Belege).filter(([k]) => !k.startsWith('!')).map(([, v]) => v as { z?: unknown; s?: unknown });
+    expect(cells.filter(cell => cell.z !== undefined || cell.s !== undefined)).toEqual([]);
   });
 
   it('describes no style, width, merge, freeze or filter on the sheet', () => {
