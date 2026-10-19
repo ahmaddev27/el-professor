@@ -269,6 +269,52 @@ services:
           credentials: true
           max_age: 3600
 
+  # ── Excel export service ──────────────────────────────────────────────────
+  # No key-auth, for the same reason as the functions above: the service asks
+  # GoTrue who the caller is (it needs an end user's token, not the anon key)
+  # and enforces its own size, rate and concurrency limits, because this file
+  # adds no Kong plugin and KONG_PLUGINS is a rollback guard. The upstream is
+  # the container named export-service in the compose file; if it is missing the
+  # route answers 502 and the browser tells the user the export service is
+  # unavailable. There is deliberately no fallback to a file written in the
+  # browser: that file would carry the wrong signature.
+  #
+  # Kong resolves the container name once and keeps the address until the record
+  # expires, so a release that recreates the container can leave this route
+  # answering 502. deploy.sh probes /export/v1/healthz and reloads Kong once.
+  - name: export-v1
+    url: http://export-service:8080/
+    connect_timeout: 5000
+    read_timeout: 45000
+    write_timeout: 45000
+    routes:
+      - name: export-v1-all
+        strip_path: true
+        paths: [/export/v1/]
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - $APP_URL
+          methods:
+            - GET
+            - POST
+            - OPTIONS
+          headers:
+            - Content-Type
+            - Authorization
+            - X-Client-Info
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+            - Content-Disposition
+          credentials: true
+          max_age: 3600
+
   # ── Realtime — websocket for postgres_changes ─────────────────────────────
   - name: realtime-v1
     url: http://realtime:4000/socket/

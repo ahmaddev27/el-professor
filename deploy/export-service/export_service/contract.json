@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "creator": "openpyxl",
+  "numberFormats": [
+    "#,##0.00",
+    "#,##0.000",
+    "#,##0",
+    "#,##0.00\\ \"€\"",
+    "#,##0\\ \"km\"",
+    "0.0%",
+    "dd.mm.yyyy",
+    "dd.mm.yyyy\\ hh:mm",
+    "hh:mm"
+  ],
+  "limits": {
+    "maxBodyBytes": 8388608,
+    "maxSheets": 20,
+    "maxRowsPerSheet": 100000,
+    "maxColumns": 256,
+    "maxCells": 400000,
+    "maxStringLength": 32767,
+    "maxSheetNameLength": 31
+  }
+}

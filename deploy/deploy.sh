@@ -438,7 +438,26 @@ echo "  deploy/kong.yml parses in $kong_image with this release's KONG_PLUGINS"
 echo "  project $PROJECT_NAME in $ROOT${MANIFEST:+, release $(basename "$RELEASE_DIR")}"
 
 dc() { docker compose "$@"; }
-psql_db() { dc exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 -q "$@"; }
+
+# ── The export service image ─────────────────────────────────────────────────
+# Every other service pulls an upstream image; this one is built here, from the
+# release archive, and a release whose image cannot be built is refused before
+# the database or the gateway is touched. Skipped only when this release's
+# compose file does not declare the service at all: --activate can bring back
+# an earlier release that predates it, and compose then removes the orphan.
+EXPORT_DECLARED=no
+declared_services="$(dc config --services < /dev/null)" || fail "docker compose could not list its services"
+if grep -qx export-service <<<"$declared_services"; then EXPORT_DECLARED=yes; fi
+if [ "$EXPORT_DECLARED" = yes ]; then
+  step "export service image"
+  [ -f "$HERE/export-service/Dockerfile" ] \
+    || fail "deploy/export-service is missing on this host. The release wrapper (deploy/ci-release.sh, installed by hand as /usr/local/sbin/el-professor-release) predates the export service and has to be reinstalled before this release can be built. Nothing has been changed."
+  dc build export-service < /dev/null \
+    || fail "the export service image could not be built (see the build output above). It needs the host to reach Docker Hub and PyPI. Nothing has been changed; the running stack is as it was."
+  echo "  export-service image built"
+fi
+
+psql_db(){ dc exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 -q "$@"; }
 
 # ── Migrations ───────────────────────────────────────────────────────────────
 
@@ -802,6 +821,71 @@ else
     *)        fn_next="Kong was not reloaded: no answer here was a 502, 503 or 504, so the gateway's DNS cache is not what is wrong. If nothing answered at all, look at Caddy and Kong before the functions service." ;;
   esac
   [ -z "$fn_problem" ] || fail "the edge functions do not answer through $PUBLIC_URL: $fn_problem. $fn_context $fn_next"
+fi
+
+# ── The export service, end to end ───────────────────────────────────────────
+# Same trap as the edge functions above, same remedy: Kong resolves
+# `export-service` once and keeps that address until the record expires, and a
+# release that recreates the container can hand its address to another one, so
+# the first export after every release would be a 502.
+#
+# The probe sends the ANON key as a bearer token to POST /export/v1/workbook.
+# That proves three things in one request: Kong reaches the container, the
+# service reached GoTrue to ask who the caller is, and it REFUSED a token that
+# is valid for the stack but belongs to no user. Only its own 401 answer, with
+# the code `unauthorized` in the body, counts; a status alone cannot tell the
+# service from a gateway that dislikes the request.
+# >>> export service health checks
+
+export_probe_is_stale_upstream() {
+  case "$1" in 502|503|504) return 0 ;; *) return 1 ;; esac
+}
+
+export_probe_problem() {
+  local status="$1" body="$2"
+  case "$status" in
+    401)
+      case "$body" in
+        *'"code":"unauthorized"'*) ;;
+        *) echo "HTTP 401, but not the export service's own unauthorized answer" ;;
+      esac ;;
+    502|503|504) echo "HTTP $status from the gateway or the service, Kong did not reach a working export service" ;;
+    404) echo "HTTP 404, Kong has no /export/v1/ route" ;;
+    000|'') echo "no answer at all" ;;
+    *) echo "HTTP $status, not the export service's own refusal of the anon key" ;;
+  esac
+}
+# <<< export service health checks
+
+if [ "$EXPORT_DECLARED" = yes ]; then
+  export_anon_key="$(env_value .env ANON_KEY)"
+  [ -n "$export_anon_key" ] || fail "ANON_KEY is missing from .env, so the export service cannot be probed"
+  export_nl=$'\n'
+  export_problem="no answer at all"
+  export_reload=""
+  export_pause=0
+  export_deadline=$(( SECONDS + 120 ))
+  while :; do
+    export_answer="$(curl -s --max-time 20 -X POST "$PUBLIC_URL/export/v1/workbook" \
+      -H "Authorization: Bearer $export_anon_key" -H 'Content-Type: application/json' \
+      -d '{}' -w '\n%{http_code}')" || true
+    export_status="${export_answer##*"$export_nl"}"
+    export_problem="$(export_probe_problem "$export_status" "${export_answer%"$export_nl"*}")"
+    if [ -z "$export_problem" ]; then break; fi
+    if [ "$SECONDS" -ge "$export_deadline" ]; then break; fi
+    if [ -z "$export_reload" ] && export_probe_is_stale_upstream "$export_status"; then
+      if dc exec -T kong kong reload < /dev/null > /dev/null 2>&1; then export_reload=reloaded; else export_reload=refused; fi
+      echo "  kong reload after $export_problem: $export_reload"
+    fi
+    export_pause=$(( export_pause < 10 ? export_pause + 2 : 10 ))
+    sleep "$export_pause"
+  done
+  unset export_anon_key
+
+  export_served="refused the anon key itself"
+  echo "  $PUBLIC_URL/export/v1/workbook -> ${export_problem:-$export_served}${export_reload:+ (kong reload: $export_reload)}"
+  [ -z "$export_problem" ] \
+    || fail "the export service does not answer through $PUBLIC_URL: $export_problem. The bundle is live and every other service answered, so this is the export service alone: 'docker compose logs export-service' says whether it started, and 'docker compose exec kong kong reload' clears a stale address."
 fi
 
 if [ -n "$MANIFEST" ]; then
