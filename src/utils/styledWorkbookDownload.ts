@@ -1,62 +1,46 @@
 /**
- * Draws a styled workbook and hands the file to the browser.
+ * Draws a styled workbook with ExcelJS and hands the file to the browser.
  *
- * ── THE FACT THIS MODULE EXISTS FOR ──────────────────────────────────────────
+ * ── WHAT THIS MODULE IS NOW ──────────────────────────────────────────────────
  *
- * `xlsx@0.20.3` — the community build this project pins — DISCARDS EVERY CELL
- * STYLE ON WRITE. Measured in `node_modules/xlsx/xlsx.js`:
+ * It used to be the writer of every operational list. It is not any more: those
+ * lists (`exportTableToExcel`, `exportSheetsToExcel`, the Fahrtenanalyse report)
+ * go to the Excel export service and come back written by openpyxl, plain,
+ * through `serviceWorkbookDownload.ts`. Two callers are left on this ExcelJS
+ * path, on purpose, until a follow-up moves them behind committed golden files:
  *
- *   function get_cell_style(styles, cell, opts) {
- *     var z = opts.revssf[cell.z != null ? cell.z : "General"];
- *     ...
- *     styles[len] = { numFmtId:z, fontId:0, fillId:0, borderId:0, xfId:0,
- *                     applyNumberFormat:1 };
+ *   - `fahreruebersichtExport.ts` (the Fahrerübersicht Stundennachweis sheet),
+ *   - `monthlyPlanDocumentBuilders.ts` (the monthly plan's documents).
  *
- * `cell.z` — the number format — is the ONLY cell property that reaches the
- * file. `fontId`, `fillId` and `borderId` are literal zeros, and `write_sty_xml`
- * emits one hard-coded font, two hard-coded fills and one empty border for the
- * whole workbook:
+ * Both are statutory or payroll paperwork, which is why they did not move with
+ * the lists. The Fahrtenbuch exports still use `xlsx`'s own writer for the same
+ * reason. The end state is ONE writer, the service, and when the last of these
+ * moves this module and its ExcelJS dependency are deleted.
  *
- *   o[o.length] = ('<fonts count="1"><font><sz val="12"/>…Calibri…</font></fonts>');
- *   o[o.length] = ('<fills count="2">…none…gray125…</fills>');
- *   o[o.length] = ('<borders count="1"><border><left/><right/>…</border></borders>');
+ * ── THE OLD "DO NOT UNIFY" RULE, AND WHY IT NO LONGER HOLDS ──────────────────
  *
- * And `write_ws_xml_sheetviews` writes only `workbookViewId` (plus
- * `rightToLeft`) — there is no `<pane>` element anywhere in the writer, so
- * `ws['!freeze']` is not a key the library has ever read.
+ * This comment used to say: DO NOT "unify" ExcelJS and xlsx, because xlsx
+ * discards every cell style on write (`get_cell_style` reads only `cell.z` and
+ * writes `fontId:0, fillId:0, borderId:0`; `write_ws_xml_sheetviews` emits no
+ * `<pane>`), so the two libraries did different jobs: ExcelJS painted a readable
+ * sheet, xlsx reproduced a prescribed one byte for byte. That reason is gone for
+ * the lists, because nothing is painted any more: the owner decided on
+ * 19.10.2026 that files are plain, and written by openpyxl. The reason that
+ * remains for the two callers above is not styling but risk: they are the
+ * highest-stakes exports and are moved separately. Unifying them is the plan,
+ * not a hazard, as long as it happens behind goldens.
  *
- * So every fill, font, border and alignment `buildTableWorkbook` describes, and
- * its frozen header row, drew NOTHING. The files came out plain. What xlsx DOES
- * honour, and what therefore already worked, is `z`, `!cols`, `!rows` (`hpt`),
- * `!merges`, `!autofilter` and `!margins`.
+ * ── HOW IT WORKS ─────────────────────────────────────────────────────────────
  *
- * ── WHY TWO LIBRARIES, AND WHY THAT IS THE DESIGN ────────────────────────────
- *
- * `exceljs` writes the OPERATIONAL tables a person reads, sorts and filters —
- * everything that goes through `exportTableToExcel`. It has a real style model,
- * so the design the exporter has always described is finally drawn.
- *
- * `xlsx` stays the writer of the STATUTORY sheets: `fahrtenbuchExport.ts` and
- * `historicalWorkingHoursFahrtenbuchExport.ts`, whose `'original'` mode must
- * reproduce an imported sheet's headers byte for byte, and `exportIncomeToExcel`
- * / `exportSalariesToExcel`. A corrected Fahrtenbuch is a record an accountant
- * reconciles against; byte-fidelity there outranks a nicer-looking header band.
- *
- * DO NOT "unify" the two. The split is the decision: one library reproduces a
- * prescribed sheet exactly, the other paints a readable one.
- *
- * ── WHAT IS PRESERVED, AND WHERE IT LIVES ────────────────────────────────────
- *
- * `buildTableWorkbook` is UNCHANGED. Its xlsx worksheet is now read as the
- * intermediate description of the file — the cell values, the `z` formats, the
- * `s` styles and the six `!` sheet settings — and this module translates that
- * description into ExcelJS's model. Keeping it means the number formats, the
- * `asFiniteNumber` rule (an unreadable value is never 0), the column-0 totals
- * guard, the German chrome and the sheet-name validation `book_append_sheet`
- * performs are all exactly the code they were, still asserted cell by cell by
- * the tests that read `buildTableWorkbook(...).Sheets[name]`.
+ * `buildTableWorkbook`-style builders return an `XLSX.WorkBook` that is read as
+ * the intermediate description of the file — the cell values, the `z` formats,
+ * the `s` styles and the six `!` sheet settings — and this module translates it
+ * into ExcelJS's model. Keeping the xlsx description is what keeps number
+ * formats, the `asFiniteNumber` rule, the column-0 totals guard and the
+ * sheet-name validation exactly the code they were.
  */
 import * as XLSX from 'xlsx';
+import { triggerDownload } from './browserDownload';
 
 const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -394,23 +378,6 @@ function applyStyledSheet(
 }
 
 // ─── The download ─────────────────────────────────────────────────────────────
-
-/**
- * The repo's Blob-download shape, with the anchor attached to the document.
- * `backup.ts`, `AbrechnungPage` and `DocumentsPage` all append, click and
- * remove; `historicalWorkingHoursFahrtenbuchExport.ts`'s `triggerDownload` is
- * the one that does not, and a detached anchor's click is ignored by Firefox.
- */
-function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
 
 type ExcelJsWorkbookCtor = new () => ExcelJsWorkbookLike & {
   xlsx: { writeBuffer(): Promise<ArrayBuffer | Uint8Array> };

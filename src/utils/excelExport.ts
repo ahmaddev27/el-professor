@@ -1,35 +1,38 @@
 /**
- * TWO LIBRARIES LIVE HERE, AND THAT SPLIT IS THE DESIGN — NOT AN ACCIDENT.
+ * WHO WRITES THE FILE, AND WHO ONLY DESCRIBES IT.
  *
- * `xlsx@0.20.3` (the community build) discards every cell style on write:
- * `get_cell_style` reads exactly one property, `cell.z`, and writes `fontId:0,
- * fillId:0, borderId:0`, while `write_sty_xml` emits one hard-coded font, two
- * fills and one empty border for the whole file. `ws['!freeze']` is not a key
- * the library reads at all — its `write_ws_xml_sheetviews` emits no `<pane>`.
- * So the design the generic table exporter below describes drew NOTHING: those
- * files came out plain, however many fills and borders were named.
+ * Every Excel file this module produces is WRITTEN BY THE EXPORT SERVICE
+ * (deploy/export-service, Python's openpyxl), because the companies that receive
+ * these files check the writer. `exportTableToExcel` and `exportSheetsToExcel`
+ * build the sheet here, as they always did, and hand it to `deliverWorkbook`,
+ * which posts the values to the service and downloads what comes back. If the
+ * service cannot be reached the user is told so and NO file is written: there is
+ * no fallback to a JavaScript writer, because that file would carry the wrong
+ * signature and nobody would know.
  *
- * `exportTableToExcel` and `exportSheetsToExcel` therefore write through
- * `exceljs`, from `./styledWorkbookDownload` — every operational list a person
- * reads, sorts and filters, Umsätze and Gehälter included since 01.10.2026.
+ * Formatting is plain, like the files these customers already get from other
+ * tools: no fonts, fills, borders, alignment, widths, freeze pane, filter or
+ * merges. The `s` styles, `!cols`, `!rows`, `!merges`, `!freeze` and
+ * `!autofilter` that `buildTableSheet` still describes are NOT SENT, and the
+ * contract has nowhere to put them (`src/lib/workbookContract.ts`). What is sent
+ * is the value of each cell, whether it is a number, and the number format when
+ * it is one the contract lists. A number stays a number so an accountant can sum
+ * a column. This reverses the look the owner asked for on 01.10.2026; the
+ * descriptions are left in place for now and are dead weight until a follow-up
+ * removes them.
  *
- * What STAYS on `xlsx` is the prescribed sheets, deliberately:
+ * `xlsx@0.20.3` is used HERE only as a data structure (`XLSX.WorkBook` is what
+ * `buildTableWorkbook` returns and the tests read cell by cell) and never as a
+ * writer for these lists. What STAYS on `xlsx` and on `exceljs` is the other
+ * exports, deliberately, until their own change moves them:
  * `fahrtenbuchExport.ts` / `historicalWorkingHoursFahrtenbuchExport.ts` /
  * `monatsplanungXlsxExport.ts` / `monthlyPlanFahrtenbuchExport.ts`, whose
- * `'original'` mode must reproduce an imported sheet's headers byte for byte and
- * whose output is a statutory record an accountant reconciles against.
- *
- * Do not "unify" them. One library reproduces a prescribed sheet exactly; the
- * other paints a readable one.
- *
- * `buildTableWorkbook` is unchanged by that swap and still returns an
- * `XLSX.WorkBook`: it is the description of the file — values, `z` formats, `s`
- * styles and the `!` sheet settings — which the new writer translates. Keeping
- * it is what keeps the number formats, the `asFiniteNumber` rule and the
- * column-0 totals guard the exact code they were, still asserted cell by cell.
+ * `'original'` mode must reproduce an imported sheet's headers byte for byte,
+ * and the Fahrerübersicht and the monthly plan's documents. See
+ * `styledWorkbookDownload.ts`.
  */
 import * as XLSX from 'xlsx';
-import { downloadStyledWorkbook } from './styledWorkbookDownload';
+import { deliverWorkbook } from './serviceWorkbookDownload';
 import { Income, SalaryCalculation } from '../types/receipt';
 import {
   buildIncomeSheets,
@@ -710,31 +713,24 @@ export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
 }
 
 /**
- * Writes a multi-sheet styled workbook.
+ * Writes a multi-sheet workbook through the export service.
  *
- * Same contract as `exportTableToExcel`, including the `void` signature and the
- * logged rejection: ExcelJS writes asynchronously and no call site has anywhere
- * to show a failure.
+ * Same contract as `exportTableToExcel`, including the `void` signature: the
+ * service answers asynchronously, and a failure is reported to the user through
+ * `deliverWorkbook` (a toast with a retry) rather than thrown at a caller that
+ * has nowhere to show it.
  */
 export function exportSheetsToExcel(filename: string, sheets: ExportOptions[]): void {
   const wb = buildSheetsWorkbook(sheets);
   const safeFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
-    console.error('exportSheetsToExcel: writing the workbook failed', error);
-  });
+  deliverWorkbook(wb, safeFilename);
 }
 
 export function exportTableToExcel(opts: ExportOptions): void {
   const wb = buildTableWorkbook(opts);
   const safeFilename = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`;
-  // ExcelJS produces a buffer, so writing is asynchronous where `XLSX.writeFile`
-  // was synchronous — and this function's `void` signature, which every call
-  // site is written against, has nowhere to hand a failure. A rejection is
-  // logged rather than left unhandled; a real message on the button would mean
-  // changing that signature, which is a change of its own. The guard against a
-  // file that claims nought after a failed read stays at the call site either
-  // way: this still writes a workbook for whatever rows it is handed.
-  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
-    console.error('exportTableToExcel: writing the workbook failed', error);
-  });
+  // The guard against a file that claims nought after a failed read stays at the
+  // call site either way: this still builds a workbook for whatever rows it is
+  // handed.
+  deliverWorkbook(wb, safeFilename);
 }

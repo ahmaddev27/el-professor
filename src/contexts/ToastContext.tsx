@@ -10,10 +10,17 @@ export interface Toast {
   title: string;
   message?: string;
   duration?: number;
+  /** A button inside the toast, e.g. retry. Pressing it also dismisses the toast. */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
 }
 
 interface ToastContextType {
-  showToast: (type: ToastType, title: string, message?: string, duration?: number) => void;
+  showToast: (type: ToastType, title: string, message?: string, duration?: number, action?: ToastAction) => void;
   success: (title: string, message?: string) => void;
   error: (title: string, message?: string) => void;
   info: (title: string, message?: string) => void;
@@ -38,9 +45,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const showToast = useCallback(
-    (type: ToastType, title: string, message?: string, duration: number = 5000) => {
+    (type: ToastType, title: string, message?: string, duration: number = 5000, action?: ToastAction) => {
       const id = Math.random().toString(36).substring(7);
-      const toast: Toast = { id, type, title, message, duration };
+      const toast: Toast = { id, type, title, message, duration, action };
 
       setToasts((prev) => [...prev, toast]);
 
@@ -131,6 +138,18 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{toast.title}</p>
         {toast.message && <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{toast.message}</p>}
+        {toast.action && (
+          <button
+            type="button"
+            className="mt-2 text-sm font-semibold underline"
+            onClick={() => {
+              onRemove(toast.id);
+              toast.action?.onClick();
+            }}
+          >
+            {toast.action.label}
+          </button>
+        )}
       </div>
       <button
         onClick={() => onRemove(toast.id)}
