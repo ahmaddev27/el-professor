@@ -55,6 +55,15 @@ const DRIVER_COL_CANDIDATES = [
   'fahrername', 'fahrer name', 'fahrer', 'driver name', 'driver',
 ];
 
+/**
+ * The single `Fahrername` of a ride: the assigned driver, falling back to the
+ * original. One rule for the corrected book and for the quick trip list, so the
+ * two cannot name a different person for the same ride.
+ */
+export function tripDriverName(trip: { assigned_driver_name?: string | null; original_driver_name?: string | null }): string {
+  return trip.assigned_driver_name || trip.original_driver_name || '';
+}
+
 export const FAHRTENBUCH_ORIGINAL_COLUMNS = [
   'Datum/Uhrzeit Auftragseingang',
   'Uhrzeit der Auftragsuebermittlung',
@@ -367,7 +376,7 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
     const raw = (trip.raw_data_json ?? {}) as Record<string, unknown>;
     return columns.map(col => {
       if (col === driverCol) {
-        return trip.assigned_driver_name || trip.original_driver_name || '';
+        return tripDriverName(trip);
       }
       const val = raw[col];
       if (val === null || val === undefined) return '';
