@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **20.10.2026 (branch `feat/reminder-night-before`, PR against `staging`, not merged; migration `20261020100000`):** the Abrechnung reminder lead goes up to 24 hours (an evening-before reminder, e.g. Monday 10:00 with 14 h is Sunday 20:00) and `nothingRecorded` no longer requires revenue. Production's reminder was not broken: it ticked three times with `reminders_due: 1` and every skip counter at 0, and the week's 35 income rows were only written at 09:52:25, after it had looked.
+
 > **20.10.2026 (branch `feat/fahrtenbuch-own-page`, PR against `staging`, not merged; UI only, no migration):** the Fahrtenbuch has its own sidebar entry and route `/fahrtenbuch` (`FahrtenbuchPage`, gated on `dokumente` like Documents). It left Documents (the sub-view and its tool card are gone); the Fahrtenanalyse empty state now links to the new page.
 
 > **19.10.2026 (branch `feat/abrechnung-next-moments`, PR against `staging`, not merged; display only, no migration):** the "Abrechnung by email" card now says when the next reminder fires, computed by `nextMoments` in `abrechnung-schedule-core.ts` from the saved schedule and its `armed_at`. It exists because the owner saved his schedule 42 seconds after the reminder moment and, correctly, got none; the feature itself was proved working end to end on 19.10.2026, so this is not a bug fix.

@@ -56,7 +56,10 @@ const DEFAULTS: ScheduleForm = {
 };
 
 /** The leads the picker offers. A stored value outside this list is added to it, never lost. */
-const REMINDER_LEADS = [15, 30, 60, 90, 120, 180] as const;
+const REMINDER_LEADS = [15, 30, 60, 90, 120, 180, 360, 720, 840, 1080, 1440] as const;
+
+/** From four hours on, a whole number of hours reads better than minutes. */
+const HOURS_FROM_MINUTES = 240;
 
 type PreviewState =
   | { status: 'idle' }
@@ -195,7 +198,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
           <span>
             <span className="block font-medium">{t('settings.abrSchedule.reminder.label')}</span>
             <span className="block text-fg-subtle">
-              {t('settings.abrSchedule.reminder.hint', { minutes: form.reminderLead })}
+              {t('settings.abrSchedule.reminder.hint')}
             </span>
           </span>
         </label>
@@ -209,7 +212,9 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
             >
               {leadOptions(form.reminderLead).map((minutes) => (
                 <option key={minutes} value={minutes}>
-                  {t('settings.abrSchedule.reminder.leadOption', { minutes })}
+                  {minutes >= HOURS_FROM_MINUTES && minutes % 60 === 0
+                    ? t('settings.abrSchedule.reminder.leadOptionHours', { hours: minutes / 60 })
+                    : t('settings.abrSchedule.reminder.leadOption', { minutes })}
                 </option>
               ))}
             </NativeSelect>

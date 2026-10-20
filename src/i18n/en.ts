@@ -6550,7 +6550,7 @@ export const en: PartialDictionary = {
   'inc.uber.period.tooManyDays':       'At most {max} days at once; {count} are chosen. Please choose fewer days.',
   'inc.uber.tab.daily':                'Daily',
   'settings.abrSchedule.preview.manager.goesAddress': 'The summary goes to the saved notification address.',
-  'settings.abrSchedule.reminder.hint':    'A driver who had revenue that week but recorded neither cash nor cash receipts gets a short e-mail without amounts {minutes} minutes before the send. This also reaches drivers who have nothing to hand in. Only applies when sending to the drivers is on.',
+  'settings.abrSchedule.reminder.hint':    'A driver who recorded neither cash nor cash receipts that week gets a short e-mail without amounts at the chosen time before the send, the evening before included. This also reaches drivers who did not work that week and have nothing to hand in. Only applies when sending to the drivers is on.',
   'settings.abrSchedule.reminder.label':   'Remind drivers before it is sent',
   'settings.abrSchedule.reminder.lead':    'Reminder before the send',
   'settings.abrSchedule.reminder.leadOption': '{minutes} minutes before',
@@ -6879,4 +6879,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'settings.abrSchedule.preview.nextReminder': 'Next reminder: {weekday}, {date}, {time} (German time).',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.reminder.leadOptionHours': '{hours} hours before',
 };

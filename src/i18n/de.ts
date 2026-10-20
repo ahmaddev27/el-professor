@@ -6606,7 +6606,7 @@ export const de = {
   'inc.uber.period.tooManyDays':       'Höchstens {max} Tage auf einmal; gewählt sind {count}. Bitte weniger Tage wählen.',
   'inc.uber.tab.daily':                'Täglich',
   'settings.abrSchedule.preview.manager.goesAddress': 'Übersicht geht an die hinterlegte Benachrichtigungsadresse.',
-  'settings.abrSchedule.reminder.hint':    'Ein Fahrer, der in der Woche Umsatz hatte, aber weder Bargeld noch Barbelege erfasst hat, bekommt {minutes} Minuten vor dem Versand eine kurze E-Mail ohne Beträge. Das trifft auch Fahrer, die nichts abzugeben haben. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
+  'settings.abrSchedule.reminder.hint':    'Ein Fahrer, der in der Woche weder Bargeld noch Barbelege erfasst hat, bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Das trifft auch Fahrer, die in der Woche nicht gefahren sind und nichts abzugeben haben. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
   'settings.abrSchedule.reminder.label':   'Fahrer vor dem Versand erinnern',
   'settings.abrSchedule.reminder.lead':    'Erinnerung vor dem Versand',
   'settings.abrSchedule.reminder.leadOption': '{minutes} Minuten vorher',
@@ -6935,4 +6935,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'settings.abrSchedule.preview.nextReminder': 'Nächste Erinnerung: {weekday}, {date}, {time} Uhr (deutsche Zeit).',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.reminder.leadOptionHours': '{hours} Stunden vorher',
 } as const;
