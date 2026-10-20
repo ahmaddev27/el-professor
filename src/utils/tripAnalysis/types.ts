@@ -537,6 +537,8 @@ export interface TripRowForAnalysis {
   readonly source_status?: string | null;
   readonly source_row_index: number | null;
   readonly raw_data_json: Readonly<Record<string, unknown>> | null;
+  /** Copied from the import by the database (20261020110000). */
+  readonly is_simulated?: boolean;
   /** timestamptz from slice A (migration 20260922100000). */
   readonly start_at?: string | null;
   readonly end_at?: string | null;

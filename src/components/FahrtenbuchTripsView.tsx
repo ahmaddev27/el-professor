@@ -12,6 +12,7 @@ import { buildFahrtenlisteExport } from '../utils/tableExportRows';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { SimulatedBadge, SimulatedNotice } from './simulatedRides/SimulatedBadge';
 import {
   Alert,
   Badge,
@@ -320,7 +321,12 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       id: 'date',
       header: t('common.date'),
       className: 'whitespace-nowrap font-medium tabular-nums',
-      cell: trip => format(new Date(trip.trip_date), 'dd.MM.yyyy'),
+      cell: trip => (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          {format(new Date(trip.trip_date), 'dd.MM.yyyy')}
+          {trip.is_simulated ? <SimulatedBadge /> : null}
+        </span>
+      ),
     },
     {
       id: 'start',
@@ -447,7 +453,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           <option value="all">{t('imp.trips.allImports')}</option>
           {imports.map(imp => (
             <option key={imp.id} value={imp.id}>
-              {t(MONTH_KEYS[imp.month - 1])} {imp.year} — {imp.file_name.slice(0, 20)}
+              {imp.is_simulated ? `${t('simrides.badge')} · ` : ''}{t(MONTH_KEYS[imp.month - 1])} {imp.year} — {imp.file_name.slice(0, 20)}
             </option>
           ))}
         </NativeSelect>
@@ -556,8 +562,9 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
               <div className="flex min-w-0 items-start gap-3">
                 <Calendar aria-hidden className="mt-0.5 size-4 shrink-0 text-brand-text" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-fg">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
                     {t(MONTH_KEYS[imp.month - 1])} {imp.year}
+                    {imp.is_simulated ? <SimulatedBadge /> : null}
                   </p>
                   <p className="break-words text-xs tabular-nums text-fg-muted">
                     {imp.file_name} · {t('imp.trips.tripCount', { count: imp.row_count })} ·{' '}
@@ -619,6 +626,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         </Card>
       ) : (
         <>
+          {filteredTrips.some(trip => trip.is_simulated) ? <SimulatedNotice /> : null}
           {/* Desktop table */}
           <DataTable
             className="hidden md:block"
@@ -644,7 +652,10 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                         <User aria-hidden className="size-3 shrink-0" /> {trip.original_driver_name}
                       </p>
                     </div>
-                    <Badge tone={STATUS_TONE[trip.plausibility_status] ?? 'neutral'}>{statusLabel(trip.plausibility_status)}</Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge tone={STATUS_TONE[trip.plausibility_status] ?? 'neutral'}>{statusLabel(trip.plausibility_status)}</Badge>
+                      {trip.is_simulated ? <SimulatedBadge /> : null}
+                    </div>
                   </div>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                     <div><dt className="inline text-fg-muted">{t('imp.trips.plate')}: </dt><dd className="inline text-fg">{trip.car_identifier || '—'}</dd></div>

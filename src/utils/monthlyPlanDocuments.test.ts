@@ -117,6 +117,7 @@ function project(
     result,
     warnings: validation.warnings,
     selectedDriverIds: over.selectedDriverIds ?? pool,
+    simulated: false,
     originalDriverIdByTrip: over.originalDriverIdByTrip,
   };
   return storedPlanFromGenerated(projection);

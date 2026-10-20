@@ -26,6 +26,8 @@ export interface FahrtenbuchImport {
   storage_path: string | null;
   /** SHA-256 of the uploaded file; NULL for imports older than 20260922100000. */
   file_sha256: string | null;
+  /** True for an import made by the simulated-ride generator (20261020110000). Never changes. */
+  is_simulated?: boolean;
 }
 
 /**
@@ -86,6 +88,8 @@ export interface FahrtenbuchTrip extends Omit<TripImportFacts, 'time_source' | '
   source_row_index: number | null;
   created_at: string;
   updated_at: string;
+  /** Copied from the import by trigger; a simulated ride says so wherever it is shown. */
+  is_simulated?: boolean;
 }
 
 export interface TripInsertRow extends TripImportFacts {
@@ -293,6 +297,8 @@ export function useFahrtenbuch() {
     sourceSheetName?: string;
     sourceColumns?: string[];
     xlsxBytes?: Uint8Array | null;
+    /** Only the simulated-ride generator sets this; the database keeps it for good. */
+    isSimulated?: boolean;
   }): Promise<CreateImportResult> => {
     if (!companyId || !user) throw new Error('Not authenticated');
 
@@ -375,6 +381,7 @@ export function useFahrtenbuch() {
         source_columns_json: params.sourceColumns || null,
         storage_path: storagePath,
         file_sha256: params.fileSha256,
+        is_simulated: params.isSimulated === true,
       })
       .select('id, storage_path, imported_at')
       .single();

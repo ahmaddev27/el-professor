@@ -33,6 +33,8 @@ export interface ImportSummary {
   imported_at: string;
   row_count: number;
   status: string;
+  /** True for an import made by the simulated-ride generator. */
+  is_simulated?: boolean;
 }
 
 const SETTINGS_COLUMNS =
@@ -47,7 +49,7 @@ function fail(error: { message: string } | null): void {
 export async function loadImports(companyId: string): Promise<ImportSummary[]> {
   const { data, error } = await supabase
     .from('fahrtenbuch_imports')
-    .select('id, month, year, file_name, imported_at, row_count, status')
+    .select('id, month, year, file_name, imported_at, row_count, status, is_simulated')
     .eq('company_id', companyId)
     .order('imported_at', { ascending: false });
   fail(error);

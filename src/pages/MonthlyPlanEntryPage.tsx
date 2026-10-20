@@ -6,6 +6,10 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { PLANNING_TYPES, parsePlanningType, type PlanningType } from '../utils/shiftRecommendationScreens';
 import MonthlyPlanPage from './MonthlyPlanPage';
 import ShiftRecommendationPage from './ShiftRecommendationPage';
+import SimulatedRidesPage from './SimulatedRidesPage';
+
+/** The `art` value of the simulated-ride generator; deliberately not a PlanningType. */
+const SIMULATED_ART = 'simuliert';
 
 /**
  * /monatsplan opens on a choice, and the choice lives in the address (`?art=`).
@@ -34,7 +38,29 @@ export default function MonthlyPlanEntryPage() {
     setParams(copy);
   };
 
-  if (!type) return <PlanningTypeChooser onChoose={choose} />;
+  // Not a way to plan: a generator of marked, simulated rides for practice and
+  // testing. It lives beside the planner because it feeds it, and is reached
+  // from the chooser's footer rather than as a third way to plan a month.
+  if (params.get('art') === SIMULATED_ART) {
+    return (
+      <div className="font-ui">
+        <Button variant="link" className="mb-3" onClick={() => choose(null)}>{t('mplanType.switch')}</Button>
+        <SimulatedRidesPage />
+      </div>
+    );
+  }
+
+  if (!type) {
+    return (
+      <>
+        <PlanningTypeChooser onChoose={choose} />
+        <p className="mt-6 font-ui text-sm text-fg-muted">
+          {t('simrides.entry.hint')}{' '}
+          <Button variant="link" onClick={() => setParams({ art: SIMULATED_ART })}>{t('simrides.entry.link')}</Button>
+        </p>
+      </>
+    );
+  }
 
   return (
     <div className="font-ui">

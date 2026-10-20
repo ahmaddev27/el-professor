@@ -74,6 +74,7 @@ import {
   type HistoricalWorkingHoursStundennachweisPreviewResult,
 } from '../utils/historicalWorkingHoursStundennachweisPreview';
 import * as XLSX from 'xlsx';
+import { hasSimulatedRides, writeMarkedWorkbook } from '../utils/simulatedRides/marker';
 import { type StructuredNote } from '../utils/monatsplanungPhase3';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -4340,7 +4341,7 @@ function InhaberFreeWindowSearchView({
       newWs['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: totalRows - 1, c: totalCols - 1 } });
       const wb2 = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb2, newWs, sourceSheetName ?? 'Sheet1');
-      XLSX.writeFile(wb2, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+      writeMarkedWorkbook(wb2, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`, hasSimulatedRides(originalTrips));
       return;
     }
 
@@ -4385,7 +4386,7 @@ function InhaberFreeWindowSearchView({
     const ws = XLSX.utils.json_to_sheet(allRows, { header: headers });
     const wb3 = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb3, ws, sourceSheetName ?? 'Sheet1');
-    XLSX.writeFile(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+    writeMarkedWorkbook(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`, hasSimulatedRides(originalTrips));
   }, [sectionFData, originalTrips, resolvedOwnerName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, year, month, noteReassignments, t]);
 
   // Keep exportTriggerRef in sync so the parent can trigger a download
@@ -9595,7 +9596,7 @@ async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): 
     newWs['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: totalRows - 1, c: totalCols - 1 } });
     const wb2 = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb2, newWs, sourceSheetName ?? 'Sheet1');
-    XLSX.writeFile(wb2, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+    writeMarkedWorkbook(wb2, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`, hasSimulatedRides(trips));
     return;
   }
 
@@ -9628,7 +9629,7 @@ async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): 
   const ws = XLSX.utils.json_to_sheet(allRows, { header: headers });
   const wb3 = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb3, ws, sourceSheetName ?? 'Sheet1');
-  XLSX.writeFile(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+  writeMarkedWorkbook(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`, hasSimulatedRides(trips));
 }
 
 // ── Main component ────────────────────────────────────────────────────────────

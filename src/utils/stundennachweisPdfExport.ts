@@ -13,6 +13,7 @@
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { categorizeWarnings, formatDateDE } from './warningCategories';
+import { SIMULATED_SHORT_NOTICE, simulatedFileName } from './simulatedRides/marker';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -148,6 +149,15 @@ export interface StundennachweisExportData {
    * a historical reconciliation is never a proposal.
    */
   planningNotice?: string;
+  /**
+   * Whether any ride this document was computed from is simulated. REQUIRED,
+   * so that no caller can build a Stundennachweis without deciding: the hours
+   * and Lohnart figures come from ride times, and a simulated ride's times are
+   * invented. The rule is the trips', not a company flag: the caller derives it
+   * from the source trips (see simulatedRides/importMarker.ts). True stamps a
+   * line on every page and prefixes the file name.
+   */
+  simulated: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -243,6 +253,26 @@ export function toPdfDayRow(
 // ── Main export function ──────────────────────────────────────────────────────
 
 function _buildDoc(data: StundennachweisExportData): jsPDF {
+  const pdf = _buildDocBody(data);
+  if (data.simulated) stampSimulated(pdf);
+  return pdf;
+}
+
+/** The marker on every page, top and bottom, in the margins no table uses. */
+function stampSimulated(pdf: jsPDF): void {
+  const pages = pdf.getNumberOfPages();
+  for (let page = 1; page <= pages; page++) {
+    pdf.setPage(page);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.setTextColor(180, 0, 0);
+    pdf.text(SIMULATED_SHORT_NOTICE, 105, 6, { align: 'center' });
+    pdf.text(SIMULATED_SHORT_NOTICE, 105, 294, { align: 'center' });
+  }
+  pdf.setTextColor(0, 0, 0);
+}
+
+function _buildDocBody(data: StundennachweisExportData): jsPDF {
   const { driver, month, year, rows, totals, notes = [], warnings = [], isHistorical = false, historicalCorrections = [] } = data;
   // A planning proposal, never a record. Empty for every existing caller, which
   // is what keeps their header byte-identical.
@@ -919,7 +949,8 @@ export function exportStundennachweisAsPdf(
   const monthName = MONTH_NAMES_DE[(data.month ?? 1) - 1] ?? 'Monat';
   const safeName = (data.driver?.name ?? 'Fahrer').replace(/[/\\:*?"<>|\s]+/g, '_');
   const fallback = `${data.isHistorical ? 'Historischer_' : ''}Stundennachweis_${safeName}_${monthName}_${data.year ?? ''}`;
-  const base = typeof filename === 'string' && filename.trim() ? filename.trim() : fallback;
+  const plain = typeof filename === 'string' && filename.trim() ? filename.trim() : fallback;
+  const base = data.simulated ? simulatedFileName(plain) : plain;
   doc.save(base.endsWith('.pdf') ? base : `${base}.pdf`);
 }
 
