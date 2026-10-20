@@ -13,8 +13,16 @@
  * receipt or `bargeld` income in the week, so the driver who recorded nothing
  * gets no mail at all. This module is the reminder for exactly that driver:
  *
- *     he drove (income of type `umsatz` that week), and he handed nothing in
- *     (no `bargeld` income row, no `bar` receipt).
+ *     he handed nothing in (no `bargeld` income row, no `bar` receipt).
+ *
+ * Until 20.10.2026 the rule also required "he drove" (income of type `umsatz`).
+ * Measured on production: the reminder ticked three times at 09:30, 09:40 and
+ * 09:50, each with `reminders_due: 1`, `planned: 0` and every skip counter at
+ * zero, because the company entered that week's revenue in one go at 09:52:25.
+ * The rule read a week that was not filled in yet, and could not tell "drove
+ * and handed nothing in" from "not entered yet". Revenue is the company's own
+ * data entry, so the term is gone; the cost is a harmless reminder to a driver
+ * who did not work that week. Restoring it is one line in `nothingRecorded`.
  *
  * The owner decided (15.10.2026) that a reminder reaching somebody who did not
  * need it is not worth machinery: "if the driver forgets to submit the data on
@@ -59,10 +67,13 @@ function num(value: number | string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** THE rule: he drove, and recorded neither cash nor a cash receipt. */
-export function nothingRecorded(facts: Pick<ReminderFacts, 'umsatz_amount' | 'bargeld_rows' | 'bar_receipt_rows'>): boolean {
-  return num(facts.umsatz_amount) > 0
-    && num(facts.bargeld_rows) === 0
+/**
+ * THE rule: the driver recorded neither cash nor a cash receipt. No revenue term
+ * (20.10.2026): revenue is entered by the company from the Uber export, often
+ * after the reminder has looked, so a rule hanging on it found nobody.
+ */
+export function nothingRecorded(facts: Pick<ReminderFacts, 'bargeld_rows' | 'bar_receipt_rows'>): boolean {
+  return num(facts.bargeld_rows) === 0
     && num(facts.bar_receipt_rows) === 0;
 }
 

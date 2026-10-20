@@ -234,11 +234,17 @@ BEGIN
       'UPDATE abrechnung_schedules SET company_id = %L WHERE company_id = %L',
       co_a, 'c0000000-0000-4000-8000-00000000000b')) LIKE 'ERR %');
 
-  PERFORM _ar_ok('role gate: the lead is bounded — 14 and 721 are refused by the table',
+  PERFORM _ar_ok('role gate: the lead is bounded — 14 and 1441 are refused by the table',
     _ar_try(admin_a, format(
       'UPDATE abrechnung_schedules SET reminder_lead_minutes = 14 WHERE company_id = %L', co_a)) LIKE 'ERR 23514%'
     AND _ar_try(admin_a, format(
-      'UPDATE abrechnung_schedules SET reminder_lead_minutes = 721 WHERE company_id = %L', co_a)) LIKE 'ERR 23514%');
+      'UPDATE abrechnung_schedules SET reminder_lead_minutes = 1441 WHERE company_id = %L', co_a)) LIKE 'ERR 23514%');
+
+  PERFORM _ar_ok('role gate: a lead of 1440 (24 h) is accepted, 720 stays valid',
+    _ar_try(admin_a, format(
+      'UPDATE abrechnung_schedules SET reminder_lead_minutes = 1440 WHERE company_id = %L', co_a)) LIKE 'rows 1%'
+    AND _ar_try(admin_a, format(
+      'UPDATE abrechnung_schedules SET reminder_lead_minutes = 720 WHERE company_id = %L', co_a)) LIKE 'rows 1%');
 
   -- _ar_try rolls every probe back, so what is stored is what the seed wrote:
   -- the refused probes above changed nothing, and neither did the allowed one.

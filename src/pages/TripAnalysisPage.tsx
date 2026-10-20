@@ -450,7 +450,7 @@ export default function TripAnalysisPage() {
         description={t('ta.noImports.body')}
         action={
           <Button variant="secondary" asChild>
-            <Link to="/dokumente">{t('ta.noImports.action')}</Link>
+            <Link to="/fahrtenbuch">{t('ta.noImports.action')}</Link>
           </Button>
         }
       />

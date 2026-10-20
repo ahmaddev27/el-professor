@@ -25,12 +25,12 @@ import { HARNESS_COMPANY_ID, HARNESS_USER_ID, scenario } from '../scenario';
  * error scenarios act on, and this batch uses none of them. So the screen is
  * read from the query string directly.
  */
-export type Batch3Screen = 'dokumente' | 'monatsplanung' | 'stundennachweis';
+export type Batch3Screen = 'dokumente' | 'fahrtenbuch' | 'monatsplanung' | 'stundennachweis';
 
 const params = new URLSearchParams(window.location.search);
 const requested = params.get('screen');
 export const batch3Screen: Batch3Screen | null =
-  requested === 'dokumente' || requested === 'monatsplanung' || requested === 'stundennachweis' ? requested : null;
+  requested === 'dokumente' || requested === 'fahrtenbuch' || requested === 'monatsplanung' || requested === 'stundennachweis' ? requested : null;
 
 /** `entry=archiv` opens the Stundennachweis sheet the way Dokumente's "Öffnen" does. */
 export const batch3Entry = params.get('entry');
