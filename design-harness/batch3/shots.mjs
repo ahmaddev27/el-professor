@@ -50,7 +50,6 @@ export const openRunPreview = async page => {
 export const openRowDelete = page =>
   click(page, page.getByRole('row', { name: /Svenja Krüger/ }).getByRole('button').last());
 export const openGroupDelete = page => click(page, button(page, /^(Alle löschen|Delete all)/));
-export const openFahrtenbuch = page => click(page, button(page, /^Fahrtenbuch/));
 
 export const toStep2 = async page => {
   await page.locator('main select').first().selectOption({ index: 1 });
@@ -73,7 +72,7 @@ export const BATCH3_SHOTS = [
   { name: 'dokumente-leer', query: { screen: 'dokumente', data: 'empty' }, variants: STATE },
   { name: 'dokumente-loeschen', query: { screen: 'dokumente' }, act: openRowDelete, dialog: true, variants: STATE },
   { name: 'dokumente-gruppe-loeschen', query: { screen: 'dokumente' }, act: openGroupDelete, dialog: true, variants: STATE },
-  { name: 'dokumente-fahrtenbuch', query: { screen: 'dokumente' }, act: openFahrtenbuch, variants: STATE },
+  { name: 'fahrtenbuch', query: { screen: 'fahrtenbuch' }, variants: STATE },
   { name: 'dokumente-en', query: { screen: 'dokumente', lang: 'en' }, variants: [{ width: 1280, theme: 'light' }] },
 
   // Monatsplanung

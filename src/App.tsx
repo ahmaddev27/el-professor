@@ -33,6 +33,7 @@ import UsersPage from './pages/UsersPage';
 import BackupPage from './pages/BackupPage';
 import RolesPage from './pages/RolesPage';
 import DocumentsPage from './pages/DocumentsPage';
+import FahrtenbuchPage from './pages/FahrtenbuchPage';
 import StundennachweisPage from './pages/StundennachweisPage';
 import TripAnalysisPage from './pages/TripAnalysisPage';
 import SettingsPage from './pages/SettingsPage';
@@ -652,6 +653,7 @@ function App() {
                 <Route path="dokumente"              element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="dokumente/:id"          element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
+                <Route path="fahrtenbuch" element={<PlanGate feature="dokumente"><FahrtenbuchPage /></PlanGate>} />
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
                 <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
                 {/* The monthly plan of the §1 requirement: four screens over the

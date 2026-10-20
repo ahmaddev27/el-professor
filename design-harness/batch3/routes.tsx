@@ -8,12 +8,14 @@
 import { Route } from 'react-router-dom';
 import CompanyPlannerPage from '../../src/pages/CompanyPlannerPage';
 import DocumentsPage from '../../src/pages/DocumentsPage';
+import FahrtenbuchPage from '../../src/pages/FahrtenbuchPage';
 import StundennachweisPage from '../../src/pages/StundennachweisPage';
 import { archivedRecord, batch3Entry, batch3Screen } from './fixtures';
 
 export const BATCH3_ROUTES = (
   <>
     <Route path="dokumente" element={<DocumentsPage />} />
+    <Route path="fahrtenbuch" element={<FahrtenbuchPage />} />
     <Route path="stundennachweis" element={<StundennachweisPage />} />
     <Route path="company-planner" element={<CompanyPlannerPage />} />
   </>
@@ -21,6 +23,7 @@ export const BATCH3_ROUTES = (
 
 const PATHS = {
   dokumente: '/dokumente',
+  fahrtenbuch: '/fahrtenbuch',
   monatsplanung: '/company-planner',
   stundennachweis: '/stundennachweis',
 } as const;

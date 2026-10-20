@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Users, DollarSign, Plus,
   Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
   StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
-  Database, ListChecks, Download,
+  Database, ListChecks, Download, BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from './BrandLogo';
@@ -44,6 +44,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/benachrichtigungen', icon: Bell,        labelKey: 'nav.notifications',  feature: 'benachrichtigungen' },
   { path: '/salaries',           icon: Wallet,      labelKey: 'nav.salaries',       feature: 'gehaelter' },
   { path: '/dokumente',       icon: FileText,       labelKey: 'nav.documents',      feature: 'dokumente' },
+  { path: '/fahrtenbuch',     icon: BookOpen,       labelKey: 'doc.fahrtenbuch',    feature: 'dokumente' },
   { path: '/company-planner', icon: CalendarDays,   labelKey: 'nav.planner',        feature: 'dokumente' },
   // `/monatsplan` is listed only where it is meant to be seen — see
   // `monthlyPlanInNav`. The route is registered in every environment regardless.
