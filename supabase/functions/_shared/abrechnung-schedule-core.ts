@@ -33,10 +33,18 @@ import type { AbrechnungFigures } from './abrechnung-mail.ts';
 /** How long after its moment an occurrence may still be sent. */
 export const GRACE_MINUTES = 12 * 60;
 
-/** The reminder's lead, in minutes before the driver mail. The column's CHECK is the same range. */
+/**
+ * The reminder's lead, in minutes before the driver mail. The column's CHECK is the same range.
+ *
+ * The ceiling is 24 hours and not more, because of `dueReminder`'s offsets: it
+ * looks at today and tomorrow as the driver mail's day, which finds a reminder
+ * moment on the mail's day or the one before it. A lead over 1440 can put the
+ * moment two days earlier, which that loop cannot see, so it would never fire.
+ * Raise this only together with that loop and a test that proves it.
+ */
 export const REMINDER_LEAD_DEFAULT_MINUTES = 60;
 export const REMINDER_LEAD_MIN_MINUTES = 15;
-export const REMINDER_LEAD_MAX_MINUTES = 720;
+export const REMINDER_LEAD_MAX_MINUTES = 1440;
 
 /**
  * How long after its own moment a reminder may still go out. A reminder that is

@@ -1,8 +1,8 @@
 /**
  * The reminder rule and its cap, without a database or a clock.
  *
- * The rule is `nothingRecorded`: a driver with revenue that week and neither
- * cash income nor a cash receipt. Everything else is who can be mailed.
+ * The rule is `nothingRecorded`: a driver with neither cash income nor a cash
+ * receipt that week, whatever the company has entered as revenue. Everything else is who can be mailed.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -39,9 +39,14 @@ describe('nothingRecorded', () => {
     expect(nothingRecorded(facts({ bar_receipt_rows: 2 }))).toBe(false);
   });
 
-  it('does not remind a driver who did not drive: no revenue is not "forgot", it is "off"', () => {
-    expect(nothingRecorded(facts({ umsatz_amount: 0 }))).toBe(false);
-    expect(nothingRecorded(facts({ umsatz_amount: '0.00' }))).toBe(false);
+  it('reminds when no revenue is entered yet and nothing is recorded (production, 19.10.2026: the company enters revenue after the reminder looked)', () => {
+    expect(nothingRecorded(facts({ umsatz_amount: 0 }))).toBe(true);
+    expect(nothingRecorded(facts({ umsatz_amount: '0.00' }))).toBe(true);
+  });
+
+  it('still does not remind a driver who recorded cash, with or without revenue', () => {
+    expect(nothingRecorded(facts({ umsatz_amount: 0, bargeld_rows: 1 }))).toBe(false);
+    expect(nothingRecorded(facts({ umsatz_amount: 0, bar_receipt_rows: 1 }))).toBe(false);
   });
 
   it('reads the numeric strings the database returns', () => {
