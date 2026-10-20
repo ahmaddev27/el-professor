@@ -116,6 +116,7 @@
 import * as XLSX from 'xlsx';
 import { applySourceCellFormats, findDriverColumn, safeSheetName } from './fahrtenbuchExport';
 import { fetchAllPaginated } from './fetchAllPaginated';
+import { addSimulatedNotice, appendSimulatedNoticeRows, hasSimulatedRides, simulatedFileName } from './simulatedRides/marker';
 
 /** A cell as `aoa_to_sheet` takes it. `null` writes no cell, as `buildOriginalSheet` does. */
 export type PlannedFahrtenbuchCell = string | number | boolean | null;
@@ -155,6 +156,8 @@ export interface ImportedTripRowForExport {
   source_row_index: number | null;
   trip_date: string | null;
   start_time: string | null;
+  /** Copied from the import by the database; true marks a ride the generator made. */
+  is_simulated?: boolean | null;
 }
 
 /** What the header line and the PLANUNG sheet print. */
@@ -258,6 +261,8 @@ export interface PlannedFahrtenbuchSheet {
   metaRows: PlannedFahrtenbuchCell[][];
   fileName: string;
   completeness: PlannedFahrtenbuchCompleteness;
+  /** True when any ride came from the simulated-ride generator: the file says so. */
+  simulated?: boolean;
 }
 
 // ── refusals ───────────────────────────────────────────────────────────────
@@ -765,7 +770,7 @@ export async function loadPlannedFahrtenbuch(
     loadPaged<ImportedTripRowForExport>(
       client,
       'fahrtenbuch_trips',
-      'id, is_canceled, original_driver_name, raw_data_json, source_row_index, trip_date, start_time',
+      'id, is_canceled, original_driver_name, raw_data_json, source_row_index, trip_date, start_time, is_simulated',
       'import_id',
       plan.import_id,
       'Fahrten',
@@ -785,7 +790,7 @@ export async function loadPlannedFahrtenbuch(
     (header): header is string => typeof header === 'string' && header.length > 0,
   );
 
-  return buildPlannedFahrtenbuch({
+  const built = buildPlannedFahrtenbuch({
     headers,
     trips,
     blocks,
@@ -801,6 +806,10 @@ export async function loadPlannedFahrtenbuch(
       generatedAt: options.generatedAt ?? new Date(),
     },
   });
+  // Rides the generator made keep their marker in the planned file too.
+  return hasSimulatedRides(trips)
+    ? { ...built, simulated: true, fileName: simulatedFileName(built.fileName) }
+    : built;
 }
 
 /** Read, build and hand the file to the browser. */
@@ -831,7 +840,9 @@ export function buildPlannedFahrtenbuchWorkbook(sheet: PlannedFahrtenbuchSheet):
   // renamed file and a deleted tab.
   wb.Props = { Title: `Fahrtenbuch — ${PLANUNG_BANNER}` };
 
-  const ws = XLSX.utils.aoa_to_sheet(sheet.sheetRows);
+  const written: PlannedFahrtenbuchCell[][] = [...sheet.sheetRows];
+  if (sheet.simulated) appendSimulatedNoticeRows(written);
+  const ws = XLSX.utils.aoa_to_sheet(written);
   // A source cell Excel held as a date arrived as a serial (the importer reads
   // with `raw: true`) and would otherwise be delivered as that serial.
   // `applySourceCellFormats` skips exactly one row — its `r + 1` — so it is
@@ -845,6 +856,7 @@ export function buildPlannedFahrtenbuchWorkbook(sheet: PlannedFahrtenbuchSheet):
   const wsMeta = XLSX.utils.aoa_to_sheet(sheet.metaRows);
   wsMeta['!cols'] = [{ wch: 36 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, wsMeta, sheet.metaSheetName);
+  if (sheet.simulated) addSimulatedNotice(wb, 'first');
 
   return wb;
 }

@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase';
 // One home for the source-cell number formats, so this exporter and the
 // Fahrtenbuch one cannot drift apart on what a serial means.
 import { applySourceCellFormats } from './fahrtenbuchExport';
+import { addSimulatedNotice, appendSimulatedNoticeRows, hasSimulatedRides, simulatedFileName } from './simulatedRides/marker';
 
 const BATCH = 1000;
 
@@ -73,6 +74,7 @@ interface TripRow {
   assignment_block_id: string | null;
   assignment_planning_run_id: string | null;
   raw_data_json: Record<string, unknown> | null;
+  is_simulated?: boolean;
 }
 
 interface ManualExceptionRow {
@@ -90,7 +92,7 @@ async function fetchAllTrips(companyId: string, importId: string): Promise<TripR
     const { data, error } = await supabase
       .from('fahrtenbuch_trips')
       .select(
-        'id, trip_date, start_time, end_time, original_driver_id, original_driver_name, assigned_driver_id, assigned_driver_name, car_identifier, is_canceled, source_row_index, assignment_source, assignment_block_id, assignment_planning_run_id, raw_data_json',
+        'id, trip_date, start_time, end_time, original_driver_id, original_driver_name, assigned_driver_id, assigned_driver_name, car_identifier, is_canceled, source_row_index, assignment_source, assignment_block_id, assignment_planning_run_id, raw_data_json, is_simulated',
       )
       .eq('company_id', companyId)
       .eq('import_id', importId)
@@ -415,12 +417,18 @@ export async function exportAppliedRunXlsx(
     : 'Sheet1';
   // XLSX sheet names are capped at 31 chars and forbid : \ / ? * [ ]
   const originalSheetName = rawSheetName.replace(/[:\\/?*[\]]/g, '_').slice(0, 31);
-  const ws = XLSX.utils.aoa_to_sheet(originalRows);
+  // Rides the generator made say so in the file. The header check above has
+  // already passed, so the notice cannot break "Originalformat" for real rides.
+  const simulated = hasSimulatedRides(prep.trips);
+  const dataRowCount = originalRows.length - 1;
+  const sheetRows: unknown[][] = [...originalRows];
+  if (simulated) appendSimulatedNoticeRows(sheetRows);
+  const ws = XLSX.utils.aoa_to_sheet(sheetRows);
   // A source cell Excel held as a date arrived as a serial (the importer reads
   // with raw: true) and would otherwise be delivered as that serial. Row 0 is
   // the header and is never touched — Originalformat reproduces it byte for
   // byte, which the strict header check above already guards.
-  applySourceCellFormats(ws, prep.headers, originalRows.slice(1));
+  applySourceCellFormats(ws, prep.headers, originalRows.slice(1, 1 + dataRowCount));
   XLSX.utils.book_append_sheet(wb, ws, originalSheetName);
 
   if (mode === 'audit') {
@@ -429,9 +437,11 @@ export async function exportAppliedRunXlsx(
     XLSX.utils.book_append_sheet(wb, ws2, 'Planung_Audit');
   }
 
-  XLSX.writeFile(wb, fileName);
+  if (simulated) addSimulatedNotice(wb, 'first');
+  const writtenName = simulated ? simulatedFileName(fileName) : fileName;
+  XLSX.writeFile(wb, writtenName);
 
-  return { validation: prep.validation, fileName, mode };
+  return { validation: prep.validation, fileName: writtenName, mode };
 }
 
 // Backwards-compat alias used by detail-modal pre-export validation.
