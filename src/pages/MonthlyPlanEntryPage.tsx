@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, ConfirmDialog } from '../components/ui';
 import { PlanningTypeChooser } from '../components/shiftRecommendation/PlanningTypeChooser';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -10,6 +10,8 @@ import SimulatedRidesPage from './SimulatedRidesPage';
 
 /** The `art` value of the simulated-ride generator; deliberately not a PlanningType. */
 const SIMULATED_ART = 'simuliert';
+/** Set by the Fahrtenbuch's button, so the generator's back link returns there and not to the chooser. */
+export const FROM_FAHRTENBUCH = 'fahrtenbuch';
 
 /**
  * /monatsplan opens on a choice, and the choice lives in the address (`?art=`).
@@ -28,6 +30,7 @@ const SIMULATED_ART = 'simuliert';
 export default function MonthlyPlanEntryPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const type = parsePlanningType(params.get('art'));
   const [confirmLeave, setConfirmLeave] = useState(false);
 
@@ -44,7 +47,11 @@ export default function MonthlyPlanEntryPage() {
   if (params.get('art') === SIMULATED_ART) {
     return (
       <div className="font-ui">
-        <Button variant="link" className="mb-3" onClick={() => choose(null)}>{t('mplanType.switch')}</Button>
+        {params.get('from') === FROM_FAHRTENBUCH ? (
+          <Button variant="link" className="mb-3" onClick={() => navigate('/fahrtenbuch')}>{t('simrides.back.fahrtenbuch')}</Button>
+        ) : (
+          <Button variant="link" className="mb-3" onClick={() => choose(null)}>{t('mplanType.switch')}</Button>
+        )}
         <SimulatedRidesPage />
       </div>
     );

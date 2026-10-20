@@ -457,7 +457,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         {/* The generator's only output is an import in this book, so it is
             offered beside Import. The page it opens gates itself on the
             documents page right, exactly as the import does in the database. */}
-        <Button variant="secondary" onClick={() => navigate('/monatsplan?art=simuliert')}>
+        <Button variant="secondary" onClick={() => navigate('/monatsplan?art=simuliert&from=fahrtenbuch')}>
           <Sparkles aria-hidden /> {t('simrides.entry.link')}
         </Button>
       </div>
