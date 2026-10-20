@@ -90,10 +90,10 @@ ALTER TABLE public.fahrtenbuch_trips
 
 COMMENT ON COLUMN public.fahrtenbuch_imports.is_simulated IS
   'True for an import made by the simulated-ride generator. Set at insert, never changed, '
-  'never removed (20261020100000). Not friction: the owner''s condition for the generator.';
+  'never removed (20261020110000). Not friction: the owner''s condition for the generator.';
 COMMENT ON COLUMN public.fahrtenbuch_trips.is_simulated IS
   'Copied from the trip''s import by trigger; a client value is overwritten. Never changed '
-  'after insert (20261020100000).';
+  'after insert (20261020110000).';
 
 -- Partial index: the screens that must show or exclude simulated rides filter on it,
 -- and nearly every row is false.

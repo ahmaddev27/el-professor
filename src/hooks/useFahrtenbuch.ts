@@ -26,7 +26,7 @@ export interface FahrtenbuchImport {
   storage_path: string | null;
   /** SHA-256 of the uploaded file; NULL for imports older than 20260922100000. */
   file_sha256: string | null;
-  /** True for an import made by the simulated-ride generator (20261020100000). Never changes. */
+  /** True for an import made by the simulated-ride generator (20261020110000). Never changes. */
   is_simulated?: boolean;
 }
 
