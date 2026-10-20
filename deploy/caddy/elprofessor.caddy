@@ -142,6 +142,67 @@ api-staging.elprofessor.eu {
 	header X-Robots-Tag "noindex, nofollow"
 }
 
+# The openpyxl rewriting tool. Upload an .xlsx, get the same workbook back
+# written by openpyxl, with no name and no edit trace in it.
+#
+# IT IS NOT PART OF EL-PROFESSOR, by the owner's decision of 20.10.2026: it is a
+# separate project in its own repository (C:/Users/ahmad/Desktop/openpyxl-web on
+# the owner's machine, /srv/openpyxl-web on the host), its own compose project
+# and its own container. No release ships it, no release can break it, and
+# nothing in this repository builds or tests it.
+#
+# ONLY THIS BLOCK LIVES HERE, and only because it has to: ridy's Caddy owns 80
+# and 443, and the guard renders routes from this one file. Editing the host copy
+# or ridy's file by hand is what the guard exists to undo.
+#
+# IT IS OPEN TO ANYONE, which is also the owner's decision of 20.10.2026, taken
+# after a password was offered. So note what is and is not carrying the weight:
+#
+#   - there is no login, and the service's own caps are the whole defence. They
+#     are in that project's openpyxl_web/limits.py, each derived from a
+#     measurement, and the container is given one core's share and 768 MB;
+#   - the service holds no credential, no database, no key and no volume, and
+#     writes nothing anywhere. A caller receives the file they sent, and there is
+#     nothing else here to receive. That is what makes an open endpoint
+#     defensible at all, and it stops being true the moment it is given anything
+#     to read;
+#   - X-Client-IP is what its rate limit counts, so the header_up below is not
+#     optional. Without it every request looks like one client and the limit
+#     becomes a suggestion.
+#
+# Installed and updated with that project's own install.sh, by a person.
+openpyxl.elprofessor.eu {
+	encode zstd gzip
+
+	# The outer backstop only. The service caps the body at 25 MB itself and
+	# answers a named refusal the page can explain; this is deliberately higher
+	# so that the explanation is what a person sees, and Caddy only catches what
+	# never should have been sent.
+	request_body {
+		max_size 32MB
+	}
+
+	reverse_proxy elprofessor-openpyxl:8080 {
+		header_up X-Client-IP {remote_host}
+		# A rewrite is allowed up to 180 s inside the service, so the proxy must
+		# outlast it; a gateway that gives up first turns a slow answer into a
+		# failure with no reason attached.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+}
+
 # Staging mail catcher. The login is enforced by Mailpit itself (MP_UI_AUTH_FILE,
 # set with deploy/set-mailpit-password.sh): the inbox holds live reset links for
 # the real accounts copied into staging.
