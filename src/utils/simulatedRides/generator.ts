@@ -28,9 +28,9 @@ const TIP_AMOUNTS = [1, 1.5, 2, 3, 5] as const;
 
 interface Segment { t0: number; t1: number; from: GeoPoint; to: GeoPoint }
 
-interface PlannedShift { vehicle: SimVehicle; startMs: number; plannedEndMs: number; operatingDay: string }
+export interface PlannedShift { vehicle: SimVehicle; startMs: number; plannedEndMs: number; operatingDay: string }
 
-interface Context {
+export interface Context {
   rng: Rng;
   opts: GeneratorOptions;
   base: GeoPoint;
@@ -38,9 +38,9 @@ interface Context {
   usedTransmits: Set<number>;
 }
 
-interface ShiftOwner { shiftId: string; vehicle: SimVehicle; driver: SimDriver }
+export interface ShiftOwner { shiftId: string; vehicle: SimVehicle; driver: SimDriver }
 
-interface ShiftRun { rides: SimRide[]; endMs: number }
+export interface ShiftRun { rides: SimRide[]; endMs: number }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -156,7 +156,7 @@ function transmitTime(ctx: Context, plan: PlannedShift, prevStartMs: number | nu
 }
 
 /** One shift, rides back to back. Null when any clock reading in it is not unique. */
-function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): ShiftRun | null {
+export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): ShiftRun | null {
   const { rng, opts } = ctx;
   const rides: SimRide[] = [];
   const segments: Segment[] = [];
@@ -248,6 +248,12 @@ function pickDriver(ctx: Context, states: DriverState[], plan: PlannedShift): Dr
   return ctx.rng.pick(free.filter(s => s.workedMs === least));
 }
 
+/**
+ * A month with fares of its own making. NOT used by the screen: it invents
+ * revenue the books never recorded, which is exactly what the feature must not
+ * do. The screen uses generateFromFigures (figures.ts). Kept for the physical
+ * rules' tests only.
+ */
 export function generateMonth(input: GeneratorInput): GeneratedMonth {
   const opts: GeneratorOptions = { ...DEFAULT_OPTIONS, ...input.options };
   const ctx: Context = { rng: createRng(input.seed), opts, base: input.base, pool: input.pool, usedTransmits: new Set() };

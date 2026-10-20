@@ -38,27 +38,31 @@
   There is no setting, argument or role that bypasses these. **Do not add one.**
   A migration that needs to change a marker is a decision for the owner.
 
-  ## Decision: a company holds simulated rides or real ones, never both
+  ## Decision: simulated rides explain recorded figures, and never share a
+  ## driver-week with real trips
 
-  A Fahrtenbuch is not a leaf. Trips feed the vehicle blocks, the driver
-  assignment, the Stundennachweis, the Lohnart premiums, the Fahrtenanalyse and
-  the payroll summary, and those produce documents for a Steuerberater and
-  figures a person is paid on. Every one of those readers reads the trip and
-  none asks whether it was real, so a marker on the row cannot stop a simulated
-  ride from moving somebody's pay once it sits beside real data. The only
-  wall that holds against every reader, including the ones written later, is
-  that the two never share a company:
+  The generator is derived from the books: for each driver and business week
+  that has `income` rows it makes rides whose fares add up, to the cent, to the
+  recorded umsatz, bargeld and trinkgeld. It writes no income row and invents no
+  total, so no salary figure moves. What would move one is the same income being
+  explained twice, by real trips and by simulated ones, so:
 
-    3. `fahrtenbuch_imports_refuse_mixing` (BEFORE INSERT) refuses a simulated
-       import into a company that holds a real import, and a real import into a
-       company that holds a simulated one (P0001, HINT `simulated_mixing_refused`).
-       Deleting the simulated imports (an administrator) ends the refusal.
+    3. `fahrtenbuch_trips_refuse_double_count` (BEFORE INSERT) refuses a
+       simulated trip into a driver-week (company, driver name compared
+       `lower(btrim(...))`, Monday-to-Sunday week of `trip_date`) that already
+       holds a real trip, and a real trip into one that holds a simulated trip
+       (P0001, HINT `simulated_double_count_refused`). The week is the business
+       week the salary is computed over. Deleting the simulated import lifts it.
 
-  Stricter than "per month" on purpose: a business week belongs to the month of
-  its Monday, a driver's reserve and Stundennachweis are per driver and month,
-  and a month-level rule would still let a simulated month sit beside a real one
-  in the same planning. Relaxing it to the month is the owner's decision and a
-  new migration, not a setting.
+  This replaces a company-wide refusal that an earlier draft of this file
+  carried. It was stricter than the hazard needs once totals are tied to the
+  books, and it would have made the feature unusable in exactly the companies
+  that have figures to explain. What it guarded and this does not: the hours.
+  A Stundennachweis, the Lohnart premiums and the planning read the TIMES of a
+  trip, and those are invented. The documents that print them do not carry the
+  marker yet (src/utils/simulatedRides/readers.test.ts lists them), so
+  generating into a company whose drivers are really paid by hours is not safe
+  until they do. That is recorded, not solved here.
 
   ## What this does not do
 
@@ -155,31 +159,49 @@ CREATE TRIGGER fahrtenbuch_imports_keep_simulated
 REVOKE ALL ON FUNCTION public.fahrtenbuch_trips_keep_simulated()   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.fahrtenbuch_imports_keep_simulated() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE OR REPLACE FUNCTION public.fahrtenbuch_imports_refuse_mixing()
+CREATE INDEX IF NOT EXISTS fahrtenbuch_trips_driver_week_idx
+  ON public.fahrtenbuch_trips (company_id, (lower(btrim(original_driver_name))), trip_date);
+
+CREATE OR REPLACE FUNCTION public.fahrtenbuch_trips_refuse_double_count()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $$
+DECLARE
+  v_simulated boolean;
+  v_week      date;
 BEGIN
-  -- Two imports racing into one company must not each see the other as absent.
-  PERFORM pg_advisory_xact_lock(hashtextextended('simulated_mixing:' || NEW.company_id::text, 0));
-  IF EXISTS (SELECT 1 FROM public.fahrtenbuch_imports i
-              WHERE i.company_id = NEW.company_id AND i.is_simulated IS DISTINCT FROM NEW.is_simulated) THEN
+  IF btrim(coalesce(NEW.original_driver_name, '')) = '' THEN
+    RETURN NEW;
+  END IF;
+  -- Read the import's marker here rather than trusting the order two triggers fire in.
+  SELECT i.is_simulated INTO v_simulated FROM public.fahrtenbuch_imports i WHERE i.id = NEW.import_id;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+  v_week := date_trunc('week', NEW.trip_date::timestamp)::date;
+  IF EXISTS (
+    SELECT 1 FROM public.fahrtenbuch_trips t
+     WHERE t.company_id = NEW.company_id
+       AND lower(btrim(t.original_driver_name)) = lower(btrim(NEW.original_driver_name))
+       AND t.trip_date >= v_week AND t.trip_date < v_week + 7
+       AND t.is_simulated IS DISTINCT FROM v_simulated
+  ) THEN
     RAISE EXCEPTION
-      'Dieses Unternehmen enthält bereits % Fahrten. Echte und simulierte Fahrten dürfen nicht im selben Unternehmen liegen.',
-      CASE WHEN NEW.is_simulated THEN 'echte' ELSE 'simulierte' END
-      USING ERRCODE = 'P0001', HINT = 'simulated_mixing_refused';
+      'Diese Fahrerwoche enthält bereits % Fahrten. Echte und simulierte Fahrten dürfen dieselbe Woche eines Fahrers nicht zweimal erklären.',
+      CASE WHEN v_simulated THEN 'echte' ELSE 'simulierte' END
+      USING ERRCODE = 'P0001', HINT = 'simulated_double_count_refused';
   END IF;
   RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS fahrtenbuch_imports_refuse_mixing ON public.fahrtenbuch_imports;
-CREATE TRIGGER fahrtenbuch_imports_refuse_mixing
-  BEFORE INSERT ON public.fahrtenbuch_imports
-  FOR EACH ROW EXECUTE FUNCTION public.fahrtenbuch_imports_refuse_mixing();
+DROP TRIGGER IF EXISTS fahrtenbuch_trips_refuse_double_count ON public.fahrtenbuch_trips;
+CREATE TRIGGER fahrtenbuch_trips_refuse_double_count
+  BEFORE INSERT ON public.fahrtenbuch_trips
+  FOR EACH ROW EXECUTE FUNCTION public.fahrtenbuch_trips_refuse_double_count();
 
-REVOKE ALL ON FUNCTION public.fahrtenbuch_imports_refuse_mixing() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.fahrtenbuch_trips_refuse_double_count() FROM PUBLIC, anon, authenticated, service_role;
 
 DO $selfcheck$
 DECLARE
@@ -203,7 +225,7 @@ BEGIN
     RAISE EXCEPTION 'simulated rides self-check 1: both tables must carry is_simulated';
   END IF;
 
-  FOREACH v_fn IN ARRAY ARRAY['fahrtenbuch_trips_keep_simulated', 'fahrtenbuch_imports_keep_simulated', 'fahrtenbuch_imports_refuse_mixing'] LOOP
+  FOREACH v_fn IN ARRAY ARRAY['fahrtenbuch_trips_keep_simulated', 'fahrtenbuch_imports_keep_simulated', 'fahrtenbuch_trips_refuse_double_count'] LOOP
     IF (SELECT p.prosecdef FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = v_fn) THEN
       RAISE EXCEPTION 'simulated rides self-check 2: % must stay SECURITY INVOKER', v_fn;
     END IF;
@@ -219,9 +241,9 @@ BEGIN
                   AND tgname = 'fahrtenbuch_imports_keep_simulated' AND NOT tgisinternal AND tgenabled = 'O') THEN
     RAISE EXCEPTION 'simulated rides self-check 3: a marker trigger is missing or disabled';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.fahrtenbuch_imports'::regclass
-                  AND tgname = 'fahrtenbuch_imports_refuse_mixing' AND NOT tgisinternal AND tgenabled = 'O') THEN
-    RAISE EXCEPTION 'simulated rides self-check 4: the mixing refusal is missing or disabled';
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.fahrtenbuch_trips'::regclass
+                  AND tgname = 'fahrtenbuch_trips_refuse_double_count' AND NOT tgisinternal AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'simulated rides self-check 4: the double-count refusal is missing or disabled';
   END IF;
 END
 $selfcheck$;

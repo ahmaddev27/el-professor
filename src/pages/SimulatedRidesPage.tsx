@@ -11,33 +11,52 @@ import { useFahrtenbuch } from '../hooks/useFahrtenbuch';
 import { supabase } from '../lib/supabase';
 import { loadCompanyDrivers, loadSettings } from '../lib/tripAnalysisClient';
 import type { CompanyDriver } from '../lib/tripAnalysisView';
+import type { TranslationKey } from '../i18n';
 import { PoolError, buildAddressPool, readCachedPool, writeCachedPool, type AddressPool } from '../utils/simulatedRides/addressPool';
-import { generateMonth, validateRides } from '../utils/simulatedRides/generator';
+import {
+  addDays, figuresOf, generateFromFigures, mondayOf, mondaysOfMonth, weekKey, type Finding, type FindingCode, type FiguresResult, type IncomeRow,
+} from '../utils/simulatedRides/figures';
+import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
-import { ridesToRows } from '../utils/simulatedRides/sheet';
-import type { GeneratedMonth, GeoPoint } from '../utils/simulatedRides/types';
+import { rideDate, ridesToRows } from '../utils/simulatedRides/sheet';
+import type { GeoPoint } from '../utils/simulatedRides/types';
 
 /**
- * Fahrten simulieren: a month of rides in the shape of an Uber export, for
- * teaching, demos and testing the chain end to end.
+ * Fahrten simulieren: rides that EXPLAIN the figures already in the books.
  *
- * The rides are generated in memory (utils/simulatedRides), written to an .xlsx
- * and taken through the ordinary import, with the import row marked
- * `is_simulated`. The database copies that marker onto every ride and refuses to
- * change it. This screen has no control that leaves the marker out and must not
- * get one: the generator exists on the owner's condition that every simulated
- * ride says so.
+ * For each driver and business week that has income, the generator makes rides
+ * whose fares add up to exactly the recorded umsatz, bargeld and trinkgeld. It
+ * writes no income and invents no total; a week without figures gets no rides,
+ * and a week whose records contradict each other, or that already has trips, is
+ * refused and listed. The rides are written to an .xlsx and taken through the
+ * ordinary import, with the import row marked `is_simulated`. The database
+ * copies that marker onto every ride and refuses to change it. The times,
+ * addresses and routes are invented, so the marker stays: this screen has no
+ * control that leaves it out and must not get one.
  */
 type Phase = 'idle' | 'pool' | 'generating' | 'ready' | 'importing' | 'done';
 
 interface CarOption { id: string; plate: string }
 
 interface Result {
-  month: GeneratedMonth;
+  generated: FiguresResult;
   prepared: PreparedSimulatedImport;
   poolRequests: number;
   poolCached: boolean;
+  booksBefore: number;
 }
+
+const FINDING_KEYS: Record<FindingCode, TranslationKey> = {
+  unknown_driver: 'simrides.finding.unknown_driver',
+  negative_amount: 'simrides.finding.negative_amount',
+  fractional_cent: 'simrides.finding.fractional_cent',
+  cash_without_revenue: 'simrides.finding.cash_without_revenue',
+  cash_exceeds_revenue: 'simrides.finding.cash_exceeds_revenue',
+  tip_without_revenue: 'simrides.finding.tip_without_revenue',
+  revenue_too_small: 'simrides.finding.revenue_too_small',
+  real_trips_exist: 'simrides.finding.real_trips_exist',
+  cannot_explain: 'simrides.finding.cannot_explain',
+};
 
 const POOL_ERROR_KEYS = {
   city_not_found: 'simrides.error.pool.cityNotFound',
@@ -45,6 +64,7 @@ const POOL_ERROR_KEYS = {
   request_failed: 'simrides.error.pool.requestFailed',
 } as const;
 
+const PAGE = 1000;
 const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed';
 const nextTick = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
 const fetchJson = (url: string) => fetch(url, { headers: { Accept: 'application/json' } });
@@ -65,15 +85,42 @@ function savedBase(row: Awaited<ReturnType<typeof loadSettings>>): GeoPoint | nu
   return row?.base_latitude != null && row?.base_longitude != null && Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
 
+/** The books of the weeks that belong to the month, and the trips those weeks already hold. */
+async function readBooks(companyId: string, year: number, month: number): Promise<{ income: IncomeRow[]; occupied: Set<string> }> {
+  const mondays = mondaysOfMonth(year, month);
+  if (mondays.length === 0) return { income: [], occupied: new Set() };
+  const from = mondays[0];
+  const to = addDays(mondays[mondays.length - 1], 6);
+  const income: IncomeRow[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase.from('income').select('driver_name, type, date, amount')
+      .eq('company_id', companyId).gte('date', from).lte('date', to).order('id').range(offset, offset + PAGE - 1);
+    if (error) throw new Error(error.message);
+    income.push(...((data ?? []) as IncomeRow[]));
+    if ((data ?? []).length < PAGE) break;
+  }
+  const occupied = new Set<string>();
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase.from('fahrtenbuch_trips').select('original_driver_name, trip_date')
+      .eq('company_id', companyId).gte('trip_date', from).lte('trip_date', to).order('id').range(offset, offset + PAGE - 1);
+    if (error) throw new Error(error.message);
+    for (const row of (data ?? []) as { original_driver_name: string; trip_date: string }[]) {
+      occupied.add(weekKey(row.original_driver_name, mondayOf(row.trip_date)));
+    }
+    if ((data ?? []).length < PAGE) break;
+  }
+  return { income, occupied };
+}
+
+const sumCents = (rows: readonly IncomeRow[]): number => rows.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
+
 export default function SimulatedRidesPage() {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { settings } = useCompanySettings();
   const scope = useCompanyScope();
-  const { createImport, imports, loadingImports } = useFahrtenbuch();
-  // A company holds simulated rides or real ones, never both (the database refuses the mix too).
-  const holdsRealRides = imports.some(imp => !imp.is_simulated);
+  const { createImport } = useFahrtenbuch();
   const canWrite = scope.can('documents', 'edit') && !scope.readOnly;
 
   const [monthKey, setMonthKey] = useState(defaultMonthKey);
@@ -82,7 +129,6 @@ export default function SimulatedRidesPage() {
   const [cars, setCars] = useState<CarOption[]>([]);
   const [drivers, setDrivers] = useState<CompanyDriver[]>([]);
   const [carIds, setCarIds] = useState<string[]>([]);
-  const [driverIds, setDriverIds] = useState<string[]>([]);
   const [base, setBase] = useState<GeoPoint | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -111,7 +157,6 @@ export default function SimulatedRidesPage() {
         setCars(carList);
         setCarIds(carList.map(c => c.id));
         setDrivers(driverRows);
-        setDriverIds(driverRows.map(d => d.id));
         setBase(savedBase(settingsRow));
       } catch (err) {
         console.error('Fahrten simulieren: loading the company failed', err);
@@ -146,20 +191,23 @@ export default function SimulatedRidesPage() {
     setResult(null);
     setPhase('pool');
     try {
+      const books = await readBooks(companyId, period.year, period.month);
       const { pool, cached } = await ensurePool();
       const origin = base ?? pool.center;
       setPhase('generating');
       await nextTick();
       const vehicles = cars.filter(c => carIds.includes(c.id)).map(c => ({ plate: c.plate, type: 'Mietwagen' }));
-      const chosen = drivers.filter(d => driverIds.includes(d.id));
-      const month = generateMonth({ ...period, base: origin, pool: pool.addresses, vehicles, drivers: chosen.map(d => ({ name: d.name })), seed });
-      if (month.rides.length === 0) throw new Error(t('simrides.error.noRides'));
-      if (validateRides(month, origin).length > 0) throw new Error(t('simrides.error.validation'));
-      const prepared = await prepareSimulatedImport({
-        ...period, seed, rows: ridesToRows(month.rides),
-        drivers: chosen.map(d => ({ id: d.id, name: d.name })), cars,
+      const generated = generateFromFigures({
+        ...period, base: origin, pool: pool.addresses, vehicles, drivers: drivers.map(d => ({ name: d.name })),
+        income: books.income, occupied: books.occupied, seed,
       });
-      setResult({ month, prepared, poolRequests: cached ? 0 : pool.requests, poolCached: cached });
+      if (generated.month.rides.length === 0) throw new Error(t('simrides.error.noRides'));
+      assertSound(generated, origin);
+      const prepared = await prepareSimulatedImport({
+        ...period, seed, rows: ridesToRows(generated.month.rides),
+        drivers: drivers.map(d => ({ id: d.id, name: d.name })), cars,
+      });
+      setResult({ generated, prepared, poolRequests: cached ? 0 : pool.requests, poolCached: cached, booksBefore: sumCents(books.income) });
       setPhase('ready');
     } catch (err) {
       setError(failureText(err));
@@ -167,8 +215,19 @@ export default function SimulatedRidesPage() {
     }
   };
 
+  /** Nothing is offered for import unless the rides pass every rule and add up to the books. */
+  const assertSound = (generated: FiguresResult, origin: GeoPoint) => {
+    if (validateRides(generated.month, origin).length > 0) throw new Error(t('simrides.error.validation'));
+    const read = figuresOf(generated.month.rides, rideDate);
+    const exact = generated.explained.every(f => {
+      const got = read.get(weekKey(f.driver, f.weekMonday));
+      return got !== undefined && got.umsatz === f.umsatz && got.bargeld === f.bargeld && got.trinkgeld === f.trinkgeld;
+    });
+    if (!exact) throw new Error(t('simrides.error.mismatch'));
+  };
+
   const runImport = async () => {
-    if (!result || !period) return;
+    if (!result || !period || !companyId) return;
     setPhase('importing');
     setError(null);
     try {
@@ -177,6 +236,8 @@ export default function SimulatedRidesPage() {
         ...period, fileName: prepared.file.fileName, trips: prepared.trips, fileSha256: prepared.fileSha256,
         sourceSheetName: prepared.sheetName, sourceColumns: prepared.headers, xlsxBytes: prepared.file.bytes, isSimulated: true,
       });
+      const after = await readBooks(companyId, period.year, period.month);
+      if (sumCents(after.income) !== result.booksBefore) throw new Error(t('simrides.error.booksMoved'));
       showToast('success', t('simrides.done.title'));
       setPhase('done');
     } catch (err) {
@@ -186,20 +247,19 @@ export default function SimulatedRidesPage() {
   };
 
   const busy = phase === 'pool' || phase === 'generating' || phase === 'importing';
-  const ready = canWrite && !holdsRealRides && !loadingImports && !loadFailed && Boolean(period) && city.trim() !== '' && carIds.length > 0 && driverIds.length > 0 && !busy;
+  const ready = canWrite && !loadFailed && Boolean(period) && city.trim() !== '' && carIds.length > 0 && drivers.length > 0 && !busy;
 
   return (
     <div className="grid grid-cols-1 gap-5 font-ui">
       <PageHeader title={t('simrides.title')} description={t('simrides.subtitle')} />
       <Alert tone="caution" icon={FlaskConical} role="note" title={t('simrides.banner.title')}>{t('simrides.banner.body')}</Alert>
       {loadFailed ? <Alert tone="critical" title={t('simrides.error.load')} /> : null}
-      {holdsRealRides ? <Alert tone="critical" title={t('simrides.error.hasReal.title')}>{t('simrides.error.hasReal.body')}</Alert> : null}
       {!canWrite ? <Alert tone="neutral">{t('simrides.error.readOnly')}</Alert> : null}
 
       <Card>
         <CardHeader>
           <CardTitle>{t('simrides.form.title')}</CardTitle>
-          <CardDescription>{t('simrides.form.description')}</CardDescription>
+          <CardDescription>{t('simrides.form.figures')}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -217,16 +277,6 @@ export default function SimulatedRidesPage() {
               <label key={car.id} className="flex cursor-pointer items-start gap-3 text-sm text-fg">
                 <input type="checkbox" className={checkboxClass} checked={carIds.includes(car.id)} onChange={() => setCarIds(list => toggled(list, car.id))} />
                 <span>{car.plate}</span>
-              </label>
-            ))}
-          </fieldset>
-          <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-2 border-0 p-0" disabled={busy}>
-            <legend className="mb-1 text-[13px] font-medium text-fg-muted">{t('simrides.field.drivers')}</legend>
-            {drivers.length === 0 ? <p className="text-sm text-fg-subtle">{t('simrides.noDrivers')}</p> : null}
-            {drivers.map(driver => (
-              <label key={driver.id} className="flex cursor-pointer items-start gap-3 text-sm text-fg">
-                <input type="checkbox" className={checkboxClass} checked={driverIds.includes(driver.id)} onChange={() => setDriverIds(list => toggled(list, driver.id))} />
-                <span>{driver.name}</span>
               </label>
             ))}
           </fieldset>
@@ -254,11 +304,28 @@ export default function SimulatedRidesPage() {
   );
 }
 
+function FindingsList({ findings }: { findings: readonly Finding[] }) {
+  const { t } = useTranslation();
+  if (findings.length === 0) return null;
+  return (
+    <Alert tone="caution" title={t('simrides.findings.title', { count: findings.length })}>
+      <ul className="grid grid-cols-1 gap-1">
+        {findings.map(f => (
+          <li key={`${f.code}|${f.driver}|${f.weekMonday}`}>
+            {f.driver}, {t('simrides.findings.week', { monday: f.weekMonday.split('-').reverse().join('.') })}: {t(FINDING_KEYS[f.code])}
+            {f.detail ? ` (${f.detail})` : ''}
+          </li>
+        ))}
+      </ul>
+    </Alert>
+  );
+}
+
 function ResultCard({ result, phase, onImport }: { result: Result; phase: Phase; onImport: () => void }) {
   const { t } = useTranslation();
-  const completed = result.month.rides.filter(r => r.status === 'completed');
-  const cancelled = result.month.rides.length - completed.length;
-  const revenue = completed.reduce((sum, r) => sum + r.fare + r.tip, 0);
+  const { month, findings, explained } = result.generated;
+  const completed = month.rides.filter(r => r.status === 'completed');
+  const revenue = explained.reduce((sum, f) => sum + f.umsatz, 0) / 100;
   const done = phase === 'done';
   return (
     <Card>
@@ -273,12 +340,12 @@ function ResultCard({ result, phase, onImport }: { result: Result; phase: Phase;
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <KpiCard label={t('simrides.summary.weeks')} value={String(explained.length)} />
           <KpiCard label={t('simrides.summary.rides')} value={String(completed.length)} />
-          <KpiCard label={t('simrides.summary.cancelled')} value={String(cancelled)} />
-          <KpiCard label={t('simrides.summary.shifts')} value={String(result.month.shifts.length)} />
-          <KpiCard label={t('simrides.summary.revenue')} value={formatEuro(revenue)} />
+          <KpiCard label={t('simrides.summary.shifts')} value={String(month.shifts.length)} />
+          <KpiCard label={t('simrides.summary.revenue')} value={formatEuro(revenue)} caption={t('simrides.summary.revenueNote')} />
         </div>
-        {result.month.droppedShifts > 0 ? <Alert tone="neutral">{t('simrides.summary.dropped', { count: result.month.droppedShifts })}</Alert> : null}
+        <FindingsList findings={findings} />
         {done ? <Alert tone="positive" title={t('simrides.done.title')}>{t('simrides.done.body')}</Alert> : null}
         <div>
           <Button onClick={onImport} disabled={done || phase === 'importing'} loading={phase === 'importing'}>

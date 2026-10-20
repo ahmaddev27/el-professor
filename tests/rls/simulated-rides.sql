@@ -10,11 +10,12 @@
     2. inherit     a trip takes the marker from its import whatever it sends, in
                    both directions (the marker cannot be left off, or forged on)
     3. fixed       neither marker changes after insert, for the owner too
-    4. mixing      a company holds simulated rides or real ones, never both, in
-                   both directions; deleting the simulated imports lifts it
+    4. double count a driver-week (company, driver, Monday-Sunday) holds real or
+                   simulated trips, never both; other weeks and drivers untouched
     5. caller      an administrator creates a simulated import and its trips as
                    `authenticated` (the triggers run as the caller and need no
-                   app_private), and is refused the mix
+                   app_private), and is refused the double count
+    6. books       income, cash and tip rows are identical before and after
 
   Each refusal is told apart by SQLSTATE and HINT, so a probe that fails for
   another reason (a malformed statement, a missing privilege) is not a pass.
@@ -69,7 +70,7 @@ BEGIN
   RETURN v_out;
 END $$;
 
--- ─── fixtures: company A is emptied of imports so the mixing rule starts clean ──
+-- ─── fixtures: company A is emptied of imports so the double-count rule starts clean ──
 
 DELETE FROM fahrtenbuch_imports WHERE company_id IN
   ('c0000000-0000-4000-8000-00000000000a', 'c0000000-0000-4000-8000-00000000000b');
@@ -99,7 +100,7 @@ BEGIN
        FROM pg_proc p
       WHERE p.pronamespace = 'public'::regnamespace
         AND p.proname IN ('fahrtenbuch_trips_keep_simulated', 'fahrtenbuch_imports_keep_simulated',
-                          'fahrtenbuch_imports_refuse_mixing')));
+                          'fahrtenbuch_trips_refuse_double_count')));
 END $$;
 
 -- ─── 2. inherit ─────────────────────────────────────────────────────────────
@@ -144,50 +145,86 @@ BEGIN
     _sr_do(NULL, $q$UPDATE fahrtenbuch_imports SET notes = 'n' WHERE id = '51000000-0000-4000-8000-0000000000a1' RETURNING 'ok'$q$) = 'ok');
 END $$;
 
--- ─── 4. mixing ──────────────────────────────────────────────────────────────
+-- ─── 4. double count: a driver-week is explained once ───────────────────────
+
+-- The books of company A, which the generator reads and must never change.
+INSERT INTO income (company_id, description, amount, type, driver_name, date) VALUES
+  ('c0000000-0000-4000-8000-00000000000a', 'sr', 1647.08, 'umsatz', 'X', '2026-09-06'),
+  ('c0000000-0000-4000-8000-00000000000a', 'sr',  523.37, 'bargeld', 'X', '2026-09-06'),
+  ('c0000000-0000-4000-8000-00000000000a', 'sr',   41.50, 'trinkgeld', 'X', '2026-09-06');
+CREATE TEMP TABLE _sr_books AS SELECT type, driver_name, amount FROM income WHERE company_id = 'c0000000-0000-4000-8000-00000000000a';
+
+-- 2026-09-01 is a Tuesday: its week runs from Monday 2026-08-31 to Sunday 2026-09-06.
+INSERT INTO fahrtenbuch_imports (id, company_id, month, year, file_name, imported_by)
+VALUES ('51000000-0000-4000-8000-0000000000a9', 'c0000000-0000-4000-8000-00000000000a', 10, 2026, 'real-a.xlsx',
+        'a0000000-0000-4000-8000-000000000001');
+INSERT INTO fahrtenbuch_imports (id, company_id, month, year, file_name, imported_by, is_simulated)
+VALUES ('51000000-0000-4000-8000-0000000000b9', 'c0000000-0000-4000-8000-00000000000b', 9, 2026, 'SIMULIERT_b.xlsx',
+        'b0000000-0000-4000-8000-000000000001', true);
 
 DO $$
 BEGIN
-  PERFORM _sr_ok('mixing: a real import into a company holding simulated rides is refused',
-    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by)
-      VALUES ('c0000000-0000-4000-8000-00000000000a', 10, 2026, 'real.xlsx', 'a0000000-0000-4000-8000-000000000001') RETURNING 'in'$q$)
-      LIKE 'ERR P0001 simulated_mixing_refused %');
-  PERFORM _sr_ok('mixing: a simulated import into a company holding real rides is refused',
-    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by, is_simulated)
-      VALUES ('c0000000-0000-4000-8000-00000000000b', 10, 2026, 'SIMULIERT_x.xlsx', 'b0000000-0000-4000-8000-000000000001', true) RETURNING 'in'$q$)
-      LIKE 'ERR P0001 simulated_mixing_refused %');
-  PERFORM _sr_ok('mixing: another simulated import into a simulated company is fine',
-    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by, is_simulated)
-      VALUES ('c0000000-0000-4000-8000-00000000000a', 10, 2026, 'SIMULIERT_2.xlsx', 'a0000000-0000-4000-8000-000000000001', true) RETURNING 'in'$q$) = 'in');
-  PERFORM _sr_ok('mixing: another real import into a real company is fine',
-    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by)
-      VALUES ('c0000000-0000-4000-8000-00000000000b', 10, 2026, 'real2.xlsx', 'b0000000-0000-4000-8000-000000000001') RETURNING 'in'$q$) = 'in');
+  PERFORM _sr_ok('double count: a real trip into a driver-week holding simulated trips is refused (name compared case- and space-blind)',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000a', '51000000-0000-4000-8000-0000000000a9', '2026-09-03', '  x ', 'X') RETURNING 'in'$q$)
+      LIKE 'ERR P0001 simulated_double_count_refused %');
+  PERFORM _sr_ok('double count: the Sunday of that week is the same week',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000a', '51000000-0000-4000-8000-0000000000a9', '2026-09-06', 'X', 'X') RETURNING 'in'$q$)
+      LIKE 'ERR P0001 simulated_double_count_refused %');
+  PERFORM _sr_ok('double count: the Monday after is another week and is accepted',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000a', '51000000-0000-4000-8000-0000000000a9', '2026-09-07', 'X', 'X') RETURNING 'in'$q$) = 'in');
+  PERFORM _sr_ok('double count: another driver in the same week is accepted',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000a', '51000000-0000-4000-8000-0000000000a9', '2026-09-03', 'Y', 'Y') RETURNING 'in'$q$) = 'in');
+  PERFORM _sr_ok('double count: a simulated trip into the real week of the same driver in company B is refused',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000b', '51000000-0000-4000-8000-0000000000b9', '2026-09-02', 'X', 'X') RETURNING 'in'$q$)
+      LIKE 'ERR P0001 simulated_double_count_refused %');
+  PERFORM _sr_ok('double count: a company that holds real imports takes a simulated trip into a week with no real trips',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000b', '51000000-0000-4000-8000-0000000000b9', '2026-09-16', 'X', 'X') RETURNING is_simulated::text$q$) = 'true');
 END $$;
 
 -- ─── 5. caller ──────────────────────────────────────────────────────────────
 
 DO $$
 BEGIN
-  PERFORM _sr_ok('caller: company B''s administrator is refused a simulated import (company holds real rides)',
-    _sr_do('b0000000-0000-4000-8000-000000000001'::uuid, $q$INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by, is_simulated)
-      VALUES ('c0000000-0000-4000-8000-00000000000b', 11, 2026, 'SIMULIERT_y.xlsx', 'b0000000-0000-4000-8000-000000000001', true) RETURNING 'in'$q$)
-      LIKE 'ERR P0001 simulated_mixing_refused %');
-  PERFORM _sr_ok('caller: company A''s administrator creates a simulated import and a trip as authenticated',
+  PERFORM _sr_ok('caller: company B administrator is refused the same double count as authenticated',
+    _sr_do('b0000000-0000-4000-8000-000000000001'::uuid, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000b', '51000000-0000-4000-8000-0000000000b9', '2026-09-02', 'X', 'X') RETURNING 'in'$q$)
+      LIKE 'ERR P0001 simulated_double_count_refused %');
+  PERFORM _sr_ok('caller: company A administrator creates a simulated import and a trip as authenticated',
     _sr_do('a0000000-0000-4000-8000-000000000001'::uuid, $q$WITH i AS (
         INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by, is_simulated)
         VALUES ('c0000000-0000-4000-8000-00000000000a', 11, 2026, 'SIMULIERT_z.xlsx', 'a0000000-0000-4000-8000-000000000001', true)
         RETURNING id)
       INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
-      SELECT 'c0000000-0000-4000-8000-00000000000a', id, '2026-11-01', 'X', 'X' FROM i RETURNING is_simulated::text$q$) = 'true');
+      SELECT 'c0000000-0000-4000-8000-00000000000a', id, '2026-11-02', 'Z', 'Z' FROM i RETURNING is_simulated::text$q$) = 'true');
 END $$;
 
--- Delete the simulated imports of A: the company may import real rides again.
-DELETE FROM fahrtenbuch_imports WHERE company_id = 'c0000000-0000-4000-8000-00000000000a';
+-- ─── 6. the books do not move ───────────────────────────────────────────────
+
 DO $$
 BEGIN
-  PERFORM _sr_ok('mixing: with the simulated imports deleted, a real import is accepted again',
-    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_imports (company_id, month, year, file_name, imported_by)
-      VALUES ('c0000000-0000-4000-8000-00000000000a', 12, 2026, 'real-again.xlsx', 'a0000000-0000-4000-8000-000000000001') RETURNING 'in'$q$) = 'in');
+  PERFORM _sr_ok('books: income, cash and tips of company A are exactly what they were before any simulated import or trip',
+    (SELECT count(*) = 0 FROM (
+       (SELECT type, driver_name, amount FROM income WHERE company_id = 'c0000000-0000-4000-8000-00000000000a'
+        EXCEPT SELECT type, driver_name, amount FROM _sr_books)
+       UNION ALL
+       (SELECT type, driver_name, amount FROM _sr_books
+        EXCEPT SELECT type, driver_name, amount FROM income WHERE company_id = 'c0000000-0000-4000-8000-00000000000a')) d)
+    AND (SELECT sum(amount) FROM income WHERE company_id = 'c0000000-0000-4000-8000-00000000000a' AND type = 'umsatz') = 1647.08);
+END $$;
+
+-- Delete the simulated import of A: the driver-week is free for real trips again.
+DELETE FROM fahrtenbuch_imports WHERE company_id = 'c0000000-0000-4000-8000-00000000000a' AND is_simulated;
+DO $$
+BEGIN
+  PERFORM _sr_ok('double count: with the simulated import deleted, a real trip into that week is accepted again',
+    _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
+      VALUES ('c0000000-0000-4000-8000-00000000000a', '51000000-0000-4000-8000-0000000000a9', '2026-09-03', 'X', 'X') RETURNING 'in'$q$) = 'in');
 END $$;
 
 ROLLBACK;

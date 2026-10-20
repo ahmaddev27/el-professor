@@ -27,7 +27,7 @@ function stamp(ms: number | null, withMillis = false): string {
  * `start_at` stays the ride's real start; this is the property the analysis
  * code reads it for.
  */
-function rideDate(ride: SimRide): string {
+export function rideDate(ride: SimRide): string {
   return operatingDayOf(ride.startMs ?? ride.orderTransmittedMs);
 }
 
