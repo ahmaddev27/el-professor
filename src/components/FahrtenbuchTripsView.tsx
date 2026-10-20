@@ -68,20 +68,6 @@ const STATUS_TONE: Record<string, 'neutral' | 'positive' | 'caution' | 'critical
   canceled:  'critical',
 };
 
-// The keys are `time_source` values stored on the trip (20260922100000) — data,
-// so they stay as they are; only the labels follow the UI language. The column
-// they name is load-bearing rather than noise: `fallback_trip_date` means
-// `start_at` was built from `trip_date` plus a clock time, so it inherits the
-// day-early date the Uber export writes for a ride starting just after midnight.
-// A value this map does not know is written verbatim, as an unmapped status is.
-const TIME_SOURCE_LABEL_KEYS: Record<string, TranslationKey> = {
-  source_start_end:   'imp.export.timeSource.sourceStartEnd',
-  fallback_trip_date: 'imp.export.timeSource.fallbackTripDate',
-  missing:            'imp.export.timeSource.missing',
-  unparsed:           'imp.export.timeSource.unparsed',
-  ambiguous:          'imp.export.timeSource.ambiguous',
-};
-
 const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const { isAdmin, isSuperAdmin } = useAuth();
   const { success, error: showError } = useToast();
@@ -221,23 +207,12 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       : imports.find(i => i.month === filterMonth && i.year === filterYear);
 
   /**
-   * The Fahrtenliste: the rides as a working list, for "which rides did this
-   * driver do in that plate in this month" in a form anyone can open.
-   *
-   * **It is not the Fahrtenbuch.** The button beside it builds the statutory
-   * corrected Fahrtenbuch, whose headers reproduce the imported sheet's and may
-   * never be translated; this is a plain table dump, so its headers follow the UI
-   * language. Different noun, different filename slug, different sheet title.
-   *
-   * **The rules being preserved.** `start_at` is the ride's real start, while
-   * `trip_date` is the file's "Datum der Fahrt", which the Uber export dates a day
-   * early for a ride starting just after midnight — so both are columns, and so is
-   * `time_source`, which says whether `start_at` was read from the source or built
-   * from that same date. And a trip with `is_canceled = true` is never counted:
-   * it is listed with a column saying so and enters no sum, which is why the file
-   * carries **no money totals row** (the screen's own Gesamtpreis reduces over
-   * every filtered trip with no `is_canceled` term, and the importer keeps a
-   * cancelled ride's fare).
+   * The Fahrtenliste: the ride log in the 18 columns of the Uber Fahrtenbuch,
+   * as a quick read. **It is not the Fahrtenbuch export.** That button beside it
+   * stays behind the Finalization checks; this one is the same shape with the
+   * assigned driver (else the original) in `Fahrername`, and no gate. It carries
+   * no Zeitquelle, Status or Storniert, and no SIMULIERT marker (a known open
+   * gap, left for a separate pass).
    *
    * It exports `filteredTrips`, never `pageTrips`: the hook loads every trip of
    * the month through its batched `while (true)` loop, and the paging below is
@@ -247,49 +222,14 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
     const imp = selectedImport();
     const month = imp?.month ?? filterMonth;
     const year = imp?.year ?? filterYear;
-    const filterLine = (label: string, value: string) => t('ui.export.filterLine', { label, value });
-    const filterSummary = [filterLine(t('common.period'), `${t(MONTH_KEYS[month - 1])} ${year}`)];
-    if (selectedImportId !== 'all' && imp) filterSummary.push(filterLine(t('imp.trips.importSelectLabel'), imp.file_name));
-    if (searchTerm) filterSummary.push(filterLine(t('common.search'), searchTerm));
-    if (filterDriver) filterSummary.push(filterLine(t('common.driver'), filterDriver));
-    if (filterPlate) filterSummary.push(filterLine(t('imp.trips.plate'), filterPlate));
-    if (filterStatus) {
-      filterSummary.push(filterLine(
-        t('common.status'),
-        filterStatus === 'active' ? t('imp.trips.onlyActive') : statusLabel(filterStatus),
-      ));
-    }
-    // The screen's own counts, so the file says how many of its rows are cancelled
-    // in place of the money total it deliberately does not write.
-    filterSummary.push(t('imp.trips.activeAndCanceled', { active: activeCount, canceled: canceledCount }));
 
     try {
       exportPicker.table('fahrtenliste', buildFahrtenlisteExport({
         trips: filteredTrips,
-        filterSummary,
         year,
         month,
         labels: {
           sheetTitle: t('imp.export.sheetTitle'),
-          date: t('common.date'),
-          startAt: t('imp.export.startAt'),
-          endAt: t('imp.export.endAt'),
-          timeSource: t('imp.export.timeSource'),
-          start: t('imp.th.start'),
-          end: t('imp.th.end'),
-          plate: t('imp.th.plate'),
-          originalDriver: t('imp.th.originalDriver'),
-          assignedDriver: t('imp.trips.th.assignedDriver'),
-          pickup: t('imp.trips.th.pickup'),
-          destination: t('imp.trips.th.destination'),
-          fare: t('imp.trips.th.fare'),
-          tip: t('imp.th.tip'),
-          status: t('common.status'),
-          canceled: t('imp.export.canceled'),
-          yes: t('common.yes'),
-          no: t('common.no'),
-          statusNames: Object.fromEntries(Object.entries(STATUS_LABEL_KEYS).map(([status, key]): [string, string] => [status, t(key)])),
-          timeSourceNames: Object.fromEntries(Object.entries(TIME_SOURCE_LABEL_KEYS).map(([source, key]): [string, string] => [source, t(key)])),
           chrome: exportChrome,
         },
       }));

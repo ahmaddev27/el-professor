@@ -3,6 +3,7 @@ import type { RolePermission } from '../types/role';
 import { formatDate } from '../components/ui/format';
 import { toCents } from './money';
 import { berlinToday } from './salaryCashReceiptFlow';
+import { FAHRTENBUCH_ORIGINAL_COLUMNS, tripDriverName } from './fahrtenbuchExport';
 import type { ExportChromeLabels, ExportColumn, ExportOptions } from './excelExport';
 
 /**
@@ -93,39 +94,6 @@ function chromeLabels(text: ExportChromeText): ExportChromeLabels {
 /** `2026-09` for a filename, so a period sorts in a folder listing. */
 function monthSlug(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}`;
-}
-
-/**
- * An instant as the Berlin day and clock time, e.g. `23.09.2026 00:15`.
- *
- * Pinned to Europe/Berlin rather than read in the browser's zone: the importer
- * writes `time_zone = 'Europe/Berlin'` on every trip, and a ride whose Berlin
- * start is 00:15 must not print as the previous day for an operator abroad —
- * that is the very confusion rule 4 exists to remove. An unreadable value is
- * written through unchanged rather than becoming "Invalid Date".
- */
-const BERLIN_INSTANT = new Intl.DateTimeFormat('de-DE', {
-  timeZone: 'Europe/Berlin',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  // hourCycle rather than `hour12: false`, which maps to h24 in some ICU builds
-  // and would print a ride starting at midnight as 24:15 of the previous day.
-  hourCycle: 'h23',
-});
-
-function berlinInstant(iso: string | null): string {
-  if (!iso) return '';
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return BERLIN_INSTANT.format(at).replace(', ', ' ');
-}
-
-/** A clock column as the screen shows it: `HH:MM`, or empty when absent. */
-function clock(value: string | null): string {
-  return value ? value.slice(0, 5) : '';
 }
 
 // ─── Abrechnung ───────────────────────────────────────────────────────────────
@@ -386,127 +354,73 @@ export function buildGehaltsquittungExport(input: GehaltsquittungExportInput): E
 
 // ─── Fahrtenliste ─────────────────────────────────────────────────────────────
 
-/** A trip as `useFahrtenbuch` loads it — only the columns this file writes. */
+/** A trip as `useFahrtenbuch` loads it — only what the 18-column ride log reads. */
 export interface FahrtenlisteExportTrip {
-  /** The file's "Datum der Fahrt". See rule 4: not necessarily the ride's day. */
-  trip_date: string;
-  /** The ride's real start, as an instant. NULL when the source gave none. */
-  start_at: string | null;
-  end_at: string | null;
-  /** Why the two instants read as they do; NULL on rows from a rolled-back release. */
-  time_source: string | null;
-  start_time: string | null;
-  end_time: string | null;
-  car_identifier: string | null;
+  raw_data_json: Record<string, unknown> | null;
   original_driver_name: string;
   assigned_driver_name: string;
-  route_start: string | null;
-  route_end: string | null;
-  /** Euros, rounded to two decimals by the importer's parseMoney. */
-  price_amount: number;
-  /** Euros, same parser. */
-  tip_amount: number;
-  plausibility_status: string;
-  is_canceled: boolean;
 }
 
 export interface FahrtenlisteExportLabels {
   sheetTitle: string;
-  date: string;
-  startAt: string;
-  endAt: string;
-  timeSource: string;
-  start: string;
-  end: string;
-  plate: string;
-  originalDriver: string;
-  assignedDriver: string;
-  pickup: string;
-  destination: string;
-  fare: string;
-  tip: string;
-  status: string;
-  canceled: string;
-  yes: string;
-  no: string;
-  /** By stored `plausibility_status`; an unmapped value is written verbatim, as the screen does. */
-  statusNames: Readonly<Record<string, string>>;
-  /** By stored `time_source`; an unmapped value is written verbatim. */
-  timeSourceNames: Readonly<Record<string, string>>;
   chrome: ExportChromeText;
 }
 
 export interface FahrtenlisteExportInput {
   /** `filteredTrips`, never the current page: the screen holds every trip of the month. */
   trips: readonly FahrtenlisteExportTrip[];
-  filterSummary: readonly string[];
   year: number;
   /** 1-based. */
   month: number;
   labels: FahrtenlisteExportLabels;
 }
 
+const DRIVER_COLUMN = 'Fahrername';
+
+/** The three numeric source columns; everything else is the source's text. */
+const FAHRTENLISTE_NUMERIC: Readonly<Record<string, ExportColumn['type']>> = {
+  Fahrpreis: 'money',
+  Trinkgeld: 'money',
+  Kilometer: 'number',
+};
+
 /**
- * "Which rides did this driver do in that plate" in a form anyone can open,
- * beside — and deliberately distinct from — the statutory corrected Fahrtenbuch
- * the screen's other button builds. Different noun, different filename, and its
- * headers follow the UI language, which the Fahrtenbuch's never may.
+ * The ride log itself, in the 18 columns of the Uber Fahrtenbuch
+ * (`FAHRTENBUCH_ORIGINAL_COLUMNS`, read from the export module and never
+ * retyped), each cell the imported `raw_data_json` value. Headers are statutory
+ * German and do not follow the UI language.
  *
- * **No money totals row**, and that is rule 3 rather than an omission: the
- * screen's own Gesamtpreis and Gesamttrinkgeld reduce over every filtered trip
- * with no `is_canceled` term, and the importer keeps a cancelled ride's fare
- * (only its cash and online split are zeroed). Writing those totals would count
- * a cancelled ride; recomputing them without one would be a figure the screen
- * never showed. With #150's typed cells an operator filters the `canceled`
- * column and reads the sum in Excel's status bar instead.
+ * `Fahrername` is the assigned driver, falling back to the original
+ * (`tripDriverName`, the rule the corrected Fahrtenbuch uses).
+ *
+ * **This is a quick read of the same shape, not an equivalent of the official
+ * Fahrtenbuch export**, which stays behind the Finalization checks. What the
+ * file no longer carries against the former 15 columns: Zeitquelle, the system's
+ * Status and Storniert, the Originalfahrer beside the assigned one, and the
+ * Berlin start/end instants (Fahrtbeginn/-ende are the source's own text now).
+ * A cancelled ride is listed with its source `Fahrtstatus`; nothing is totalled.
  */
 export function buildFahrtenlisteExport(input: FahrtenlisteExportInput): ExportOptions {
-  const { trips, filterSummary, year, month, labels } = input;
+  const { trips, year, month, labels } = input;
+  const columns: ExportColumn[] = FAHRTENBUCH_ORIGINAL_COLUMNS.map(name => ({
+    key: name,
+    label: name,
+    type: FAHRTENLISTE_NUMERIC[name],
+  }));
 
   return {
     filename: `fahrtenliste_${monthSlug(year, month)}`,
     sheetTitle: labels.sheetTitle,
     moduleName: labels.sheetTitle,
-    filterSummary: [...filterSummary],
-    columns: [
-      // Column 0: the file's date. There is no totals row, so nothing collides
-      // with the label the exporter would write here.
-      { key: 'date', label: labels.date, width: 12 },
-      { key: 'startAt', label: labels.startAt, width: 18 },
-      { key: 'endAt', label: labels.endAt, width: 18 },
-      { key: 'timeSource', label: labels.timeSource, width: 22 },
-      { key: 'start', label: labels.start, width: 10 },
-      { key: 'end', label: labels.end, width: 10 },
-      { key: 'plate', label: labels.plate, width: 14 },
-      { key: 'originalDriver', label: labels.originalDriver, width: 24 },
-      { key: 'assignedDriver', label: labels.assignedDriver, width: 24 },
-      { key: 'pickup', label: labels.pickup, width: 30 },
-      { key: 'destination', label: labels.destination, width: 30 },
-      { key: 'fare', label: labels.fare, width: 14, align: 'right', type: 'money' },
-      { key: 'tip', label: labels.tip, width: 14, align: 'right', type: 'money' },
-      { key: 'status', label: labels.status, width: 16 },
-      { key: 'canceled', label: labels.canceled, width: 12 },
-    ],
-    rows: trips.map((trip): ExportRow => ({
-      date: formatDate(trip.trip_date),
-      startAt: berlinInstant(trip.start_at),
-      endAt: berlinInstant(trip.end_at),
-      timeSource: trip.time_source ? labels.timeSourceNames[trip.time_source] ?? trip.time_source : '',
-      start: clock(trip.start_time),
-      end: clock(trip.end_time),
-      plate: trip.car_identifier ?? '',
-      originalDriver: trip.original_driver_name,
-      // The full name, not the screen's dash for "same as the original": a file
-      // is read without the screen beside it.
-      assignedDriver: trip.assigned_driver_name,
-      pickup: trip.route_start ?? '',
-      destination: trip.route_end ?? '',
-      // Euros, straight from the importer. Never summed here — see the note above.
-      fare: trip.price_amount,
-      tip: trip.tip_amount,
-      status: labels.statusNames[trip.plausibility_status] ?? trip.plausibility_status,
-      canceled: trip.is_canceled ? labels.yes : labels.no,
-    })),
+    columns,
+    rows: trips.map((trip): ExportRow => {
+      const raw = trip.raw_data_json ?? {};
+      const row: ExportRow = {};
+      for (const name of FAHRTENBUCH_ORIGINAL_COLUMNS) {
+        row[name] = name === DRIVER_COLUMN ? tripDriverName(trip) : raw[name] ?? '';
+      }
+      return row;
+    }),
     labels: chromeLabels(labels.chrome),
   };
 }

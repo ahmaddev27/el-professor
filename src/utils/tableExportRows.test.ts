@@ -10,7 +10,9 @@ import {
   type GehaltsquittungExportLabels,
   type RolesExportLabels,
 } from './tableExportRows';
-import { buildTableWorkbook, type ExportColumn, type ExportOptions } from './excelExport';
+import * as XLSX from 'xlsx';
+import { FAHRTENBUCH_ORIGINAL_COLUMNS } from './fahrtenbuchExport';
+import { buildPlainWorkbook, buildTableWorkbook, type ExportColumn, type ExportOptions } from './excelExport';
 import { ROLE_PAGE_KEYS } from '../lib/companyRoles';
 import type { RolePermission } from '../types/role';
 
@@ -274,115 +276,64 @@ describe('buildGehaltsquittungExport', () => {
 
 // ─── Fahrtenliste ─────────────────────────────────────────────────────────────
 
-const TRIP_LABELS: FahrtenlisteExportLabels = {
-  sheetTitle: 'Fahrtenliste',
-  date: 'Datum der Fahrt',
-  startAt: 'Start',
-  endAt: 'Ende',
-  timeSource: 'Zeitquelle',
-  start: 'von',
-  end: 'bis',
-  plate: 'Kennzeichen',
-  originalDriver: 'Fahrer (Datei)',
-  assignedDriver: 'Zugewiesen',
-  pickup: 'Start',
-  destination: 'Ziel',
-  fare: 'Preis',
-  tip: 'Trinkgeld',
-  status: 'Status',
-  canceled: 'Storniert',
-  yes: 'Ja',
-  no: 'Nein',
-  statusNames: { pending: 'Offen', canceled: 'Storniert' },
-  timeSourceNames: { source_start_end: 'Quelle', fallback_trip_date: 'Ersatz' },
-  chrome: CHROME,
-};
+const TRIP_LABELS: FahrtenlisteExportLabels = { sheetTitle: 'Fahrtenliste', chrome: CHROME };
+
+function rawRide(extra: Record<string, unknown>): Record<string, unknown> {
+  return {
+    'Datum der Fahrt': '2026-09-22',
+    Fahrtstatus: 'Abgeschlossen',
+    Kennzeichen: 'B-YA 47',
+    Fahrername: 'Ali',
+    Fahrpreis: 32.4,
+    Trinkgeld: 2.5,
+    Kilometer: 12.3,
+    Abholort: 'Hbf, Berlin',
+    Zielort: 'Flughafen BER',
+    ...extra,
+  };
+}
 
 const TRIPS = [
-  {
-    // The Uber export dates a ride starting just after midnight a day early:
-    // trip_date is the 22nd, the ride starts 00:15 Berlin on the 23rd.
-    trip_date: '2026-09-22',
-    start_at: '2026-09-22T22:15:00Z',
-    end_at: '2026-09-22T22:41:00Z',
-    time_source: 'source_start_end',
-    start_time: '00:15:00', end_time: '00:41:00',
-    car_identifier: 'B-YA 47', original_driver_name: 'Ali', assigned_driver_name: 'Ali',
-    route_start: 'Hbf', route_end: 'Flughafen',
-    price_amount: 32.4, tip_amount: 2.5,
-    plausibility_status: 'pending', is_canceled: false,
-  },
-  {
-    trip_date: '2026-09-23',
-    start_at: null, end_at: null, time_source: 'missing',
-    start_time: null, end_time: null,
-    car_identifier: null, original_driver_name: 'Ben', assigned_driver_name: 'Cem',
-    route_start: null, route_end: null,
-    // A cancelled ride keeps its fare in the import (only cash/online are zeroed).
-    price_amount: 18, tip_amount: 0,
-    plausibility_status: 'canceled', is_canceled: true,
-  },
+  { raw_data_json: rawRide({}), original_driver_name: 'Ali', assigned_driver_name: 'Cem' },
+  { raw_data_json: rawRide({ Fahrername: 'Ben' }), original_driver_name: 'Ben', assigned_driver_name: '' },
+  { raw_data_json: null, original_driver_name: '', assigned_driver_name: '' },
 ];
 
 describe('buildFahrtenlisteExport', () => {
-  const options = buildFahrtenlisteExport({
-    trips: TRIPS,
-    filterSummary: ['Zeitraum: September 2026', '1 aktiv + 1 storniert'],
-    year: 2026,
-    month: 9,
-    labels: TRIP_LABELS,
+  const options = buildFahrtenlisteExport({ trips: TRIPS, year: 2026, month: 9, labels: TRIP_LABELS });
+
+  it('has exactly the 18 Fahrtenbuch columns, in order, read from the constant', () => {
+    expect(options.columns.map(c => c.label)).toEqual([...FAHRTENBUCH_ORIGINAL_COLUMNS]);
+    expect(options.columns).toHaveLength(18);
   });
 
-  it('writes the ride\'s real start beside the file\'s date, in Berlin', () => {
-    // Domain rule: start_at is the ride's real start; trip_date is the file's
-    // "Datum der Fahrt", a day early here. Both must be readable side by side,
-    // or the day-early rows cannot be found at all.
-    expect(options.rows[0].date).toBe('22.09.2026');
-    expect(options.rows[0].startAt).toBe('23.09.2026 00:15');
-    expect(options.rows[0].endAt).toBe('23.09.2026 00:41');
-    expect(options.rows[0].timeSource).toBe('Quelle');
-    // A missing instant is empty, never a guessed date.
-    expect(options.rows[1].startAt).toBe('');
-    expect(options.rows[1].endAt).toBe('');
-    // An unmapped time_source is written verbatim, as the screen's status does.
-    expect(options.rows[1].timeSource).toBe('missing');
+  it('writes Fahrername as the assigned driver, else the original', () => {
+    expect(options.rows[0].Fahrername).toBe('Cem');
+    expect(options.rows[1].Fahrername).toBe('Ben');
+    expect(options.rows[2].Fahrername).toBe('');
   });
 
-  it('lists a cancelled ride, marks it, and writes no money total at all', () => {
-    // The screen's own Gesamtpreis / Gesamttrinkgeld reduce over every filtered
-    // trip with no is_canceled term, and the importer keeps a cancelled ride's
-    // fare. Exporting those totals would count a cancelled ride; recomputing
-    // them without one would be a figure the screen never showed.
-    expect(options.rows[1].canceled).toBe('Ja');
-    expect(options.rows[0].canceled).toBe('Nein');
-    expect(options.totals).toBeUndefined();
-    expect(options.columns[0].key).toBe('date');
-    expect(() => buildTableWorkbook(options)).not.toThrow();
+  it('copies the imported cells and leaves a missing one empty', () => {
+    expect(options.rows[0].Abholort).toBe('Hbf, Berlin');
+    expect(options.rows[0].Fahrzeugtyp).toBe('');
+    expect(options.rows[2].Kennzeichen).toBe('');
   });
 
-  it('writes fare and tip as euros in money columns', () => {
-    // parseMoney stores Math.round(n * 100) / 100 — euros, two decimals.
-    expect(cellOf(options, 'fare', 0)).toBe(32.4);
-    expect(cellOf(options, 'tip', 0)).toBe(2.5);
-    expect(cellOf(options, 'fare', 1)).toBe(18);
-    expect(typeOf(options, 'fare')).toBe('money');
-    expect(typeOf(options, 'tip')).toBe('money');
-  });
-
-  it('writes the assigned driver in full, not the screen\'s dash', () => {
-    // The screen draws "—" when the assigned driver is the original one; a file
-    // is read without the screen beside it.
-    expect(options.rows[0].assignedDriver).toBe('Ali');
-    expect(options.rows[1].assignedDriver).toBe('Cem');
-    expect(options.rows[1].originalDriver).toBe('Ben');
+  it('keeps fare, tip and kilometres numeric and bare', () => {
+    const sheet = buildPlainWorkbook([options]).Sheets[options.sheetTitle];
+    const col = (name: string) => FAHRTENBUCH_ORIGINAL_COLUMNS.indexOf(name);
+    const at = (name: string) => sheet[XLSX.utils.encode_cell({ r: 1, c: col(name) })];
+    expect(at('Fahrpreis')).toMatchObject({ t: 'n', v: 32.4 });
+    expect(at('Trinkgeld')).toMatchObject({ t: 'n', v: 2.5 });
+    expect(at('Kilometer')).toMatchObject({ t: 'n', v: 12.3 });
+    expect(at('Fahrpreis').z).toBeUndefined();
+    // Uber's shape: headers in A1, data from A2.
+    expect(sheet[XLSX.utils.encode_cell({ r: 0, c: 0 })].v).toBe(FAHRTENBUCH_ORIGINAL_COLUMNS[0]);
   });
 
   it('is named for the Fahrtenliste and never for the Fahrtenbuch', () => {
-    // The statutory corrected Fahrtenbuch is the screen's other button. A file
-    // that shared its noun or its slug would be mistaken for it.
     expect(options.filename).toBe('fahrtenliste_2026-09');
-    expect(options.sheetTitle).toBe('Fahrtenliste');
-    expect(options.filterSummary).toEqual(['Zeitraum: September 2026', '1 aktiv + 1 storniert']);
+    expect(options.totals).toBeUndefined();
   });
 });
 
@@ -487,7 +438,7 @@ describe('all four exports', () => {
     const built = [
       buildAbrechnungExport({ mode: 'monthly', rows: [], totals: { anzahl_belege: 0, ausgegebene_bargeld: 0, bargeld: 0, bar_zuruck: 0 }, year: 2026, month: 9, filterSummary: [], labels: ABR_LABELS }),
       buildGehaltsquittungExport({ rows: [], filterSummary: [], today: '2026-02-05', labels: GQ_LABELS }),
-      buildFahrtenlisteExport({ trips: [], filterSummary: [], year: 2026, month: 9, labels: TRIP_LABELS }),
+      buildFahrtenlisteExport({ trips: [], year: 2026, month: 9, labels: TRIP_LABELS }),
       buildRolesExport({ companyRoles: [], templates: [], holders: {}, labels: ROLE_LABELS }),
     ];
     for (const options of built) {
@@ -505,7 +456,7 @@ describe('all four exports', () => {
     const built = [
       buildAbrechnungExport({ mode: 'weekly', rows: WEEKLY_ROWS, totals: WEEKLY_TOTALS, year: 2026, month: 9, filterSummary: [], labels: ABR_LABELS }),
       buildGehaltsquittungExport({ rows: GQ_ROWS, filterSummary: [], today: '2026-02-05', labels: GQ_LABELS }),
-      buildFahrtenlisteExport({ trips: TRIPS, filterSummary: [], year: 2026, month: 9, labels: TRIP_LABELS }),
+      buildFahrtenlisteExport({ trips: TRIPS, year: 2026, month: 9, labels: TRIP_LABELS }),
       buildRolesExport({ companyRoles: [{ id: 'r1', name: 'Büro', description: '', is_system: false, permissions: [] }], templates: [], holders: {}, labels: ROLE_LABELS }),
     ];
     for (const options of built) {
