@@ -146,14 +146,14 @@ try {
     await context.close();
   });
 
-  await check('Dokumente: the Fahrtenbuch card opens the trips view, and Dokumente comes back', async () => {
-    const { page, context, errors } = await open({ screen: 'dokumente' });
-    await click(page, button(page, /^Fahrtenbuch$/));
+  await check('Fahrtenbuch: has its own page, and Dokumente no longer carries a Fahrtenbuch card', async () => {
+    const { page, context, errors } = await open({ screen: 'fahrtenbuch' });
     await expect(page.getByRole('heading', { level: 1, name: 'Fahrtenbuch' })).toBeVisible();
-    await click(page, button(page, /^Dokumente$/));
-    await expect(page.getByRole('heading', { level: 1, name: 'Dokumente' })).toBeVisible();
     await nothingSent(page, errors);
     await context.close();
+    const docs = await open({ screen: 'dokumente' });
+    await expect(button(docs.page, /^Fahrtenbuch$/)).toHaveCount(0);
+    await docs.context.close();
   });
 
   await check('Dokumente: "Öffnen" opens that record in the Stundennachweis sheet, and nothing is saved', async () => {

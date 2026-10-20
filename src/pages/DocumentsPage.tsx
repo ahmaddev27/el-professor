@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
-import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, FileSearch, FileSpreadsheet, RotateCw, Download, type LucideIcon } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, Receipt, Car, Trash2, ExternalLink, FileDown, FileSpreadsheet, RotateCw, Download, type LucideIcon } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
-import FahrtenbuchTripsView from '../components/FahrtenbuchTripsView';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
 // minsToDecimal and totalMins were declared in this file. They moved into the
 // export module so that the spreadsheet's hours and the screen's hours are one
@@ -19,7 +17,6 @@ import {
 } from '../utils/stundennachweisArchiveExport';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
-import { tripAnalysisLinkShown } from '../components/navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import {
@@ -106,8 +103,6 @@ function fmtDec(v: number): string {
   return v.toFixed(2).replace('.', ',');
 }
 
-type SubView = 'main' | 'fahrtenbuch';
-
 // ── PDF export — uses the shared renderer (Schicht 3, no Samstag column) ─────
 
 function exportSavedPDF(rec: SavedRecord): void {
@@ -140,13 +135,8 @@ const DocumentsPage: React.FC = () => {
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
   // Bumped when the dialog issues a receipt or attaches a signed copy, so the list reloads.
-  const [subView, setSubView] = useState<SubView>('main');
 
   // SalaryDetailsModal links a locked payment to its receipt through router state.
-
-  // Drivers and cars for Fahrtenbuch matching
-  const [drivers, setDrivers] = useState<DriverOption[]>([]);
-  const [cars, setCars] = useState<CarOption[]>([]);
 
   // Saved Stundennachweise archive
   const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
@@ -171,29 +161,6 @@ const DocumentsPage: React.FC = () => {
   const [deleteGroupKey, setDeleteGroupKey] = useState<string | null>(null);
   const [deletingGroup, setDeletingGroup] = useState(false);
   const [groupDeleteError, setGroupDeleteError] = useState('');
-
-  useEffect(() => {
-    if (!companyId) return;
-    supabase
-      .from('drivers')
-      .select('id, name')
-      .eq('company_id', companyId)
-      .eq('status', 'active')
-      .order('name')
-      .then(({ data }) => setDrivers((data || []) as DriverOption[]));
-
-    supabase
-      .from('cars')
-      .select('id, kennzeichen')
-      .eq('company_id', companyId)
-      .order('kennzeichen')
-      .then(({ data }) => setCars(
-        (data || []).map((c: { id: string; kennzeichen: string }) => ({
-          id: c.id,
-          plate: c.kennzeichen,
-        }))
-      ));
-  }, [companyId]);
 
   const loadArchive = useCallback(async () => {
     if (!companyId) return;
@@ -415,34 +382,6 @@ const DocumentsPage: React.FC = () => {
     if (amount == null) return '—';
     return Number.isFinite(amount) ? formatEuro(amount) : String(amount);
   };
-
-  // ── Fahrtenbuch sub-view ───────────────────────────────────────────────────
-  if (subView === 'fahrtenbuch') {
-    return (
-      <div>
-        {/* No font-ui here: the trips view below is still the legacy screen. */}
-        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={() => setSubView('main')}>
-          <ArrowLeft aria-hidden />
-          {t('nav.documents')}
-        </Button>
-        <PageHeader
-          title={t('doc.fahrtenbuch')}
-          description={t('doc.fahrtenbuchSubtitle')}
-          actions={
-            // Offered only where the Fahrtenanalyse is meant to be seen. The route
-            // stays registered everywhere, so the screen is reachable by address.
-            tripAnalysisLinkShown(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV) ? (
-              <Button variant="secondary" onClick={() => navigate('/fahrtenanalyse')}>
-                <FileSearch aria-hidden />
-                {t('ta.link.open')}
-              </Button>
-            ) : undefined
-          }
-        />
-        <FahrtenbuchTripsView drivers={drivers} cars={cars} />
-      </div>
-    );
-  }
 
   // ── Confirmation modal for group delete ───────────────────────────────────
   const groupForDelete = deleteGroupKey ? monthGroups.find(g => g.key === deleteGroupKey) : null;
@@ -713,13 +652,6 @@ const DocumentsPage: React.FC = () => {
               description={t('doc.mietwagenauftragDesc')}
               badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
               onClick={() => setIsMietwagenModalOpen(true)}
-            />
-            <ToolCard
-              icon={MapPin}
-              title={t('doc.fahrtenbuch')}
-              description={t('doc.fahrtenbuchDesc')}
-              badges={[t('doc.badgeImport'), 'Excel / CSV']}
-              onClick={() => setSubView('fahrtenbuch')}
             />
           </div>
         </section>

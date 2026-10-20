@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **20.10.2026 (branch `feat/fahrtenbuch-own-page`, PR against `staging`, not merged; UI only, no migration):** the Fahrtenbuch has its own sidebar entry and route `/fahrtenbuch` (`FahrtenbuchPage`, gated on `dokumente` like Documents). It left Documents (the sub-view and its tool card are gone); the Fahrtenanalyse empty state now links to the new page.
+
 > **19.10.2026 (branch `feat/abrechnung-next-moments`, PR against `staging`, not merged; display only, no migration):** the "Abrechnung by email" card now says when the next reminder fires, computed by `nextMoments` in `abrechnung-schedule-core.ts` from the saved schedule and its `armed_at`. It exists because the owner saved his schedule 42 seconds after the reminder moment and, correctly, got none; the feature itself was proved working end to end on 19.10.2026, so this is not a bug fix.
 >
 > **19.10.2026 (branch `feat/export-uber-columns`, PR against `staging`, not merged):** the operational Excel exports carry bare numbers like Uber's file: no number format, so no `km` or currency suffix, no forced decimals and no percent sign, and no column widths or alignment; a percent column is written as the percentage (42, not 0.42), the one column whose value changed. The stored values are exact and still sum. Dates are unchanged. Details in HANDOFF.md.

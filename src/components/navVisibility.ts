@@ -32,7 +32,7 @@ export function monthlyPlanInNav(deployEnv: string | undefined, isDev: boolean):
  *
  * The owner's decision of 23.09.2026, restated on 04.10.2026 when he was asked
  * before the release: the Fahrtenbuch analysis stays on staging. **It is not the
- * Fahrtenbuch** — that is `/dokumente`, it is on production, and nothing here
+ * Fahrtenbuch** — that is `/fahrtenbuch`, it is on production, and nothing here
  * touches it. This hides two links to a separate read-only screen that explains
  * an imported month and changes no trip.
  *
