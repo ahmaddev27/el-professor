@@ -38,9 +38,9 @@ export default function MonthlyPlanEntryPage() {
     setParams(copy);
   };
 
-  // Not a way to plan: a generator of marked, simulated rides for practice and
-  // testing. It lives beside the planner because it feeds it, and is reached
-  // from the chooser's footer rather than as a third way to plan a month.
+  // Not a way to plan: a generator of marked, simulated rides whose output is a
+  // Fahrtenbuch import. It is offered on the Fahrtenbuch page beside Import; this
+  // address stays so that existing bookmarks and links keep opening it.
   if (params.get('art') === SIMULATED_ART) {
     return (
       <div className="font-ui">
@@ -52,13 +52,7 @@ export default function MonthlyPlanEntryPage() {
 
   if (!type) {
     return (
-      <>
-        <PlanningTypeChooser onChoose={choose} />
-        <p className="mt-6 font-ui text-sm text-fg-muted">
-          {t('simrides.entry.hint')}{' '}
-          <Button variant="link" onClick={() => setParams({ art: SIMULATED_ART })}>{t('simrides.entry.link')}</Button>
-        </p>
-      </>
+      <PlanningTypeChooser onChoose={choose} />
     );
   }
 
