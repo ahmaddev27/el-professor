@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Filter, X, Upload, Trash2, Lock, User, Calendar, Eye, ChevronLeft, ChevronRight, Download, FileSpreadsheet } from 'lucide-react';
+import { Search, Filter, X, Upload, Trash2, Lock, User, Calendar, Eye, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useFahrtenbuch, FahrtenbuchImport, FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
@@ -70,6 +71,7 @@ const STATUS_TONE: Record<string, 'neutral' | 'positive' | 'caution' | 'critical
 
 const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const { isAdmin, isSuperAdmin } = useAuth();
+  const navigate = useNavigate();
   const { success, error: showError } = useToast();
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
@@ -451,6 +453,13 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         )}
 
         {importButton(t('imp.trips.import'))}
+
+        {/* The generator's only output is an import in this book, so it is
+            offered beside Import. The page it opens gates itself on the
+            documents page right, exactly as the import does in the database. */}
+        <Button variant="secondary" onClick={() => navigate('/monatsplan?art=simuliert&from=fahrtenbuch')}>
+          <Sparkles aria-hidden /> {t('simrides.entry.link')}
+        </Button>
       </div>
 
       {loadFailed && (

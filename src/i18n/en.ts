@@ -6889,7 +6889,6 @@ export const en: PartialDictionary = {
   'simrides.banner.title':             'For practice, demos and testing only',
   'simrides.done.body':                'The rides are now in the Fahrtenbuch, marked SIMULIERT, and can be planned like a real month.',
   'simrides.done.title':               'Import finished',
-  'simrides.entry.hint':               'To practise or test without real data:',
   'simrides.entry.link':               'Generate simulated rides',
   'simrides.error.generic':            'The rides could not be generated.',
   'simrides.error.load':               'Vehicles and drivers could not be loaded.',
@@ -6941,4 +6940,7 @@ export const en: PartialDictionary = {
   'simrides.summary.revenueNote':          'exactly the recorded revenue',
   'simrides.summary.weeks':                'Driver-weeks',
   'settings.abrSchedule.reminder.leadOptionHours': '{hours} hours before',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.back.fahrtenbuch': '← Back to the ride log',
 };

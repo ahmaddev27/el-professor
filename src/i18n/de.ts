@@ -6945,7 +6945,6 @@ export const de = {
   'simrides.banner.title':             'Nur zum Üben, Vorführen und Testen',
   'simrides.done.body':                'Die Fahrten stehen jetzt im Fahrtenbuch, gekennzeichnet als SIMULIERT, und können wie ein echter Monat geplant werden.',
   'simrides.done.title':               'Import abgeschlossen',
-  'simrides.entry.hint':               'Zum Üben oder Testen ohne echte Daten:',
   'simrides.entry.link':               'Simulierte Fahrten erzeugen',
   'simrides.error.generic':            'Die Fahrten konnten nicht erzeugt werden.',
   'simrides.error.load':               'Fahrzeuge und Fahrer konnten nicht geladen werden.',
@@ -6997,4 +6996,7 @@ export const de = {
   'simrides.summary.revenueNote':          'genau der erfasste Umsatz',
   'simrides.summary.weeks':                'Fahrerwochen',
   'settings.abrSchedule.reminder.leadOptionHours': '{hours} Stunden vorher',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.back.fahrtenbuch': '← Zurück zum Fahrtenbuch',
 } as const;
