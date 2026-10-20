@@ -1,18 +1,13 @@
-import { createRng, type Rng } from './rng';
+import type { Rng } from './rng';
 import { deadheadSeconds, interpolate, minTravelSeconds, rideSeconds, roadKm } from './geo';
-import { daysInMonth, isUniqueWallTime, localHour, operatingDayStartMs } from './time';
-import type {
-  GeneratedMonth, GeneratorInput, GeneratorOptions, GeoPoint, PoolAddress, SimDriver, SimRide, SimShift, SimVehicle,
-} from './types';
+import { isUniqueWallTime, localHour } from './time';
+import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimDriver, SimRide, SimShift, SimVehicle } from './types';
 
 export const DEFAULT_OPTIONS: GeneratorOptions = {
-  maxShiftsPerVehicleDay: 3,
-  shiftCountWeights: [0.25, 0.5, 0.25],
   minShiftMinutes: 270,
   maxShiftMinutes: 360,
   minVehicleGapMinutes: 60,
   minDriverRestMinutes: 11 * 60,
-  activeDayShare: 0.92,
   cancellationShare: 0.02,
   tipShare: 0.12,
   appPaymentShare: 0.69,
@@ -204,79 +199,6 @@ export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): S
   }
   if (rides.length === 0 || !rides.every(stampsAreUnique)) return null;
   return { rides, endMs: cursor };
-}
-
-function planVehicleDay(ctx: Context, vehicle: SimVehicle, dayStartMs: number, operatingDay: string): PlannedShift[] {
-  const { rng, opts } = ctx;
-  const cap = Math.min(opts.maxShiftsPerVehicleDay, SHIFT_LIMITS.maxPerVehicleDay);
-  const roll = rng.next();
-  const [w1, w2] = opts.shiftCountWeights;
-  const count = Math.min(roll < w1 ? 1 : roll < w1 + w2 ? 2 : 3, cap);
-  const lengths = Array.from({ length: count }, () => rng.int(opts.minShiftMinutes / 15, opts.maxShiftMinutes / 15) * 15);
-  const gapSteps = opts.minVehicleGapMinutes / 15;
-  const gaps = Array.from({ length: count - 1 }, () => rng.int(gapSteps, gapSteps + 8) * 15);
-  const total = lengths.reduce((a, b) => a + b, 0) + gaps.reduce((a, b) => a + b, 0);
-  let minute = rng.int(0, Math.floor(Math.max(0, 24 * 60 - total) / 15)) * 15;
-  return lengths.map((len, i) => {
-    const startMs = dayStartMs + minute * 60_000;
-    minute += len + (gaps[i] ?? 0);
-    return { vehicle, startMs, plannedEndMs: startMs + len * 60_000, operatingDay };
-  });
-}
-
-function planMonth(ctx: Context, input: GeneratorInput): PlannedShift[] {
-  const plans: PlannedShift[] = [];
-  for (let day = 1; day <= daysInMonth(input.year, input.month); day++) {
-    const dayStart = operatingDayStartMs(input.year, input.month, day);
-    if (dayStart === null) continue;
-    const key = `${input.year}-${String(input.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    for (const vehicle of input.vehicles) {
-      if (ctx.rng.chance(ctx.opts.activeDayShare)) plans.push(...planVehicleDay(ctx, vehicle, dayStart, key));
-    }
-  }
-  return plans.sort((a, b) => a.startMs - b.startMs);
-}
-
-interface DriverState { driver: SimDriver; lastEndMs: number; workedMs: number }
-
-/** The driver who has worked least this month among those rested enough. */
-function pickDriver(ctx: Context, states: DriverState[], plan: PlannedShift): DriverState | null {
-  const restMs = ctx.opts.minDriverRestMinutes * 60_000;
-  const free = states.filter(s => plan.startMs >= s.lastEndMs + restMs);
-  if (free.length === 0) return null;
-  const least = Math.min(...free.map(s => s.workedMs));
-  return ctx.rng.pick(free.filter(s => s.workedMs === least));
-}
-
-/**
- * A month with fares of its own making. NOT used by the screen: it invents
- * revenue the books never recorded, which is exactly what the feature must not
- * do. The screen uses generateFromFigures (figures.ts). Kept for the physical
- * rules' tests only.
- */
-export function generateMonth(input: GeneratorInput): GeneratedMonth {
-  const opts: GeneratorOptions = { ...DEFAULT_OPTIONS, ...input.options };
-  const ctx: Context = { rng: createRng(input.seed), opts, base: input.base, pool: input.pool, usedTransmits: new Set() };
-  const states: DriverState[] = input.drivers.map(driver => ({ driver, lastEndMs: -Infinity, workedMs: 0 }));
-  const shifts: SimShift[] = [];
-  const rides: SimRide[] = [];
-  let droppedShifts = 0;
-  if (input.pool.length < 8 || input.vehicles.length === 0 || states.length === 0) {
-    return { shifts, rides, droppedShifts: 0 };
-  }
-
-  for (const plan of planMonth(ctx, input)) {
-    const state = pickDriver(ctx, states, plan);
-    const id = `S${shifts.length + droppedShifts + 1}`;
-    const run = state ? runShift(ctx, plan, { shiftId: id, vehicle: plan.vehicle, driver: state.driver }) : null;
-    if (!state || !run) { droppedShifts++; continue; }
-    state.lastEndMs = run.endMs;
-    state.workedMs += run.endMs - plan.startMs;
-    shifts.push({ id, vehicle: plan.vehicle, driver: state.driver, operatingDay: plan.operatingDay, startMs: plan.startMs, endMs: run.endMs });
-    rides.push(...run.rides);
-  }
-  rides.sort((a, b) => a.orderTransmittedMs - b.orderTransmittedMs);
-  return { shifts, rides, droppedShifts };
 }
 
 // ── The rules, checked independently of how the rides were made ─────────────

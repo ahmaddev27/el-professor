@@ -71,6 +71,8 @@ interface SavedRecord {
   calculated_salary?: number | null;
   pdf_storage_path?: string | null;
   snapshot_hash?: string | null;
+  /** Set by the database from the run the record was saved from; never cleared. */
+  is_simulated?: boolean;
 }
 
 interface MonthGroup {
@@ -125,7 +127,7 @@ function exportSavedPDF(rec: SavedRecord): void {
   };
   const warnings = Array.isArray(rec.warnings_json) ? rec.warnings_json : [];
   exportStundennachweisAsPdf(
-    { driver: { name: driver_name, personalnummer }, month, year, rows, totals, warnings },
+    { driver: { name: driver_name, personalnummer }, month, year, rows, totals, warnings, simulated: rec.is_simulated === true },
     `Stundennachweis_${driver_name.replace(/\s+/g, '_')}_${MONTH_NAMES_DE[month - 1]}_${year}`,
   );
 }

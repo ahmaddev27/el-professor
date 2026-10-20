@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
 import { FAHRTENBUCH_ORIGINAL_COLUMNS } from '../fahrtenbuchExport';
-import { generateMonth } from './generator';
+import { addDays, generateFromFigures, mondaysOfMonth } from './figures';
 import { prepareSimulatedImport } from './importPath';
 import { SIMULATED_NOTICE, SIMULATED_SHEET_NAME } from './marker';
 import { formatPosition, ridesToRows } from './sheet';
@@ -14,11 +14,16 @@ const POOL: PoolAddress[] = Array.from({ length: 400 }, (_, i) => ({
   lon: 7.0 + (i % 20) * 0.0085,
 }));
 const DRIVERS = ['Ferhat Erol', 'Alev Büyükay', 'Chris Muster', 'Dana Probe', 'Emil Test', 'Fritz Demo'];
-const month = generateMonth({
-  year: 2026, month: 9, base: BASE, pool: POOL, seed: 7,
+const INCOME = mondaysOfMonth(2026, 9).flatMap((monday, w) => DRIVERS.flatMap((name, d) => [
+  { driver_name: name, type: 'umsatz', date: addDays(monday, 6), amount: 1100 + w * 90 + d * 130 + 0.41 },
+  { driver_name: name, type: 'bargeld', date: addDays(monday, 6), amount: 250 + d },
+  { driver_name: name, type: 'trinkgeld', date: addDays(monday, 6), amount: 30 },
+]));
+const month = generateFromFigures({
+  year: 2026, month: 9, base: BASE, pool: POOL, seed: 7, income: INCOME, occupied: new Set(),
   vehicles: [{ plate: 'SG-YA15', type: 'Toyota Corolla Touring Sports' }, { plate: 'SG-YA18', type: 'Toyota Corolla Touring Sports' }],
   drivers: DRIVERS.map(name => ({ name })),
-});
+}).month;
 
 describe('the generated sheet', () => {
   const rows = ridesToRows(month.rides);

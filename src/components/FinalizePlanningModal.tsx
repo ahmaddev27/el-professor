@@ -13,6 +13,7 @@
  * Only write: one INSERT into planning_finalizations.
  */
 
+import { importsAreSimulated } from '../utils/simulatedRides/importMarker';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -1032,10 +1033,12 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
   // ── Download per-driver Stundennachweis PDF from finalized snapshot ──
 
-  function handleDownloadStunden(driver: DriverSummary): void {
+  async function handleDownloadStunden(driver: DriverSummary): Promise<void> {
     if (!driver.pdfData) return;
     setDownloadingStundenDriverId(driver.id);
     try {
+      // The run's rides decide: a Stundennachweis built from simulated rides says so.
+      const simulated = await importsAreSimulated([run.import_id]);
       const safeName = driver.name.replace(/[/\\:*?"<>|]/g, '_');
       // Banner and filename belong to the statutory Stundennachweis PDF and stay
       // German in both UI languages.
@@ -1047,9 +1050,12 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           rows: driver.pdfData.rows,
           totals: driver.pdfData.totals,
           warnings: [`Finalisierter Stundennachweis · ${MONTHS_DE[run.month - 1]} ${run.year}`],
+          simulated,
         },
         `Stundennachweis_${safeName}_${MONTHS_DE[run.month - 1]}_${run.year}.pdf`,
       );
+    } catch (e) {
+      setError(formatError(e));
     } finally {
       setDownloadingStundenDriverId(null);
     }

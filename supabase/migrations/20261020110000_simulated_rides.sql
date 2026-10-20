@@ -203,6 +203,45 @@ CREATE TRIGGER fahrtenbuch_trips_refuse_double_count
 
 REVOKE ALL ON FUNCTION public.fahrtenbuch_trips_refuse_double_count() FROM PUBLIC, anon, authenticated, service_role;
 
+-- ─── A saved Stundennachweis is a stored copy of hours: it keeps the marker ────
+
+-- saved_stundennachweise.source_run_id / source_import_id say where a record came
+-- from, but nothing wrote the import, and a record outlives the screen that made
+-- it. The marker is therefore on the record itself, derived from its source by
+-- trigger and, once true, never false again: the hours in rows_json came from
+-- simulated ride times for good, whatever is saved over them later.
+ALTER TABLE public.saved_stundennachweise
+  ADD COLUMN IF NOT EXISTS is_simulated boolean NOT NULL DEFAULT false;
+
+CREATE OR REPLACE FUNCTION public.saved_stundennachweise_keep_simulated()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_derived boolean;
+BEGIN
+  SELECT EXISTS (
+           SELECT 1 FROM public.company_planning_runs r
+             JOIN public.fahrtenbuch_imports i ON i.id = r.import_id
+            WHERE r.id = NEW.source_run_id AND i.is_simulated)
+      OR EXISTS (
+           SELECT 1 FROM public.fahrtenbuch_imports i
+            WHERE i.id = NEW.source_import_id AND i.is_simulated)
+    INTO v_derived;
+  -- A caller may mark more, never less.
+  NEW.is_simulated := NEW.is_simulated OR v_derived OR (TG_OP = 'UPDATE' AND OLD.is_simulated);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS saved_stundennachweise_keep_simulated ON public.saved_stundennachweise;
+CREATE TRIGGER saved_stundennachweise_keep_simulated
+  BEFORE INSERT OR UPDATE ON public.saved_stundennachweise
+  FOR EACH ROW EXECUTE FUNCTION public.saved_stundennachweise_keep_simulated();
+
+REVOKE ALL ON FUNCTION public.saved_stundennachweise_keep_simulated() FROM PUBLIC, anon, authenticated, service_role;
+
 DO $selfcheck$
 DECLARE
   v_col record;
@@ -225,7 +264,7 @@ BEGIN
     RAISE EXCEPTION 'simulated rides self-check 1: both tables must carry is_simulated';
   END IF;
 
-  FOREACH v_fn IN ARRAY ARRAY['fahrtenbuch_trips_keep_simulated', 'fahrtenbuch_imports_keep_simulated', 'fahrtenbuch_trips_refuse_double_count'] LOOP
+  FOREACH v_fn IN ARRAY ARRAY['fahrtenbuch_trips_keep_simulated', 'fahrtenbuch_imports_keep_simulated', 'fahrtenbuch_trips_refuse_double_count', 'saved_stundennachweise_keep_simulated'] LOOP
     IF (SELECT p.prosecdef FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = v_fn) THEN
       RAISE EXCEPTION 'simulated rides self-check 2: % must stay SECURITY INVOKER', v_fn;
     END IF;

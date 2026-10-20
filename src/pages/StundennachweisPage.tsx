@@ -2092,6 +2092,8 @@ interface PdfData {
   totals:   Totals;
   notes?:   Note[];
   warnings?: string[];
+  /** From the saved record the sheet was opened from; a sheet typed here is not built from rides. */
+  simulated: boolean;
 }
 
 /**
@@ -2159,7 +2161,7 @@ function exportPDF(data: PdfData, filename: string): void {
     };
   });
   exportStundennachweisAsPdf(
-    { ...data, notes: pdfNotes, warnings: data.warnings ?? [] },
+    { ...data, notes: pdfNotes, warnings: data.warnings ?? [], simulated: data.simulated },
     filename,
   );
 }
@@ -3366,6 +3368,7 @@ const StundennachweisPage: React.FC = () => {
   const [noSalaryMeta, setNoSalaryMeta] = useState(false);
   // Set when a saved record is opened from the archive
   const [isFromArchive, setIsFromArchive] = useState(false);
+  const [archiveSimulated, setArchiveSimulated] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [generationSource, setGenerationSource] = useState<string | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
@@ -3452,6 +3455,7 @@ const StundennachweisPage: React.FC = () => {
       setWorkWindow(rec.work_window_json as WorkWindowConstraints);
     }
     setIsFromArchive(true);
+    setArchiveSimulated(rec.is_simulated === true);
     setGenerationSource((rec.generation_source as string | null) ?? null);
     const ts = (rec.updated_at ?? rec.saved_at) as string | null;
     setSavedAt(ts ?? null);
@@ -3587,6 +3591,7 @@ const StundennachweisPage: React.FC = () => {
           totals,
           notes:    notes,
           warnings: generationWarnings,
+          simulated: archiveSimulated,
         },
         `Stundennachweis_${selDriver.name.replace(/\s+/g,'_')}_${MONTH_NAMES_DE[selMonth-1]}_${selYear}`
       );
@@ -3632,6 +3637,7 @@ const StundennachweisPage: React.FC = () => {
           calculated_salary:   hourlyRate > 0 ? calcSal : null,
           totals_target_json:  genMode === 'totals' ? totalsTarget : null,
           work_window_json:    workWindow ?? null,
+          is_simulated:        archiveSimulated,
           updated_at:          new Date().toISOString(),
         }, { onConflict: 'company_id,driver_id,month,year' });
       if (error) throw error;

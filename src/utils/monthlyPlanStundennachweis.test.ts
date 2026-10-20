@@ -86,6 +86,7 @@ function plan(blocks: StoredPlanBlock[], over: Partial<StoredMonthlyPlan> = {}):
     year: 2026,
     month: 5,
     status: 'confirmed',
+    simulated: false,
     drivers: [DRIVER],
     blocks,
     ...over,

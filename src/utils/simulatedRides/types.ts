@@ -18,35 +18,17 @@ export interface SimDriver {
 }
 
 export interface GeneratorOptions {
-  /** Hard ceiling per vehicle and operating day. Never above 3. */
-  maxShiftsPerVehicleDay: number;
-  /** Share of vehicle-days with 1, 2 and 3 shifts. */
-  shiftCountWeights: readonly [number, number, number];
   minShiftMinutes: number;
   maxShiftMinutes: number;
   /** Idle time between two shifts of one vehicle. */
   minVehicleGapMinutes: number;
   /** A driver starts no shift sooner than this after his last one ended. */
   minDriverRestMinutes: number;
-  /** Share of vehicle-days that run at all. */
-  activeDayShare: number;
   cancellationShare: number;
   tipShare: number;
   /** Share paid through the app; the rest is cash ("Bar"). */
   appPaymentShare: number;
   prebookedShare: number;
-}
-
-export interface GeneratorInput {
-  year: number;
-  /** 1 = January. */
-  month: number;
-  base: GeoPoint;
-  pool: readonly PoolAddress[];
-  vehicles: readonly SimVehicle[];
-  drivers: readonly SimDriver[];
-  seed: number;
-  options?: Partial<GeneratorOptions>;
 }
 
 export interface SimShift {

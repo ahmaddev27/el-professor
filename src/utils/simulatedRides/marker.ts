@@ -18,6 +18,9 @@ export const SIMULATED_NOTICE =
   'SIMULIERT – Diese Fahrten wurden vom Fahrtengenerator erzeugt. Es sind keine echten Fahrten. '
   + 'Nicht als Nachweis, Fahrtenbuch oder Lohngrundlage verwenden.';
 
+/** One line for a PDF margin: where the long notice does not fit. */
+export const SIMULATED_SHORT_NOTICE = 'SIMULIERT - keine echten Fahrten, kein Arbeitszeitnachweis, nicht verwenden';
+
 interface MaybeSimulated {
   is_simulated?: boolean | null;
 }
@@ -50,6 +53,16 @@ export function addSimulatedNotice(wb: XLSX.WorkBook, position: 'first' | 'last'
     wb.SheetNames = [SIMULATED_SHEET_NAME, ...wb.SheetNames.filter(n => n !== SIMULATED_SHEET_NAME)];
   }
   wb.Props = { ...(wb.Props ?? {}), Title: SIMULATED_NOTICE };
+}
+
+/**
+ * Writes a workbook; if any ride behind it is simulated the file carries the
+ * notice sheet first and the SIMULIERT_ file name. The one place the workbook
+ * writers that cannot build their data themselves go through.
+ */
+export function writeMarkedWorkbook(wb: XLSX.WorkBook, fileName: string, simulated: boolean): void {
+  if (simulated) addSimulatedNotice(wb, 'first');
+  XLSX.writeFile(wb, simulated ? simulatedFileName(fileName) : fileName);
 }
 
 /** Two rows under the data of a ride sheet: an empty one and the notice. */

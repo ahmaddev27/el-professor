@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { writeMarkedWorkbook } from './simulatedRides/marker';
 import { downloadStyledWorkbook } from './styledWorkbookDownload';
 // The column list, the hour formatter and the month names are shared with §12's
 // payroll summary (`monthlyPlanPayrollSummary.ts`), which prints the same seven
@@ -279,8 +280,10 @@ export function exportFahreruebersichtImportFormat(params: {
   year: number;
   companyId: string | null;
   rows: FahreruebersichtImportRow[];
+  /** Required: the figures come from ride times; true when any source ride is simulated. */
+  simulated: boolean;
 }): void {
-  const { month, year, companyId, rows } = params;
+  const { month, year, companyId, rows, simulated } = params;
   const monthName = MONTHS_DE[month - 1];
   const monatLabel = `${monthName} ${year}`;
 
@@ -331,5 +334,5 @@ export function exportFahreruebersichtImportFormat(params: {
   ws['!cols'] = IMPORT_HEADERS.map(h => ({ wch: Math.max(h.length + 4, 14) }));
 
   XLSX.utils.book_append_sheet(wb, ws, `${mm}_${year}`);
-  XLSX.writeFile(wb, fileName);
+  writeMarkedWorkbook(wb, fileName, simulated);
 }

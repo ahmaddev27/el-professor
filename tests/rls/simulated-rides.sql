@@ -93,14 +93,14 @@ BEGIN
       WHERE a.attname = 'is_simulated' AND a.attnotnull AND a.atttypid = 'boolean'::regtype
         AND pg_get_expr(d.adbin, d.adrelid) = 'false'
         AND a.attrelid IN ('public.fahrtenbuch_imports'::regclass, 'public.fahrtenbuch_trips'::regclass)));
-  PERFORM _sr_ok('shape: the three trigger functions are INVOKER and executable by no API role',
-    (SELECT count(*) = 3 AND bool_and(NOT p.prosecdef)
+  PERFORM _sr_ok('shape: the four trigger functions are INVOKER and executable by no API role',
+    (SELECT count(*) = 4 AND bool_and(NOT p.prosecdef)
             AND bool_and(NOT has_function_privilege('anon', p.oid, 'EXECUTE'))
             AND bool_and(NOT has_function_privilege('authenticated', p.oid, 'EXECUTE'))
        FROM pg_proc p
       WHERE p.pronamespace = 'public'::regnamespace
         AND p.proname IN ('fahrtenbuch_trips_keep_simulated', 'fahrtenbuch_imports_keep_simulated',
-                          'fahrtenbuch_trips_refuse_double_count')));
+                          'fahrtenbuch_trips_refuse_double_count', 'saved_stundennachweise_keep_simulated')));
 END $$;
 
 -- ─── 2. inherit ─────────────────────────────────────────────────────────────
@@ -225,6 +225,29 @@ BEGIN
   PERFORM _sr_ok('double count: with the simulated import deleted, a real trip into that week is accepted again',
     _sr_do(NULL, $q$INSERT INTO fahrtenbuch_trips (company_id, import_id, trip_date, original_driver_name, assigned_driver_name)
       VALUES ('c0000000-0000-4000-8000-00000000000a', '51000000-0000-4000-8000-0000000000a9', '2026-09-03', 'X', 'X') RETURNING 'in'$q$) = 'in');
+END $$;
+
+-- ─── 7. a saved Stundennachweis keeps the marker of the rides it came from ──
+
+INSERT INTO company_planning_runs (id, company_id, month, year, import_id)
+VALUES ('51000000-0000-4000-8000-0000000000c1', 'c0000000-0000-4000-8000-00000000000b', 9, 2026, '51000000-0000-4000-8000-0000000000b9'),
+       ('51000000-0000-4000-8000-0000000000c2', 'c0000000-0000-4000-8000-00000000000b', 8, 2026, '51000000-0000-4000-8000-0000000000b1');
+INSERT INTO saved_stundennachweise (id, company_id, driver_id, driver_name, month, year, source_run_id, is_simulated)
+VALUES ('51000000-0000-4000-8000-0000000000d1', 'c0000000-0000-4000-8000-00000000000b', 'd0000000-0000-4000-8000-00000000000b', 'X', 9, 2026,
+        '51000000-0000-4000-8000-0000000000c1', false),
+       ('51000000-0000-4000-8000-0000000000d2', 'c0000000-0000-4000-8000-00000000000b', 'd0000000-0000-4000-8000-00000000000b', 'X', 8, 2026,
+        '51000000-0000-4000-8000-0000000000c2', false);
+
+DO $$
+BEGIN
+  PERFORM _sr_ok('saved: a record saved from a simulated run is simulated, whatever the insert said',
+    (SELECT is_simulated FROM saved_stundennachweise WHERE id = '51000000-0000-4000-8000-0000000000d1'));
+  PERFORM _sr_ok('saved: control, a record saved from a real run is not',
+    (SELECT NOT is_simulated FROM saved_stundennachweise WHERE id = '51000000-0000-4000-8000-0000000000d2'));
+  PERFORM _sr_ok('saved: once simulated it cannot be saved back to real',
+    _sr_do(NULL, $q$UPDATE saved_stundennachweise SET is_simulated = false, source_run_id = NULL WHERE id = '51000000-0000-4000-8000-0000000000d1' RETURNING is_simulated::text$q$) = 'true');
+  PERFORM _sr_ok('saved: a caller may mark a record more, not less',
+    _sr_do(NULL, $q$UPDATE saved_stundennachweise SET is_simulated = true WHERE id = '51000000-0000-4000-8000-0000000000d2' RETURNING is_simulated::text$q$) = 'true');
 END $$;
 
 ROLLBACK;

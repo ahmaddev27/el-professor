@@ -3,57 +3,61 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Every file under src/ that names `fahrtenbuch_trips`, and what keeps a
- * simulated ride from reaching a figure or a document unannounced.
+ * Every file under src/ that names `fahrtenbuch_trips`, and what it does about
+ * simulated rides. There are two answers and no third.
  *
  * The Fahrtenbuch is not a leaf: planning, the Stundennachweis, the Lohnart
- * premiums, the payroll summary and the analysis all read trips and none asks
- * whether a trip was real. The money cannot move: simulated rides are derived
- * from the recorded income and add up to it to the cent (figures.test.ts), and a
- * driver-week holds real trips or simulated ones, never both
- * (`fahrtenbuch_trips_refuse_double_count`, tests/rls/simulated-rides.sql).
- * The TIMES are invented, though, and hours-based readers print them, so:
+ * premiums, the payroll summary and the analysis all read trips and none asked
+ * whether a trip was real. The money cannot move (simulated rides are derived
+ * from the recorded income and add up to it to the cent, figures.test.ts; a
+ * driver-week holds real or simulated trips, never both,
+ * tests/rls/simulated-rides.sql). The TIMES are invented, though, and
+ * hours-based documents print them. So the rule is the rides': a document whose
+ * source trips include a simulated one carries the marker (SIMULIERT line,
+ * notice sheet or PDF stamp, and the SIMULIERT_ file name), whatever company it
+ * is in.
  *
- *   marks     the file it writes says SIMULIERT (sheet, line, file name)
- *   isolated  it reads trips and produces figures or documents from the invented
- *             times or routes, and does NOT yet print the marker itself. This is
- *             the open gap: do not use these in a company whose drivers are paid
- *             by hours until the marker is printed on each.
- *   counts    it reads trips only to count or delete them; no figure, no document
+ *   marks   the file produces or forwards a document or a screen of figures and
+ *           carries the marker itself (it reads is_simulated, or asks the
+ *           import), or EXCLUDES simulated rides from what it computes
+ *   counts  the file reads trips without producing a document: a pure engine or
+ *           type, a count, a deletion preview, or a screen that only hands rows
+ *           to a builder that marks (named in the comment beside it)
  *
- * A new reader fails this test until someone writes its line down.
+ * A new reader fails this test until someone writes its line down, and a
+ * 'marks' line must really mention the marker.
  */
-type Disposition = 'marks' | 'isolated' | 'counts';
+type Disposition = 'marks' | 'counts';
 
 const INVENTORY: Record<string, Disposition> = {
   'components/CompanyDeletionPreview.tsx': 'counts',
-  'components/FinalizePlanningModal.tsx': 'isolated',
-  'components/HistoricalReconciliationWizard.tsx': 'isolated',
-  'components/HistoricalWorkingHoursWizard.tsx': 'isolated',
-  'components/MonatsplanungAppliedRuns.tsx': 'isolated',
-  'components/MonatsplanungStundennachweisPreview.tsx': 'isolated',
-  'components/MonthlyPlanDocumentsStep.tsx': 'isolated',
+  'components/FinalizePlanningModal.tsx': 'marks',
+  'components/HistoricalReconciliationWizard.tsx': 'marks',
+  'components/HistoricalWorkingHoursWizard.tsx': 'marks',
+  'components/MonatsplanungAppliedRuns.tsx': 'counts', // export goes through exportAppliedRunXlsx (marks)
+  'components/MonatsplanungStundennachweisPreview.tsx': 'marks',
+  'components/MonthlyPlanDocumentsStep.tsx': 'counts', // renders builder output; every builder is wrapped by markSimulated
   'hooks/useFahrtenbuch.ts': 'marks',
   'lib/platformCompanyDeletion.ts': 'counts',
-  'lib/tripAnalysisClient.ts': 'isolated',
+  'lib/tripAnalysisClient.ts': 'marks',
   'pages/AbnahmeDiagnosticPage.tsx': 'counts',
-  'pages/CompanyPlannerPage.tsx': 'isolated',
-  'pages/MonthlyPlanPage.tsx': 'isolated',
+  'pages/CompanyPlannerPage.tsx': 'counts', // lists runs; the documents come from Preview and Finalize (marks)
+  'pages/MonthlyPlanPage.tsx': 'marks',
   'pages/SimulatedRidesPage.tsx': 'counts',
-  'pages/TripAnalysisPage.tsx': 'isolated',
+  'pages/TripAnalysisPage.tsx': 'marks',
   'utils/backup.ts': 'counts',
-  'utils/fahrtenbuchImportParser.ts': 'counts',
+  'utils/fahrtenbuchImportParser.ts': 'counts', // the import path, which sets the marker
   'utils/monatsplanungXlsxExport.ts': 'marks',
-  'utils/monthlyPlan/blocks.ts': 'isolated',
-  'utils/monthlyPlanDocuments.ts': 'isolated',
+  'utils/monthlyPlan/blocks.ts': 'counts', // pure block engine, no document
+  'utils/monthlyPlanDocuments.ts': 'marks',
   'utils/monthlyPlanFahrtenbuchExport.ts': 'marks',
-  'utils/monthlyPlanPayrollSummary.ts': 'isolated',
-  'utils/monthlyPlanStundennachweis.ts': 'isolated',
-  'utils/returnCheck/parse.ts': 'isolated',
-  'utils/shiftRecommendation/types.ts': 'isolated',
-  'utils/shiftRecommendationReference.ts': 'isolated',
-  'utils/tripAnalysis/adapter.ts': 'isolated',
-  'utils/tripAnalysis/types.ts': 'isolated',
+  'utils/monthlyPlanPayrollSummary.ts': 'counts', // pure figures; the payroll builder that prints them is wrapped by markSimulated
+  'utils/monthlyPlanStundennachweis.ts': 'marks',
+  'utils/returnCheck/parse.ts': 'counts', // pure row reader, no document
+  'utils/shiftRecommendation/types.ts': 'counts', // types only; ShiftRecommendationPage drops simulated rides before learning
+  'utils/shiftRecommendationReference.ts': 'counts', // pure statistics over rows the page already filtered
+  'utils/tripAnalysis/adapter.ts': 'counts', // pure adapter, no document
+  'utils/tripAnalysis/types.ts': 'marks',
 };
 
 function sources(dir: string): string[] {
@@ -79,7 +83,7 @@ describe('readers of fahrtenbuch_trips', () => {
     for (const [file, how] of Object.entries(INVENTORY)) {
       if (how !== 'marks') continue;
       const text = readFileSync(path.join(root, file), 'utf8');
-      expect(/simulatedRides\/marker|is_simulated/.test(text), file).toBe(true);
+      expect(/[sS]imulated|SIMULIERT/.test(text), file).toBe(true);
     }
   });
 
@@ -96,5 +100,23 @@ describe('readers of fahrtenbuch_trips', () => {
       const text = readFileSync(file, 'utf8');
       expect(/from\(['"](income|receipts|cash_transactions|cash_movements|salaries|salary_payments)['"]\)\s*\.\s*(insert|update|upsert|delete)/.test(text), file).toBe(false);
     }
+  });
+
+  it('the shift recommendation never learns from simulated rides', () => {
+    const page = readFileSync(path.join(root, 'pages/ShiftRecommendationPage.tsx'), 'utf8');
+    expect(page).toMatch(/is_simulated !== true/);
+  });
+
+  it('every file that writes a Stundennachweis PDF decides whether it is simulated', () => {
+    const callers = sources(root).filter(file => /exportStundennachweisAsPdf\(|getStundennachweisBlob\(/.test(readFileSync(file, 'utf8'))
+      && !file.endsWith('stundennachweisPdfExport.ts'));
+    expect(callers.length).toBeGreaterThan(4);
+    for (const file of callers) expect(readFileSync(file, 'utf8'), file).toMatch(/simulated/);
+  });
+
+  it('the PDF writer takes the flag as a REQUIRED property, so a new caller cannot forget it', () => {
+    const writer = readFileSync(path.join(root, 'utils/stundennachweisPdfExport.ts'), 'utf8');
+    expect(writer).toMatch(/\n  simulated: boolean;/);
+    expect(writer).not.toMatch(/simulated\?: boolean/);
   });
 });

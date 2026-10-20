@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
 import { translate, type TranslationKey, type TranslationVars } from '../i18n';
 import type { AnalysisTrip, TripAnalysisResult } from './tripAnalysis/types';
 import { effectiveSettings } from '../lib/tripAnalysisView';
-import { buildTripAnalysisReport, tripAnalysisReportFileName } from './tripAnalysisReport';
+import { buildTripAnalysisReport, downloadTripAnalysisReport, tripAnalysisReportFileName } from './tripAnalysisReport';
+import { SIMULATED_SHEET_NAME } from './simulatedRides/marker';
+
+const delivered: { wb: XLSX.WorkBook; name: string }[] = [];
+vi.mock('./serviceWorkbookDownload', () => ({
+  deliverWorkbook: (wb: XLSX.WorkBook, name: string) => { delivered.push({ wb, name }); },
+}));
 
 const de = (key: TranslationKey, vars?: TranslationVars) => translate('de', key, vars);
 const en = (key: TranslationKey, vars?: TranslationVars) => translate('en', key, vars);
@@ -46,6 +52,7 @@ const result: TripAnalysisResult = {
 function build(t = de) {
   return buildTripAnalysisReport({
     t,
+    simulated: false,
     result,
     settings: effectiveSettings({ id: 's', block_gap_minutes: 45, travel_margin_minutes: null, updated_at: null }, true),
     driverRows: [],
@@ -187,5 +194,22 @@ describe('buildTripAnalysisReport — the drawing', () => {
     expect(cell(ws, 'A1')?.v).toBe(de('ta.report.marker'));
     expect(cell(ws, 'A5')?.v).toBe('t1');
     expect(cell(ws, 'A6')?.v).toBe('t2');
+  });
+});
+
+describe('a report built from simulated rides says so', () => {
+  const input = (simulated: boolean) => ({
+    t: de, simulated, result, settings: effectiveSettings({ id: 's', block_gap_minutes: 45, travel_margin_minutes: null, updated_at: null }, true),
+    driverRows: [], month: 8, year: 2026, fileName: 'f.xlsx', generatedAtMs: 0,
+  });
+
+  it('puts the notice sheet first and SIMULIERT_ on the file name; the control has neither', () => {
+    delivered.length = 0;
+    downloadTripAnalysisReport(input(true));
+    downloadTripAnalysisReport(input(false));
+    expect(delivered[0].wb.SheetNames[0]).toBe(SIMULATED_SHEET_NAME);
+    expect(delivered[0].name.startsWith('SIMULIERT_')).toBe(true);
+    expect(delivered[1].wb.SheetNames).not.toContain(SIMULATED_SHEET_NAME);
+    expect(delivered[1].name.startsWith('SIMULIERT_')).toBe(false);
   });
 });

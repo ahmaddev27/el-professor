@@ -6,6 +6,7 @@
 // Generator salary logic (planning_hourly_rate + 40% night premium + 50% sunday).
 // No PDF export, no DB writes.
 
+import { SimulatedNotice } from './simulatedRides/SimulatedBadge';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -27,6 +28,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { resolveActualRideWindow } from '../utils/planningQualityChecks';
 import { isPublicHoliday } from '../utils/germanHolidays';
+import { writeMarkedWorkbook } from '../utils/simulatedRides/marker';
 import { exportStundennachweisAsPdf, type PdfDayRow, type PdfTotals, getStundennachweisBlob } from '../utils/stundennachweisPdfExport';
 import { exportAppliedRunXlsx, type AppliedRunSummary } from '../utils/monatsplanungXlsxExport';
 import { exportFahreruebersichtImportFormat, type FahreruebersichtImportRow } from '../utils/fahreruebersichtExport';
@@ -76,6 +78,8 @@ interface TripRow {
   assignment_source: string | null;
   is_canceled: boolean;
   raw_data_json: Record<string, unknown> | null;
+  /** Copied from the import by the database; a document built from such a ride says so. */
+  is_simulated?: boolean;
 }
 
 interface ExceptionRow {
@@ -935,11 +939,11 @@ function buildPdfRows(group: DriverGroup, month: number, year: number, bundeslan
   return { rows, totals };
 }
 
-function exportDriverPdf(group: DriverGroup, month: number, year: number, bundesland?: string | null): void {
+function exportDriverPdf(group: DriverGroup, month: number, year: number, bundesland: string | null | undefined, simulated: boolean): void {
   const { rows, totals } = buildPdfRows(group, month, year, bundesland);
   const MONTHS_DE_PDF = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
   exportStundennachweisAsPdf(
-    { driver: { name: group.driver_name }, month, year, rows, totals },
+    { driver: { name: group.driver_name }, month, year, rows, totals, simulated },
     `Stundennachweis_${group.driver_name.replace(/\s+/g, '_')}_${MONTHS_DE_PDF[month - 1]}_${year}`,
   );
 }
@@ -954,6 +958,7 @@ function buildPruefExportXlsx(
   trips: TripRow[],
   month: number,
   year: number,
+  simulated: boolean,
 ): void {
   const wb = XLSX.utils.book_new();
   const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -1184,7 +1189,7 @@ function buildPruefExportXlsx(
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(warnings), 'Warnungen');
 
   const MONTHS_XLSX = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
-  XLSX.writeFile(wb, `Stundennachweis_Pruefexport_${MONTHS_XLSX[month - 1]}_${year}.xlsx`);
+  writeMarkedWorkbook(wb, `Stundennachweis_Pruefexport_${MONTHS_XLSX[month - 1]}_${year}.xlsx`, simulated);
 }
 
 function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }: Props) {
@@ -1192,6 +1197,8 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [trips, setTrips] = useState<TripRow[]>([]);
+  // The trips decide: a document with any simulated ride behind it says so.
+  const simulated = trips.some(trip => trip.is_simulated === true);
   const [exceptions, setExceptions] = useState<ExceptionRow[]>([]);
   const [wages, setWages] = useState<DriverWage[]>([]);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
@@ -1365,7 +1372,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       while (true) {
         let q = supabase
           .from('fahrtenbuch_trips')
-          .select('id, trip_date, start_time, end_time, car_identifier, assigned_driver_id, assigned_driver_name, assignment_block_id, assignment_source, is_canceled, raw_data_json')
+          .select('id, trip_date, start_time, end_time, car_identifier, assigned_driver_id, assigned_driver_name, assignment_block_id, assignment_source, is_canceled, raw_data_json, is_simulated')
           .eq('assignment_planning_run_id', run.id)
           .order('trip_date', { ascending: true })
           .order('start_time', { ascending: true })
@@ -1626,7 +1633,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
     if (!target) return;
     try {
       setPdfExporting(true);
-      exportDriverPdf(target, run.month, run.year, companyBundesland);
+      exportDriverPdf(target, run.month, run.year, companyBundesland, simulated);
     } catch (e) {
       setExportError(e instanceof Error ? e.message : t('stn.err.pdfExportFailed'));
     } finally {
@@ -1647,7 +1654,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
     try {
       setPdfExporting(true);
       for (const g of targetGroups) {
-        exportDriverPdf(g, run.month, run.year, companyBundesland);
+        exportDriverPdf(g, run.month, run.year, companyBundesland, simulated);
       }
     } catch (e) {
       setExportError(e instanceof Error ? e.message : t('stn.err.pdfExportFailed'));
@@ -1686,6 +1693,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           year: run.year,
           rows: pdfRows,
           totals,
+          simulated,
         };
         const pdfBlob = getStundennachweisBlob(pdfData);
 
@@ -1744,6 +1752,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         rows_json:         rowsForStorage,
         generation_source: 'monatsplanung',
         source_run_id:     run.id,
+        is_simulated:      simulated,
         generated_at:      new Date().toISOString(),
         hourly_rate:       g.hourly_rate ?? null,
         target_salary:     g.target_salary ?? null,
@@ -1769,7 +1778,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
     setExportError('');
     try {
       setXlsxExporting(true);
-      buildPruefExportXlsx(driverGroups, trips, run.month, run.year);
+      buildPruefExportXlsx(driverGroups, trips, run.month, run.year, simulated);
     } catch (e) {
       setExportError(e instanceof Error ? e.message : t('stn.err.xlsxExportFailed'));
     } finally {
@@ -1826,6 +1835,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         year: run.year,
         companyId: run.company_id ?? null,
         rows,
+        simulated,
       });
     } catch (e) {
       setExportError(e instanceof Error ? e.message : t('stn.err.driverOverviewFailed'));
@@ -1880,6 +1890,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
         onClick={e => e.stopPropagation()}
       >
+        {simulated ? <div className="px-5 pt-4"><SimulatedNotice /></div> : null}
         <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0">
             <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>

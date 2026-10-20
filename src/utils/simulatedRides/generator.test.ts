@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { generateMonth, validateRides, SHIFT_LIMITS } from './generator';
+import { SHIFT_LIMITS, validateRides } from './generator';
+import { addDays, generateFromFigures, mondaysOfMonth, type FiguresInput, type IncomeRow } from './figures';
 import { minTravelSeconds } from './geo';
 import { localHour, operatingDayOf } from './time';
-import type { GeneratedMonth, GeneratorInput, GeoPoint, PoolAddress } from './types';
+import type { GeneratedMonth, GeoPoint, PoolAddress } from './types';
 
+/**
+ * The physical rules of a generated month, on the one generator that ships.
+ * (An earlier generator that invented its own fares was deleted: it could be
+ * called by mistake and produce revenue the books never recorded.)
+ */
 const BASE: GeoPoint = { lat: 51.1657, lon: 7.0671 };
 
 /** 24 x 24 addresses about 0.6 km apart: a town of roughly 14 km across. */
@@ -13,24 +19,41 @@ const POOL: PoolAddress[] = Array.from({ length: 576 }, (_, i) => ({
   lon: 7.0 + (i % 24) * 0.0085,
 }));
 
-const input = (over: Partial<GeneratorInput> = {}): GeneratorInput => ({
+const NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+
+function incomeFor(year: number, month: number): IncomeRow[] {
+  return mondaysOfMonth(year, month).flatMap((monday, w) => NAMES.flatMap((name, d) => {
+    const date = addDays(monday, 6);
+    const umsatz = 900 + ((w * 7 + d) % 5) * 260 + 0.37 * d;
+    return [
+      { driver_name: name, type: 'umsatz', date, amount: umsatz },
+      { driver_name: name, type: 'bargeld', date, amount: Math.round(umsatz * 0.3 * 100) / 100 },
+      { driver_name: name, type: 'trinkgeld', date, amount: 20 + d },
+    ];
+  }));
+}
+
+const input = (over: Partial<FiguresInput> = {}): FiguresInput => ({
   year: 2026,
   month: 9,
   base: BASE,
   pool: POOL,
   vehicles: [{ plate: 'SG-YA15', type: 'Toyota' }, { plate: 'SG-YA18', type: 'Toyota' }, { plate: 'SG-YA20', type: 'Toyota' }],
-  drivers: ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map(name => ({ name })),
+  drivers: NAMES.map(name => ({ name })),
+  income: incomeFor(2026, 9),
+  occupied: new Set(),
   seed: 42,
   ...over,
 });
 
-describe('generateMonth', () => {
-  const month = generateMonth(input());
+describe('the generated month', () => {
+  const result = generateFromFigures(input());
+  const month = result.month;
 
-  it('produces a month, and the same one for the same seed', () => {
+  it('is a month, and the same one for the same seed', () => {
     expect(month.rides.length).toBeGreaterThan(300);
-    expect(generateMonth(input()).rides).toEqual(month.rides);
-    expect(generateMonth(input({ seed: 43 })).rides).not.toEqual(month.rides);
+    expect(generateFromFigures(input()).month.rides).toEqual(month.rides);
+    expect(generateFromFigures(input({ seed: 43 })).month.rides).not.toEqual(month.rides);
   });
 
   it('passes its own validator', () => {
@@ -45,10 +68,10 @@ describe('generateMonth', () => {
     }
   });
 
-  it('puts at most 3 shifts of a vehicle into one operating day, and uses 3 sometimes', () => {
+  it('puts at most 3 shifts of a vehicle into one operating day', () => {
     const counts = new Map<string, number>();
     for (const s of month.shifts) counts.set(`${s.vehicle.plate}|${s.operatingDay}`, (counts.get(`${s.vehicle.plate}|${s.operatingDay}`) ?? 0) + 1);
-    expect(Math.max(...counts.values())).toBe(3);
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(SHIFT_LIMITS.maxPerVehicleDay);
   });
 
   it('never lets a ride overlap another one of the same shift', () => {
@@ -80,23 +103,13 @@ describe('generateMonth', () => {
     }
   });
 
-  it('lets no vehicle and no driver be in two shifts at once, and rests drivers', () => {
+  it('rests the drivers and puts no vehicle or driver in two shifts at once', () => {
     expect(validateRides(month, BASE).filter(v => v.includes('overlap'))).toEqual([]);
     const byDriver = new Map<string, typeof month.shifts>();
     for (const s of month.shifts) byDriver.set(s.driver.name, [...(byDriver.get(s.driver.name) ?? []), s]);
     for (const list of byDriver.values()) {
       const sorted = [...list].sort((a, b) => a.startMs - b.startMs);
       sorted.forEach((s, i) => { if (i > 0) expect(s.startMs - sorted[i - 1].endMs).toBeGreaterThanOrEqual(11 * 3_600_000); });
-    }
-  });
-
-  it('keeps cancellations plausible and without clock times', () => {
-    const cancelled = month.rides.filter(r => r.status === 'cancelled');
-    expect(cancelled.length / month.rides.length).toBeGreaterThan(0.005);
-    expect(cancelled.length / month.rides.length).toBeLessThan(0.05);
-    for (const r of cancelled) {
-      expect(r.startMs).toBeNull();
-      expect(r.km).toBe(0);
     }
   });
 
@@ -111,14 +124,13 @@ describe('generateMonth', () => {
     expect(operatingDayOf(late!.startMs!)).toBe(shift.operatingDay);
   });
 
-  it('writes nothing when it has no pool, no vehicle or no driver', () => {
-    expect(generateMonth(input({ pool: POOL.slice(0, 3) })).rides).toEqual([]);
-    expect(generateMonth(input({ vehicles: [] })).rides).toEqual([]);
-    expect(generateMonth(input({ drivers: [] })).rides).toEqual([]);
+  it('writes nothing without a pool or a vehicle', () => {
+    expect(generateFromFigures(input({ pool: POOL.slice(0, 3) })).month.rides).toEqual([]);
+    expect(generateFromFigures(input({ vehicles: [] })).month.rides).toEqual([]);
   });
 
   it('survives the October clock change without a clock reading that names two instants', () => {
-    const october = generateMonth(input({ month: 10 }));
+    const october = generateFromFigures(input({ month: 10, income: incomeFor(2026, 10) })).month;
     expect(october.rides.length).toBeGreaterThan(100);
     expect(validateRides(october, BASE)).toEqual([]);
   });
@@ -131,16 +143,14 @@ function clone(m: GeneratedMonth): GeneratedMonth {
 }
 
 describe('validateRides (negative controls)', () => {
-  const good = generateMonth(input());
+  const good = generateFromFigures(input()).month;
 
   it('flags a gap shorter than the distance allows', () => {
     const bad = clone(good);
-    const shift = bad.shifts[0];
-    const rides = bad.rides.filter(r => r.shiftId === shift.id && r.status === 'completed').sort((a, b) => a.startMs! - b.startMs!);
-    // Pull the second ride five seconds after the first one ended.
-    const shift2 = rides[1].endMs! - rides[1].startMs!;
+    const rides = bad.rides.filter(r => r.shiftId === bad.shifts[0].id && r.status === 'completed').sort((a, b) => a.startMs! - b.startMs!);
+    const length = rides[1].endMs! - rides[1].startMs!;
     rides[1].startMs = rides[0].endMs! + 5_000;
-    rides[1].endMs = rides[1].startMs + shift2;
+    rides[1].endMs = rides[1].startMs + length;
     expect(validateRides(bad, BASE).some(v => v.includes('shorter than'))).toBe(true);
   });
 

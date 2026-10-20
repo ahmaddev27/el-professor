@@ -1,3 +1,4 @@
+import { SimulatedNotice } from '../components/simulatedRides/SimulatedBadge';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Download, FileSearch, Info, RotateCcw } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -402,6 +403,7 @@ export default function TripAnalysisPage() {
       year: period.year,
       fileName: selectedImport.file_name,
       generatedAtMs: Date.now(),
+      simulated: selectedImport.is_simulated === true,
     });
     showToast('success', t('ta.exported'));
   }, [result, period, selectedImport, effective, driverRows, showToast, t]);
@@ -545,6 +547,7 @@ export default function TripAnalysisPage() {
           {t('ta.boundary')}
         </Alert>
         {scope.readOnly ? <Alert tone="caution">{t('ta.readOnly')}</Alert> : null}
+        {selectedImport?.is_simulated ? <SimulatedNotice /> : null}
 
         {/* Which file the figures come from is part of the claim, so it is
             named whether or not there is a second one to choose from. */}
