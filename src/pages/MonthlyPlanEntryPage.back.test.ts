@@ -41,12 +41,12 @@ describe('generator back link', () => {
   it('returns to the Fahrtenbuch when it was opened from there', () => {
     const out = openAndGoBack('/monatsplan?art=simuliert&from=fahrtenbuch');
     expect(out).toContain('RIDE-LOG');
-    expect(labels.at(-1)).toContain('Zurück zum Fahrtenbuch');
+    expect(labels[labels.length - 1]).toContain('Zurück zum Fahrtenbuch');
   });
   it('returns to the Monatsplan chooser for the old address', () => {
     const out = openAndGoBack('/monatsplan?art=simuliert');
     expect(out).toContain('CHOOSER');
-    expect(labels.at(-1)).toContain('Planungsart wechseln');
+    expect(labels[labels.length - 1]).toContain('Planungsart wechseln');
     expect(out).not.toContain('RIDE-LOG');
   });
 });
