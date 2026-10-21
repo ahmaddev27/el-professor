@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { Plus, CreditCard as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
@@ -153,9 +154,13 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
   const handleDelete = async (r: ReferralCode) => {
     if (!window.confirm(t('codes.referral.deleteConfirm', { code: r.ref_code }))) return;
     try {
-      const { error } = await supabase.from('referrals').delete().eq('id', r.id);
-      if (error) throw error;
-      showToast('success', t('codes.referral.deleted', { code: r.ref_code }));
+      const outcome = await deleteChecked(supabase, 'referrals', q => q.eq('id', r.id));
+      if (outcome === 'refused') {
+        showToast('error', t('common.writeRefused'));
+        return;
+      }
+      if (outcome === 'gone') showToast('warning', t('common.writeAlreadyGone'));
+      else showToast('success', t('codes.referral.deleted', { code: r.ref_code }));
       load();
     } catch (err: any) {
       showToast('error', err.message || t('common.error'));

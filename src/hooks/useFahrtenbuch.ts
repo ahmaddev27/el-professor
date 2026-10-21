@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { inGroups, sourceRowKeyChunks } from '../utils/postgrestLookup';
 import { useAuth } from '../contexts/AuthContext';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type {
@@ -404,7 +405,10 @@ export function useFahrtenbuch() {
     // Verify storage_path was persisted
     if (!importRow.storage_path) {
       await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
-      await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
+      // Rollback: the throw below happens either way. A refused delete (the
+      // import's DELETE is admin-only) leaves a row with no file, so say so.
+      const rollback = await deleteChecked(supabase, 'fahrtenbuch_imports', q => q.eq('id', importId)).catch(() => 'refused');
+      if (rollback === 'refused') console.error('[FahrtenbuchImport] rollback refused, import row left without file:', importId);
       throw new Error(t('imp.blockedFileMissing'));
     }
 

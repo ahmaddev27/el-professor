@@ -17,6 +17,7 @@ import {
   Calendar, List, Play, Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useAuth } from '../contexts/AuthContext';
 import HistoricalHourTargetsManager, {
   HourTargetsTrigger,
@@ -10223,13 +10224,24 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     const imp = imports.find(i => i.id === selectedImportId);
 
     // Delete any existing plan for this company/month/year/mode before inserting new one
-    await supabase
-      .from('historical_wh_saved_plans')
-      .delete()
-      .eq('company_id', companyId)
-      .eq('month', month)
-      .eq('year', year)
-      .eq('mode', 'historical_working_hours');
+    // A hidden DELETE touches nothing and answers 200; inserting after it would
+    // leave two plans for the month. 'gone' (nothing to replace) is fine.
+    try {
+      const cleared = await deleteChecked(supabase, 'historical_wh_saved_plans', q => q
+        .eq('company_id', companyId)
+        .eq('month', month)
+        .eq('year', year)
+        .eq('mode', 'historical_working_hours'));
+      if (cleared === 'refused') {
+        setSavePlanError(t('common.writeRefused'));
+        setSavingPlan(false);
+        return;
+      }
+    } catch (e: any) {
+      setSavePlanError(e?.message ?? t('common.error'));
+      setSavingPlan(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('historical_wh_saved_plans')

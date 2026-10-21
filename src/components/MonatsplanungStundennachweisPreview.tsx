@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
+import { deleteChecked, type WriteOutcome } from '../lib/writeOutcome';
 import { resolveActualRideWindow } from '../utils/planningQualityChecks';
 import { isPublicHoliday } from '../utils/germanHolidays';
 import { writeMarkedWorkbook } from '../utils/simulatedRides/marker';
@@ -3443,13 +3444,17 @@ function GehaltsabweichungSection({
     if (adjs.length === 0) return;
     setSavingAusgleich(driverId);
     setAusgleichError('');
-    const { error } = await supabase
-      .from('planning_run_adjustments')
-      .delete()
-      .in('id', adjs.map(a => a.id));
+    let outcome: WriteOutcome | { error: string };
+    try {
+      outcome = await deleteChecked(supabase, 'planning_run_adjustments', q => q.in('id', adjs.map(a => a.id)), adjs.length);
+    } catch (e: any) {
+      outcome = { error: e?.message ?? '' };
+    }
     setSavingAusgleich(null);
-    if (error) {
-      setAusgleichError(t('stn.ausgleich.removeFailed', { error: error.message }));
+    if (typeof outcome === 'object') {
+      setAusgleichError(t('stn.ausgleich.removeFailed', { error: outcome.error }));
+    } else if (outcome === 'refused') {
+      setAusgleichError(t('common.writeRefused'));
     } else {
       onAdjustmentSaved();
     }
