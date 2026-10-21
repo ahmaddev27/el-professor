@@ -6999,4 +6999,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.back.fahrtenbuch': '← Zurück zum Fahrtenbuch',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.activeDriversCount': '{active} aktive Fahrer',
 } as const;
