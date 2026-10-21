@@ -1,4 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+const support = (file: string) => fileURLToPath(new URL(`./tests/support/${file}`, import.meta.url));
 
 // The payroll code reads local time throughout — computeLohnartSeconds walks
 // calendar days with `new Date(y, m, d)`, and the business-week rule is defined
