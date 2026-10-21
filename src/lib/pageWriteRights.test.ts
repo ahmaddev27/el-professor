@@ -64,7 +64,12 @@ describe('the screens bind their page and check their deletes', () => {
 
   it('every delete reads its rows back and checks them (lib/writeOutcome.ts)', () => {
     const hook = read('../hooks/useDatabase.ts');
-    for (const table of ['receipts', 'drivers']) {
+    // `drivers` was on this list and is deliberately off it: the owner replaced
+    // deleting a driver with deactivating one on 21.10.2026, so there is no
+    // driver delete left to read its rows back. The stronger claim — that no
+    // delete path returns here at all — is in `updateDriverRefusal.test.ts`,
+    // which is why this line is shortened rather than loosened.
+    for (const table of ['receipts']) {
       expect(hook, table).toContain(`deleteChecked(supabase, '${table}'`);
     }
     expect(read('../components/IncomeManagement.tsx')).toContain("deleteChecked(supabase, 'income'");
