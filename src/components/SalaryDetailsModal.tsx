@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { usePlan } from '../contexts/PlanContext';
 import { useToast } from '../contexts/ToastContext';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
@@ -594,9 +595,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const handleDeletePayment = async () => {
     if (!paymentToDelete) return;
     try {
-      const { error } = await supabase.from('salary_payments').delete().eq('id', paymentToDelete.id);
-      if (error) throw error;
-      showToast('success', t('sal.payment.deleted'));
+      // A raised refusal (receipt guards) throws and is shown below; the silent
+      // one, a policy hiding the row, comes back as 'refused'.
+      const outcome = await deleteChecked(supabase, 'salary_payments', q => q.eq('id', paymentToDelete.id));
+      if (outcome === 'refused') {
+        showToast('error', t('common.writeRefused'));
+        return;
+      }
+      if (outcome === 'done') showToast('success', t('sal.payment.deleted'));
+      else showToast('warning', t('common.writeAlreadyGone'));
       await fetchPayments();
       await onUpdate();
     } catch (error: any) {
@@ -1218,7 +1225,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                               >
                                 <Edit2 size={16} />
                               </button>
-                              <button
+                              {rolePermits('salaries', 'edit') && <button
                                 onClick={() => setPaymentToDelete(paymentRow)}
                                 style={{ color: 'var(--danger)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
@@ -1226,7 +1233,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 title={t('common.delete')}
                               >
                                 <Trash2 size={16} />
-                              </button>
+                              </button>}
                             </div>
                             )}
                           </td>

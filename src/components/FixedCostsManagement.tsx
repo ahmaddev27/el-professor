@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
+import { deleteChecked } from '../lib/writeOutcome';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -224,11 +225,19 @@ const FixedCostsManagement: React.FC = () => {
   const handleDelete = async (month: string, id: string) => {
     const resolved = resolveMonth(fixedCosts, month);
     try {
-      const { error: writeError } =
-        resolved.source === 'own'
-          ? await supabase.from('fixed_costs').delete().eq('id', id)
-          : await insertCopies(month, copyForMonth(resolved, { removeId: id }));
-      if (writeError) return reportWrite(writeError, t('common.errorDelete'));
+      if (resolved.source === 'own') {
+        // The page gate hides the row from a role without the right: 200, zero rows.
+        const outcome = await deleteChecked(supabase, 'fixed_costs', q => q.eq('id', id));
+        if (outcome !== 'done') {
+          if (outcome === 'gone') await loadFixedCosts();
+          showError(t('common.errorDelete'), t(outcome === 'gone' ? 'common.writeAlreadyGone' : 'common.writeRefused'));
+          setDeleteConfirm({ isOpen: false, id: null, month: null });
+          return;
+        }
+      } else {
+        const { error: writeError } = await insertCopies(month, copyForMonth(resolved, { removeId: id }));
+        if (writeError) return reportWrite(writeError, t('common.errorDelete'));
+      }
       await loadFixedCosts();
       success(t('fleet.fixedCostsDeleted'), t('fleet.fixedCostsDeletedBody'));
       setDeleteConfirm({ isOpen: false, id: null, month: null });
