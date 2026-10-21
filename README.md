@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **Page-key write rights on Belege, Fahrer, Umsätze (21.10.2026, branch `fix/page-key-write-rights`, UI only, no migration).** Edit/delete/Add on those screens now ask the page the database asks (`receipts`, `drivers`, `income`) through `pageWriteRights`; before, `canEdit(record)` without a page key meant "is admin" and hid the buttons from editors and supervisors. Deletes that remove no row are reported as a refusal. Not seen in a browser.
+
 > **Gap between rides fixed (21.10.2026, branch `fix/simulated-approach-leg`, generator only, no migration):** the simulated month put 38.5 % of its ride-to-ride transitions above 120 km/h (the real export: 5.8 %). The gap now holds two legs, previous Zielort to the car's Standort to the Abholort, plus the wait for the order; the approach is a constraint on time and never a ride row. Measured after: 4 to 5 % over 120 km/h, median 16 to 20 km/h. Ride length follows the real quartiles with a tail up to 95 km. Fares still match the books to the cent. Not verified against a live address pool.
 
 > **Generator entry moved to the Fahrtenbuch (20.10.2026, branch `feat/generator-on-fahrtenbuch`, UI only, no migration).** "Simulierte Fahrten erzeugen" is a button beside Import on `/fahrtenbuch`, because the generator's only output is a Fahrtenbuch import and the owner could not find it under Monatsplanung. `/monatsplan?art=simuliert` still opens it; the chooser link is gone.

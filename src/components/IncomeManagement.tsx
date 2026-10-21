@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Check, DownloadCloud, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
 import { Income, IncomeFormData, Driver, INCOME_TYPES } from '../types/receipt';
 import { supabase } from '../lib/supabase';
+import { throwIfDeleteRefused } from '../utils/deleteOutcome';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { pageWriteRights } from '../lib/pageWriteRights';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -127,7 +129,9 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
   const { user, profile } = useAuth();
   // The rights of the company the session is in — see BelegePage.
-  const { canEdit, canDelete, canCreate } = useCompanyScope();
+  const scope = useCompanyScope();
+  // The page the database asks (income), so the browser asks the same question.
+  const { canEdit, canDelete, canCreate } = pageWriteRights('income', scope);
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { t, tPlural } = useTranslation();
@@ -450,12 +454,17 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { data: removed, error } = await supabase
         .from('income')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
 
       if (error) throw error;
+      await throwIfDeleteRefused(removed, async () => {
+        const { data: stillThere } = await supabase.from('income').select('id').eq('id', id).maybeSingle();
+        return !!stillThere;
+      });
       await loadIncomes();
       success(t('inc.deleted'), t('inc.deletedBody'));
       setDeleteConfirm({ isOpen: false, id: null });

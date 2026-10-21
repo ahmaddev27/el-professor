@@ -5273,7 +5273,7 @@ export const en: PartialDictionary = {
   'engine.warningGroup.target': 'Target / salary',
   'engine.warningGroup.note': 'Notes & hints',
   'engine.dbError.unexpected': 'An unexpected error occurred',
-  'engine.dbError.notAuthorized': 'Not authorised: administrators and the creator only',
+  'engine.dbError.notAuthorized': 'Not authorised: your role needs the Edit right on this page',
   'engine.dbError.stillReferenced': 'This entry cannot be deleted because it is still in use',
   'engine.dbError.duplicate': 'An entry with this data already exists',
   'engine.dbError.notFound': 'The requested entry was not found',
