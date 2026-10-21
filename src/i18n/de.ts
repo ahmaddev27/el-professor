@@ -7006,6 +7006,11 @@ export const de = {
   'fleet.activeDriversCount': '{active} aktive Fahrer',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'fahrer.updateRefused':      'Die Änderung wurde von der Datenbank abgelehnt. Möglicherweise fehlt die Berechtigung oder der Fahrer wurde bereits entfernt.',
+  'fahrer.updateRefused':      'Die Änderung wurde von der Datenbank abgelehnt: Ihrer Rolle fehlt die Berechtigung. Es wurde nichts geändert.',
   'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, Belege und die Fahrtenhistorie verweisen auf sie.',
+  'sa.subs.actionDelete':              'Löschen',
+  'sa.subs.confirmDelete.description': 'Die Rechnung wird endgültig gelöscht. Der durch sie gewährte Zugangszeitraum wird ungültig; der Kunde kann dadurch den Zugang verlieren. Bezahlte Rechnungen lassen sich nicht löschen, nur stornieren.',
+  'sa.subs.deleteRefused.paid':        'Eine bezahlte Rechnung kann nicht gelöscht werden. Sie belegt den Zahlungseingang; bitte stattdessen stornieren.',
+  'sa.subs.deleteRefused.wasPaid':     'Diese Rechnung wurde bereits als bezahlt erfasst und kann nicht gelöscht werden. Bitte stattdessen stornieren.',
+  'sa.subs.invoiceDeleted':            'Rechnung gelöscht',
 } as const;

@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { callPlatformRpc } from '../lib/platformRpc';
+import { callPlatformRpc, PlatformRpcError } from '../lib/platformRpc';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   CreditCard, Receipt, CheckCircle, AlertTriangle, Clock,
-  XCircle, Download, Eye,
+  XCircle, Download, Eye, Trash2,
   Plus, RefreshCw, Banknote, CalendarDays, ChevronLeft, ChevronRight,
   TrendingUp, FileText, Search, MoreHorizontal, ShieldAlert,
 } from 'lucide-react';
@@ -73,6 +73,19 @@ const MONTH_KEYS: readonly TranslationKey[] = [
 ];
 
 /** Resolve a 1-based month number, tolerating a value outside 1–12. */
+/** Reason codes of platform_invoice_delete's refusals, mapped to a dictionary key. */
+const DELETE_REFUSAL_KEYS: Record<string, TranslationKey> = {
+  invoice_paid: 'sa.subs.deleteRefused.paid',
+  invoice_was_paid: 'sa.subs.deleteRefused.wasPaid',
+};
+
+/** The words of the confirmation dialog, per action. */
+const CONFIRM_KEYS: Record<'unpaid' | 'cancel' | 'delete', { title: TranslationKey; description: TranslationKey }> = {
+  unpaid: { title: 'sa.subs.actionMarkUnpaid', description: 'sa.subs.confirmUnpaid.description' },
+  cancel: { title: 'sa.subs.actionCancel', description: 'sa.subs.confirmCancel.description' },
+  delete: { title: 'sa.subs.actionDelete', description: 'sa.subs.confirmDelete.description' },
+};
+
 function monthLabel(t: (key: TranslationKey) => string, month: number): string {
   const key = MONTH_KEYS[month - 1];
   return key ? t(key) : '';
@@ -181,7 +194,7 @@ export default function SubscriptionBillingPage() {
 
   // Modals
   const [markPaidInvoice, setMarkPaidInvoice] = useState<PlatformInvoiceRow | null>(null);
-  const [invoiceConfirm, setInvoiceConfirm] = useState<{ kind: 'unpaid' | 'cancel'; invoice: PlatformInvoiceRow } | null>(null);
+  const [invoiceConfirm, setInvoiceConfirm] = useState<{ kind: 'unpaid' | 'cancel' | 'delete'; invoice: PlatformInvoiceRow } | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -433,6 +446,22 @@ export default function SubscriptionBillingPage() {
     loadData();
   };
 
+  // ── Delete invoice ──
+  // Only an invoice nobody paid. The database refuses the rest with a reason
+  // code; the sentence shown comes from the dictionaries, so it follows the
+  // operator's language, and the function's own German is the fallback.
+  const handleDelete = async (inv: PlatformInvoiceRow) => {
+    try {
+      await callPlatformRpc('platform_invoice_delete', { p_invoice_id: inv.id });
+    } catch (err: any) {
+      const key = err instanceof PlatformRpcError ? DELETE_REFUSAL_KEYS[err.reason] : undefined;
+      showToast('error', t('sa.subs.errorWithMessage', { message: key ? t(key) : err.message }));
+      return;
+    }
+    showToast('success', t('sa.subs.invoiceDeleted'));
+    loadData();
+  };
+
   // ── PDF download ──
   // Every literal below feeds generateSubscriptionPdf and is therefore German
   // in both languages: the PDF is a German payment record.
@@ -569,6 +598,13 @@ export default function SubscriptionBillingPage() {
                   onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'cancel', invoice: inv }); }}
                 >
                   <XCircle size={14} /> {t('sa.subs.actionCancel')}
+                </button>
+              )}
+              {canBilling && inv.status !== 'paid' && (
+                <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors text-critical hover:bg-sunken"
+                  onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'delete', invoice: inv }); }}
+                >
+                  <Trash2 size={14} /> {t('sa.subs.actionDelete')}
                 </button>
               )}
               <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
@@ -1026,11 +1062,12 @@ export default function SubscriptionBillingPage() {
         onConfirm={() => {
           if (!invoiceConfirm) return;
           if (invoiceConfirm.kind === 'cancel') void handleCancel(invoiceConfirm.invoice);
+          else if (invoiceConfirm.kind === 'delete') void handleDelete(invoiceConfirm.invoice);
           else void handleMarkUnpaid(invoiceConfirm.invoice);
         }}
-        title={t(invoiceConfirm?.kind === 'cancel' ? 'sa.subs.actionCancel' : 'sa.subs.actionMarkUnpaid')}
-        description={t(invoiceConfirm?.kind === 'cancel' ? 'sa.subs.confirmCancel.description' : 'sa.subs.confirmUnpaid.description')}
-        confirmLabel={t(invoiceConfirm?.kind === 'cancel' ? 'sa.subs.actionCancel' : 'sa.subs.actionMarkUnpaid')}
+        title={t(CONFIRM_KEYS[invoiceConfirm?.kind ?? 'unpaid'].title)}
+        description={t(CONFIRM_KEYS[invoiceConfirm?.kind ?? 'unpaid'].description)}
+        confirmLabel={t(CONFIRM_KEYS[invoiceConfirm?.kind ?? 'unpaid'].title)}
       />
       {markPaidInvoice && (
         <MarkPaidModal
