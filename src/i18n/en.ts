@@ -6943,4 +6943,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.back.fahrtenbuch': '← Back to the ride log',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.activeDriversCount': '{active} active drivers',
 };
