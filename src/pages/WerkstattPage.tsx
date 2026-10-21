@@ -9,6 +9,8 @@ import { format } from 'date-fns';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
+import { deleteChecked } from '../lib/writeOutcome';
 
 interface WerkstattCheck {
   id: string;
@@ -99,6 +101,9 @@ export default function WerkstattPage() {
   const loadSequence = useRef(0);
   const { showToast } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // `werkstatt_checks` is gated by the Werkstatt page right; a refused UPDATE or
+  // DELETE is silent (lib/writeOutcome.ts), so the buttons ask the same question.
+  const mayEdit = useCompanyScope().can('werkstatt', 'edit');
 
   useEffect(() => {
     const today = new Date();
@@ -167,9 +172,14 @@ export default function WerkstattPage() {
   const handleDelete = async () => {
     if (!checkToDelete) return;
     try {
-      const { error } = await supabase.from('werkstatt_checks').delete().eq('id', checkToDelete.id);
-      if (error) throw error;
-      showToast('success', t('werkstatt.deleted'));
+      const checkId = checkToDelete.id;
+      const outcome = await deleteChecked(supabase, 'werkstatt_checks', q => q.eq('id', checkId));
+      if (outcome === 'refused') {
+        showToast('error', t('common.writeRefused'));
+        return;
+      }
+      if (outcome === 'gone') showToast('error', t('common.writeAlreadyGone'));
+      else showToast('success', t('werkstatt.deleted'));
       loadChecks();
     } catch (error: any) {
       showToast('error', t('werkstatt.deleteFailedReason', { error: error.message }));
@@ -421,7 +431,7 @@ export default function WerkstattPage() {
                       {check.car?.kennzeichen || t('common.unknown')}
                     </h3>
                   </div>
-                  <div className="flex gap-1">
+                  {mayEdit && <div className="flex gap-1">
                     <button
                       onClick={() => { setSelectedCheck(check); setShowModal(true); }}
                       className="p-1 rounded"
@@ -440,7 +450,7 @@ export default function WerkstattPage() {
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                  </div>
+                  </div>}
                 </div>
 
                 <div className="space-y-1.5 text-sm">

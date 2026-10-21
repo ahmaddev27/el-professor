@@ -18,6 +18,8 @@ import {
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
+import { deleteChecked, type WriteOutcome } from '../lib/writeOutcome';
 import type { TranslationKey } from '../i18n';
 import {
   Alert,
@@ -132,6 +134,9 @@ function exportSavedPDF(rec: SavedRecord): void {
 const DocumentsPage: React.FC = () => {
   const navigate = useNavigate();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // `saved_stundennachweise` is gated by the Dokumente page right (an editor does
+  // not hold it); a refused DELETE is silent (lib/writeOutcome.ts).
+  const mayEdit = useCompanyScope().can('documents', 'edit');
   const { t, tPlural } = useTranslation();
   const exportPicker = useColumnPickerExport();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
@@ -272,14 +277,18 @@ const DocumentsPage: React.FC = () => {
     setDeleting(true);
     // Scope by company as well as id: deleting a statutory record by primary key
     // alone leaves the tenant boundary entirely to RLS.
-    const { error } = await supabase
-      .from('saved_stundennachweise')
-      .delete()
-      .eq('id', deleteConfirmId)
-      .eq('company_id', companyId);
+    let outcome: WriteOutcome;
+    try {
+      outcome = await deleteChecked(supabase, 'saved_stundennachweise', q =>
+        q.eq('id', deleteConfirmId).eq('company_id', companyId));
+    } catch (error) {
+      setDeleting(false);
+      setDeleteError(t('doc.deleteFailed', { message: (error as { message?: string }).message ?? '' }));
+      return;
+    }
     setDeleting(false);
-    if (error) {
-      setDeleteError(t('doc.deleteFailed', { message: error.message }));
+    if (outcome === 'refused') {
+      setDeleteError(t('common.writeRefused'));
       return;
     }
     setDeleteConfirmId(null);
@@ -300,18 +309,24 @@ const DocumentsPage: React.FC = () => {
     setGroupDeleteError('');
     const ids = group.records.map(r => r.id);
     if (!companyId) return;
-    const { error } = await supabase
-      .from('saved_stundennachweise')
-      .delete()
-      .in('id', ids)
-      .eq('company_id', companyId);
-    if (error) {
-      setGroupDeleteError(error.message);
+    let outcome: WriteOutcome;
+    try {
+      outcome = await deleteChecked(supabase, 'saved_stundennachweise', q =>
+        q.in('id', ids).eq('company_id', companyId), ids.length);
+    } catch (error) {
+      setGroupDeleteError((error as { message?: string }).message ?? '');
       setDeletingGroup(false);
       return;
     }
-    setDeleteGroupKey(null);
     setDeletingGroup(false);
+    if (outcome === 'refused') {
+      // Some of the month may have gone before the rest was refused: show what
+      // is really there rather than the list from before.
+      setGroupDeleteError(t('common.writeRefused'));
+      loadArchive();
+      return;
+    }
+    setDeleteGroupKey(null);
     loadArchive();
   };
 
@@ -482,17 +497,19 @@ const DocumentsPage: React.FC = () => {
           <FileDown aria-hidden />
         </Button>
       </Tooltip>
-      <Tooltip content={t('common.delete')}>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="hover:text-critical"
-          aria-label={t('doc.deleteRecordAria', { driver: rec.driver_name })}
-          onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
-        >
-          <Trash2 aria-hidden />
-        </Button>
-      </Tooltip>
+      {mayEdit && (
+        <Tooltip content={t('common.delete')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hover:text-critical"
+            aria-label={t('doc.deleteRecordAria', { driver: rec.driver_name })}
+            onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        </Tooltip>
+      )}
     </>
   );
 
@@ -589,18 +606,20 @@ const DocumentsPage: React.FC = () => {
                       <span className="sr-only"> – {group.label}</span>
                     </Button>
                   </Tooltip>
-                  <Tooltip content={t('doc.deleteAllTitle', { label: group.label })}>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="text-critical hover:text-critical"
-                      onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
-                    >
-                      <Trash2 aria-hidden />
-                      {t('doc.deleteAll')}
-                      <span className="sr-only"> – {group.label}</span>
-                    </Button>
-                  </Tooltip>
+                  {mayEdit && (
+                    <Tooltip content={t('doc.deleteAllTitle', { label: group.label })}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="text-critical hover:text-critical"
+                        onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
+                      >
+                        <Trash2 aria-hidden />
+                        {t('doc.deleteAll')}
+                        <span className="sr-only"> – {group.label}</span>
+                      </Button>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
               {isExpanded && (

@@ -83,6 +83,8 @@ vi.mock('../lib/supabase', () => {
   };
 });
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, profile: null }) }));
+// The screen asks the page right for its row actions; this file is about the week.
+vi.mock('../hooks/useCompanyScope', () => ({ useCompanyScope: () => ({ can: () => true }) }));
 vi.mock('../contexts/SuperAdminContext', () => ({ useSuperAdmin: () => ({ effectiveCompanyId: 'company-1' }) }));
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: world.showToast }) }));
 vi.mock('../contexts/LanguageContext', () => ({ useTranslation: () => world.translation }));

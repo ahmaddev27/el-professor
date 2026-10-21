@@ -10,7 +10,7 @@ import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 import { numberOrUndefined } from '../utils/receiptDisplay';
-import { assertRowsUpdated } from '../utils/updateOutcome';
+import { deleteChecked, updateChecked } from '../lib/writeOutcome';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
@@ -259,19 +259,12 @@ export const useDatabase = () => {
         updateData.preferred_language = contact.preferred_language;
       }
 
-      const { data, error } = await supabase
-        .from('drivers')
-        .update(updateData)
-        .eq('id', id)
-        .select('id');
-
-      if (error) {
-        console.error('Error updating driver:', error);
-        throw error;
-      }
       // Deactivating a driver is this UPDATE, and a policy that refuses it
       // answers 200 with no row: without this the screen toasted success.
-      assertRowsUpdated(data, t('fahrer.updateRefused'));
+      // `gone` is not a permission problem and must not be reported as one.
+      const outcome = await updateChecked(supabase, 'drivers', updateData, q => q.eq('id', id));
+      if (outcome === 'refused') throw new Error(t('fahrer.updateRefused'));
+      if (outcome === 'gone') throw new Error(t('common.writeAlreadyGone'));
     } catch (error) {
       console.error('Failed to update driver in database:', error);
       throw error;
@@ -461,15 +454,10 @@ export const useDatabase = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('receipts')
-        .delete()
-        .eq('id', id);
-      
-      if (error) {
-        console.error('Error deleting receipt:', error);
-        throw error;
-      }
+      // A plain Error with the sentence, as refuseOfflineWrite does: the screens
+      // show it through handleDatabaseError, which passes an unrecognised message on.
+      const outcome = await deleteChecked(supabase, 'receipts', q => q.eq('id', id));
+      if (outcome === 'refused') throw new Error(t('common.writeRefused'));
     } catch (error) {
       console.error('Failed to delete receipt from database:', error);
       throw error;

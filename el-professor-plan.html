@@ -490,6 +490,7 @@
             <tr><th>الخطوة</th><th>الاسم</th><th>الحالة</th><th>شو انفحص</th><th>PR</th></tr>
           </thead>
           <tbody>
+            <tr><td class="num">21.10</td><td>صلاحيات الكتابة بـBelege وFahrer وUmsätze حسب مفتاح الصفحة</td><td><span class="pill warn">مبني</span></td><td>الأزرار كانت أدمن-فقط بالغلط (البوّابة بتتجاهل وسيطها الأول). واجهة بس؛ الحذف اللي بيمسح صفر صفوف صار رفض. ما انفتح بالمتصفح.</td><td class="num">—</td></tr>
             <tr><td class="num">0.1</td><td>حد محاولات تسجيل الدخول</td><td><span class="pill ok">خلص عالستيج</span></td><td>52 محاولة غلط انقبلت، والمحاولة 53 انرفضت بـ 429. عنوان تاني ما تأثر.</td><td class="num">#2</td></tr>
             <tr><td class="num">0.2</td><td>إصدارات محفوظة وزر رجوع</td><td><span class="pill ok">خلص عالستيج</span></td><td>رجوع من <code>1310e01</code> لـ <code>60d62a5</code> بدون ما تنلمس قاعدة البيانات. رجعة لآخر إصدار. ورفض الرجوع لما ما في إصدار أقدم.</td><td class="num">#3</td></tr>
             <tr><td class="num">0.3</td><td>البرودكشن بينشر بس نفس كود الستيج</td><td><span class="pill warn">مبني</span></td><td>بيشتغل أول ما الكود يوصل <code>main</code>. السيرفر صار يعرف شو شغّال على الستيج.</td><td class="num">#3</td></tr>
@@ -1318,7 +1319,8 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">7</td><td>كرت Abrechnung بالإيميل يعرض التذكيرة الجاية (مو إصلاح خلل — الميزة اشتغلت 19.10)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">8</td><td>مولّد رحلات تجريبية SIMULIERT (علامة دائمة + عزل الشركة؛ فجوة: وثائق التخطيط ما بتحمل العلامة بنفسها)</td><td>كبير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">8</td><td>الـFahrtenbuch صفحة وبند خاص بالقائمة (انشال من Dokumente)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
-            <tr><td class="num">9</td><td>حذف السائق صار تعطيل (الحذف كان يُرفض بالـtrigger أو يمسح الرواتب بصمت)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">9</td><td>إصلاح الرفض الصامت: الحذف والتعديل المرفوضين من الداتابيس (200 + صفر صفوف) كانوا يطلعوا «نجاح» بـFahrzeuge وWerkstatt وNotizen وDokumente؛ هلأ الأزرار تتبع الصلاحية وكل كتابة بتتحقق من الصفوف</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">10</td><td>حذف السائق صار تعطيل (الحذف كان يُرفض بالـtrigger أو يمسح الرواتب بصمت)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
           </tbody>
         </table>
       </div>

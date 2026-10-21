@@ -1,18 +1,19 @@
+/**
+ * Deactivating replaced deleting a driver (owner, 21.10.2026), so two things
+ * have to stay true and neither is visible from a type: the status write must
+ * read back what it touched, and no delete path may come back as a
+ * convenience. `assertRowsUpdated` and its own test were this file's first
+ * shape; they went when the branch merged, because `src/lib/writeOutcome.ts`
+ * already answered the same question for four other screens and three copies
+ * of one helper is how they drift apart. What that helper does on zero rows is
+ * tested in `writeOutcome.test.ts`; what is tested here is that `updateDriver`
+ * asks it, and that the delete is gone.
+ */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { assertRowsUpdated } from './updateOutcome';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
-
-describe('assertRowsUpdated', () => {
-  it('accepts a statement that changed a row', () => {
-    expect(() => assertRowsUpdated([{ id: 'a' }], 'refused')).not.toThrow();
-  });
-  it.each([[[]], [null], [undefined]])('reports a refusal when no row came back (%j)', rows => {
-    expect(() => assertRowsUpdated(rows, 'refused')).toThrow('refused');
-  });
-});
 
 describe('deactivating a driver', () => {
   const hook = read('../hooks/useDatabase.ts');
@@ -20,8 +21,14 @@ describe('deactivating a driver', () => {
 
   it('writes status through updateDriver and reads the rows back', () => {
     expect(updateDriver).toContain('updateData.status = status');
-    expect(updateDriver).toMatch(/\.update\(updateData\)\s*\.eq\('id', id\)\s*\.select\('id'\)/);
-    expect(updateDriver).toContain('assertRowsUpdated(');
+    expect(updateDriver).toMatch(/updateChecked\(\s*supabase,\s*'drivers',\s*updateData/);
+  });
+
+  it('separates a refusal from a row someone else already removed', () => {
+    // Reporting "no permission" for a driver a colleague deleted in another tab
+    // is the same lie in the other direction.
+    expect(updateDriver).toMatch(/outcome === 'refused'[\s\S]{0,80}fahrer\.updateRefused/);
+    expect(updateDriver).toMatch(/outcome === 'gone'[\s\S]{0,80}common\.writeAlreadyGone/);
   });
 
   it('has no delete path left: not in the hook, the page or the screen', () => {

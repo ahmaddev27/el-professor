@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { RotateCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { pageWriteRights } from '../lib/pageWriteRights';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
 import { Driver, DriverContact } from '../types/receipt';
@@ -18,7 +19,11 @@ const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
   // The rights of the company the session is in — see BelegePage.
-  const { canEdit, canCreate } = useCompanyScope();
+  const scope = useCompanyScope();
+  // The page the database asks (drivers), so the browser asks the same question.
+  // The delete right is not asked for: deleting a driver was replaced by
+  // deactivating one, so there is nothing of that kind left to gate here.
+  const { canEdit, canCreate } = pageWriteRights('drivers', scope);
   const { success, error: showError } = useToast();
   const { drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
   const [drivers, setDrivers] = useState<Driver[]>([]);
