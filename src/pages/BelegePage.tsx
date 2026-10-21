@@ -3,6 +3,7 @@ import { DownloadCloud, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { pageWriteRights } from '../lib/pageWriteRights';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
@@ -42,7 +43,9 @@ const BelegePage: React.FC = () => {
   const { effectiveCompanyId } = useSuperAdmin();
   // The rights of the company the session is in: a read context writes nothing
   // (plan 3.4b), and the database refuses these three the same way.
-  const { canEdit, canDelete, canCreate } = useCompanyScope();
+  const scope = useCompanyScope();
+  // The page the database asks (receipts), so the browser asks the same question.
+  const { canEdit, canDelete, canCreate } = pageWriteRights('receipts', scope);
   const { success, error: showError } = useToast();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
   const { settings } = useCompanySettings();

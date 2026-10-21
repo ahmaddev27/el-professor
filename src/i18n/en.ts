@@ -5273,7 +5273,7 @@ export const en: PartialDictionary = {
   'engine.warningGroup.target': 'Target / salary',
   'engine.warningGroup.note': 'Notes & hints',
   'engine.dbError.unexpected': 'An unexpected error occurred',
-  'engine.dbError.notAuthorized': 'Not authorised: administrators and the creator only',
+  'engine.dbError.notAuthorized': 'Not authorised: your role needs the Edit right on this page',
   'engine.dbError.stillReferenced': 'This entry cannot be deleted because it is still in use',
   'engine.dbError.duplicate': 'An entry with this data already exists',
   'engine.dbError.notFound': 'The requested entry was not found',
@@ -6945,6 +6945,8 @@ export const en: PartialDictionary = {
   'simrides.back.fahrtenbuch': '← Back to the ride log',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.writeAlreadyGone': 'This entry no longer exists. The list has been reloaded.',
+  'common.writeRefused':     'Not authorised: your role needs the Edit right on this page',
   'fleet.activeDriversCount': '{active} active drivers',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────

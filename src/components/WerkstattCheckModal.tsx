@@ -6,6 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { getWeekNumber, getWeeksOfMonth, getWeekNumberForDate, getBusinessMonth } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { updateChecked } from '../lib/writeOutcome';
 
 interface Car {
   id: string;
@@ -193,12 +194,13 @@ export default function WerkstattCheckModal({
       };
 
       if (check) {
-        const { error } = await supabase
-          .from('werkstatt_checks')
-          .update(checkData)
-          .eq('id', check.id);
-
-        if (error) throw error;
+        // A refused UPDATE changes nothing and raises nothing: read what it did.
+        const outcome = await updateChecked(supabase, 'werkstatt_checks', checkData, q => q.eq('id', check.id));
+        if (outcome !== 'done') {
+          showToast('error', t(outcome === 'refused' ? 'common.writeRefused' : 'common.writeAlreadyGone'));
+          if (outcome === 'gone') onSuccess();
+          return;
+        }
         showToast('success', t('fleet.werkstattCheckUpdated'));
       } else {
         const { error } = await supabase
