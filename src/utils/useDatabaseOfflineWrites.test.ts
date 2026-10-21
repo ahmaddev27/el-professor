@@ -36,7 +36,6 @@ const HOOK = fileURLToPath(new URL('../hooks/useDatabase.ts', import.meta.url));
 const WRITES = [
   'addDriver',
   'updateDriver',
-  'deleteDriver',
   'addReceipt',
   'updateReceipt',
   'deleteReceipt',

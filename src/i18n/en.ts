@@ -6946,4 +6946,8 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fleet.activeDriversCount': '{active} active drivers',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fahrer.updateRefused':      'The database refused the change. You may lack permission, or the driver no longer exists.',
+  'fleet.deactivateNotDelete': 'Drivers are deactivated, not deleted: salaries, receipts and the ride history refer to them.',
 };

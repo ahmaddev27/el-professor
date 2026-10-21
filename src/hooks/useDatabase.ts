@@ -10,6 +10,7 @@ import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 import { numberOrUndefined } from '../utils/receiptDisplay';
+import { assertRowsUpdated } from '../utils/updateOutcome';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
@@ -98,8 +99,8 @@ export const useDatabase = () => {
    * The read branches below fall back to `localStorage`, which CLAUDE.md records
    * as a legacy quirk of this hook. The *write* half of that fallback was never
    * built: every use of it in this file is a `getItem`. Six write branches
-   * nevertheless resolved — `updateDriver`, `deleteDriver`, `updateReceipt` and
-   * `deleteReceipt` with a bare `return`, and `addDriver` and `addReceipt` by
+   * nevertheless resolved — `updateDriver`, `updateReceipt` and
+   * `deleteReceipt` with a bare `return` (a sixth, the driver delete, is gone since 21.10.2026), and `addDriver` and `addReceipt` by
    * handing the caller a fabricated row with a `Date.now()` id. Every one of the
    * six call sites then showed its success toast and reloaded a list that could
    * not contain the row.
@@ -258,38 +259,21 @@ export const useDatabase = () => {
         updateData.preferred_language = contact.preferred_language;
       }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('drivers')
         .update(updateData)
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
 
       if (error) {
         console.error('Error updating driver:', error);
         throw error;
       }
+      // Deactivating a driver is this UPDATE, and a policy that refuses it
+      // answers 200 with no row: without this the screen toasted success.
+      assertRowsUpdated(data, t('fahrer.updateRefused'));
     } catch (error) {
       console.error('Failed to update driver in database:', error);
-      throw error;
-    }
-  };
-
-  const deleteDriver = async (id: string): Promise<void> => {
-    if (!isConnected) {
-      refuseOfflineWrite();
-    }
-
-    try {
-      const { error } = await supabase
-        .from('drivers')
-        .delete()
-        .eq('id', id);
-      
-      if (error) {
-        console.error('Error deleting driver:', error);
-        throw error;
-      }
-    } catch (error) {
-      console.error('Failed to delete driver from database:', error);
       throw error;
     }
   };
@@ -501,8 +485,7 @@ export const useDatabase = () => {
     drivers: {
       get: getDrivers,
       add: addDriver,
-      update: updateDriver,
-      delete: deleteDriver
+      update: updateDriver
     },
     receipts: {
       get: getReceipts,

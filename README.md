@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **Driver delete became deactivate (21.10.2026, branch `feat/driver-deactivate-not-delete`, UI/hook only, no migration).** Owner decision. The delete was unconfirmed, was refused by the Fahrtenbuch immutability trigger for nearly every driver (13,959 of 13,981 staging trips carry `original_driver_id`) and, for a driver without trips, silently cascaded away salaries, payments and receipts. Deactivating (`drivers.status`) replaces it, with a zero-row check on the update. Not opened in a browser.
+
 > **Gap between rides fixed (21.10.2026, branch `fix/simulated-approach-leg`, generator only, no migration):** the simulated month put 38.5 % of its ride-to-ride transitions above 120 km/h (the real export: 5.8 %). The gap now holds two legs, previous Zielort to the car's Standort to the Abholort, plus the wait for the order; the approach is a constraint on time and never a ride row. Measured after: 4 to 5 % over 120 km/h, median 16 to 20 km/h. Ride length follows the real quartiles with a tail up to 95 km. Fares still match the books to the cent. Not verified against a live address pool.
 
 > **Generator entry moved to the Fahrtenbuch (20.10.2026, branch `feat/generator-on-fahrtenbuch`, UI only, no migration).** "Simulierte Fahrten erzeugen" is a button beside Import on `/fahrtenbuch`, because the generator's only output is a Fahrtenbuch import and the owner could not find it under Monatsplanung. `/monatsplan?art=simuliert` still opens it; the chooser link is gone.

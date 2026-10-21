@@ -7002,4 +7002,8 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fleet.activeDriversCount': '{active} aktive Fahrer',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fahrer.updateRefused':      'Die Änderung wurde von der Datenbank abgelehnt. Möglicherweise fehlt die Berechtigung oder der Fahrer wurde bereits entfernt.',
+  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, Belege und die Fahrtenhistorie verweisen auf sie.',
 } as const;
