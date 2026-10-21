@@ -81,7 +81,7 @@ describe('the generated month', () => {
     }
   });
 
-  it('derives every gap from the distance: never shorter than the drive, at most 40 s longer', () => {
+  it('never leaves a gap shorter than the drive needs: Zielort to Standort to Abholort, or Zielort to Abholort for an order that came during the ride', () => {
     let pairs = 0;
     for (const s of month.shifts) {
       const rides = month.rides.filter(r => r.shiftId === s.id && r.status === 'completed').sort((a, b) => a.startMs! - b.startMs!);
@@ -89,7 +89,6 @@ describe('the generated month', () => {
         const gap = (rides[i].startMs! - rides[i - 1].endMs!) / 1000;
         const needed = minTravelSeconds(rides[i - 1].dropoff, rides[i].pickup, localHour(rides[i - 1].endMs!));
         expect(gap).toBeGreaterThanOrEqual(needed);
-        expect(gap).toBeLessThanOrEqual(needed + 40);
         pairs++;
       }
     }

@@ -4,12 +4,10 @@ import { Driver, DriverContact } from '../types/receipt';
 import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
-import { usePlan } from '../contexts/PlanContext';
-import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { pageWriteRights } from '../lib/pageWriteRights';
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -46,13 +44,14 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const activeDrivers = drivers.filter(d => d.status === 'active');
   const inactiveDrivers = drivers.filter(d => d.status === 'inactive');
 
-  const { planState } = usePlan();
-  const { settings: companySettings } = useCompanySettings();
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
-  const driversPerCar = companySettings?.drivers_per_car_limit ?? 4;
-  const driverLimit = planState.carLimit * driversPerCar;
-  const driverLimitReached = activeDrivers.length >= driverLimit;
+  // No cap on how many drivers a company may have (owner, 21.10.2026). The cap
+  // was `planState.carLimit * company_settings.drivers_per_car_limit` and lived
+  // ONLY here, in the browser: no policy, trigger or constraint enforced it, so
+  // removing it takes nothing else with it. `drivers_per_car_limit` is still
+  // stored and still shown on the plan in AssignSubscriptionModal; it no longer
+  // stops anyone. A company decides its own number of drivers.
 
   const handleSave = (
     name: string,
@@ -158,16 +157,14 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   // handleAddDriver refuses such a caller as before. There is no confirmation in
   // front of the bin: it deletes at once, as it always has.
 
-  const { canCreate } = useCompanyScope();
-  const limitAlertId = 'fahrer-driver-limit';
+  const scope = useCompanyScope();
+  const { canCreate } = pageWriteRights('drivers', scope);
 
   const addButton = (size?: 'sm') =>
     canCreate ? (
       <Button
         size={size}
-        onClick={() => !driverLimitReached && setIsModalOpen(true)}
-        disabled={driverLimitReached}
-        aria-describedby={driverLimitReached ? limitAlertId : undefined}
+        onClick={() => setIsModalOpen(true)}
       >
         <Plus aria-hidden />
         {t('fleet.newDriver')}
@@ -303,8 +300,8 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           <>
             {t('fleet.driversDescription')}
             <span aria-hidden className="mx-1.5 text-fg-subtle">·</span>
-            <span className={driverLimitReached ? 'whitespace-nowrap font-medium text-critical' : 'whitespace-nowrap'}>
-              {t('fleet.activeDriversOfLimit', { active: activeDrivers.length, limit: driverLimit })}
+            <span className="whitespace-nowrap">
+              {t('fleet.activeDriversCount', { active: activeDrivers.length })}
             </span>
           </>
         }
@@ -323,12 +320,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           widest child's content, and the table alone would push the page past
           375 px. */}
       <div className="grid grid-cols-1 gap-4">
-        {driverLimitReached && (
-          <Alert id={limitAlertId} tone="critical" icon={Users} title={t('fleet.driverLimitReachedHeading')}>
-            {t('fleet.driverLimitBanner', { limit: driverLimit, cars: planState.carLimit, perCar: driversPerCar })}
-          </Alert>
-        )}
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <KpiCard label={t('fleet.activeDrivers')} value={activeDrivers.length} icon={UserCheck} />
           <KpiCard label={t('fleet.inactiveDrivers')} value={inactiveDrivers.length} icon={UserX} />
