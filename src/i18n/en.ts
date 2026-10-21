@@ -6946,4 +6946,11 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fleet.activeDriversCount': '{active} active drivers',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sa.subs.actionDelete':              'Delete',
+  'sa.subs.confirmDelete.description': 'The invoice is deleted for good. The access period it granted is voided; the customer may lose access. Paid invoices cannot be deleted, only cancelled.',
+  'sa.subs.deleteRefused.paid':        'A paid invoice cannot be deleted. It is the record of a payment received; cancel it instead.',
+  'sa.subs.deleteRefused.wasPaid':     'This invoice was recorded as paid at some point and cannot be deleted. Cancel it instead.',
+  'sa.subs.invoiceDeleted':            'Invoice deleted',
 };

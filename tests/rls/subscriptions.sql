@@ -2266,6 +2266,168 @@ BEGIN
     v_co_diff = 0);
 END $$;
 
-DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3, the tier fix and the kept void): all checks passed ──'; END $$;
+-- ─── 11. deleting an invoice (20261021120000) ───────────────────────────────
+--
+-- platform_invoice_delete is the only door: a DELETE through the table's policy
+-- reads the row, the SELECT policy hides it from a platform account outside a
+-- support session, and the statement removes zero rows and answers 200.
+--
+-- Two rules are asserted by what the database holds afterwards, not by the
+-- answer alone: a paid invoice survives and keeps admitting its company, and an
+-- unpaid one takes its coverage period with it. The last block is the mutation
+-- control: it builds the function with one rule switched off, in this same
+-- transaction, and requires the observable the probes above rely on to move.
+-- A probe whose refusal cannot be told from its neighbour's measures nothing, so
+-- the two refusals carry different reasons and are asserted separately.
+
+/** A billed company with one open invoice due in a few days, applied. Answers the invoice id. */
+CREATE OR REPLACE FUNCTION _sub_dl_open(p_slug text) RETURNS uuid
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid := _sub_billed_company(p_slug);
+  v_inv   uuid := _sub_invoice(p_slug, v_co, v_year, v_month, (now() AT TIME ZONE 'Europe/Berlin')::date + 4, 20);
+BEGIN
+  PERFORM app_private.subscription_invoice_apply(v_inv);
+  RETURN v_inv;
+END $$;
+
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_inv   uuid;
+  v_co    uuid;
+  v_out   text;
+  v_from  bigint;
+BEGIN
+  -- 11a. an unpaid invoice: deleted, its period voided, its company refused
+  v_inv := _sub_dl_open('dl-open');
+  v_co  := _sub_id('company:dl-open');
+  PERFORM _sub_ok('delete: the open invoice grants access before it is deleted (premise)',
+    _sub_admitted(_sub_id('user:dl-open'))
+    AND (SELECT status = 'active' FROM subscription_coverage
+          WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+
+  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('delete: an owner deletes an unpaid invoice', _sub_succeeded(v_out));
+  PERFORM _sub_ok('delete: …the invoice row is gone',
+    NOT EXISTS (SELECT 1 FROM subscription_invoices WHERE id = v_inv));
+  PERFORM _sub_ok('delete: …its period is void, with a reason of its own, not the cancel reason',
+    (SELECT status = 'void' AND void_reason = 'invoice_deleted' FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+  PERFORM _sub_ok('delete: …and the company is refused, because nothing grants access any more',
+    NOT _sub_admitted(_sub_id('user:dl-open')));
+  PERFORM _sub_ok('delete: …with exactly one audit row, ok, naming the invoice number and the withdrawn period',
+    (SELECT count(*) FROM app_private.platform_audit_log WHERE id > v_from) = 1
+    AND (SELECT a.action = 'invoice.delete' AND a.outcome = 'ok' AND a.target_id = v_inv::text
+                AND a.before_value ->> 'invoice_number' = 'INV-SUB-DL-OPEN'
+                AND a.before_value ->> 'coverage_period_end' IS NOT NULL
+                AND a.after_value ->> 'coverage_withdrawn' = 'true'
+           FROM app_private.platform_audit_log a WHERE a.id > v_from));
+
+  -- 11b. a second delete finds nothing
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('delete: deleting it again answers not_found',
+    NOT _sub_succeeded(v_out) AND v_out::jsonb ->> 'reason' = 'not_found');
+
+  -- 11c. a paid invoice is refused, and nothing moves
+  v_inv := _sub_dl_open('dl-paid');
+  v_co  := _sub_id('company:dl-paid');
+  PERFORM _sub_ok('delete: marking the invoice paid works (premise)',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, 2000)::text', v_inv))));
+  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('delete: a paid invoice is refused with invoice_paid and a German sentence naming the cancel path',
+    NOT _sub_succeeded(v_out) AND v_out::jsonb ->> 'reason' = 'invoice_paid'
+    AND v_out::jsonb ->> 'error' LIKE '%stornieren%');
+  PERFORM _sub_ok('delete: …the invoice is still there, paid',
+    (SELECT status FROM subscription_invoices WHERE id = v_inv) = 'paid');
+  PERFORM _sub_ok('delete: …its coverage is still live and the company still admitted',
+    _sub_admitted(_sub_id('user:dl-paid'))
+    AND (SELECT status = 'active' FROM subscription_coverage
+          WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+  PERFORM _sub_ok('delete: …and the refusal left one error row, not an ok one',
+    (SELECT count(*) FROM app_private.platform_audit_log WHERE id > v_from) = 1
+    AND (SELECT a.action = 'invoice.delete' AND a.outcome = 'error' AND a.after_value ->> 'reason' = 'invoice_paid'
+           FROM app_private.platform_audit_log a WHERE a.id > v_from));
+
+  -- 11d. paid, then re-opened: the payment trail would cascade away, so refused
+  --      under a different reason than 11c
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_unpaid(%L)::text', v_inv));
+  PERFORM _sub_ok('delete: re-opening the paid invoice works (premise)',
+    _sub_succeeded(v_out) AND (SELECT status FROM subscription_invoices WHERE id = v_inv) = 'open');
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('delete: an invoice that was once paid is refused with invoice_was_paid, not invoice_paid',
+    NOT _sub_succeeded(v_out) AND v_out::jsonb ->> 'reason' = 'invoice_was_paid');
+  PERFORM _sub_ok('delete: …and its payment trail is intact',
+    EXISTS (SELECT 1 FROM subscription_payment_audit WHERE invoice_id = v_inv AND new_status = 'paid'));
+
+  -- 11e. cancelled and never paid: deletable, and the earlier void keeps its reason
+  v_inv := _sub_dl_open('dl-canceled');
+  v_co  := _sub_id('company:dl-canceled');
+  PERFORM _sub_ok('delete: cancelling works (premise)',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_cancel(%L)::text', v_inv))));
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('delete: a cancelled, never-paid invoice can be deleted',
+    _sub_succeeded(v_out) AND NOT EXISTS (SELECT 1 FROM subscription_invoices WHERE id = v_inv));
+  PERFORM _sub_ok('delete: …and its period keeps the reason the cancellation gave it',
+    (SELECT void_reason = 'invoice_canceled' FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+
+  -- 11f. the shape: the function is the door, and only a signed-in account has the key
+  PERFORM _sub_ok('delete: SECURITY DEFINER, search_path pinned, EXECUTE for authenticated only',
+    (SELECT p.prosecdef AND EXISTS (SELECT 1 FROM unnest(p.proconfig) c(s) WHERE c.s LIKE 'search_path=%')
+       FROM pg_proc p WHERE p.oid = to_regprocedure('public.platform_invoice_delete(uuid)'))
+    AND has_function_privilege('authenticated', 'public.platform_invoice_delete(uuid)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public.platform_invoice_delete(uuid)', 'EXECUTE')
+    AND NOT has_function_privilege('service_role', 'public.platform_invoice_delete(uuid)', 'EXECUTE'));
+  PERFORM _sub_ok('delete: a DELETE through the table, as the platform owner, removes nothing — the reason there is an RPC',
+    (SELECT _sub_try(v_owner, format('DELETE FROM subscription_invoices WHERE id = %L', _sub_dl_open('dl-direct'))) = 'rows 0'));
+END $$;
+
+-- 11g. the mutation control. Two copies of the function, each with one rule
+--      switched off, built from the live definition in this same transaction.
+--      The premise is that the text really changed, so a refactor that moves
+--      the lines fails here instead of passing vacuously.
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_def   text := replace(pg_get_functiondef(to_regprocedure('public.platform_invoice_delete(uuid)')),
+                          'public.platform_invoice_delete(', 'public._mut_invoice_delete(');
+  v_inv   uuid;
+  v_out   text;
+BEGIN
+  PERFORM _sub_ok('mutation: both switches find their text in the live definition (premise)',
+    replace(v_def, 'IF v_reason IS NOT NULL THEN', 'IF false THEN') <> v_def
+    AND replace(v_def, 'SET status = ''void'', void_reason = ''invoice_deleted''', 'SET note = note') <> v_def);
+
+  -- mutant 1: no refusal at all. A paid invoice then goes, which is the
+  -- observable 11c asserts did not happen.
+  EXECUTE replace(v_def, 'IF v_reason IS NOT NULL THEN', 'IF false THEN');
+  EXECUTE 'ALTER FUNCTION public._mut_invoice_delete(uuid) OWNER TO CURRENT_USER';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public._mut_invoice_delete(uuid) TO authenticated';
+  v_inv := _sub_dl_open('mut-paid');
+  PERFORM _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, 2000)::text', v_inv));
+  v_out := _sub_do(v_owner, format('SELECT _mut_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('mutation: without the paid refusal, a paid invoice is deleted — so 11c would have failed',
+    _sub_succeeded(v_out) AND NOT EXISTS (SELECT 1 FROM subscription_invoices WHERE id = v_inv));
+
+  -- mutant 2: the invoice goes, its period stays live. The company keeps access
+  -- that no invoice grants, which is the observable 11a asserts did not happen.
+  EXECUTE replace(v_def, 'SET status = ''void'', void_reason = ''invoice_deleted''', 'SET note = note');
+  EXECUTE 'ALTER FUNCTION public._mut_invoice_delete(uuid) OWNER TO CURRENT_USER';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public._mut_invoice_delete(uuid) TO authenticated';
+  v_inv := _sub_dl_open('mut-void');
+  v_out := _sub_do(v_owner, format('SELECT _mut_invoice_delete(%L)::text', v_inv));
+  PERFORM _sub_ok('mutation: without the void, the invoice is gone but its company is still admitted — so 11a would have failed',
+    _sub_succeeded(v_out) AND NOT EXISTS (SELECT 1 FROM subscription_invoices WHERE id = v_inv)
+    AND _sub_admitted(_sub_id('user:mut-void')));
+
+  DROP FUNCTION public._mut_invoice_delete(uuid);
+END $$;
+
+DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3, the tier fix, the kept void and invoice deletion): all checks passed ──'; END $$;
 
 ROLLBACK;
