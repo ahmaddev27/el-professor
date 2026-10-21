@@ -6943,4 +6943,8 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.back.fahrtenbuch': '← Back to the ride log',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.writeAlreadyGone': 'This entry no longer exists. The list has been reloaded.',
+  'common.writeRefused':     'Not permitted: your role may not change or delete this data. Nothing was changed.',
 };

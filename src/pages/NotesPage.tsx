@@ -11,6 +11,8 @@ import { format } from 'date-fns';
 import { getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
+import { deleteChecked, updateChecked } from '../lib/writeOutcome';
 import type { TranslationKey } from '../i18n';
 import { noteVehicleMissing, noteVehicleRequired } from '../utils/noteRules';
 
@@ -211,6 +213,9 @@ export function NotesPage() {
   const [selectedWeek, setSelectedWeek]   = useState(getWeekNumberForDate(new Date()));
   const [weeks, setWeeks] = useState<any[]>([]);
   const { showToast } = useToast();
+  // `driver_notes` is gated by the Notizen page right; a refused UPDATE or DELETE
+  // is silent (lib/writeOutcome.ts), so the buttons ask the same question.
+  const mayEdit = useCompanyScope().can('notes', 'edit');
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   // The fleet the catch-up asks. Null means "nothing to fetch from", which is
   // also what a failed read leaves — and then the button is not drawn, which is
@@ -385,12 +390,13 @@ export function NotesPage() {
       };
 
       if (editingNote) {
-        const { error } = await supabase
-          .from('driver_notes')
-          .update(noteData)
-          .eq('id', editingNote.id)
-          .eq('company_id', companyId);
-        if (error) throw error;
+        const outcome = await updateChecked(supabase, 'driver_notes', noteData, q =>
+          q.eq('id', editingNote.id).eq('company_id', companyId));
+        if (outcome !== 'done') {
+          showToast('error', t(outcome === 'refused' ? 'common.writeRefused' : 'common.writeAlreadyGone'));
+          if (outcome === 'gone') { handleCloseModal(); loadNotes(); }
+          return;
+        }
         showToast('success', t('notes.updated'));
       } else {
         const { error } = await supabase
@@ -436,13 +442,14 @@ export function NotesPage() {
     const id = deleteConfirm.noteId;
     setDeleteConfirm({ open: false, noteId: '' });
     try {
-      const { error } = await supabase
-        .from('driver_notes')
-        .delete()
-        .eq('id', id)
-        .eq('company_id', companyId);
-      if (error) throw error;
-      showToast('success', t('notes.deleted'));
+      const outcome = await deleteChecked(supabase, 'driver_notes', q =>
+        q.eq('id', id).eq('company_id', companyId));
+      if (outcome === 'refused') {
+        showToast('error', t('common.writeRefused'));
+        return;
+      }
+      if (outcome === 'gone') showToast('error', t('common.writeAlreadyGone'));
+      else showToast('success', t('notes.deleted'));
       loadNotes();
     } catch (error: any) {
       showToast('error', error.message || t('common.errorDelete'));
@@ -864,7 +871,7 @@ export function NotesPage() {
                     </span>
                   )}
                 </div>
-                <div className="flex gap-2 ml-2 flex-shrink-0">
+                {mayEdit && <div className="flex gap-2 ml-2 flex-shrink-0">
                   <button onClick={() => handleEdit(note)} className="p-1 rounded" style={{ color: 'var(--accent-text)' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
@@ -875,7 +882,7 @@ export function NotesPage() {
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <Trash2 className="w-4 h-4" />
                   </button>
-                </div>
+                </div>}
               </div>
               {note.note_text ? (
                 <p className="text-sm whitespace-pre-wrap break-words" style={{ color: 'var(--text-secondary)' }}>

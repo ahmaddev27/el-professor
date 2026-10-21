@@ -6999,4 +6999,8 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.back.fahrtenbuch': '← Zurück zum Fahrtenbuch',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.writeAlreadyGone': 'Der Eintrag existiert nicht mehr. Die Liste wurde neu geladen.',
+  'common.writeRefused':     'Keine Berechtigung: Deine Rolle darf diese Daten nicht ändern oder löschen. Es wurde nichts geändert.',
 } as const;
