@@ -38,6 +38,11 @@ export function deadheadSeconds(km: number, hour: number): number {
   return Math.ceil(PICKUP_HANDLING_SECONDS + (km / citySpeedKmh(hour)) * 3600);
 }
 
+/** Seconds to drive an empty vehicle over `km` road kilometres, with no customer to find at the end. */
+export function driveSeconds(km: number, hour: number): number {
+  return Math.ceil((km / citySpeedKmh(hour)) * 3600);
+}
+
 export function minTravelSeconds(from: GeoPoint, to: GeoPoint, hour: number): number {
   return deadheadSeconds(roadKm(from, to), hour);
 }
