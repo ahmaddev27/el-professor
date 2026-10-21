@@ -6945,5 +6945,7 @@ export const en: PartialDictionary = {
   'simrides.back.fahrtenbuch': '← Back to the ride log',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.writeAlreadyGone': 'This entry no longer exists. The list has been reloaded.',
+  'common.writeRefused':     'Not authorised: your role needs the Edit right on this page',
   'fleet.activeDriversCount': '{active} active drivers',
 };

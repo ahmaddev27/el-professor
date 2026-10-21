@@ -10,7 +10,7 @@ import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 import { numberOrUndefined } from '../utils/receiptDisplay';
-import { throwIfDeleteRefused } from '../utils/deleteOutcome';
+import { deleteChecked } from '../lib/writeOutcome';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
@@ -280,20 +280,10 @@ export const useDatabase = () => {
     }
 
     try {
-      const { data: removed, error } = await supabase
-        .from('drivers')
-        .delete()
-        .eq('id', id)
-        .select('id');
-      
-      if (error) {
-        console.error('Error deleting driver:', error);
-        throw error;
-      }
-      await throwIfDeleteRefused(removed, async () => {
-        const { data: stillThere } = await supabase.from('drivers').select('id').eq('id', id).maybeSingle();
-        return !!stillThere;
-      });
+      // A plain Error with the sentence, as refuseOfflineWrite does: the screens
+      // show it through handleDatabaseError, which passes an unrecognised message on.
+      const outcome = await deleteChecked(supabase, 'drivers', q => q.eq('id', id));
+      if (outcome === 'refused') throw new Error(t('common.writeRefused'));
     } catch (error) {
       console.error('Failed to delete driver from database:', error);
       throw error;
@@ -483,20 +473,10 @@ export const useDatabase = () => {
     }
 
     try {
-      const { data: removed, error } = await supabase
-        .from('receipts')
-        .delete()
-        .eq('id', id)
-        .select('id');
-      
-      if (error) {
-        console.error('Error deleting receipt:', error);
-        throw error;
-      }
-      await throwIfDeleteRefused(removed, async () => {
-        const { data: stillThere } = await supabase.from('receipts').select('id').eq('id', id).maybeSingle();
-        return !!stillThere;
-      });
+      // A plain Error with the sentence, as refuseOfflineWrite does: the screens
+      // show it through handleDatabaseError, which passes an unrecognised message on.
+      const outcome = await deleteChecked(supabase, 'receipts', q => q.eq('id', id));
+      if (outcome === 'refused') throw new Error(t('common.writeRefused'));
     } catch (error) {
       console.error('Failed to delete receipt from database:', error);
       throw error;

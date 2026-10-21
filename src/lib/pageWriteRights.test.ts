@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { PageKey } from '../contexts/AuthContext';
 import { pageWriteRights, type PageRightsSource } from './pageWriteRights';
-import { deleteRefusal, throwIfDeleteRefused } from '../utils/deleteOutcome';
 
 function source(editable: PageKey[], isAdmin = false): PageRightsSource {
   const can = (page: PageKey, action: 'view' | 'edit' = 'edit') =>
@@ -45,19 +44,6 @@ describe('pageWriteRights', () => {
   });
 });
 
-describe('a refused delete is a refusal', () => {
-  it('zero rows back with the row still there throws 42501', async () => {
-    await expect(throwIfDeleteRefused([], async () => true)).rejects.toMatchObject({ code: '42501' });
-    await expect(throwIfDeleteRefused(null, async () => true)).rejects.toEqual(deleteRefusal());
-  });
-  it('zero rows back with the row gone is not blamed on the caller', async () => {
-    await expect(throwIfDeleteRefused([], async () => false)).resolves.toBeUndefined();
-  });
-  it('a removed row needs no second look', async () => {
-    await expect(throwIfDeleteRefused([{ id: 'a' }], async () => { throw new Error('unused'); })).resolves.toBeUndefined();
-  });
-});
-
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 describe('the screens bind their page and check their deletes', () => {
@@ -76,18 +62,11 @@ describe('the screens bind their page and check their deletes', () => {
     }
   });
 
-  it('every delete reads its rows back and checks them', () => {
+  it('every delete reads its rows back and checks them (lib/writeOutcome.ts)', () => {
     const hook = read('../hooks/useDatabase.ts');
     for (const table of ['receipts', 'drivers']) {
-      const at = hook.indexOf(`.from('${table}')\n        .delete()`.replace(/\n/g, hook.includes('\r\n') ? '\r\n' : '\n'));
-      expect(at, table).toBeGreaterThan(-1);
-      expect(hook.slice(at, at + 400)).toContain(".select('id')");
-      expect(hook.slice(at, at + 600)).toContain('throwIfDeleteRefused');
+      expect(hook, table).toContain(`deleteChecked(supabase, '${table}'`);
     }
-    const income = read('../components/IncomeManagement.tsx');
-    const i = income.search(/\.from\('income'\)\s*\.delete\(\)/);
-    expect(i).toBeGreaterThan(-1);
-    expect(income.slice(i, i + 400)).toContain(".select('id')");
-    expect(income).toContain('throwIfDeleteRefused(removed');
+    expect(read('../components/IncomeManagement.tsx')).toContain("deleteChecked(supabase, 'income'");
   });
 });

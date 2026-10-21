@@ -7001,5 +7001,7 @@ export const de = {
   'simrides.back.fahrtenbuch': '← Zurück zum Fahrtenbuch',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.writeAlreadyGone': 'Der Eintrag existiert nicht mehr. Die Liste wurde neu geladen.',
+  'common.writeRefused':     'Keine Berechtigung: Dafür braucht Ihre Rolle das Bearbeiten-Recht auf dieser Seite',
   'fleet.activeDriversCount': '{active} aktive Fahrer',
 } as const;

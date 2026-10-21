@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, DownloadCloud, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
 import { Income, IncomeFormData, Driver, INCOME_TYPES } from '../types/receipt';
 import { supabase } from '../lib/supabase';
-import { throwIfDeleteRefused } from '../utils/deleteOutcome';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { pageWriteRights } from '../lib/pageWriteRights';
@@ -454,17 +454,11 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
   const handleDelete = async (id: string) => {
     try {
-      const { data: removed, error } = await supabase
-        .from('income')
-        .delete()
-        .eq('id', id)
-        .select('id');
-
-      if (error) throw error;
-      await throwIfDeleteRefused(removed, async () => {
-        const { data: stillThere } = await supabase.from('income').select('id').eq('id', id).maybeSingle();
-        return !!stillThere;
-      });
+      const outcome = await deleteChecked(supabase, 'income', q => q.eq('id', id));
+      if (outcome === 'refused') {
+        showError(t('common.errorDelete'), t('common.writeRefused'));
+        return;
+      }
       await loadIncomes();
       success(t('inc.deleted'), t('inc.deletedBody'));
       setDeleteConfirm({ isOpen: false, id: null });

@@ -8,6 +8,8 @@ import type { CarWithDrivers, TuevInfo, TuevStatus } from '../types/car';
 import { getTuevStatus } from '../types/car';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import {
@@ -121,6 +123,9 @@ export default function CarsManagement() {
 
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
+  // The database gates `cars` by page right, and a refused DELETE or UPDATE is
+  // silent (see lib/writeOutcome.ts), so the screen asks the same question.
+  const mayEdit = useCompanyScope().can('cars', 'edit');
   const { planState } = usePlan();
   const { t, tPlural } = useTranslation();
   const exportPicker = useColumnPickerExport();
@@ -203,9 +208,14 @@ export default function CarsManagement() {
   const confirmDelete = async () => {
     if (!deleteConfirmation.carId) return;
     try {
-      const { error } = await supabase.from('cars').delete().eq('id', deleteConfirmation.carId);
-      if (error) throw error;
-      showToast('success', t('fleet.carDeleted'));
+      const carId = deleteConfirmation.carId;
+      const outcome = await deleteChecked(supabase, 'cars', q => q.eq('id', carId));
+      if (outcome === 'refused') {
+        showToast('error', t('common.writeRefused'));
+        return;
+      }
+      if (outcome === 'gone') showToast('error', t('common.writeAlreadyGone'));
+      else showToast('success', t('fleet.carDeleted'));
       loadCars();
     } catch (error: any) {
       console.error('Error deleting car:', error);
@@ -453,7 +463,7 @@ export default function CarsManagement() {
                   columns={columns}
                   rows={filteredCars}
                   getRowId={car => car.id}
-                  rowActions={rowActions}
+                  rowActions={mayEdit ? rowActions : undefined}
                   rowActionsLabel={t('fleet.actions')}
                   emptyState={
                     <EmptyState size="sm" icon={CarIcon} title={t('fleet.noCarsForFilter')} description={t('fleet.noCarsFilterHint')} />
