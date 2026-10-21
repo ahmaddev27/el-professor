@@ -5326,7 +5326,7 @@ export const de = {
   'engine.warningGroup.target': 'Ziel / Gehalt',
   'engine.warningGroup.note': 'Notizen & Hinweise',
   'engine.dbError.unexpected': 'Ein unerwarteter Fehler ist aufgetreten',
-  'engine.dbError.notAuthorized': 'Keine Berechtigung: Nur Admin oder Ersteller',
+  'engine.dbError.notAuthorized': 'Keine Berechtigung: Dafür braucht Ihre Rolle das Bearbeiten-Recht auf dieser Seite',
   'engine.dbError.stillReferenced': 'Dieser Eintrag kann nicht gelöscht werden, da er noch verwendet wird',
   'engine.dbError.duplicate': 'Ein Eintrag mit diesen Daten existiert bereits',
   'engine.dbError.notFound': 'Der angeforderte Eintrag wurde nicht gefunden',

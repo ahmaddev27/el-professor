@@ -8,6 +8,7 @@ import { usePlan } from '../contexts/PlanContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { pageWriteRights } from '../lib/pageWriteRights';
 import {
   Alert,
   Badge,
@@ -158,7 +159,8 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   // handleAddDriver refuses such a caller as before. There is no confirmation in
   // front of the bin: it deletes at once, as it always has.
 
-  const { canCreate } = useCompanyScope();
+  const scope = useCompanyScope();
+  const { canCreate } = pageWriteRights('drivers', scope);
   const limitAlertId = 'fahrer-driver-limit';
 
   const addButton = (size?: 'sm') =>
