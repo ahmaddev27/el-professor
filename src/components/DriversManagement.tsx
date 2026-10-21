@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
+import { Download, Pencil, Plus, Power, PowerOff, UserCheck, UserX, Users } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
 import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
@@ -25,18 +25,14 @@ interface DriversManagementProps {
   // `contact` is optional on purpose: the status toggle calls this with four
   // arguments and must not rewrite an address nobody touched.
   onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
-  onDeleteDriver: (id: string) => void;
   canEdit: (driver: Driver) => boolean;
-  canDelete: (driver: Driver) => boolean;
 }
 
 const DriversManagement: React.FC<DriversManagementProps> = ({
   drivers,
   onAddDriver,
   onEditDriver,
-  onDeleteDriver,
-  canEdit,
-  canDelete
+  canEdit
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | undefined>();
@@ -73,10 +69,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const handleEdit = (driver: Driver) => {
     setEditingDriver(driver);
     setIsModalOpen(true);
-  };
-
-  const handleDelete = (id: string) => {
-    onDeleteDriver(id);
   };
 
   const handleToggleStatus = (driver: Driver) => {
@@ -244,7 +236,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
     },
   ];
 
-  const anyRowWritable = drivers.some(driver => canEdit(driver) || canDelete(driver));
+  const anyRowWritable = drivers.some(driver => canEdit(driver));
 
   const rowActions = (driver: Driver) => (
     <>
@@ -273,19 +265,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
             onClick={() => canEdit(driver) && handleEdit(driver)}
           >
             <Pencil aria-hidden />
-          </Button>
-        </Tooltip>
-      ) : null}
-      {canDelete(driver) ? (
-        <Tooltip content={t('common.delete')}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="hover:text-critical"
-            aria-label={t('fleet.deleteDriverAria', { name: driver.name })}
-            onClick={() => canDelete(driver) && handleDelete(driver.id)}
-          >
-            <Trash2 aria-hidden />
           </Button>
         </Tooltip>
       ) : null}
@@ -340,6 +319,10 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
             rowActionsLabel={t('fleet.actions')}
           />
         )}
+
+        {/* Where "delete" used to be. A driver who leaves is deactivated, never
+            removed: salaries, receipts and the ride history reference them. */}
+        <p className="text-sm text-fg-muted">{t('fleet.deactivateNotDelete')}</p>
       </div>
 
       <DriverModal

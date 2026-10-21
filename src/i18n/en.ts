@@ -6948,4 +6948,8 @@ export const en: PartialDictionary = {
   'common.writeAlreadyGone': 'This entry no longer exists. The list has been reloaded.',
   'common.writeRefused':     'Not authorised: your role needs the Edit right on this page',
   'fleet.activeDriversCount': '{active} active drivers',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fahrer.updateRefused':      'The database refused the change. You may lack permission, or the driver no longer exists.',
+  'fleet.deactivateNotDelete': 'Drivers are deactivated, not deleted: salaries, receipts and the ride history refer to them.',
 };

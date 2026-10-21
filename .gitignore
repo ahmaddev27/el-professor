@@ -55,3 +55,4 @@ e2e/playwright-report
 
 # A reference file the owner shares into the repo root; never part of the product.
 FleetBook_*.html
+bash.exe.stackdump

@@ -21,7 +21,9 @@ const FahrerPage: React.FC = () => {
   // The rights of the company the session is in — see BelegePage.
   const scope = useCompanyScope();
   // The page the database asks (drivers), so the browser asks the same question.
-  const { canEdit, canDelete, canCreate } = pageWriteRights('drivers', scope);
+  // The delete right is not asked for: deleting a driver was replaced by
+  // deactivating one, so there is nothing of that kind left to gate here.
+  const { canEdit, canCreate } = pageWriteRights('drivers', scope);
   const { success, error: showError } = useToast();
   const { drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -36,10 +38,6 @@ const FahrerPage: React.FC = () => {
 
   const canEditDriver = (driver: Driver): boolean => {
     return canEdit(driver.createdBy);
-  };
-
-  const canDeleteDriver = (driver: Driver): boolean => {
-    return canDelete(driver.createdBy);
   };
 
   useEffect(() => {
@@ -84,17 +82,6 @@ const FahrerPage: React.FC = () => {
     } catch (err) {
       console.error('Error updating driver:', err);
       showError(t('common.errorUpdate'), handleDatabaseError(err));
-    }
-  };
-
-  const handleDeleteDriver = async (id: string) => {
-    try {
-      await driverActions.delete(id);
-      await loadData();
-      success(t('fahrer.deleted'), t('fahrer.deletedBody'));
-    } catch (err) {
-      console.error('Error deleting driver:', err);
-      showError(t('common.errorDelete'), handleDatabaseError(err));
     }
   };
 
@@ -163,9 +150,7 @@ const FahrerPage: React.FC = () => {
       drivers={drivers}
       onAddDriver={handleAddDriver}
       onEditDriver={handleUpdateDriver}
-      onDeleteDriver={handleDeleteDriver}
       canEdit={canEditDriver}
-      canDelete={canDeleteDriver}
     />
       </TabsContent>
 
