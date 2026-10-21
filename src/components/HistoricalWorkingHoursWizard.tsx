@@ -10224,8 +10224,13 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     const imp = imports.find(i => i.id === selectedImportId);
 
     // Delete any existing plan for this company/month/year/mode before inserting new one
-    // A hidden DELETE touches nothing and answers 200; inserting after it would
-    // leave two plans for the month. 'gone' (nothing to replace) is fine.
+    // A hidden DELETE touches nothing and answers 200, so the INSERT below ran
+    // against the row this was meant to clear. It did NOT leave two plans for the
+    // month — `historical_wh_saved_plans_company_month_year_mode_key` is UNIQUE on
+    // (company_id, month, year, mode), verified live on staging — so the insert
+    // failed 23505 and the user read a raw duplicate-key sentence instead of being
+    // told their role may not save a plan. That is what this replaces.
+    // 'gone' (nothing to replace) is fine.
     try {
       const cleared = await deleteChecked(supabase, 'historical_wh_saved_plans', q => q
         .eq('company_id', companyId)
