@@ -19,8 +19,10 @@
  * "not available in manual eval without notes map". The Notizen screen writes
  * `driver_notes`, so the rows that matter — sick, vacation — were never consulted
  * when a person picked the driver. The dialog drew a driver on sick leave green,
- * and the one wall left was the export check, `validateDriverNotesForPlanStep`,
- * which fires when the plan is built for export, not when it is assigned.
+ * although its own list of refusals that can never be bypassed names the note
+ * constraint. What refused him came later, from `validateDriverNotesForPlanStep`
+ * over the finished plan - the red box under it and the apply gate, then again
+ * before an export - after the whole plan had been built around him.
  *
  * Its neighbour, the note *window*, has a measured cost: while the window was built
  * at UTC midnight, 11 real rides on staging went to drivers recorded as sick
@@ -57,6 +59,16 @@ import {
 import type { Phase1VehicleBlock } from './monatsplanungPhase1';
 import type { PlanningDriver } from '../components/MonatsplanungDriverPool';
 import { block, driver, note } from '../test-utils/phase3Fixtures';
+
+// ── the zone ────────────────────────────────────────────────────────────────
+
+describe('the timezone these cases are stated in', () => {
+  it('is Europe/Berlin, or the days the clocks change below mean nothing', () => {
+    // vitest.config.ts sets TZ before any module evaluates a Date.
+    expect(new Date(2026, 4, 22).getTimezoneOffset()).toBe(-120); // CEST, UTC+2
+    expect(new Date(2026, 1, 1).getTimezoneOffset()).toBe(-60);   // CET,  UTC+1
+  });
+});
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -116,6 +128,8 @@ const SHAPES: Array<{ shape: string; note: StructuredNote; probes: Probe[] }> = 
       { name: 'refuses a block from the day before that runs into the noted morning', block: ['2026-05-21', '23:00', '01:00'], refused: true },
       { name: 'allows the same hours on the day before', block: ['2026-05-21', '10:00', '12:00'], refused: false },
       { name: 'allows the first hour of the day after', block: ['2026-05-23', '00:30', '01:00'], refused: false },
+      { name: 'allows a block that ends exactly at midnight, where the day starts', block: ['2026-05-21', '23:00', '00:00'], refused: false },
+      { name: 'allows a block that starts exactly at midnight, where the day ends', block: ['2026-05-23', '00:00', '01:00'], refused: false },
     ],
   },
   {

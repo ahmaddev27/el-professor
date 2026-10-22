@@ -6,6 +6,10 @@ import type { PlanningDriver } from '../components/MonatsplanungDriverPool';
  * The smallest Phase 1 block, Phase 3 driver and structured note that Phase 3's
  * tests can ask a question about. Dates are local wall clock, which is what Phase 1
  * builds and what vitest.config.ts pins to Europe/Berlin.
+ *
+ * monatsplanungPhase3.windows.test.ts predates this file and keeps copies of its own
+ * (its driver has a night Dienstzeit and its block takes a vehicle); it can move over
+ * the next time that file is touched for another reason.
  */
 
 const pad = (n: number) => String(n).padStart(2, '0');

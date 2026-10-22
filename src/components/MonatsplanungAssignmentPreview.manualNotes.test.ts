@@ -96,11 +96,16 @@ const checkboxes = (tree: ReactTestRenderer) =>
 const confirmButton = (tree: ReactTestRenderer): ReactTestInstance =>
   tree.root.findAll(n => n.type === 'button' && flatText(n) === 'common.confirm')[0];
 
+// The repair pass logs what it did, and Confirm logs the assignment it made; the tests
+// read the screen, and read that second log only to tell an assignment from a refusal.
+const confirmationLog = vi.fn();
+const CONFIRMED = '[Monatsplanung] manual assignment confirmed';
+
 beforeEach(() => {
   world.notes = [note()];
-  // The repair pass and the confirmation log what they did; the test reads the screen.
+  confirmationLog.mockReset();
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  vi.spyOn(console, 'info').mockImplementation(() => {});
+  vi.spyOn(console, 'info').mockImplementation(confirmationLog);
 });
 
 afterEach(() => {
@@ -127,11 +132,12 @@ describe('the Manuell lösen dialog and a driver on sick leave', () => {
     await press(driverRow(tree));
     await press(confirmButton(tree));
 
+    expect(confirmationLog).not.toHaveBeenCalledWith(CONFIRMED, expect.anything());
     expect(textOf(tree)).toContain('mp.unassignedBlocks');
     expect(tree.root.findAll(n => n.type === 'button' && flatText(n).includes('Fahrer Eins'))).toHaveLength(1);
   });
 
-  it('follows the notes the screen holds now, and assigns once they no longer exclude him', async () => {
+  it('follows the notes the screen holds now, in both directions, and assigns only while none excludes him', async () => {
     const tree = await mount();
     await openTheDialog(tree);
     await press(driverRow(tree));
@@ -140,10 +146,20 @@ describe('the Manuell lösen dialog and a driver on sick leave', () => {
     // The notes are read again (here: for another company) and the sick note is gone.
     world.notes = [];
     await rerender(tree, { ...PROPS, companyId: 'company-2' });
-
     expect(badgeOf(driverRow(tree))).toBe('mp.resolver.possible');
     expect(confirmButton(tree).props.disabled).toBe(false);
+
+    // The dangerous direction: he is selected and Confirm is on when the note arrives.
+    world.notes = [note()];
+    await rerender(tree, { ...PROPS, companyId: 'company-3' });
+    expect(badgeOf(driverRow(tree))).toBe('mp.reason.noteConstraint');
+    expect(confirmButton(tree).props.disabled).toBe(true);
+    expect(checkboxes(tree)).toHaveLength(0);
+
+    world.notes = [];
+    await rerender(tree, { ...PROPS, companyId: 'company-4' });
     await press(confirmButton(tree));
+    expect(confirmationLog).toHaveBeenCalledWith(CONFIRMED, expect.objectContaining({ blockId: 'B1' }));
     expect(textOf(tree)).not.toContain('mp.unassignedBlocks');
   });
 });
