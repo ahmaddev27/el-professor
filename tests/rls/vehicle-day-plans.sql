@@ -20,13 +20,25 @@
   apart by what they print, and every one is asserted by its exact text:
 
       new row violates row-level security policy for table "…"   a policy
-      permission denied for table / function …                    a missing GRANT
+      privilege table <name> / privilege function <name>          a missing GRANT
       not_authorized                                              the role gate of an RPC
       no_company                                                  the state gate of an RPC
       unauthenticated                                             no subject at all
 
   and each guard refusal prints its own HINT (vehicle_day_shift_moments_mismatch,
   vehicle_day_plan_is_final, …), each check its own constraint name.
+
+  A missing GRANT is reported by what was refused, read out of PostgreSQL's own
+  message ("permission denied for table X"), and never by the HINT. The
+  supabase/postgres image of 17.6 adds a prose hint to that error ("Grant the
+  required privileges to the current role with: GRANT SELECT ON …") that
+  PostgreSQL 16 does not write, and the first run of this file on that image
+  differed on exactly two lines for that reason: the refusal was right (42501 on
+  both tables) and the sentence was the version's. The SQLSTATE and the object's
+  name are what is stable, so those are what is asserted -- and a HINT is taken
+  as a reason only when it is a snake_case word, the shape every guard and RPC
+  of this migration gives its own. Section 9 runs the probe against a refusal
+  written with and without that prose hint, so the reading is itself checked.
 
   ── WHAT IS COVERED ──────────────────────────────────────────────────────────
 
@@ -168,10 +180,31 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE authenticated';
 END $$;
 
+/* What a refusal is reported as, after its SQLSTATE. Three kinds of 42501 exist
+   and stay apart in what they print:
+     - a missing GRANT: `privilege <table|function|schema> <name>`, read out of
+       PostgreSQL's message. The message is the same on every version and names the
+       object; the HINT is not (the supabase/postgres image of 17.6 writes a prose
+       one), so a missing GRANT is never reported by its hint;
+     - a row-level security policy: its message, which names the table;
+     - an RPC's own gate: its HINT, a snake_case word (not_authorized, no_company).
+   Any other refusal prints a snake_case HINT when it has one, else its message. */
+CREATE OR REPLACE FUNCTION _vd_reason(p_state text, p_message text, p_hint text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN p_state = '42501' AND p_message ~ '^permission denied for (table|function|schema) '
+      THEN 'privilege ' || regexp_replace(p_message, '^permission denied for (table|function|schema) .*$', '\1')
+           || ' ' || regexp_replace(p_message, '^permission denied for (table|function|schema) ', '')
+    WHEN p_hint ~ '^[a-z][a-z0-9_]*$' THEN p_hint
+    ELSE p_message
+  END
+$$;
+
 /* Run p_sql as that caller in a subtransaction that is always rolled back and
    return the scalar it answered, `rows N` for a statement without a result, or
-   `ERR <sqlstate> <hint, else message>`. Nothing it writes survives. The HINT is
-   preferred because every refusal of the guards and the RPCs carries one. */
+   `ERR <sqlstate> <reason>` (see _vd_reason). Nothing it writes survives. A
+   statement the server cancels (a statement timeout) is reported as ERR 57014:
+   WHEN OTHERS does not catch it, and an uncaught one would end the file. */
 CREATE OR REPLACE FUNCTION _vd_try(p_user uuid, p_session uuid, p_sql text) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -195,10 +228,12 @@ BEGIN
   EXCEPTION
     WHEN SQLSTATE 'ZZ031' THEN
       v_out := SQLERRM;
+    WHEN query_canceled THEN
+      v_out := 'ERR 57014 ' || SQLERRM;
     WHEN OTHERS THEN
       GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT,
                               v_hint = PG_EXCEPTION_HINT;
-      v_out := 'ERR ' || v_state || ' ' || coalesce(nullif(v_hint, ''), v_msg);
+      v_out := 'ERR ' || v_state || ' ' || _vd_reason(v_state, v_msg, v_hint);
   END;
   PERFORM _vd_reset();
   RETURN v_out;
@@ -1449,14 +1484,56 @@ BEGIN
     _vd_try(c_super, NULL, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:a-draft'))));
 
   -- anon holds no privilege at all, so it never reaches a policy or a function body.
-  PERFORM _vd_expect('state: anon cannot read the plans', 'ERR 42501 permission denied for table vehicle_day_plans',
+  -- Each refusal is asserted by its SQLSTATE and the NAME of what was refused (see
+  -- _vd_reason): 42501 on the plans table and 42501 on the shifts table are two
+  -- different lines, so a pass cannot be a refusal of the wrong table.
+  PERFORM _vd_expect('state: anon cannot read the plans', 'ERR 42501 privilege table vehicle_day_plans',
     _vd_try(NULL, NULL, 'SELECT count(*)::text FROM vehicle_day_plans'));
-  PERFORM _vd_expect('state: anon cannot read the shifts', 'ERR 42501 permission denied for table vehicle_day_shifts',
+  PERFORM _vd_expect('state: anon cannot read the shifts', 'ERR 42501 privilege table vehicle_day_shifts',
     _vd_try(NULL, NULL, 'SELECT count(*)::text FROM vehicle_day_shifts'));
-  PERFORM _vd_expect('state: anon cannot call vehicle_day_plan_save', 'ERR 42501 permission denied for function vehicle_day_plan_save',
+  PERFORM _vd_expect('state: anon cannot call vehicle_day_plan_save', 'ERR 42501 privilege function vehicle_day_plan_save',
     _vd_try(NULL, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', c_payload)));
-  PERFORM _vd_expect('state: anon cannot call vehicle_day_plan_confirm', 'ERR 42501 permission denied for function vehicle_day_plan_confirm',
+  PERFORM _vd_expect('state: anon cannot call vehicle_day_plan_confirm', 'ERR 42501 privilege function vehicle_day_plan_confirm',
     _vd_try(NULL, NULL, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:a-draft'))));
+
+  -- The probe itself. A missing GRANT reads the same with and without the prose
+  -- hint the supabase/postgres image of 17.6 attaches to it (this is the text that
+  -- run printed), while a policy refusal and an RPC's own gate stay what they are.
+  PERFORM _vd_expect('probe: a missing table GRANT reads the same with the image''s prose hint',
+    'ERR 42501 privilege table vehicle_day_plans',
+    _vd_try(NULL, NULL, $q$DO $x$ BEGIN
+        RAISE EXCEPTION 'permission denied for table vehicle_day_plans' USING ERRCODE = '42501',
+          HINT = 'Grant the required privileges to the current role with: GRANT SELECT ON public.vehicle_day_plans TO anon;';
+      END $x$
+      $q$));
+  PERFORM _vd_expect('probe: …and without it', 'ERR 42501 privilege table vehicle_day_plans',
+    _vd_try(NULL, NULL, $q$DO $x$ BEGIN
+        RAISE EXCEPTION 'permission denied for table vehicle_day_plans' USING ERRCODE = '42501';
+      END $x$
+      $q$));
+  PERFORM _vd_expect('probe: …and the other table is another line, not the same refusal',
+    'ERR 42501 privilege table vehicle_day_shifts',
+    _vd_try(NULL, NULL, $q$DO $x$ BEGIN
+        RAISE EXCEPTION 'permission denied for table vehicle_day_shifts' USING ERRCODE = '42501',
+          HINT = 'Grant the required privileges to the current role with: GRANT SELECT ON public.vehicle_day_shifts TO anon;';
+      END $x$
+      $q$));
+  PERFORM _vd_expect('probe: a policy refusal keeps its message, which names its table',
+    'ERR 42501 new row violates row-level security policy for table "vehicle_day_plans"',
+    _vd_try(NULL, NULL, $q$DO $x$ BEGIN
+        RAISE EXCEPTION 'new row violates row-level security policy for table "vehicle_day_plans"' USING ERRCODE = '42501';
+      END $x$
+      $q$));
+  PERFORM _vd_expect('probe: an RPC''s own gate keeps its hint', 'ERR 42501 not_authorized',
+    _vd_try(NULL, NULL, $q$DO $x$ BEGIN
+        RAISE EXCEPTION 'Keine Berechtigung' USING ERRCODE = '42501', HINT = 'not_authorized';
+      END $x$
+      $q$));
+  PERFORM _vd_expect('probe: a check violation keeps its own SQLSTATE and message', 'ERR 23514 a check failed',
+    _vd_try(NULL, NULL, $q$DO $x$ BEGIN
+        RAISE EXCEPTION 'a check failed' USING ERRCODE = '23514';
+      END $x$
+      $q$));
 
   -- The authenticated role with no subject at all: the function's first gate.
   PERFORM _vd_expect('state: a token with no subject is refused as unauthenticated, before the company is asked', 'ERR 42501 unauthenticated',
