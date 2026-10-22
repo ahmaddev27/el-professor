@@ -229,6 +229,14 @@ SELECT
 -- records something without affecting the plan. One of each, so the Notizen
 -- screen and its export have all three and the planner has a pin and an exclusion
 -- to honour.
+--
+-- A type and its effect have to agree (driver_notes_behavior_follows_type,
+-- 20261022143000): `sick`, `vacation` and `off` exclude, the five incident types
+-- require, and only `general` and `other` may carry any of the three. So the
+-- neutral note is a `general` one. It used to be a `vacation`, which the
+-- database now refuses: a vacation excludes, and a request nobody has approved
+-- yet is a note, not a vacation. src/utils/noteTypeVocabulary.test.ts reads this
+-- block and fails when a row here is a pairing the database would refuse.
 
 INSERT INTO driver_notes (
   company_id, driver_id, created_by, note_text, note_type,
@@ -239,7 +247,7 @@ SELECT ctx.company_id, d.id, ctx.admin_id, n.text, n.kind, n.behaviour,
   FROM (VALUES
     ('Anna Beispiel',   'Krankmeldung liegt vor',        'sick',     'exclude_from_plan',    DATE '2026-11-09', DATE '2026-11-11', true),
     ('Bert Nachtfahrt', 'Kontrollfahrt eingeplant',      'other',    'must_include_in_plan', DATE '2026-11-19', DATE '2026-11-19', false),
-    ('Emil Normal',     'Urlaub beantragt, noch offen',  'vacation', 'neutral',              DATE '2026-11-30', DATE '2026-11-30', true)
+    ('Emil Normal',     'Urlaub beantragt, noch offen',  'general',  'neutral',              DATE '2026-11-30', DATE '2026-11-30', true)
   ) AS n(driver, text, kind, behaviour, start_date, end_date, full_day)
   JOIN drivers d ON d.name = n.driver
   CROSS JOIN ctx

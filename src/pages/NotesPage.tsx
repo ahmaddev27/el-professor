@@ -14,7 +14,10 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { deleteChecked, updateChecked } from '../lib/writeOutcome';
 import type { TranslationKey } from '../i18n';
-import { noteVehicleMissing, noteVehicleRequired } from '../utils/noteRules';
+import {
+  noteBehaviorFor, noteBehaviorIsFree, notePairAllowed, noteVehicleMissing, noteVehicleRequired,
+  type NotePlanningBehavior,
+} from '../utils/noteRules';
 
 interface Driver {
   id: string;
@@ -31,8 +34,6 @@ interface Car {
   kennzeichen: string;
   status: string;
 }
-
-type NotePlanningBehavior = 'neutral' | 'exclude_from_plan' | 'must_include_in_plan';
 
 interface Note {
   id: string;
@@ -111,18 +112,20 @@ function carPickerOptions(
 }
 
 // `label` holds a TranslationKey: this list is module-level and t() is a
-// hook value. Every consumer resolves it.
+// hook value. Every consumer resolves it. The effect each type carries is not
+// here: utils/noteRules.ts holds it once, for this screen, the CHECK in the
+// database and the tests that keep them equal.
 const NOTE_TYPES = [
-  { value: 'general',   label: 'notes.type.general' as TranslationKey,       behavior: 'neutral'              as NotePlanningBehavior },
-  { value: 'sick',      label: 'notes.type.sick' as TranslationKey,                  behavior: 'exclude_from_plan'    as NotePlanningBehavior },
-  { value: 'vacation',  label: 'notes.type.vacation' as TranslationKey,                 behavior: 'exclude_from_plan'    as NotePlanningBehavior },
-  { value: 'off',       label: 'notes.type.unavailable' as TranslationKey, behavior: 'exclude_from_plan'    as NotePlanningBehavior },
-  { value: 'blitzer',   label: 'notes.type.speedCamera' as TranslationKey,                behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'accident',  label: 'notes.type.accident' as TranslationKey,                 behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'kontrolle', label: 'notes.type.inspection' as TranslationKey,              behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'breakdown', label: 'notes.type.breakdown' as TranslationKey,                  behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'wait',      label: 'notes.type.waiting' as TranslationKey,              behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'other',     label: 'notes.type.other' as TranslationKey,              behavior: 'neutral'              as NotePlanningBehavior },
+  { value: 'general',   label: 'notes.type.general' as TranslationKey },
+  { value: 'sick',      label: 'notes.type.sick' as TranslationKey },
+  { value: 'vacation',  label: 'notes.type.vacation' as TranslationKey },
+  { value: 'off',       label: 'notes.type.unavailable' as TranslationKey },
+  { value: 'blitzer',   label: 'notes.type.speedCamera' as TranslationKey },
+  { value: 'accident',  label: 'notes.type.accident' as TranslationKey },
+  { value: 'kontrolle', label: 'notes.type.inspection' as TranslationKey },
+  { value: 'breakdown', label: 'notes.type.breakdown' as TranslationKey },
+  { value: 'wait',      label: 'notes.type.waiting' as TranslationKey },
+  { value: 'other',     label: 'notes.type.other' as TranslationKey },
 ];
 
 const PLANNING_BEHAVIOR_LABELS: Record<NotePlanningBehavior, TranslationKey> = {
@@ -346,6 +349,15 @@ export function NotesPage() {
   const vehicleRequired =
     noteVehicleRequired(formData.note_type) && !keepsLegacyVehicleGap;
 
+  // Eight of the ten types fix their own planning effect, and the database
+  // refuses a note that says otherwise (driver_notes_behavior_follows_type).
+  // `general` and `other` are the operator's own categories. The field is
+  // locked only while it already holds what the type says, so a note saved
+  // before the rule, whose effect disagrees, can still be corrected here.
+  const behaviorLocked =
+    !noteBehaviorIsFree(formData.note_type)
+    && notePairAllowed(formData.note_type, formData.note_planning_behavior);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -356,6 +368,11 @@ export function NotesPage() {
 
     if (noteVehicleMissing(formData.note_type, formData.car_id, keepsLegacyVehicleGap)) {
       showToast('error', t('notes.vehicleRequired'));
+      return;
+    }
+
+    if (!notePairAllowed(formData.note_type, formData.note_planning_behavior)) {
+      showToast('error', t('notes.behaviorMismatch'));
       return;
     }
 
@@ -470,11 +487,10 @@ export function NotesPage() {
 
   // When note type changes, auto-enable date range for long absence types
   const handleNoteTypeChange = (value: string) => {
-    const nt = NOTE_TYPES.find(n => n.value === value);
     setFormData(prev => ({
       ...prev,
       note_type: value,
-      note_planning_behavior: nt?.behavior ?? 'neutral',
+      note_planning_behavior: noteBehaviorFor(value) ?? 'neutral',
       use_date_range: RANGE_NOTE_TYPES.has(value) ? true : prev.use_date_range,
     }));
   };
@@ -944,12 +960,21 @@ export function NotesPage() {
                   <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('notes.planningBehaviour')}</label>
                   <select value={formData.note_planning_behavior}
                     onChange={e => setFormData(p => ({ ...p, note_planning_behavior: e.target.value as NotePlanningBehavior }))}
-                    className="w-full" style={inputStyle}>
+                    disabled={behaviorLocked}
+                    aria-describedby={behaviorLocked ? 'note-behavior-hint' : undefined}
+                    className="w-full disabled:cursor-not-allowed disabled:opacity-60" style={inputStyle}>
                     <option value="neutral">{t('notes.effect.none')}</option>
                     <option value="exclude_from_plan">{t('notes.effect.exclude')}</option>
                     <option value="must_include_in_plan">{t('notes.effect.require')}</option>
                   </select>
                 </div>
+                {/* Its own full-width row: inside the second column the sentence
+                    would wrap into a tall strip on a phone. */}
+                {behaviorLocked && (
+                  <p id="note-behavior-hint" className="col-span-2 text-xs text-[var(--text-tertiary)]">
+                    {t('notes.behaviorFixed')}
+                  </p>
+                )}
               </div>
 
               {/*
