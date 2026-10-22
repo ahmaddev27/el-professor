@@ -22,8 +22,9 @@
  *   addresses are passengers'. Sending them to a third party is a data
  *   protection decision, and the public Nominatim's policy is about one request
  *   a second (src/utils/simulatedRides/addressPool.ts spaces its requests by
- *   1.1 s for that reason). The sample month in the repository root is 2,376
- *   rides and 3,944 distinct addresses: 72 minutes per fleet per month.
+ *   1.1 s for that reason). The Uber sample the export work was measured on
+ *   (one month, uber.xlsx, no longer tracked) is 2,376 rides and 3,944
+ *   distinct addresses: 72 minutes of requests per fleet per month.
  * - **A Nominatim of our own.** The honest shape, in the same pattern as the
  *   routing container: a service on our network, off unless asked for, never
  *   called from the browser. It is a PostgreSQL import. For scale: the Nominatim

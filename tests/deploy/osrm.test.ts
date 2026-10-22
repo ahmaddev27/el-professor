@@ -247,25 +247,38 @@ describe.skipIf(!hasBash)('compose_profiles_problem (deploy.sh)', () => {
 
 describe.skipIf(!hasBash)('osrm_data_problem (deploy.sh)', () => {
   const log = posix(join(dir, 'docker-calls.log'));
+  const IMAGE = 'ghcr.io/example/osrm@sha256:abc';
   const ask = (env: Record<string, string>) =>
     run('data.sh', [
-      `docker() { echo "$*" >> "${log}"; case "$1 $2" in "volume inspect") [ "\${FAKE_VOLUME}" = yes ] ;; "run --rm") [ "\${FAKE_READY}" = yes ] ;; esac; }`,
-      'osrm_data_problem ghcr.io/example/osrm@sha256:abc ya-mobility-staging_osrm-data',
+      [
+        `docker() { echo "$*" >> "${log}"; case "$*" in`,
+        '"volume inspect"*) [ "${FAKE_VOLUME}" = yes ] ;;',
+        '*"--entrypoint test"*) [ "${FAKE_READY}" = yes ] ;;',
+        '*"--entrypoint grep"*) [ "${FAKE_MATCH}" = yes ] ;;',
+        'esac; }',
+      ].join(' '),
+      `osrm_data_problem ${IMAGE} ya-mobility-staging_osrm-data`,
     ], env).out;
+  const world = (volume: string, ready: string, match: string) => ({ FAKE_VOLUME: volume, FAKE_READY: ready, FAKE_MATCH: match });
 
-  it('says nothing when the volume holds a finished build', () => {
-    expect(ask({ FAKE_VOLUME: 'yes', FAKE_READY: 'yes' })).toBe('');
+  it('says nothing when the volume holds a finished build made by this release\'s image', () => {
+    expect(ask(world('yes', 'yes', 'yes'))).toBe('');
   });
 
   it('names a volume that does not exist, and one that holds no ready.json', () => {
-    expect(ask({ FAKE_VOLUME: 'no', FAKE_READY: 'yes' })).toMatch(/volume ya-mobility-staging_osrm-data does not exist/);
-    expect(ask({ FAKE_VOLUME: 'yes', FAKE_READY: 'no' })).toMatch(/holds no finished build \(no \/data\/current\/ready\.json\)/);
+    expect(ask(world('no', 'yes', 'yes'))).toMatch(/volume ya-mobility-staging_osrm-data does not exist/);
+    expect(ask(world('yes', 'no', 'yes'))).toMatch(/holds no finished build \(no \/data\/current\/ready\.json\)/);
   });
 
-  it('looks through the link the service reads, read-only and without a network', () => {
-    ask({ FAKE_VOLUME: 'yes', FAKE_READY: 'yes' });
+  it('names a build that another OSRM image made: the data format belongs to the version that wrote it', () => {
+    expect(ask(world('yes', 'yes', 'no'))).toMatch(/made by another OSRM image than the one this release runs/);
+  });
+
+  it('looks through the link the service reads, read-only and without a network, and asks for the image by its full name', () => {
+    ask(world('yes', 'yes', 'yes'));
     const calls = readFileSync(join(dir, 'docker-calls.log'), 'utf8');
     expect(calls).toMatch(/run --rm --network none -v ya-mobility-staging_osrm-data:\/data:ro --entrypoint test ghcr\.io\/example\/osrm@sha256:abc -f \/data\/current\/ready\.json/);
+    expect(calls).toMatch(/--entrypoint grep ghcr\.io\/example\/osrm@sha256:abc -qF "image":"ghcr\.io\/example\/osrm@sha256:abc" \/data\/current\/ready\.json/);
   });
 });
 
@@ -384,7 +397,7 @@ describe('deploy.sh asks before it changes anything', () => {
     expect(deployCode).toContain('if [ -n "$osrm_image" ]; then');
   });
 
-  it('never builds the map: that is hours of work and a great deal of memory, and not a release\'s', () => {
+  it('never builds the map: that is a long job and a great deal of memory, and not a release\'s', () => {
     expect(deployCode.replace('Build it first with deploy/osrm-build-data.sh', '')).not.toContain('osrm-build-data');
     expect(deployCode).not.toMatch(/osrm-(extract|partition|customize)/);
   });
@@ -416,8 +429,9 @@ describe('the build script\'s promises', () => {
     expect(stage).toContain('--memory "${MEM_MIB}m" --memory-swap "${SWAP_MIB}m"');
     expect(stage).toContain('--cpus "$BUILD_CPUS" --cpu-shares 256');
     expect(buildCode).toContain('read -r MEM_MIB SWAP_MIB <<<"$(build_limits /proc/meminfo)"');
+    expect(buildCode).toMatch(/^SERVICE_USER=\(--network none /m);
     for (const call of buildCode.split('\n').filter((l) => /^\s*docker run /.test(l))) {
-      expect(call, call).toContain('--network none');
+      expect(call, call).toMatch(/--network none|"\$\{SERVICE_USER\[@\]\}"/);
     }
   });
 
@@ -427,10 +441,19 @@ describe('the build script\'s promises', () => {
     expect(buildCode).toContain('flock -n 9');
   });
 
-  it('starts the new build once, as the service\'s user, before the link moves to it', () => {
+  it('starts the new build once, as the service\'s user and read-only, before the link moves to it', () => {
     expect(buildCode).toContain('--user 10001:10001');
+    expect(buildCode).toContain('-v "$VOLUME":/data:ro)');
     expect(at('osrm-routed --algorithm=MLD')).toBeGreaterThan(0);
     expect(at('osrm-routed --algorithm=MLD')).toBeLessThan(at('mv -T current.new current'));
+  });
+
+  it('makes the build readable for that user before it tries, loads it with --trial, and keeps the check container\'s log', () => {
+    expect(at('chmod -R a+rX "/data/$1"')).toBeGreaterThan(0);
+    expect(at('chmod -R a+rX "/data/$1"')).toBeLessThan(at('osrm-routed --trial'));
+    expect(at('osrm-routed --trial')).toBeLessThan(at('docker run -d --name "$CHECK"'));
+    // Not --rm: a container that dies on start must leave its log behind to be read.
+    expect(buildCode).not.toMatch(/docker run -d --rm/);
   });
 
   it('writes ready.json before it moves the link, and moves the link in one rename', () => {

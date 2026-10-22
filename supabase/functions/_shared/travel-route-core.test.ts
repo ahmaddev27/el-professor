@@ -181,7 +181,7 @@ describe('interpretOsrmAnswer', () => {
     ['InvalidUrl', 400, 'request_rejected'],
     ['TooBig', 400, 'request_rejected'],
     ['SomethingNew', 400, 'service_error'],
-  ])('maps the OSRM code %s to %s, whatever HTTP status carried it', (code, status, reason) => {
+  ])('reads the OSRM code %s (sent with HTTP %i) as %s, and reads it the same at HTTP 200', (code, status, reason) => {
     expect(interpretOsrmAnswer(status, { code, message: 'text that is never passed on' })).toEqual({ kind: 'unavailable', reason });
     expect(interpretOsrmAnswer(200, { code })).toEqual({ kind: 'unavailable', reason });
   });
@@ -210,14 +210,14 @@ describe('interpretOsrmAnswer', () => {
   });
 
   it.each([
-    ['not JSON at all', 200, undefined, 'bad_answer'],
-    ['null', 200, null, 'bad_answer'],
-    ['a list', 200, [], 'bad_answer'],
-    ['a body with no code', 200, { routes: [] }, 'bad_answer'],
-    ['a gateway error page', 502, undefined, 'service_error'],
-    ['a server error with no body', 500, undefined, 'service_error'],
-    ['a service unavailable', 503, null, 'service_error'],
-  ])('answers %s with %s', (_label, status, body, reason) => {
+    ['not JSON at all', 200, 'bad_answer', undefined],
+    ['null', 200, 'bad_answer', null],
+    ['a list', 200, 'bad_answer', []],
+    ['a body with no code', 200, 'bad_answer', { routes: [] }],
+    ['a gateway error page', 502, 'service_error', undefined],
+    ['a server error with no body', 500, 'service_error', undefined],
+    ['a service unavailable', 503, 'service_error', null],
+  ])('reads %s (HTTP %i) as %s', (_label, status, reason, body) => {
     expect(interpretOsrmAnswer(status, body)).toEqual({ kind: 'unavailable', reason });
   });
 });

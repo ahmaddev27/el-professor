@@ -303,17 +303,22 @@ compose_profiles_problem() {
 
 # >>> osrm data checks
 
-# Whether the routing container has a finished build to serve. $1 = the osrm
-# image, $2 = the volume. A release cannot make this build (hours of work and a
-# great deal of memory on a host that carries another live product), so when the
-# profile is on and the volume holds none, the release is refused before it
-# changes anything. ready.json is the last thing the build script writes, read
-# through the link the service reads. Prints nothing when it is there.
+# Whether the routing container has a finished build to serve, made by the
+# image this release runs. $1 = the osrm image, $2 = the volume. A release cannot
+# make this build (a long job and a great deal of memory on a host that
+# carries another live product), so when the profile is on and the volume holds
+# none, the release is refused before it changes anything. ready.json is the
+# last thing the build script writes, read through the link the service reads,
+# and it names the image that wrote the build: the data format belongs to the
+# OSRM version, so moving the image's pin without building again would start a
+# container that cannot read its map. Prints nothing when all of it is right.
 osrm_data_problem() {
   docker volume inspect "$2" > /dev/null 2>&1 \
     || { echo "the volume $2 does not exist"; return; }
   docker run --rm --network none -v "$2":/data:ro --entrypoint test "$1" -f /data/current/ready.json < /dev/null > /dev/null 2>&1 \
-    || echo "the volume $2 holds no finished build (no /data/current/ready.json)"
+    || { echo "the volume $2 holds no finished build (no /data/current/ready.json)"; return; }
+  docker run --rm --network none -v "$2":/data:ro --entrypoint grep "$1" -qF "\"image\":\"$1\"" /data/current/ready.json < /dev/null > /dev/null 2>&1 \
+    || echo "the build in $2 was made by another OSRM image than the one this release runs ($1)"
 }
 
 # <<< osrm data checks
@@ -444,7 +449,7 @@ print(((json.load(sys.stdin).get("services") or {}).get("osrm") or {}).get("imag
 if [ -n "$osrm_image" ]; then
   osrm_problem="$(osrm_data_problem "$osrm_image" "${PROJECT_NAME}_osrm-data")"
   [ -z "$osrm_problem" ] \
-    || fail "the osrm profile is on but $osrm_problem. Build it first with deploy/osrm-build-data.sh (hours for Germany, and not something a release should wait for). Nothing has been changed."
+    || fail "the osrm profile is on but $osrm_problem. Build it first with deploy/osrm-build-data.sh (a long job for Germany, and not something a release should wait for; again after any change of the image). Nothing has been changed."
   echo "  osrm data present in ${PROJECT_NAME}_osrm-data"
 fi
 

@@ -499,7 +499,7 @@ services:
   # does not turn it on, so merging the change that added it starts nothing and
   # pulls nothing. Turning it on is two steps and a person does both:
   #   1. deploy/osrm-build-data.sh builds the map data into the volume osrm-data
-  #      (hours and tens of gigabytes for Germany; the header of that script
+  #      (a long job and tens of gigabytes of memory for Germany; the header of that script
   #      says what and why not inside a release);
   #   2. COMPOSE_PROFILES in .env names osrm (staging: staging,osrm), and a
   #      release starts it. deploy.sh refuses that release when the volume holds

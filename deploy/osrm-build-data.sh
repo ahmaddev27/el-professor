@@ -8,15 +8,16 @@
 #   deploy/osrm-build-data.sh --date 261020                a named snapshot instead of the newest
 #
 # Run it by hand, from the deploy directory of the stack it is for, as root, and
-# detached: it takes hours for Germany (nohup, tmux or screen; it logs to stdout).
-# It is deliberately NOT part of a release. deploy.sh never calls it; a release
-# only checks that its result exists (osrm_data_problem, below) when the `osrm`
-# profile is on.
+# detached: it is a long job for Germany (nohup, tmux or screen; it logs to stdout).
+# It is deliberately NOT part of a release. deploy.sh never calls it; when the
+# `osrm` profile is on a release only checks that its result exists and was made
+# by the image the release runs (osrm_data_problem in deploy.sh), so moving the
+# image's pin means running this again before the release.
 #
 # ## Why it is not part of a release, and why it is careful
 #
 # This host also runs another live product (ridy). Building Germany is a job of
-# tens of gigabytes of memory and a lot of CPU for hours, and the kernel's
+# tens of gigabytes of memory and all the CPU it is given for as long as it runs, and the kernel's
 # answer to a host that runs out of memory is to kill whatever it likes. So the
 # three build steps run in throwaway containers with a memory ceiling BELOW what
 # the host has free: if the build needs more than it was given, that one
@@ -224,7 +225,7 @@ docker run --rm --network none -v "$WORK_DIR":/in:ro -v "$VOLUME":/data --entryp
   -c 'mkdir -p "/data/$1" && cp "/in/$2" "/data/$1/map.osm.pbf"' _ "$NAME" "$NAME.osm.pbf" < /dev/null \
   || fail "could not copy the extract into the volume"
 
-declare -A TOOK PEAK
+declare -A TOOK PEAK REPORTED
 # The highest memory use docker stats shows for a container, sampled while it
 # runs, so the next person learns what the build really took and not what the
 # wiki's table says. Prints MiB, or nothing when it never saw the container.
@@ -248,19 +249,27 @@ peak_memory_mib() {
   [ "$seen" = no ] || echo "$peak"
 }
 
+# OSRM's tools end with "RAM: peak bytes used: N". That is the tool's own figure
+# and more exact than a sample once a second, so it wins when it is there.
+reported_peak_mib() {
+  grep -o 'RAM: peak bytes used: [0-9]*' "$1" 2> /dev/null | tail -n 1 | awk '{ printf "%.0f", $NF / 1048576 }'
+}
+
 run_stage() {
-  local stage="$1" started=$SECONDS sampler status
+  local stage="$1" started=$SECONDS sampler status log="$WORK_DIR/stage-$1.log"
   shift
   step "$stage"
   peak_memory_mib "osrm-build-$stage" > "$WORK_DIR/peak-$stage" 2> /dev/null &
   sampler=$!
   docker run --rm --name "osrm-build-$stage" --network none --memory "${MEM_MIB}m" --memory-swap "${SWAP_MIB}m" \
-      --cpus "$BUILD_CPUS" --cpu-shares 256 -v "$VOLUME":/data "$IMAGE" "$@" < /dev/null \
+      --cpus "$BUILD_CPUS" --cpu-shares 256 -v "$VOLUME":/data "$IMAGE" "$@" < /dev/null 2>&1 | tee "$log" \
     || { status=$?; kill "$sampler" 2> /dev/null || true; fail "$stage did not finish (exit $status). A kill (137) means it was given less memory than it needed; nothing else on the host was touched. The build is in /data/$NAME of $VOLUME and is not served"; }
   TOOK[$stage]=$((SECONDS - started))
   wait "$sampler" || true
   PEAK[$stage]="$(cat "$WORK_DIR/peak-$stage" 2> /dev/null || true)"
-  echo "  $stage took ${TOOK[$stage]} s, peak memory ${PEAK[$stage]:-unknown} MiB (sampled once a second)"
+  REPORTED[$stage]="$(reported_peak_mib "$log")"
+  [ -z "${REPORTED[$stage]}" ] || PEAK[$stage]="${REPORTED[$stage]}"
+  echo "  $stage took ${TOOK[$stage]} s, peak memory ${PEAK[$stage]:-unknown} MiB (the tool's own figure, else sampled once a second)"
 }
 
 run_stage extract osrm-extract -p /opt/car.lua --threads "$BUILD_CPUS" "/data/$NAME/map.osm.pbf"
@@ -270,10 +279,19 @@ run_stage customize osrm-customize --threads "$BUILD_CPUS" "/data/$NAME/map.osrm
 # ── Prove it loads, as the user the service runs as, before anything points at it
 
 step "start it once"
+# The tools write as root with whatever mode they chose; the service reads as 10001.
+docker run --rm --network none -v "$VOLUME":/data --entrypoint sh "$IMAGE" -c 'chmod -R a+rX "/data/$1"' _ "$NAME" < /dev/null \
+  || fail "could not make the build readable"
+SERVICE_USER=(--network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --user 10001:10001 -v "$VOLUME":/data:ro)
+
+# Does it initialise at all? --trial quits after loading, and says why when it cannot.
+docker run --rm "${SERVICE_USER[@]}" "$IMAGE" osrm-routed --trial --algorithm=MLD --mmap --verbosity=WARNING "/data/$NAME/map.osrm" < /dev/null \
+  || fail "osrm-routed could not load the new build (its message is above); it is not switched in"
+
+# And does it answer a question over HTTP, the way the service is asked?
 CHECK=osrm-build-check
 trap 'docker rm -f "$CHECK" > /dev/null 2>&1 || true' EXIT
-docker run -d --rm --name "$CHECK" --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --user 10001:10001 \
-    -v "$VOLUME":/data:ro "$IMAGE" osrm-routed --algorithm=MLD --mmap --ip=127.0.0.1 --port=5000 --verbosity=WARNING "/data/$NAME/map.osrm" \
+docker run -d --name "$CHECK" "${SERVICE_USER[@]}" "$IMAGE" osrm-routed --algorithm=MLD --mmap --ip=127.0.0.1 --port=5000 --verbosity=WARNING "/data/$NAME/map.osrm" \
     < /dev/null > /dev/null
 ANSWERED=no
 for _ in $(seq 1 90); do

@@ -156,6 +156,8 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         working-directory: deploy
         run: |
+          # Without pipefail the exit status of the build is tee's, and a refused build passes.
+          set -o pipefail
           sudo env "PATH=$PATH" ./osrm-build-data.sh --check --region "$REGION"
           sudo env "PATH=$PATH" ./osrm-build-data.sh --region "$REGION" 2>&1 | tee "$RUNNER_TEMP/build.log"
           {
@@ -190,7 +192,15 @@ jobs:
           [ -z "$problem" ] || { echo "::error::the guard refuses a good build: $problem"; exit 1; }
           problem="$(osrm_data_problem "$image" ya-mobility-staging_no-such-volume)"
           [ -n "$problem" ] || { echo "::error::the guard accepts a volume that does not exist"; exit 1; }
-          echo "guard: $problem"
+          echo "guard, no volume: $problem"
+          # A build another image wrote: make ready.json name a different digest, ask, put it back.
+          docker run --rm -v ya-mobility-staging_osrm-data:/data --entrypoint sh "$image" -c 'sed -i "s/sha256:/sha256:0/" /data/current/ready.json'
+          problem="$(osrm_data_problem "$image" ya-mobility-staging_osrm-data)"
+          docker run --rm -v ya-mobility-staging_osrm-data:/data --entrypoint sh "$image" -c 'sed -i "s/sha256:0/sha256:/" /data/current/ready.json'
+          [ -n "$problem" ] || { echo "::error::the guard accepts a build another image wrote"; exit 1; }
+          echo "guard, other image: $problem"
+          problem="$(osrm_data_problem "$image" ya-mobility-staging_osrm-data)"
+          [ -z "$problem" ] || { echo "::error::the guard refuses the build after ready.json was put back: $problem"; exit 1; }
       - name: Ask the container for routes
         if: steps.scope.outputs.run == 'true'
         env:
@@ -206,6 +216,22 @@ jobs:
           if grep -qE '(7\.0[0-9]{3}|51\.1[0-9]{3})' "$RUNNER_TEMP/osrm.log"; then
             echo "::error::the container's log holds a coordinate that the live test asked about"; exit 1
           fi
+      - name: Control for the log check - at the default verbosity the same container does log requests
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          image="$(docker compose --profile osrm config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["osrm"]["image"])')"
+          docker run -d --name osrm-info --user 10001:10001 --read-only --tmpfs /tmp:size=16m -v ya-mobility-staging_osrm-data:/data:ro "$image" osrm-routed --algorithm=MLD --mmap --ip=0.0.0.0 /data/current/map.osrm
+          ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' osrm-info)"
+          for _ in $(seq 1 30); do curl -fsS "http://$ip:5000/nearest/v1/driving/7.0671,51.1657" > /dev/null 2>&1 && break; sleep 2; done
+          curl -fsS "http://$ip:5000/route/v1/driving/7.0671,51.1657;7.0771,51.1757?overview=false" > /dev/null
+          echo "--- log at the default verbosity ---"; docker logs osrm-info 2>&1 | tail -20; echo "--- end ---"
+          if docker logs osrm-info 2>&1 | grep -qE '7\.0671|51\.1657'; then
+            echo "control: at INFO the container logs the request coordinates, so --verbosity=WARNING is what keeps them out"
+          else
+            echo "::warning::control: at INFO the container does not log the coordinates either; the check above cannot fail and the compose comment about the log is wrong"
+          fi
+          docker rm -f osrm-info > /dev/null
       - name: The edge function type-checks under Deno
         if: steps.scope.outputs.run == 'true'
         continue-on-error: true
