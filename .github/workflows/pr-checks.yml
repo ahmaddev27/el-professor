@@ -220,7 +220,29 @@ jobs:
         env:
           OSRM_LIVE_CENTER: '51.1657,7.0671'
           OSRM_LIVE_OUTSIDE: '48.1374,11.5755'
-        run: npx vitest run tests/deploy/osrm.live.test.ts
+        run: |
+          echo "--- what osrm-routed itself answers to one route request"
+          curl -sS "$OSRM_URL/route/v1/driving/7.0671,51.1657;7.0771,51.1757?overview=false&alternatives=false&steps=false"; echo
+          npx vitest run tests/deploy/osrm.live.test.ts
+      - name: The function, in the real edge runtime, with the real container behind it
+        if: ${{ !cancelled() && steps.live.outcome == 'success' }}
+        env:
+          JWT_SECRET: ci-jwt-secret-ci-jwt-secret-ci-jwt-secret-0001
+        run: |
+          net=ya-mobility-staging_default
+          docker run -d --name edge-stub --network "$net" -v "$PWD/tests/deploy":/s:ro node:22-bookworm-slim node /s/edge-stub.mjs
+          docker run -d --name edge --network "$net" -p 127.0.0.1:9000:9000 \
+            -v "$PWD/supabase/functions":/home/deno/functions:ro \
+            -e JWT_SECRET -e SUPABASE_ANON_KEY=ci-anon -e SUPABASE_URL=http://edge-stub:8000 -e APP_URL=https://app.example.test \
+            supabase/edge-runtime:v1.76.2 start --main-service /home/deno/functions/main
+          for _ in $(seq 1 60); do curl -s -o /dev/null -m 3 http://127.0.0.1:9000/ && break; sleep 2; done
+          status=0
+          node tests/deploy/edge-e2e.mjs warm || true
+          node tests/deploy/edge-e2e.mjs || status=1
+          docker stop ya-mobility-staging-osrm-1 > /dev/null
+          node tests/deploy/edge-e2e.mjs osrm-down || status=1
+          if [ "$status" != 0 ]; then echo "--- edge runtime log"; docker logs edge 2>&1 | tail -60; fi
+          exit "$status"
       - name: The container logs no coordinate
         if: ${{ !cancelled() && steps.live.outcome != 'skipped' }}
         working-directory: deploy

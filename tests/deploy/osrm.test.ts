@@ -510,6 +510,13 @@ describe('CI runs the chain for real, and only when a change touches it', () => 
     expect(job).toContain('osrm_data_problem');
   });
 
+  it('runs the function in the very edge-runtime image the stack runs, against the real container', () => {
+    const stackImage = /image: (supabase\/edge-runtime:v[\d.]+)/.exec(functionsBlock)?.[1];
+    expect(stackImage).toBeDefined();
+    expect(job).toContain(`${stackImage} start --main-service /home/deno/functions/main`);
+    expect(job).toContain('node tests/deploy/edge-e2e.mjs osrm-down');
+  });
+
   it('checks the service is off without its profile and that its log holds no coordinate', () => {
     expect(job).toContain('osrm is in the default services');
     expect(job).toContain("The container logs no coordinate");
