@@ -1,5 +1,31 @@
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 
+// ─── Scope: this engine does not consult driver absence ─────────────────────
+//
+// This is the engine of the Brutto-Gehälter pipeline (HistoricalReconciliationWizard),
+// and absence is not an input to it, on purpose. That pipeline reconciles gross
+// pay against figures the Steuerberater already has, for a month that has already
+// been driven: each ride is attributed to the driver the Fahrtenbuch names
+// (original_driver_id / original_driver_name), so who was available is not a
+// question it asks, and a note saying a driver was sick or on leave says nothing
+// about a ride that happened. The wizard reads no driver notes at all, and
+// shiftBlockEngine.scope.test.ts fails if that stops being true, so this
+// paragraph cannot go stale quietly.
+//
+// validateCoverage and enforceBlockCoverageInvariant used to take a blockedDates
+// map (date → reason). It was filled by GenerateStundennachweisModal, a different
+// feature that generated a Stundennachweis from a plan; that modal was deleted in
+// c3a8a8b (2026-09-09) as unreachable, and nothing has called either function
+// since (checked 22.10.2026). The parameter went with its only caller rather than
+// being left to look like a hook this pipeline forgot to fill: wiring absence
+// into the pipeline that produces the accountant's figures would be a product
+// decision about those figures, not a missing line.
+//
+// If absence ever has to be consulted by code that uses this engine, build the
+// windows with noteExclusionIntervals (utils/driverNoteValidation.ts) and never
+// with a new copy of the date arithmetic: the header there records what the two
+// earlier copies cost.
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 export const BLOCK_SEPARATOR_GAP_MINUTES = 90;
@@ -462,33 +488,20 @@ export function checkRidesOutsidePreferredWindow(
 
 // ─── Coverage validation ────────────────────────────────────────────────────
 
+// Judges rides against the Schichten alone. It takes no absence map: see "Scope"
+// at the top of this file.
 export function validateCoverage(
   tripsByDate: Map<string, NormalizedTrip[]>,
   schichtenByDate: Map<string, Schicht[]>,
-  blockedDates: Map<string, string>,
 ): CoverageResult[] {
   const results: CoverageResult[] = [];
   const processedOriginals = new Set<string>();
 
   for (const [date, segments] of tripsByDate) {
     const shifts = schichtenByDate.get(date) ?? [];
-    const blocked = blockedDates.get(date);
 
     for (const seg of segments) {
       if (processedOriginals.has(seg.original.id)) continue;
-
-      if (blocked) {
-        processedOriginals.add(seg.original.id);
-        results.push({
-          tripId: seg.original.id,
-          date: seg.original.trip_date,
-          startTime: seg.original.start_time ?? '',
-          endTime: seg.original.end_time ?? '',
-          status: 'uncovered',
-          reason: `Abwesenheit: ${blocked}`,
-        });
-        continue;
-      }
 
       const tripStart = seg.startMinutes;
       const tripEnd = seg.endMinutes;
@@ -760,17 +773,16 @@ export function extendShiftsForSalary(
 // ─── Block coverage invariant ───────────────────────────────────────────────
 // After all modifications (buffer, Pflichtnotiz, salary extension, splitting),
 // ensure every ride segment is fully inside at least one Schicht on its date.
-// If not, extend the nearest Schicht to cover it.
+// If not, extend the nearest Schicht to cover it. It takes no absence map either:
+// see "Scope" at the top of this file.
 
 export function enforceBlockCoverageInvariant(
   schichtenByDate: Map<string, Schicht[]>,
   segsByDate: Map<string, NormalizedTrip[]>,
-  blockedDates: Map<string, string>,
 ): string[] {
   const fixes: string[] = [];
 
   for (const [date, segments] of segsByDate) {
-    if (blockedDates.has(date)) continue;
     const shifts = schichtenByDate.get(date);
     if (!shifts || shifts.length === 0) continue;
 
