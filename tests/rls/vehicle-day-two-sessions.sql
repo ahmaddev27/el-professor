@@ -4,7 +4,7 @@
 
   Named to sort AFTER vehicle-day-plans.sql: the runner stops at the first file
   that fails, this is the one that depends on dblink and on a second session, and
-  the main file's 353 answers should be on the screen whatever this one does.
+  the main file's verdict should be on the screen whatever this one does.
 
   Runs after seed.sql, against the same throwaway database as every other file,
   as supabase_admin. tests/rls/vehicle-day-plans.sql is one transaction and one

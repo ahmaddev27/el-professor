@@ -68,22 +68,24 @@
                     month when written directly
     7. lifecycle    confirm, replace, generation, the freeze, status only through
                     the RPC, a draft's shifts go with it
+   7b. overlap      the one-pass check against the comparison of every pair, on
+                    60 plans and by hand
     8. save         what the RPC refuses, by name; the totals are the database's;
                     a failed save leaves the earlier draft alone
-    9. state        a suspended company and anon
+   8b. rule 2       the summary is a closed object of numbers, a shift field has
+                    the JSON type it is stored as, the version is a token --
+                    through the RPC and through a direct write
+    9. state        a suspended company and anon; the probe's own reading of a
+                    missing GRANT, with and without the 17.6 image's prose hint
    10. contexts     a view context reads and writes nothing; a support session
                     writes and each row leaves one audit row
    11. deletion     a company holding a confirmed and a superseded plan can still
                     be deleted (the defect 20261016140000 fixed for the monthly
                     plan), while the same delete of one plan is refused
-   7b. overlap      the one-pass check against the comparison of every pair, on
-                    60 plans and by hand; 12b: a month of 3100 shifts under a
-                    statement timeout
-   8b. rule 2       the summary is a closed object of numbers, a shift field has
-                    the JSON type it is stored as, the version is a token --
-                    through the RPC and through a direct write
    12. mutations    fourteen controls: break one rule inside a subtransaction,
                     require the probe to notice, and let the rollback restore it
+  12b. scale        a month of 6200 shifts, saved a moment ago, confirmed inside a
+                    statement timeout of 3 s
 
   The matrix lines for both tables, and the EXECUTE grants of both RPCs, are in
   tests/rls/matrix.sql. What one session cannot show -- a shift written while a
@@ -94,9 +96,9 @@
   and not the schema's. The one-pass overlap check (7b, 12b) was compared with
   the self-join it replaced by running this file against both on PostgreSQL 16.6:
   the join passed 7b, being correct, and failed 12b with a cancelled statement; the
-  pass passed both. The migration's own self-check (section 8) was run against
-  fifteen deliberately broken copies of the migration and refused each by the
-  check meant for it.
+  pass passed both. The migration's own self-check (its section 8) was run
+  against fifteen deliberately broken copies of the migration and refused each by
+  the check meant for it.
 */
 
 \set ON_ERROR_STOP on
@@ -1322,14 +1324,15 @@ END $$;
 
 -- ─── 7b. the overlap check is one pass, and it answers what every pair answers ──
 --
--- vehicle_day_plan_confirm used to join the plan's shifts with themselves. A
--- reviewer measured that at 3 to 11 seconds for a month of 3100 shifts saved a
--- moment before, when the planner's figures did not know the plan yet (the API
--- roles stop a statement at 8). It is now one pass in start order. The old query
--- is written out below as the ORACLE, and sixty plans are built from md5 -- so
--- the same plans come out on every PostgreSQL -- and confirmed through the real
--- function: it must say "overlap" exactly when the oracle counts a pair. The
--- month of 3100 shifts, and the statement timeout, are section 12b.
+-- vehicle_day_plan_confirm used to join the plan's shifts with themselves. That
+-- took seconds for a month of 3100 shifts saved a moment before (2 to 3.5 on a
+-- quiet machine, up to 11 on a busy one), when the planner's figures did not
+-- know the plan yet, and never finished for 12,400 inside the 8 seconds the API
+-- roles allow a statement. It is now one pass in start order. The old query is
+-- written out below as the ORACLE, and sixty plans are built from md5 -- so the
+-- same plans come out on every PostgreSQL -- and confirmed through the real
+-- function: it must say "overlap" exactly when the oracle counts a pair. A
+-- large month, and the statement timeout, are section 12b.
 
 /* One plan, a pure function of p_case, built as the owner in a subtransaction
    that is always rolled back. The mix is the point: the slot length decides how
@@ -2206,12 +2209,12 @@ END $$;
 --
 -- What this can and cannot show. The earlier query compared every shift with
 -- every other when the planner took a nested loop with the plan as the only index
--- condition, and on PostgreSQL 16.6 it did, in exactly this state: 6200 shifts
--- took 7 to 8 seconds and were cancelled here (the one-pass check takes a few
--- hundredths). Whether another version chooses the same join is the planner's
--- business and not something a file can force, so on such a version the earlier
--- query would pass this check; the shape of the query is therefore also pinned in
--- the migration's self-check 15, and its answers by section 7b.
+-- condition, and on PostgreSQL 16.6 it did, in exactly this state: this month
+-- was cancelled at 3 seconds (the one-pass check takes a few hundredths).
+-- Whether another version chooses the same join is the planner's business and
+-- not something a file can force, so on such a version the earlier query would
+-- pass this check; the shape of the query is therefore also pinned in the
+-- migration's self-check 15, and its answers by section 7b.
 
 ANALYZE public.vehicle_day_shifts;
 ANALYZE public.vehicle_day_plans;
