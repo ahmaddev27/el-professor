@@ -6957,4 +6957,8 @@ export const en: PartialDictionary = {
   'sa.subs.deleteRefused.paid':        'A paid invoice cannot be deleted. It is the record of a payment received; cancel it instead.',
   'sa.subs.deleteRefused.wasPaid':     'This invoice was recorded as paid at some point and cannot be deleted. Cancel it instead.',
   'sa.subs.invoiceDeleted':            'Invoice deleted',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'notes.behaviorFixed':    'Set by the note type. You can only choose it for “General note” and “Other”.',
+  'notes.behaviorMismatch': 'This note type and planning behaviour do not go together. Adjust the behaviour or choose another type.',
 };

@@ -7013,4 +7013,8 @@ export const de = {
   'sa.subs.deleteRefused.paid':        'Eine bezahlte Rechnung kann nicht gelöscht werden. Sie belegt den Zahlungseingang; bitte stattdessen stornieren.',
   'sa.subs.deleteRefused.wasPaid':     'Diese Rechnung wurde bereits als bezahlt erfasst und kann nicht gelöscht werden. Bitte stattdessen stornieren.',
   'sa.subs.invoiceDeleted':            'Rechnung gelöscht',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'notes.behaviorFixed':    'Vom Notiz-Typ festgelegt. Frei wählbar nur bei „Allgemeine Notiz“ und „Sonstiges“.',
+  'notes.behaviorMismatch': 'Dieser Notiz-Typ und dieses Planungsverhalten passen nicht zusammen. Bitte das Verhalten anpassen oder einen anderen Typ wählen.',
 } as const;
