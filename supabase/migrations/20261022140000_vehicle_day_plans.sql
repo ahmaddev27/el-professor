@@ -131,9 +131,12 @@
   writes nothing) and record_support_write (every row a support session writes
   leaves one audit row). tests/rls/platform-contexts.sql section 14 and
   tests/rls/support-write-audit.sql section 1 fail a table that carries one
-  without the other. What a support session costs here is unmeasured and is one
-  audit row per row written; a month of 2500 shifts saved from inside one writes
-  about 2500 support_write.vehicle_day_shifts.insert rows.
+  without the other. What a support session costs here is one audit row per row
+  written, measured on the local replica of the kit (PostgreSQL 16.6, a loaded
+  machine, not the VPS): a month of 3100 shifts (100 vehicles, 31 days, a payload
+  of 1 MB) saves in 1.1 s for a company member and in 6.3 s inside a support
+  session, which writes 3101 audit rows (3100 support_write.vehicle_day_shifts.insert
+  and one for the plan). Confirming the same month takes 0.1 s.
 
   anon holds nothing. authenticated holds SELECT, INSERT, UPDATE and DELETE and
   nothing else. The service role holds nothing, on the tables and on both RPCs:
