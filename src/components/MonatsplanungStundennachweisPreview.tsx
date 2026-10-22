@@ -33,6 +33,7 @@ import { writeMarkedWorkbook } from '../utils/simulatedRides/marker';
 import { exportStundennachweisAsPdf, type PdfDayRow, type PdfTotals, getStundennachweisBlob } from '../utils/stundennachweisPdfExport';
 import { exportAppliedRunXlsx, type AppliedRunSummary } from '../utils/monatsplanungXlsxExport';
 import { exportFahreruebersichtImportFormat, type FahreruebersichtImportRow } from '../utils/fahreruebersichtExport';
+import { noteExclusionIntervals } from '../utils/driverNoteValidation';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey, TranslationVars } from '../i18n';
 import { localHourMs, localMidnightMs, nextLocalMidnightMs } from '../utils/localDayWindow';
@@ -2642,48 +2643,28 @@ interface DriverNote {
 }
 
 /**
- * Returns true if any exclude_from_plan note for this driver overlaps
- * the interval [shiftStartMs, shiftEndMs).
+ * Returns true if any exclude_from_plan note for this driver overlaps the
+ * interval [shiftStartMs, shiftEndMs).
+ *
+ * The window comes from `noteExclusionIntervals`, which is the one DST-correct
+ * copy. This function held a fourth copy that started at local midnight and
+ * then stepped a fixed 86 400 000 ms per day. Measured in Europe/Berlin:
+ * 25.10.2026 is a 25-hour day, so that step landed at 25.10 23:00 instead of
+ * 26.10 00:00 and left the last hour of the day outside the window; 29.03.2026
+ * is a 23-hour day, so it landed at 30.03 01:00 and left the first hour of the
+ * next day outside it. The drift was cumulative for the rest of a note's range.
+ * This is the same defect `driverNoteValidation.ts` records as having sent 11
+ * real rides on staging to drivers marked sick or on holiday.
  */
 function isNoteBlockingTransfer(
   notes: DriverNote[],
   shiftStartMs: number,
   shiftEndMs: number,
 ): boolean {
-  const MS_PER_DAY = 86_400_000;
   for (const note of notes) {
     if (note.note_planning_behavior !== 'exclude_from_plan') continue;
-
-    const rawStart = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
-    const rawEnd = note.end_date ?? rawStart;
-    if (!rawStart) continue;
-
-    const rangeStart = new Date(`${rawStart}T00:00:00`).getTime();
-    const rangeEnd = new Date(`${rawEnd ?? rawStart}T00:00:00`).getTime();
-    if (isNaN(rangeStart) || isNaN(rangeEnd)) continue;
-
-    const cappedRangeEnd = Math.min(rangeEnd, rangeStart + 366 * MS_PER_DAY);
-    for (let dayMs = rangeStart; dayMs <= cappedRangeEnd; dayMs += MS_PER_DAY) {
-      let noteStart: number;
-      let noteEnd: number;
-      if (note.is_full_day || !note.start_time || !note.end_time) {
-        noteStart = dayMs;
-        noteEnd = dayMs + MS_PER_DAY;
-      } else {
-        const [sh, sm] = note.start_time.split(':').map(Number);
-        const [eh, em] = note.end_time.split(':').map(Number);
-        const sMin = sh * 60 + (sm ?? 0);
-        const eMin = eh * 60 + (em ?? 0);
-        if (eMin > sMin) {
-          noteStart = dayMs + sMin * 60_000;
-          noteEnd = dayMs + eMin * 60_000;
-        } else {
-          // cross-midnight
-          noteStart = dayMs + sMin * 60_000;
-          noteEnd = dayMs + MS_PER_DAY + eMin * 60_000;
-        }
-      }
-      if (shiftStartMs < noteEnd && shiftEndMs > noteStart) return true;
+    for (const iv of noteExclusionIntervals(note)) {
+      if (shiftStartMs < iv.end && shiftEndMs > iv.start) return true;
     }
   }
   return false;
@@ -3254,6 +3235,10 @@ function GehaltsabweichungSection({
   // the message started with "Fehler", which stops working once it is translated.
   const [applyAllHasError, setApplyAllHasError] = useState(false);
   const [driverNotesMap, setDriverNotesMap] = useState<Map<string, DriverNote[]>>(new Map());
+  // An empty notes map reads the same whether the driver has no notes or the
+  // read failed, and the two mean opposite things for a transfer. This tells
+  // them apart so the screen can say it does not know.
+  const [notesLoadFailed, setNotesLoadFailed] = useState(false);
   const tolerance = SALARY_TOLERANCE_DEFAULT;
 
   // Load exclude_from_plan notes for all drivers in this run
@@ -3262,13 +3247,19 @@ function GehaltsabweichungSection({
     if (driverIds.length === 0) return;
     let cancelled = false;
     void (async () => {
-      const { data } = await supabase
+      // A failed read is not 'this driver has no notes'. Left discarded, an
+      // outage made every transfer validate as note-free and a driver marked
+      // sick could take one. The map stays empty either way, so the flag is
+      // what tells the screen it is blind rather than clear.
+      const { data, error } = await supabase
         .from('driver_notes')
         .select('driver_id, note_planning_behavior, is_full_day, start_date, end_date, note_date, start_time, end_time')
         .eq('company_id', companyId)
         .in('driver_id', driverIds)
         .eq('note_planning_behavior', 'exclude_from_plan');
-      if (cancelled || !data) return;
+      if (cancelled) return;
+      if (error || !data) { setNotesLoadFailed(true); return; }
+      setNotesLoadFailed(false);
       const m = new Map<string, DriverNote[]>();
       for (const row of data as DriverNote[]) {
         const arr = m.get(row.driver_id) ?? [];
@@ -3310,6 +3301,13 @@ function GehaltsabweichungSection({
 
   const requestApply = (suggestion: TransferSuggestion) => {
     if (suggestion.validation.status !== 'gueltig') return;
+    // The note check cannot have run, so 'gueltig' here means 'nothing
+    // contradicted it', not 'no note forbids it'. Refuse rather than let a
+    // transfer through on an answer the screen never got.
+    if (notesLoadFailed) {
+      setApplyError(t('stn.transfer.notesUnavailable'));
+      return;
+    }
     const tripIds = suggestion.candidate.shifts.flatMap(s => blockToTripIds.get(s.block_id) ?? []);
     if (tripIds.length === 0) {
       setApplyError(t('stn.transfer.noTripsFound'));

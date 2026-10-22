@@ -6957,4 +6957,7 @@ export const en: PartialDictionary = {
   'sa.subs.deleteRefused.paid':        'A paid invoice cannot be deleted. It is the record of a payment received; cancel it instead.',
   'sa.subs.deleteRefused.wasPaid':     'This invoice was recorded as paid at some point and cannot be deleted. Cancel it instead.',
   'sa.subs.invoiceDeleted':            'Invoice deleted',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'stn.transfer.notesUnavailable': 'The driver notes could not be loaded. A transfer is not applied while it cannot be checked whether an absence note forbids it. Please reload.',
 };
