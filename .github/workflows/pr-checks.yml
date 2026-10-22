@@ -213,13 +213,14 @@ jobs:
           problem="$(osrm_data_problem "$image" ya-mobility-staging_osrm-data)"
           [ -z "$problem" ] || { echo "::error::the guard refuses the build after ready.json was put back: $problem"; exit 1; }
       - name: Ask the container for routes
+        id: live
         if: steps.scope.outputs.run == 'true'
         env:
           OSRM_LIVE_CENTER: '51.1657,7.0671'
           OSRM_LIVE_OUTSIDE: '48.1374,11.5755'
         run: npx vitest run tests/deploy/osrm.live.test.ts
       - name: The container logs no coordinate
-        if: steps.scope.outputs.run == 'true'
+        if: ${{ !cancelled() && steps.live.outcome != 'skipped' }}
         working-directory: deploy
         run: |
           docker compose --profile osrm logs osrm > "$RUNNER_TEMP/osrm.log" 2>&1 || true
@@ -228,7 +229,7 @@ jobs:
             echo "::error::the container's log holds a coordinate that the live test asked about"; exit 1
           fi
       - name: Control for the log check - at the default verbosity the same container does log requests
-        if: steps.scope.outputs.run == 'true'
+        if: ${{ !cancelled() && steps.live.outcome != 'skipped' }}
         working-directory: deploy
         run: |
           image="$(docker compose --profile osrm config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["osrm"]["image"])')"
@@ -244,7 +245,7 @@ jobs:
           fi
           docker rm -f osrm-info > /dev/null
       - name: The edge function type-checks under Deno
-        if: steps.scope.outputs.run == 'true'
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
         continue-on-error: true
         run: docker run --rm -v "$PWD":/w -w /w denoland/deno:2.1.4 deno check supabase/functions/travel-route/index.ts
       - name: Stop it

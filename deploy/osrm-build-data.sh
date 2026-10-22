@@ -42,14 +42,14 @@
 # The wiki gives no times; this script prints the time each step took and the
 # peak memory each tool reports, and writes both into ready.json.
 #
-# Measured, once, by the CI job of the pull request that added this script
-# (Regierungsbezirk Dusseldorf, 217 MB, two CPUs, the pinned v26.9.0 image):
-# extract 139 s and 1.07 GiB, partition 11 s and 0.26 GiB, customize 4 s and
-# 0.22 GiB, 323 MB of data. The wiki's scaling put that run at 1.4 GiB and 1.0 GB,
-# so it errs high, by a quarter for memory and threefold for disk. Scaled by size
-# to Germany, 22 times larger, the same run is about 24 GiB, 7 GB and an hour on
-# two CPUs. That is an extrapolation across a factor of 22, not a measurement,
-# and the first real build overwrites it with one.
+# Measured by the CI job of the pull request that added this script, three runs
+# on shared runners (Regierungsbezirk Dusseldorf, 217 MB, two CPUs, the pinned
+# v26.9.0 image): extract 128 to 159 s and 1.07 to 1.09 GiB, partition 11 to 12 s
+# and 0.26 GiB, customize 4 s and 0.22 GiB, 323 MB of data. The wiki's scaling put
+# that extract at 1.4 GiB and 1.0 GB, so it errs high, by a quarter for memory and
+# threefold for disk. Scaled by size to Germany, 22 times larger, the same runs are
+# about 24 GiB, 7 GB and an hour on two CPUs. That is an extrapolation across a
+# factor of 22, not a measurement, and the first real build overwrites it with one.
 #
 # ## What it leaves behind
 #
@@ -294,7 +294,10 @@ run_stage() {
   echo "  $stage took ${TOOK[$stage]} s, peak memory ${PEAK[$stage]:-unknown} MiB (the tool's own figure, else sampled once a second)"
 }
 
-run_stage extract osrm-extract -p /opt/car.lua --threads "$BUILD_CPUS" "/data/$NAME/map.osm.pbf"
+# --data_version osmosis stores the extract's own timestamp (osmosis_replication_timestamp in
+# the PBF header). Without it osrm-extract stores nothing and no answer carries a
+# data_version, which is where travel-route's source label, osrm@<month>, comes from.
+run_stage extract osrm-extract -p /opt/car.lua --data_version osmosis --threads "$BUILD_CPUS" "/data/$NAME/map.osm.pbf"
 run_stage partition osrm-partition --threads "$BUILD_CPUS" "/data/$NAME/map.osrm"
 run_stage customize osrm-customize --threads "$BUILD_CPUS" "/data/$NAME/map.osrm"
 

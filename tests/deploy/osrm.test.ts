@@ -429,6 +429,11 @@ describe('the build script\'s promises', () => {
     expect(buildCode).toContain('VOLUME="${PROJECT_NAME}_osrm-data"');
   });
 
+  it('has the extract store its own timestamp, because without it no answer carries a data_version and the source loses its month', () => {
+    // osrm-extract's --data_version defaults to empty ("leave blank to avoid"); `osmosis` takes the PBF header's replication timestamp.
+    expect(buildCode).toContain('osrm-extract -p /opt/car.lua --data_version osmosis');
+  });
+
   it('checks the download against its checksum before it uses it', () => {
     expect(buildCode).toContain('md5sum "$PBF"');
     expect(at('md5sum "$PBF"')).toBeLessThan(at('run_stage extract'));
@@ -497,6 +502,8 @@ describe('CI runs the chain for real, and only when a change touches it', () => 
   });
 
   it('builds with the real script, starts the real compose service and asks it with the live test', () => {
+    // The build is piped through tee; without pipefail a refused build would pass the step.
+    expect(job).toContain('set -o pipefail');
     expect(job).toContain('./osrm-build-data.sh --region "$REGION"');
     expect(job).toContain('docker compose --profile osrm up -d osrm');
     expect(job).toContain('npx vitest run tests/deploy/osrm.live.test.ts');
