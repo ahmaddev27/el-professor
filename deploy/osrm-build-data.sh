@@ -42,10 +42,11 @@
 # The wiki gives no times; this script prints the time each step took and the
 # peak memory each tool reports, and writes both into ready.json.
 #
-# Measured by the CI job of the pull request that added this script, five runs
-# on shared runners (Regierungsbezirk Dusseldorf, 217 MB, two CPUs, the pinned
-# v26.9.0 image): extract 125 to 159 s and 1.06 to 1.09 GiB, partition 10 to 12 s
-# and 0.26 GiB, customize 4 s and 0.22 GiB, 323 MB of data. The wiki's scaling put
+# Measured by the CI job of the pull request that added this script, in the six
+# builds whose logs were kept, on shared runners (Regierungsbezirk Dusseldorf,
+# 217 MB, two CPUs, the pinned v26.9.0 image): extract 125 to 159 s and 1.05 to
+# 1.09 GiB, partition 10 to 12 s and 0.26 GiB, customize 3 to 4 s and 0.22 GiB,
+# 323 MB of data. The wiki's scaling put
 # that extract at 1.4 GiB and 1.0 GB, so it errs high, by a quarter for memory and
 # threefold for disk. Scaled by size to Germany, 22 times larger, the same runs are
 # about 24 GiB, 7 GB and an hour on two CPUs. That is an extrapolation across a
