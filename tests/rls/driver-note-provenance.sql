@@ -67,9 +67,10 @@
   11. The mutation control, run as the principals who write. Nine rules are
       broken one at a time in a subtransaction that is rolled back, and the set
       of probes that notice each is compared with the set predicted here. The
-      ninth is the one that cannot be seen as the owner: a document-key CHECK that
-      calls into app_private passes every probe the owner runs and is refused for
-      every write `authenticated` makes.
+      third (M3) is the one that cannot be seen as the owner: a document-key
+      CHECK that calls into app_private passes every probe the owner runs and is
+      refused for every write `authenticated` makes. M6 is the one whose set is
+      larger than the obvious one, and its probe says why.
 
   12. The premises, and the standing guard against a CHECK that needs a privilege
       the writing role does not have.

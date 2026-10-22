@@ -7039,4 +7039,7 @@ export const en: PartialDictionary = {
   'notes.prov.status.unverified':    'Not reviewed',
   'notes.prov.status.verified':      'Reviewed',
   'notes.prov.unknownPerson':        'Unknown',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'notes.prov.review.saveBeforeReview': 'Save the changes first, then review: a review covers the saved version.',
 };

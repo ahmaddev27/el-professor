@@ -1305,7 +1305,7 @@ export function NotesPage() {
                   mayEdit={mayEdit}
                   evidenceOffered={eventDetailsApply(formData.note_type)}
                   busy={provBusy}
-                  willReset={initialReviewed !== null && reviewedFieldsChanged(initialReviewed, reviewedOf(formData))}
+                  edited={initialReviewed !== null && reviewedFieldsChanged(initialReviewed, reviewedOf(formData))}
                   onDecide={handleDecide}
                   onAttach={file => void handleAttach(file)}
                   onOpenEvidence={() => void handleOpenEvidence()}

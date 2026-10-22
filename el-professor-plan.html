@@ -1326,6 +1326,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">13</td><td>الاختيار اليدوي للسائق («حل يدوي») صار يرفض السائق المريض أو بإجازة (ملاحظات exclude_from_plan) — كان يفحص بس الملاحظة النصية القديمة</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">14</td><td>غياب السائق: برامتر blockedDates بمحرك Brutto ما حدا بيعبّيه (طلع بقايا ميزة محذوفة، فانشال وانكتب إنو المحرك ما بيراعي الغياب)، وتخمين «غياب / Pflichtnotiz» من نص الملاحظة صار دالة وحدة بدل 4 نسخ</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">15</td><td>نوع الملاحظة وتأثيرها على التخطيط لازم يتّفقوا (قيدين CHECK بالداتابيس؛ التجاوز مسموح لـgeneral وother بس لأن الداتا الحقيقية بتستعمله، وممنوع للأنواع التمانية الباقية)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج (الـkit مش مشغّل)</span></td></tr>
+            <tr><td class="num">16</td><td>ملاحظة السائق صارت تسجّل من وين إجت ومدى الوثوق فيها ومتى صار الحدث فعلاً (3 تواريخ، مسار المستند بقيد CHECK، حالة تحقق بمراجع مختوم من الـtrigger، موقع، سجل تغييرات؛ المخطِّط ما بيقرا شي منهم، ولقيت إن Stundennachweis بتحط Pflichtnotiz حسب لحظة الكتابة مو لحظة الحدث)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج (الـkit مش مشغّل)</span></td></tr>
           </tbody>
         </table>
       </div>

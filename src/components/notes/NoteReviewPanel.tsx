@@ -53,8 +53,12 @@ export interface NoteReviewPanelProps {
   /** Whether a document is offered for this type (sick, vacation and off are a window, not an event). */
   evidenceOffered: boolean;
   busy: boolean;
-  /** The unsaved edits change what a review covers, so saving takes the decision back. */
-  willReset: boolean;
+  /**
+   * The dialog holds unsaved changes to what a review covers. A review is of the
+   * saved version, so verifying or rejecting waits for the save, and saving
+   * takes an earlier decision back.
+   */
+  edited: boolean;
   onDecide: (decision: ReviewDecision) => void;
   onAttach: (file: File) => void;
   onOpenEvidence: () => void;
@@ -89,11 +93,17 @@ export function NoteReviewPanel(props: NoteReviewPanelProps) {
 type Translate = ReturnType<typeof useTranslation>['t'];
 
 function ReviewSection(props: NoteReviewPanelProps & { status: VerificationStatus; t: Translate }) {
-  const { provenance, status, mayEdit, busy, willReset, onDecide, nameOf, t } = props;
+  const { provenance, status, mayEdit, busy, edited, onDecide, nameOf, t } = props;
+  // Taking a decision back is allowed with edits open (saving them would do it
+  // anyway); making one is not, because it would cover a version nobody saved.
+  const cannotDecide = busy || edited;
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
 
   const decide = (decision: ReviewDecision) => {
+    // The buttons are disabled for these, and the handler holds the line too: a
+    // click that reaches it by any other route still must not review an unsaved version.
+    if (busy || (edited && decision.status !== 'unverified')) return;
     setRejecting(false);
     setReason('');
     onDecide(decision);
@@ -119,19 +129,22 @@ function ReviewSection(props: NoteReviewPanelProps & { status: VerificationStatu
       )}
       <p className={MUTED}>{t('notes.prov.review.hint')}</p>
 
-      {status !== 'unverified' && willReset && (
+      {edited && status !== 'unverified' && (
         <Alert tone="caution" role="status">{t('notes.prov.review.resetWarning')}</Alert>
+      )}
+      {edited && status === 'unverified' && mayEdit && (
+        <p className={MUTED}>{t('notes.prov.review.saveBeforeReview')}</p>
       )}
 
       {mayEdit && !rejecting && (
         <div className="flex flex-wrap gap-2">
           {status !== 'verified' && (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide({ status: 'verified' })}>
+            <Button size="sm" variant="secondary" disabled={cannotDecide} onClick={() => decide({ status: 'verified' })}>
               {t('notes.prov.action.verify')}
             </Button>
           )}
           {status !== 'rejected' && (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setRejecting(true)}>
+            <Button size="sm" variant="secondary" disabled={cannotDecide} onClick={() => setRejecting(true)}>
               {t('notes.prov.action.reject')}
             </Button>
           )}
@@ -159,7 +172,7 @@ function ReviewSection(props: NoteReviewPanelProps & { status: VerificationStatu
             <Button
               size="sm"
               variant="danger"
-              disabled={busy || reason.trim() === ''}
+              disabled={cannotDecide || reason.trim() === ''}
               onClick={() => decide({ status: 'rejected', reason })}
             >
               {t('notes.prov.action.confirmReject')}

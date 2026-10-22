@@ -7095,4 +7095,7 @@ export const de = {
   'notes.prov.status.unverified':    'Nicht geprüft',
   'notes.prov.status.verified':      'Geprüft',
   'notes.prov.unknownPerson':        'Unbekannt',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'notes.prov.review.saveBeforeReview': 'Änderungen erst speichern, dann prüfen: Eine Prüfung gilt für den gespeicherten Stand.',
 } as const;
