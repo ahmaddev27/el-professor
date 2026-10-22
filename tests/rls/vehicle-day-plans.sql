@@ -134,11 +134,26 @@ BEGIN
 END $$;
 
 /* Become a signed-in caller with a password sign-in (and, when given, the
-   session a platform context is answered to) -- or anon when p_user is NULL. */
+   session a platform context is answered to) -- or anon when p_user is NULL.
+   Two sentinels: _vd_owner() keeps the table owner, to probe what no policy is
+   asked about, and _vd_nobody() is the authenticated role with no subject. */
+CREATE OR REPLACE FUNCTION _vd_owner() RETURNS uuid
+LANGUAGE sql IMMUTABLE AS $$ SELECT 'ffffffff-ffff-4fff-8fff-ffffffffffff'::uuid $$;
+CREATE OR REPLACE FUNCTION _vd_nobody() RETURNS uuid
+LANGUAGE sql IMMUTABLE AS $$ SELECT 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'::uuid $$;
+
 CREATE OR REPLACE FUNCTION _vd_as(p_user uuid, p_session uuid DEFAULT NULL) RETURNS void
 LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM _vd_reset();
+  IF p_user = _vd_owner() THEN
+    RETURN;
+  END IF;
+  IF p_user = _vd_nobody() THEN
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    RETURN;
+  END IF;
   IF p_user IS NULL THEN
     PERFORM set_config('request.jwt.claim.role', 'anon', true);
     EXECUTE 'SET LOCAL ROLE anon';
@@ -210,6 +225,21 @@ BEGIN
   END;
   PERFORM _vd_reset();
   RETURN v_out;
+END $$;
+
+/* A mutation of one function: take its live definition from the catalogue,
+   replace one fragment and install the result. It refuses when the fragment is
+   not there, because a mutation that changes nothing would make its control
+   pass for the wrong reason. */
+CREATE OR REPLACE FUNCTION _vd_mutate_fn(p_sig text, p_from text, p_to text) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_old text := pg_get_functiondef(to_regprocedure(p_sig));
+BEGIN
+  IF v_old IS NULL OR position(p_from IN v_old) = 0 THEN
+    RAISE EXCEPTION 'mutation control: % does not contain [%], so the mutation would change nothing', p_sig, p_from;
+  END IF;
+  EXECUTE replace(v_old, p_from, p_to);
 END $$;
 
 /* The audit log's high-water mark, so each check counts only its own rows. */
@@ -1034,6 +1064,331 @@ BEGIN
     'confirmed|draft',
     (SELECT string_agg(status, '|' ORDER BY status) FROM vehicle_day_plans
       WHERE company_id = c_co_a AND year = 2028 AND month = 1));
+END $$;
+
+
+-- ─── 7. confirming, replacing, and the freeze ───────────────────────────────
+--
+-- August 2027 for company A. Each save replaces the month's draft, so the
+-- scenarios run in order: an empty plan, an overlap, a legal plan that is
+-- confirmed, a second plan that is refused beside it and then replaces it, and a
+-- third that stays a draft.
+
+DO $$
+DECLARE
+  c_admin   CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  c_admin_b CONSTANT uuid := 'b0000000-0000-4000-8000-000000000001';
+  c_co      CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_res     jsonb;
+  v_empty   uuid;
+  v_overlap uuid;
+  v_p1      uuid;
+  v_p2      uuid;
+  v_p3      uuid;
+  v_n       bigint;
+BEGIN
+  -- 7a. A month may plan nothing, and may save it; it may not confirm it.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 8, 4, 15, '[]'::jsonb));
+  PERFORM _vd_reset();
+  v_empty := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('lifecycle: an empty proposal can be saved', 'true|0',
+    (v_res ->> 'success') || '|' || (v_res ->> 'shift_count'));
+  PERFORM _vd_expect('lifecycle: …its summary says it holds nothing', '0|0|0|0|0',
+    (SELECT concat_ws('|', summary ->> 'shift_count', summary ->> 'vehicle_count', summary ->> 'operating_day_count',
+                      summary ->> 'total_minutes', summary ->> 'expected_revenue_cents')
+       FROM vehicle_day_plans WHERE id = v_empty));
+  PERFORM _vd_expect('lifecycle: …but confirming it is refused, by return value and not by exception', 'plan_empty',
+    _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_confirm(%L) ->> ''reason''', v_empty)));
+
+  -- 7b. A vehicle is never on the road twice at once: 10:00 to 13:00 and 12:45 to 14:00.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 8, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-08-02', 'VD-O', 0, 24, 36, 4),
+    _vd_shift(DATE '2027-08-02', 'VD-O', 1, 35, 40, 4))));
+  PERFORM _vd_reset();
+  v_overlap := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('lifecycle: the save accepts two overlapping shifts of one vehicle (each is legal alone)', 'true', v_res ->> 'success');
+  PERFORM _vd_expect('lifecycle: confirming them is refused, by return value', 'vehicle_overlap',
+    _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_confirm(%L) ->> ''reason''', v_overlap)));
+  PERFORM _vd_expect('lifecycle: …and the plan is still a draft', 'draft',
+    (SELECT status FROM vehicle_day_plans WHERE id = v_overlap));
+
+  -- 7c. A legal plan: shifts of one vehicle that touch (13:00 ends, 13:00 begins), a
+  -- second vehicle out at the same hours, and the end of one operating day
+  -- meeting the start of the next (04:00).
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 8, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-08-02', 'VD-O', 0, 24, 36, 4),
+    _vd_shift(DATE '2027-08-02', 'VD-O', 1, 36, 40, 4),
+    _vd_shift(DATE '2027-08-02', 'VD-P', 0, 24, 36, 4),
+    _vd_shift(DATE '2027-08-03', 'VD-O', 0, 80, 96, 4),
+    _vd_shift(DATE '2027-08-04', 'VD-O', 0, 0, 12, 4))));
+  PERFORM _vd_reset();
+  v_p1 := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('lifecycle: the first plan of a month is generation 0', '0',
+    (SELECT generation::text FROM vehicle_day_plans WHERE id = v_p1));
+
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_confirm(v_p1);
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('lifecycle: touching shifts, two vehicles at once and a day boundary are not overlaps, so it is confirmed',
+    'true|' || v_p1::text || '|', (v_res ->> 'success') || '|' || (v_res ->> 'plan_id') || '|' || coalesce(v_res ->> 'superseded_plan_id', ''));
+  PERFORM _vd_expect('lifecycle: the database stamps the confirmation with the caller and the time', 'confirmed|true|true',
+    (SELECT status || '|' || (confirmed_by = c_admin)::text || '|' || (confirmed_at IS NOT NULL)::text
+       FROM vehicle_day_plans WHERE id = v_p1));
+  PERFORM _vd_expect('lifecycle: a plan that is no longer a draft cannot be confirmed again', 'not_a_draft',
+    _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_confirm(%L) ->> ''reason''', v_p1)));
+
+  -- 7d. A second proposal for the same month: generation 1, refused beside the
+  -- active plan, the active plan untouched.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 8, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-08-09', 'VD-O', 0, 24, 36, 4))));
+  PERFORM _vd_reset();
+  v_p2 := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('lifecycle: a new proposal beside a confirmed plan is generation 1 and a draft', '1|draft',
+    (SELECT generation || '|' || status FROM vehicle_day_plans WHERE id = v_p2));
+  PERFORM _vd_expect('lifecycle: confirming it without asking to replace answers plan_exists and names the active plan',
+    'plan_exists|' || v_p1::text,
+    _vd_try(c_admin, NULL, format(
+      'SELECT concat_ws(''|'', r ->> ''reason'', r ->> ''existing_plan_id'') FROM (SELECT public.vehicle_day_plan_confirm(%L) AS r) x', v_p2)));
+  PERFORM _vd_expect('lifecycle: …and writes nothing', 'confirmed|draft',
+    (SELECT string_agg(status, '|' ORDER BY status) FROM vehicle_day_plans WHERE id IN (v_p1, v_p2)));
+
+  -- 7e. The replacement is one transaction: the old plan is superseded and points
+  -- at the new one, the new one is confirmed, and the month holds one confirmed plan.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_confirm(v_p2, true);
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('lifecycle: replacing confirms the new plan and names the one it superseded',
+    'true|' || v_p1::text, (v_res ->> 'success') || '|' || (v_res ->> 'superseded_plan_id'));
+  PERFORM _vd_expect('lifecycle: the old plan is superseded, stamped, and points at its replacement',
+    'superseded|true|true|' || v_p2::text,
+    (SELECT status || '|' || (superseded_by = c_admin)::text || '|' || (superseded_at IS NOT NULL AND confirmed_at IS NOT NULL)::text
+                || '|' || replaced_by_plan_id::text FROM vehicle_day_plans WHERE id = v_p1));
+  PERFORM _vd_expect('lifecycle: exactly one plan of the month is confirmed, and it is the new one', '1|' || v_p2::text,
+    (SELECT count(*)::text || '|' || min(id::text) FROM vehicle_day_plans
+      WHERE company_id = c_co AND year = 2027 AND month = 8 AND status = 'confirmed'));
+
+  -- 7f. The next proposal is generation 2: two plans of the month were confirmed.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 8, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-08-10', 'VD-O', 0, 24, 36, 4))));
+  PERFORM _vd_reset();
+  v_p3 := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('lifecycle: after a replacement the next proposal is generation 2', '2',
+    (SELECT generation::text FROM vehicle_day_plans WHERE id = v_p3));
+  PERFORM _vd_expect('lifecycle: the empty and the overlapping drafts of the same month are gone', '1',
+    (SELECT count(*)::text FROM vehicle_day_plans WHERE company_id = c_co AND year = 2027 AND month = 8 AND status = 'draft'));
+
+  -- 7g. Status is the RPC's. Nobody writes it directly, the owner included.
+  PERFORM _vd_expect('lifecycle: a member cannot confirm a plan by writing its status', 'ERR P0001 vehicle_day_plan_transition_needs_rpc',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET status = ''confirmed'' WHERE id = %L', v_p3)));
+  PERFORM _vd_expect('lifecycle: nor take a confirmed plan back to a draft', 'ERR P0001 vehicle_day_plan_transition_needs_rpc',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET status = ''draft'' WHERE id = %L', v_p2)));
+  PERFORM _vd_expect('lifecycle: the owner of the table cannot either', 'ERR P0001 vehicle_day_plan_transition_needs_rpc',
+    _vd_try(_vd_owner(), NULL, format('UPDATE vehicle_day_plans SET status = ''confirmed'' WHERE id = %L', v_p3)));
+  PERFORM _vd_expect('lifecycle: nor stamp a confirmation in someone else''s name', 'ERR P0001 vehicle_day_plan_transition_needs_rpc',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET confirmed_by = %L WHERE id = %L', c_admin_b, v_p2)));
+
+  -- 7h. A confirmed plan is the month's record and a superseded one its history.
+  PERFORM _vd_expect('freeze: a confirmed plan''s header cannot be edited', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = summary WHERE id = %L', v_p2)));
+  PERFORM _vd_expect('freeze: a confirmed plan cannot be deleted', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format('DELETE FROM vehicle_day_plans WHERE id = %L', v_p2)));
+  PERFORM _vd_expect('freeze: a superseded plan cannot be deleted either', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format('DELETE FROM vehicle_day_plans WHERE id = %L', v_p1)));
+  PERFORM _vd_expect('freeze: the owner of the table cannot delete a confirmed plan', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(_vd_owner(), NULL, format('DELETE FROM vehicle_day_plans WHERE id = %L', v_p2)));
+  PERFORM _vd_expect('freeze: no shift can be added to a confirmed plan', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format(
+      'INSERT INTO vehicle_day_shifts (company_id, plan_id, operating_date, vehicle, shift_index, start_position, end_position, starts_local, ends_local, minutes, day_type, is_holiday, expected_revenue_cents, expected_revenue_per_hour_cents, confidence, evidence_days) VALUES (%L, %L, ''2027-08-11'', ''VD-LATE'', 0, 24, 36, ''2027-08-11 10:00'', ''2027-08-11 13:00'', 180, 2, false, 1, 1, ''low'', 1)',
+      c_co, v_p2)));
+  PERFORM _vd_expect('freeze: no shift of a confirmed plan can be edited', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_shifts SET evidence_days = 1 WHERE plan_id = %L', v_p2)));
+  PERFORM _vd_expect('freeze: no shift of a confirmed plan can be deleted', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format('DELETE FROM vehicle_day_shifts WHERE plan_id = %L', v_p2)));
+  PERFORM _vd_expect('freeze: nor can a shift of a superseded plan', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(c_admin, NULL, format('DELETE FROM vehicle_day_shifts WHERE plan_id = %L', v_p1)));
+  PERFORM _vd_expect('freeze: the same edits of a DRAFT''s shift are accepted (the control for the four refusals above)', 'rows 1',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_shifts SET evidence_days = 1 WHERE plan_id = %L', v_p3)));
+
+  -- 7i. A draft goes with its shifts.
+  SELECT count(*) INTO v_n FROM vehicle_day_shifts WHERE plan_id = v_p3;
+  PERFORM _vd_as(c_admin);
+  DELETE FROM vehicle_day_plans WHERE id = v_p3;
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('freeze: deleting a draft takes its shifts with it', '1|0',
+    v_n::text || '|' || (SELECT count(*)::text FROM vehicle_day_shifts WHERE plan_id = v_p3));
+
+  -- 7j. Another company's plan is not found, and a missing id is a contract error.
+  PERFORM _vd_expect('lifecycle: company B''s administrator confirming company A''s plan is told it does not exist', 'plan_not_found',
+    _vd_try(c_admin_b, NULL, format('SELECT public.vehicle_day_plan_confirm(%L) ->> ''reason''', v_p1)));
+  PERFORM _vd_expect('lifecycle: an id that exists nowhere is told the same', 'plan_not_found',
+    _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_confirm(%L) ->> ''reason''', _vd_id('plan:nowhere'))));
+  PERFORM _vd_expect('lifecycle: no id at all is a broken contract, not a refusal', 'ERR 22023 vehicle_day_plan_confirm: p_plan_id is required',
+    _vd_try(c_admin, NULL, 'SELECT public.vehicle_day_plan_confirm(NULL)::text'));
+
+  -- 7k. The numbering is per company and per month.
+  PERFORM _vd_as(c_admin_b);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 8, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-08-02', 'VD-BO', 0, 24, 36, 4))));
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('lifecycle: company B''s first plan of the same month is generation 0, whatever company A has done', '0',
+    (SELECT generation::text FROM vehicle_day_plans WHERE id = (v_res ->> 'plan_id')::uuid));
+END $$;
+
+-- ─── 8. what the save refuses, and what it computes ─────────────────────────
+
+DO $$
+DECLARE
+  c_admin CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  c_co    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_res   jsonb;
+  v_first uuid;
+  v_out   text;
+  v_hint  text;
+  v_rec   record;
+  v_big   text;
+BEGIN
+  -- 8a. A new save replaces the month's draft rather than adding a second.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 9, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-09-06', 'VD-S', 0, 24, 36, 4))));
+  v_first := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('save: the first save of a month discards nothing', '0', v_res ->> 'discarded_drafts');
+
+  -- 8b. Three shifts, two vehicles, two operating days. The client lies about the
+  -- totals and keeps a note of its own; the database writes the totals itself.
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(
+    _vd_payload(2027, 9, 4, 15, jsonb_build_array(
+      _vd_shift(DATE '2027-09-06', 'VD-S', 0, 24, 36, 4, 15, 12345),
+      _vd_shift(DATE '2027-09-07', 'VD-S', 0, 24, 40, 4, 15, 12345),
+      _vd_shift(DATE '2027-09-06', 'VD-T', 0, 24, 36, 4, 15, 12345)))
+    || '{"summary": {"shift_count": 999, "total_minutes": -1, "note": "kept", "history_months": [{"year": 2027, "month": 7}]}}'::jsonb);
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('save: a second save of the month discards the earlier draft and says so', '1',
+    v_res ->> 'discarded_drafts');
+  PERFORM _vd_expect('save: …the old draft is gone and one draft remains', '0|1',
+    (SELECT count(*) FILTER (WHERE id = v_first)::text || '|' || count(*)::text FROM vehicle_day_plans
+      WHERE company_id = c_co AND year = 2027 AND month = 9 AND status = 'draft'));
+  PERFORM _vd_expect('save: the database writes the five totals over what the client sent',
+    '3|2|2|600|37035',
+    (SELECT concat_ws('|', summary ->> 'shift_count', summary ->> 'vehicle_count', summary ->> 'operating_day_count',
+                      summary ->> 'total_minutes', summary ->> 'expected_revenue_cents')
+       FROM vehicle_day_plans WHERE id = (v_res ->> 'plan_id')::uuid));
+  PERFORM _vd_expect('save: …and keeps the client''s own provenance beside them', 'kept|2027',
+    (SELECT (summary ->> 'note') || '|' || (summary -> 'history_months' -> 0 ->> 'year')
+       FROM vehicle_day_plans WHERE id = (v_res ->> 'plan_id')::uuid));
+  v_first := (v_res ->> 'plan_id')::uuid;
+
+  -- 8c. A refused save leaves the earlier draft exactly as it was.
+  BEGIN
+    PERFORM _vd_as(c_admin);
+    PERFORM public.vehicle_day_plan_save(_vd_payload(2027, 9, 4, 15, jsonb_build_array(
+      _vd_shift(DATE '2027-09-08', 'VD-S', 0, 24, 36, 4) || '{"driver_id": "x"}'::jsonb)));
+    v_out := 'allowed';
+  EXCEPTION WHEN OTHERS THEN
+    v_out := SQLSTATE;
+  END;
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('save: a refused payload is refused with 22023', '22023', v_out);
+  PERFORM _vd_expect('save: …and the draft it would have replaced is still there, untouched', '1|3',
+    (SELECT count(*)::text || '|' || max((summary ->> 'shift_count')) FROM vehicle_day_plans
+      WHERE id = v_first AND status = 'draft'));
+
+  -- 8d. The refusals, one at a time, each by its own text.
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('a payload that is not an object',        '[]'::jsonb,                                  'ERR 22023 vehicle_day_plan_save: p_payload must be a JSON object'),
+      ('a payload without a month',              '{"year": 2027, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v"}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: year, month, operating_day_start_hour, slot_minutes and algorithm_version are required'),
+      ('a year that is not a number',            '{"year": "abcd", "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v"}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: year, month, operating_day_start_hour, slot_minutes and algorithm_version are required'),
+      ('an hour with three digits',              '{"year": 2027, "month": 1, "operating_day_start_hour": 100, "slot_minutes": 15, "algorithm_version": "v"}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: year, month, operating_day_start_hour, slot_minutes and algorithm_version are required'),
+      ('no algorithm version',                   '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: year, month, operating_day_start_hour, slot_minutes and algorithm_version are required'),
+      ('shifts that are not an array',           '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": {}}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: shifts must be a JSON array'),
+      ('a summary that is an array',             '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "summary": []}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: summary must be a JSON object'),
+      ('a summary that is null',                 '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "summary": null}'::jsonb,
+                                                                                               'ERR 22023 vehicle_day_plan_save: summary must be a JSON object'),
+      ('a shift that is not an object',          '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": [1]}'::jsonb,
+                                                                                               'ERR 22023 cannot call jsonb_object_keys on a scalar'),
+      ('month 13',                               '{"year": 2027, "month": 13, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": []}'::jsonb,
+                                                                                               'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_month_check"'),
+      ('year 1999',                              '{"year": 1999, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": []}'::jsonb,
+                                                                                               'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_year_check"'),
+      ('hour 24',                                '{"year": 2027, "month": 1, "operating_day_start_hour": 24, "slot_minutes": 15, "algorithm_version": "v", "shifts": []}'::jsonb,
+                                                                                               'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_start_hour_valid"'),
+      ('a slot of 20 minutes',                   '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 20, "algorithm_version": "v", "shifts": []}'::jsonb,
+                                                                                               'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_slot_minutes_supported"')
+    ) AS t(what, payload, expected)
+  LOOP
+    PERFORM _vd_expect('save: ' || v_rec.what, v_rec.expected,
+      _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', v_rec.payload::text)));
+  END LOOP;
+  PERFORM _vd_expect('save: NULL is not an object either', 'ERR 22023 vehicle_day_plan_save: p_payload must be a JSON object',
+    _vd_try(c_admin, NULL, 'SELECT public.vehicle_day_plan_save(NULL)::text'));
+  v_big := '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": [], "summary": {"x": "'
+           || repeat('a', 17000) || '"}}';
+  PERFORM _vd_expect('save: a summary of 17,000 bytes is not a place to keep a document',
+    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_summary_small"',
+    _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', v_big)));
+
+  -- 8e. One shift at a time. Thursday 2027-09-02 is day type 3; Wednesday 2027-09-01 is 2.
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('a vehicle with a leading space',
+         _vd_shift(DATE '2027-09-02', ' VD-S', 0, 24, 36, 4),
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_vehicle_named"'),
+      ('an empty vehicle',
+         _vd_shift(DATE '2027-09-02', '', 0, 24, 36, 4),
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_vehicle_named"'),
+      ('a fifth shift of one vehicle on one day',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 4, 24, 36, 4),
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_index_valid"'),
+      ('a day type that does not match the date',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4) || '{"day_type": 2}'::jsonb,
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_day_type_matches_date"'),
+      ('a holiday that is not read as a Sunday',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4) || '{"is_holiday": true}'::jsonb,
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_day_type_matches_date"'),
+      ('a holiday on a Thursday, read as the Sunday it is',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4) || '{"is_holiday": true, "day_type": 6}'::jsonb,
+         'true'),
+      ('a negative estimate',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4) || '{"expected_revenue_cents": -1}'::jsonb,
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_revenue_not_negative"'),
+      ('a confidence the engine does not use',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4) || '{"confidence": "certain"}'::jsonb,
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_confidence_known"'),
+      ('negative evidence',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4) || '{"evidence_days": -1}'::jsonb,
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_evidence_not_negative"'),
+      ('a shift of no length',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4)
+           || '{"end_position": 24, "ends_local": "2027-09-02T10:00", "minutes": 0}'::jsonb,
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_minutes_positive"'),
+      ('a start position below zero',
+         _vd_shift(DATE '2027-09-02', 'VD-S', 0, -1, 4, 4),
+         'ERR 23514 new row for relation "vehicle_day_shifts" violates check constraint "vehicle_day_shifts_positions_ordered"')
+    ) AS t(what, shift, expected)
+  LOOP
+    PERFORM _vd_expect('save: ' || v_rec.what, v_rec.expected,
+      _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+                                    _vd_payload(2027, 9, 4, 15, jsonb_build_array(v_rec.shift))::text)));
+  END LOOP;
+  PERFORM _vd_expect('save: two shifts with one (date, vehicle, index) are refused by the key',
+    'ERR 23505 duplicate key value violates unique constraint "vehicle_day_shifts_one_per_slot"',
+    _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+      _vd_payload(2027, 9, 4, 15, jsonb_build_array(
+        _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4), _vd_shift(DATE '2027-09-02', 'VD-S', 0, 40, 48, 4)))::text)));
 END $$;
 
 
