@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { exportStundennachweisAsPdf } from '../utils/stundennachweisPdfExport';
+import { resolveNoteBehavior } from '../utils/noteBehavior';
 import { ChevronLeft, ChevronRight, Download, RefreshCw, ArrowRight, Clock, StickyNote, Moon, Sun, Star, Save, FileSpreadsheet, AlertTriangle, CalendarRange, ChevronDown, Loader2 } from 'lucide-react';
 import { categorizeWarnings, formatDateDE, groupByDate, type WarningGroup } from '../utils/warningCategories';
 import { supabase } from '../lib/supabase';
@@ -2102,10 +2103,7 @@ interface PdfData {
  * printed in the notes block of the Stundennachweis handed to the Steuerberater.
  */
 function behaviorLabel(n: Note): string | null {
-  const beh = n.note_planning_behavior
-    ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => n.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
-      : ['blitzer','unfall','panne','kontrolle','wartezeit'].some(k => n.note_text.toLowerCase().includes(k)) ? 'must_include_in_plan'
-      : null);
+  const beh = resolveNoteBehavior(n);
   if (beh === 'exclude_from_plan')    return 'Abwesenheit';
   if (beh === 'must_include_in_plan') return 'Pflichtnotiz';
   return null;
@@ -2115,10 +2113,7 @@ function exportPDF(data: PdfData, filename: string): void {
   const { rows } = data;
 
   const pdfNotes = (data.notes ?? []).map(n => {
-    const beh = n.note_planning_behavior
-      ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => n.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
-        : ['blitzer','unfall','panne','kontrolle','wartezeit'].some(k => n.note_text.toLowerCase().includes(k)) ? 'must_include_in_plan'
-        : null);
+    const beh = resolveNoteBehavior(n);
     const typeLabel = beh === 'exclude_from_plan' ? 'Abwesenheit'
                     : beh === 'must_include_in_plan' ? 'Pflichtnotiz'
                     : null;
@@ -2914,13 +2909,13 @@ const NotesCarousel: React.FC<{
   // For must_include_in_plan notes: verify the note's ±30 min window is actually
   // covered by a shift (not just that the day has any worked hours).
   //
-  // The keyword lists below stay German in both languages: they are matched
-  // against note_text the operator typed, so they are data, not labels.
-  const behavior2 = note.note_planning_behavior
-    ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => note.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
-      : ['blitzer','unfall','panne','kontrolle','wartezeit'].some(k => note.note_text.toLowerCase().includes(k)) ? 'must_include_in_plan'
-      : null);
-  const isMustInclude = behavior2 === 'must_include_in_plan';
+  // What the note does to the plan is resolved once, here, and the badges below
+  // use the same value. The keyword lists that read a note's text when no
+  // behaviour is stored live in utils/noteBehavior.ts and stay German in both
+  // languages: they are matched against note_text the operator typed, so they
+  // are data, not labels.
+  const behavior = resolveNoteBehavior(note);
+  const isMustInclude = behavior === 'must_include_in_plan';
 
   let inPlan = !!(matchRow && matchRow.grundlohn);
   if (isMustInclude && matchRow) {
@@ -2954,10 +2949,6 @@ const NotesCarousel: React.FC<{
   if (isNight)   badges.push({ label: t('stn.badge.night'),   icon: <Moon size={10} />,    color: '#6366f1', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.25)' });
   if (inPlan)    badges.push({ label: t('stn.badge.inPlan'),  icon: <StickyNote size={10} />, color: '#16a34a', bg: 'rgba(22,163,74,0.1)',  border: 'rgba(22,163,74,0.25)' });
 
-  const behavior = note.note_planning_behavior
-    ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => note.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
-      : ['blitzer','unfall','panne','kontrolle','wartezeit'].some(k => note.note_text.toLowerCase().includes(k)) ? 'must_include_in_plan'
-      : null);
   if (behavior === 'exclude_from_plan')    badges.push({ label: t('stn.badge.absence'),      icon: <AlertTriangle size={10} />, color: '#dc2626', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.25)' });
   if (behavior === 'must_include_in_plan') badges.push({ label: t('stn.badge.mandatoryNote'), icon: <AlertTriangle size={10} />, color: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' });
   if (note.start_date && note.end_date && note.start_date !== note.end_date) {
