@@ -64,6 +64,8 @@ const SPEC = [
 ];
 
 async function whole() {
+  // The warm-up request has already reached the stub; the three refusals below are judged on their own.
+  if (STUB) await stub('/__reset');
   const none = await call('no token at all: the router refuses', { bearer: null, body: { addresses: [address('x', SPEC[0][1])] } });
   check('no token is a 401 from the router', none.status === 401);
 
@@ -72,7 +74,7 @@ async function whole() {
 
   const homeless = await call('a person with no active company', { bearer: lonely, body: { addresses: [address('x', SPEC[0][1])] } });
   check('a person without a company gets no_company (403)', homeless.status === 403 && homeless.json?.reason === 'no_company');
-  if (STUB) check('and nothing of it reached their side', (await stub('/__stats')).requests.length === 0);
+  if (STUB) check('and none of those three refusals reached their side', (await stub('/__stats')).requests.length === 0);
 
   await stub('/__reset');
   const answered = await call('a person with an active company asks for nine addresses of every kind', {
@@ -91,7 +93,11 @@ async function whole() {
     const seen = await stub('/__stats');
     const searches = seen.requests.filter((r) => r.url.startsWith('/search'));
     check('their side saw seven searches: the street and the bare text were never asked', searches.length === 7, String(searches.length));
-    check('and nothing about the street-only or unreadable address reached it', !searches.some((r) => /K%C3%B6nigstra|irgendwo/.test(r.url)));
+    // Compare decoded values, not the URL text: the invented street "Nirgendwoweg" contains the letters of the
+    // unreadable address "irgendwo", and the first version of this check tripped over exactly that.
+    const asked = searches.flatMap((r) => [...new URL(r.url, 'http://stub').searchParams.values()]);
+    check('and nothing about the street-only or unreadable address reached it',
+      !asked.some((v) => v.includes('Königstra') || v.trim().toLowerCase() === 'irgendwo'), asked.join(' | '));
   }
 
   const many = await call('51 addresses', { bearer: person, body: { addresses: Array.from({ length: 51 }, (_, i) => address(`a${i}`, SPEC[0][1])) } });
