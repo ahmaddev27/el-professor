@@ -150,6 +150,12 @@ export const BACKUP_TABLES: readonly string[] = [
   'notification_deliveries',
   'trip_analysis_settings',
   'driver_month_budget',
+
+  // The forward plan per vehicle and operating day (20261022140000). Both carry
+  // company_id, so both are read directly, in pages of 1000 like every other
+  // table: one company's month can hold more shifts than a page.
+  'vehicle_day_plans',
+  'vehicle_day_shifts',
 ];
 
 /** A table with no `company_id`, reached through the parent that gives it one. */
