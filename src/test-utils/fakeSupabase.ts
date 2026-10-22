@@ -16,6 +16,8 @@ export interface FakeCall {
   op: FakeOp;
   /** Filter methods applied, in order, as `eq:company_id` style tags. */
   filters: string[];
+  /** What an insert or update was given, so a test can say what was sent. Absent for a read or a delete. */
+  payload?: unknown;
 }
 
 const WRITES: readonly FakeOp[] = ['insert', 'update', 'delete'];
@@ -39,6 +41,7 @@ export function createFakeSupabase(answer: (call: FakeCall) => FakeAnswer) {
         return (...args: unknown[]) => {
           if ((WRITES as readonly string[]).includes(prop) && call.op === 'select') {
             call.op = prop as FakeOp;
+            if (prop !== 'delete') call.payload = args[0];
           } else if (prop === 'single' || prop === 'maybeSingle') {
             single.on = true;
           } else if (prop !== 'select') {
