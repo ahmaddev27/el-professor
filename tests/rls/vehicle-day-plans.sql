@@ -227,6 +227,30 @@ BEGIN
   RETURN v_out;
 END $$;
 
+/* The statement that moves one row, as a DO block for _vd_try. SELECT ... FOR UPDATE
+   takes the row (which applies the UPDATE policy's USING to the existing row) and
+   UPDATE ... WHERE CURRENT OF sets p_set without reading a column, so the new row
+   meets the UPDATE policy's WITH CHECK and nothing else. A plain UPDATE ... WHERE id
+   reads a column, and PostgreSQL then also asks the SELECT policy about the new
+   row, which would let a tenant-scoped SELECT policy hide a WITH CHECK that lets
+   the row go anywhere (the matrix's _mx_move_try is written for the same reason). */
+CREATE OR REPLACE FUNCTION _vd_move_sql(p_table text, p_id uuid, p_set text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $body$
+  SELECT format($f$DO $q$
+    DECLARE
+      c refcursor := 'vd_move';
+      r integer;
+    BEGIN
+      OPEN c FOR SELECT 1 FROM %I WHERE id = %L FOR UPDATE;
+      FETCH c INTO r;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'the row is out of reach' USING ERRCODE = 'ZZ041';
+      END IF;
+      UPDATE %I SET %s WHERE CURRENT OF c;
+      CLOSE c;
+    END $q$$f$, p_table, p_id, p_table, p_set)
+$body$;
+
 /* A mutation of one function: take its live definition from the catalogue,
    replace one fragment and install the result. It refuses when the fragment is
    not there, because a mutation that changes nothing would make its control
@@ -877,7 +901,11 @@ DECLARE
   c_co_b    CONSTANT text := 'c0000000-0000-4000-8000-00000000000b';
   v_tbl     text;
   v_shift   text := '2026-11-03';
+  v_shift_id uuid;
 BEGIN
+  -- Read once, here: ALTER TABLE below refuses a table the same statement still has open.
+  SELECT s.id INTO v_shift_id FROM vehicle_day_shifts s WHERE s.plan_id = _vd_id('plan:a-draft') ORDER BY s.vehicle LIMIT 1;
+
   FOREACH v_tbl IN ARRAY ARRAY['vehicle_day_plans', 'vehicle_day_shifts'] LOOP
     PERFORM _vd_expect(format('tenants: company A''s administrator reads none of company B''s %s', v_tbl),
       '0', _vd_try(c_admin_a, NULL, format('SELECT count(*)::text FROM %I WHERE company_id = %L', v_tbl, c_co_b)));
@@ -929,11 +957,11 @@ BEGIN
   PERFORM _vd_expect('tenants: with the plan guard off, the UPDATE policy''s WITH CHECK still refuses the move to company B',
     'ERR 42501 new row violates row-level security policy for table "vehicle_day_plans"',
     _vd_mutant('ALTER TABLE vehicle_day_plans DISABLE TRIGGER vehicle_day_plan_guard', c_admin_a, NULL,
-      format('UPDATE vehicle_day_plans SET company_id = %L WHERE id = %L', c_co_b, _vd_id('plan:a-draft'))));
+      _vd_move_sql('vehicle_day_plans', _vd_id('plan:a-draft'), format('company_id = %L', c_co_b))));
   PERFORM _vd_expect('tenants: with the shift guard off, the UPDATE policy''s WITH CHECK still refuses the move to company B',
     'ERR 42501 new row violates row-level security policy for table "vehicle_day_shifts"',
     _vd_mutant('ALTER TABLE vehicle_day_shifts DISABLE TRIGGER vehicle_day_shift_guard', c_admin_a, NULL,
-      format('UPDATE vehicle_day_shifts SET company_id = %L WHERE plan_id = %L', c_co_b, _vd_id('plan:a-draft'))));
+      _vd_move_sql('vehicle_day_shifts', v_shift_id, format('company_id = %L', c_co_b))));
 END $$;
 
 -- ─── 5. the role gate ───────────────────────────────────────────────────────
@@ -1389,6 +1417,333 @@ BEGIN
     _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
       _vd_payload(2027, 9, 4, 15, jsonb_build_array(
         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4), _vd_shift(DATE '2027-09-02', 'VD-S', 0, 40, 48, 4)))::text)));
+END $$;
+
+
+-- ─── 9. company and account state ───────────────────────────────────────────
+
+DO $$
+DECLARE
+  c_susp  CONSTANT uuid := _vd_id('user:admin-suspended');
+  c_super CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
+  c_payload CONSTANT text := '{"year": 2031, "month": 9, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": []}';
+  v_who   record;
+BEGIN
+  PERFORM _vd_expect('state: a suspended company''s administrator reads no plan', '0',
+    _vd_try(c_susp, NULL, 'SELECT count(*)::text FROM vehicle_day_plans'));
+  PERFORM _vd_expect('state: …and no shift', '0',
+    _vd_try(c_susp, NULL, 'SELECT count(*)::text FROM vehicle_day_shifts'));
+  PERFORM _vd_expect('state: …and a direct insert is refused by the policy', 'ERR 42501 new row violates row-level security policy for table "vehicle_day_plans"',
+    _vd_try(c_susp, NULL, format(
+      'INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version) VALUES (%L, 2031, 2, 4, 15, ''v'')',
+      _vd_id('company:suspended'))));
+  PERFORM _vd_expect('state: …and vehicle_day_plan_save is refused by the state gate, which is not the role gate', 'ERR 42501 no_company',
+    _vd_try(c_susp, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', c_payload)));
+  PERFORM _vd_expect('state: …and so is vehicle_day_plan_confirm, for a plan that exists', 'ERR 42501 no_company',
+    _vd_try(c_susp, NULL, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:susp-draft'))));
+
+  -- A platform owner with no context has no company, so the state gate answers.
+  PERFORM _vd_expect('state: a platform owner with no context is refused by the state gate on save', 'ERR 42501 no_company',
+    _vd_try(c_super, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', c_payload)));
+  PERFORM _vd_expect('state: …and on confirm', 'ERR 42501 no_company',
+    _vd_try(c_super, NULL, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:a-draft'))));
+
+  -- anon holds no privilege at all, so it never reaches a policy or a function body.
+  PERFORM _vd_expect('state: anon cannot read the plans', 'ERR 42501 permission denied for table vehicle_day_plans',
+    _vd_try(NULL, NULL, 'SELECT count(*)::text FROM vehicle_day_plans'));
+  PERFORM _vd_expect('state: anon cannot read the shifts', 'ERR 42501 permission denied for table vehicle_day_shifts',
+    _vd_try(NULL, NULL, 'SELECT count(*)::text FROM vehicle_day_shifts'));
+  PERFORM _vd_expect('state: anon cannot call vehicle_day_plan_save', 'ERR 42501 permission denied for function vehicle_day_plan_save',
+    _vd_try(NULL, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', c_payload)));
+  PERFORM _vd_expect('state: anon cannot call vehicle_day_plan_confirm', 'ERR 42501 permission denied for function vehicle_day_plan_confirm',
+    _vd_try(NULL, NULL, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:a-draft'))));
+
+  -- The authenticated role with no subject at all: the function's first gate.
+  PERFORM _vd_expect('state: a token with no subject is refused as unauthenticated, before the company is asked', 'ERR 42501 unauthenticated',
+    _vd_try(_vd_nobody(), NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', c_payload)));
+  PERFORM _vd_expect('state: …on confirm too', 'ERR 42501 unauthenticated',
+    _vd_try(_vd_nobody(), NULL, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:a-draft'))));
+END $$;
+
+-- ─── 10. platform contexts ──────────────────────────────────────────────────
+--
+-- A platform owner reads a company's rows only through an open context, and
+-- writes them only inside a support session (3.4a). The view context is left
+-- open: section 12's last control needs it.
+
+DO $$
+DECLARE
+  c_view    CONSTANT uuid := _vd_id('user:owner-view');
+  c_support CONSTANT uuid := _vd_id('user:owner-support');
+  c_s_view  CONSTANT uuid := _vd_id('session:owner-view');
+  c_s_supp  CONSTANT uuid := _vd_id('session:owner-support');
+  c_co_a    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  c_co_b    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000b';
+  c_payload CONSTANT text := '{"year": 2031, "month": 10, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": []}';
+  v_open    jsonb;
+  v_res     jsonb;
+  v_mark    bigint;
+  v_after   jsonb;
+  v_plan    uuid;
+BEGIN
+  PERFORM _vd_as(c_view, c_s_view);
+  v_open := public.platform_context_open(c_co_a, 'view');
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('contexts: the view context opened', 'true', v_open ->> 'success');
+
+  PERFORM _vd_expect('contexts: a view context reads the company it opened', 'true',
+    _vd_try(c_view, c_s_view, format('SELECT (count(*) > 0)::text FROM vehicle_day_plans WHERE company_id = %L', c_co_a)));
+  PERFORM _vd_expect('contexts: …and its shifts', 'true',
+    _vd_try(c_view, c_s_view, format('SELECT (count(*) > 0)::text FROM vehicle_day_shifts WHERE company_id = %L', c_co_a)));
+  PERFORM _vd_expect('contexts: …and no other company''s', '0',
+    _vd_try(c_view, c_s_view, format('SELECT count(*)::text FROM vehicle_day_plans WHERE company_id = %L', c_co_b)));
+  PERFORM _vd_expect('contexts: a view context writes nothing, and says why (3.4a)', 'ERR P0001 support_session_required',
+    _vd_try(c_view, c_s_view, format(
+      'INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version) VALUES (%L, 2031, 3, 4, 15, ''v'')', c_co_a)));
+  PERFORM _vd_expect('contexts: …not even an update that would touch no row', 'ERR P0001 support_session_required',
+    _vd_try(c_view, c_s_view, format('UPDATE vehicle_day_plans SET summary = summary WHERE id = %L', _vd_id('plan:a-draft'))));
+  PERFORM _vd_expect('contexts: a view context is refused by the save RPC''s role gate', 'ERR 42501 not_authorized',
+    _vd_try(c_view, c_s_view, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', c_payload)));
+  PERFORM _vd_expect('contexts: …and by the confirm RPC''s', 'ERR 42501 not_authorized',
+    _vd_try(c_view, c_s_view, format('SELECT public.vehicle_day_plan_confirm(%L)::text', _vd_id('plan:a-draft'))));
+
+  -- The support session: it writes the company it opened, through the RPC as the
+  -- company's own administrator would, and every row it writes leaves one audit row.
+  PERFORM _vd_as(c_support, c_s_supp);
+  v_open := public.platform_context_open(c_co_a, 'support', 'Ticket Fahrzeug-Tagesplan');
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('contexts: the support session opened', 'true', v_open ->> 'success');
+
+  v_mark := _vd_mark();
+  PERFORM _vd_as(c_support, c_s_supp);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 11, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-11-02', 'VD-SUP-1', 0, 24, 36, 4, 15, 12345),
+    _vd_shift(DATE '2027-11-02', 'VD-SUP-2', 0, 24, 36, 4, 15, 12345))));
+  PERFORM _vd_reset();
+  v_plan := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('contexts: a support session saves a plan for the company it opened', 'true|2',
+    (v_res ->> 'success') || '|' || (v_res ->> 'shift_count'));
+  PERFORM _vd_expect('contexts: each row it wrote left exactly one audit row (3.4c): one plan, two shifts', '1|2|0',
+    _vd_rows(v_mark, 'support_write.vehicle_day_plans.insert')::text || '|'
+    || _vd_rows(v_mark, 'support_write.vehicle_day_shifts.insert')::text || '|'
+    || _vd_rows(v_mark, 'support_write.vehicle_day_plans.delete')::text);
+  SELECT l.after_value INTO v_after
+    FROM app_private.platform_audit_log l
+   WHERE l.id > v_mark AND l.action = 'support_write.vehicle_day_shifts.insert'
+   ORDER BY l.id LIMIT 1;
+  PERFORM _vd_expect('contexts: the audit row names the reason and keeps the window, which is no pay figure',
+    'Ticket Fahrzeug-Tagesplan|VD-SUP-1|12345',
+    (v_after ->> 'reason') || '|' || (v_after -> 'values' ->> 'vehicle') || '|' || (v_after -> 'values' ->> 'expected_revenue_cents'));
+
+  -- Saving again replaces the draft: the old plan and its two shifts are deleted
+  -- and recorded, the new ones inserted and recorded.
+  v_mark := _vd_mark();
+  PERFORM _vd_as(c_support, c_s_supp);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 11, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-11-02', 'VD-SUP-1', 0, 24, 36, 4, 15, 12345),
+    _vd_shift(DATE '2027-11-02', 'VD-SUP-2', 0, 24, 36, 4, 15, 12345))));
+  PERFORM _vd_reset();
+  v_plan := (v_res ->> 'plan_id')::uuid;
+  PERFORM _vd_expect('contexts: replacing a draft is recorded row by row: plan and shifts deleted, new ones inserted', '1|2|1|2',
+    _vd_rows(v_mark, 'support_write.vehicle_day_plans.delete')::text || '|'
+    || _vd_rows(v_mark, 'support_write.vehicle_day_shifts.delete')::text || '|'
+    || _vd_rows(v_mark, 'support_write.vehicle_day_plans.insert')::text || '|'
+    || _vd_rows(v_mark, 'support_write.vehicle_day_shifts.insert')::text);
+
+  v_mark := _vd_mark();
+  PERFORM _vd_as(c_support, c_s_supp);
+  v_res := public.vehicle_day_plan_confirm(v_plan);
+  PERFORM _vd_reset();
+  PERFORM _vd_expect('contexts: a support session confirms through the RPC, and the status change is recorded once', 'true|1',
+    (v_res ->> 'success') || '|' || _vd_rows(v_mark, 'support_write.vehicle_day_plans.update')::text);
+
+  PERFORM _vd_expect('contexts: a support session writes no other company''s plan', 'ERR 42501 new row violates row-level security policy for table "vehicle_day_plans"',
+    _vd_try(c_support, c_s_supp, format(
+      'INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version) VALUES (%L, 2031, 4, 4, 15, ''v'')', c_co_b)));
+END $$;
+
+-- ─── 11. a company that holds a confirmed plan can still be deleted ─────────
+--
+-- 20261016140000 found, by deleting a company that had done real work, that the
+-- monthly plan's freeze refused the company's own cascade. The same shape is
+-- here, so the same deletion is tried: a company with a superseded plan, the
+-- confirmed plan that replaced it (which makes the plan table point at itself)
+-- and a draft.
+
+DO $$
+DECLARE
+  c_x       CONSTANT uuid := _vd_id('company:x');
+  c_admin_x CONSTANT uuid := _vd_id('user:admin-x');
+  v_res     jsonb;
+  v_p1      uuid;
+  v_p2      uuid;
+  v_probe   text;
+BEGIN
+  INSERT INTO companies (id, name, slug, approval_status, status, plan, subscription_status)
+  VALUES (c_x, 'VD delete', 'vd-delete', 'approved', 'active', 'basic', 'active');
+  INSERT INTO auth.users (id, email, email_confirmed_at) VALUES (c_admin_x, 'vd-admin-x@test.invalid', now());
+  INSERT INTO user_profiles (user_id, email, full_name, role, role_id, company_id, status)
+  VALUES (c_admin_x, 'vd-admin-x@test.invalid', 'VD admin x', 'admin',
+          (SELECT r.id FROM roles r WHERE r.name = 'admin' AND r.company_id IS NULL), c_x, 'active');
+
+  PERFORM _vd_as(c_admin_x);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 12, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-12-06', 'VD-X', 0, 24, 36, 4), _vd_shift(DATE '2027-12-06', 'VD-Y', 0, 24, 36, 4))));
+  v_p1 := (v_res ->> 'plan_id')::uuid;
+  PERFORM public.vehicle_day_plan_confirm(v_p1);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2027, 12, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2027-12-07', 'VD-X', 0, 24, 36, 4))));
+  v_p2 := (v_res ->> 'plan_id')::uuid;
+  PERFORM public.vehicle_day_plan_confirm(v_p2, true);
+  PERFORM public.vehicle_day_plan_save(_vd_payload(2028, 1, 4, 15, jsonb_build_array(
+    _vd_shift(DATE '2028-01-03', 'VD-X', 0, 24, 36, 4))));
+  PERFORM _vd_reset();
+
+  PERFORM _vd_expect('deletion: the company now holds a superseded plan, a confirmed plan and a draft, with four shifts',
+    'confirmed|draft|superseded|4',
+    (SELECT string_agg(status, '|' ORDER BY status) FROM vehicle_day_plans WHERE company_id = c_x)
+    || '|' || (SELECT count(*)::text FROM vehicle_day_shifts WHERE company_id = c_x));
+  PERFORM _vd_expect('deletion: the superseded plan points at the confirmed one, so the table references itself', 'true',
+    (SELECT (replaced_by_plan_id = v_p2)::text FROM vehicle_day_plans WHERE id = v_p1));
+
+  PERFORM _vd_expect('deletion: while the company exists its confirmed plan cannot be deleted', 'ERR P0001 vehicle_day_plan_is_final',
+    _vd_try(_vd_owner(), NULL, format('DELETE FROM vehicle_day_plans WHERE id = %L', v_p2)));
+
+  -- The deletion itself, with its effect checked inside the same subtransaction
+  -- and rolled back, so the company is still there for section 12.
+  v_probe := format($p$DO $q$
+    DECLARE n bigint;
+    BEGIN
+      DELETE FROM companies WHERE id = %L;
+      SELECT count(*) INTO n FROM vehicle_day_plans WHERE company_id = %L;
+      IF n <> 0 THEN RAISE EXCEPTION 'plans left: %%', n; END IF;
+      SELECT count(*) INTO n FROM vehicle_day_shifts WHERE company_id = %L;
+      IF n <> 0 THEN RAISE EXCEPTION 'shifts left: %%', n; END IF;
+    END $q$
+  $p$, c_x, c_x, c_x);
+  PERFORM _vd_expect('deletion: deleting the company takes all three plans and all four shifts with it', 'rows 0',
+    _vd_try(_vd_owner(), NULL, v_probe));
+END $$;
+
+-- ─── 12. mutation controls ──────────────────────────────────────────────────
+--
+-- A probe that cannot fail measures nothing. Each control below breaks ONE rule
+-- inside a subtransaction, runs the same probe that asserted the rule above, and
+-- requires its answer to change. The subtransaction is rolled back, so the rule
+-- is whole again for the next control. Every line prints "before => after".
+-- A mutation that would change nothing raises (see _vd_mutate_fn), so a control
+-- cannot pass for want of a mutation.
+
+DO $$
+DECLARE
+  c_admin   CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  c_admin_b CONSTANT uuid := 'b0000000-0000-4000-8000-000000000001';
+  c_view    CONSTANT uuid := 'a0000000-0000-4000-8000-000000000003';
+  c_view_p  CONSTANT uuid := _vd_id('user:owner-view');
+  c_s_view  CONSTANT uuid := _vd_id('session:owner-view');
+  c_co_a    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  c_co_b    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000b';
+  c_x       CONSTANT uuid := _vd_id('company:x');
+  v_head    text := '"year": 2027, "month": 4, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v"';
+  v_shift   text := '"operating_date": "2027-04-01", "vehicle": "VD-X", "shift_index": 0, "day_type": 3, "is_holiday": false, "expected_revenue_cents": 100, "expected_revenue_per_hour_cents": 33, "confidence": "high", "evidence_days": 3, "start_position": 24, "end_position": 36, "minutes": 180';
+  v_probe   text;
+  v_mut     text;
+  v_before  text;
+  v_after   text;
+  v_hour_plan uuid := (SELECT id FROM vehicle_day_plans WHERE company_id = 'c0000000-0000-4000-8000-00000000000a' AND year = 2027 AND month = 2);
+BEGIN
+  -- M1. The role gate leaves the plan INSERT policy.
+  v_probe := format('INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version) VALUES (%L, 2031, 8, 4, 15, ''v'')', c_co_a);
+  v_before := _vd_try(c_view, NULL, v_probe);
+  v_after  := _vd_mutant('ALTER POLICY vehicle_day_plans_insert ON public.vehicle_day_plans WITH CHECK (company_id = (SELECT public.get_active_company_id()))', c_view, NULL, v_probe);
+  PERFORM _vd_expect('mutation M1: without the role gate in the INSERT policy the viewer''s insert is admitted',
+    'ERR 42501 new row violates row-level security policy for table "vehicle_day_plans" => rows 1', v_before || ' => ' || v_after);
+
+  -- M2. The tenant term leaves the UPDATE policy's WITH CHECK (the guard is off in both runs).
+  v_probe := _vd_move_sql('vehicle_day_plans', _vd_id('plan:a-draft'), format('company_id = %L', c_co_b));
+  v_before := _vd_mutant('ALTER TABLE vehicle_day_plans DISABLE TRIGGER vehicle_day_plan_guard', c_admin, NULL, v_probe);
+  v_after  := _vd_mutant('DO $m$ BEGIN ALTER TABLE vehicle_day_plans DISABLE TRIGGER vehicle_day_plan_guard; '
+                         'ALTER POLICY vehicle_day_plans_update ON public.vehicle_day_plans WITH CHECK ((SELECT public.current_role_permits(''documents'', true))); END $m$',
+                         c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M2: without the tenant term in WITH CHECK a plan can be moved to another company',
+    'ERR 42501 new row violates row-level security policy for table "vehicle_day_plans" => rows 0', v_before || ' => ' || v_after);
+
+  -- M3. The partial unique index is dropped.
+  v_probe := format($p$DO $q$ BEGIN
+      PERFORM set_config('app_private.vehicle_day_plan_transition', 'plan:%s:' || pg_current_xact_id()::text, true);
+      UPDATE vehicle_day_plans SET status = 'confirmed' WHERE id = %L;
+    END $q$
+  $p$, _vd_id('plan:a-2'), _vd_id('plan:a-2'));
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant('DROP INDEX public.vehicle_day_plans_one_confirmed_per_month', c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M3: without the index a month gets a second confirmed plan',
+    'ERR 23505 duplicate key value violates unique constraint "vehicle_day_plans_one_confirmed_per_month" => rows 0', v_before || ' => ' || v_after);
+
+  -- M4. The save RPC stops asking the role gate.
+  v_probe := 'SELECT (public.vehicle_day_plan_save(''{"year": 2031, "month": 11, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": []}''::jsonb) ->> ''success'')';
+  v_before := _vd_try(c_view, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('public.vehicle_day_plan_save(jsonb)', 'IF NOT public.current_role_permits(''documents'', true) THEN', 'IF false THEN')$m$, c_view, NULL, v_probe);
+  PERFORM _vd_expect('mutation M4: without the role gate in the function the viewer saves a plan',
+    'ERR 42501 not_authorized => true', v_before || ' => ' || v_after);
+
+  -- M5. The shift guard stops checking the moments against the stored hour.
+  v_probe := format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+    '{' || v_head || ', "shifts": [{' || v_shift || ', "starts_local": "2027-04-01T06:00", "ends_local": "2027-04-01T09:00"}]}');
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  -- Both halves of the OR are neutralised: `false AND a OR b` would leave b live, and the
+  -- control would then pass for the wrong reason (the first version of this line did).
+  v_after  := _vd_mutant($m$DO $mm$ BEGIN
+      PERFORM _vd_mutate_fn('app_private.vehicle_day_shift_guard()', 'IF NEW.starts_local IS DISTINCT FROM', 'IF false AND NEW.starts_local IS DISTINCT FROM');
+      PERFORM _vd_mutate_fn('app_private.vehicle_day_shift_guard()', 'OR NEW.ends_local IS DISTINCT FROM', 'OR false AND NEW.ends_local IS DISTINCT FROM');
+    END $mm$
+    $m$, c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M5: without the moment check a shift cut by hour 0 is stored under a plan that says hour 4',
+    'ERR P0001 vehicle_day_shift_moments_mismatch => true', v_before || ' => ' || v_after);
+
+  -- M6. The plan guard stops fixing the hour.
+  v_probe := format('UPDATE vehicle_day_plans SET operating_day_start_hour = 0 WHERE id = %L', v_hour_plan);
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('app_private.vehicle_day_plan_guard()', 'OR NEW.operating_day_start_hour IS DISTINCT FROM OLD.operating_day_start_hour', '')$m$, c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M6: without the guard''s clause the stored hour of a plan can be edited',
+    'ERR P0001 vehicle_day_plan_key_fixed => rows 1', v_before || ' => ' || v_after);
+
+  -- M7. The tenant term leaves the SELECT policy.
+  v_probe := format('SELECT (count(*) > 0)::text FROM vehicle_day_plans WHERE company_id = %L', c_co_a);
+  v_before := _vd_try(c_admin_b, NULL, v_probe);
+  v_after  := _vd_mutant('ALTER POLICY vehicle_day_plans_select ON public.vehicle_day_plans USING (true)', c_admin_b, NULL, v_probe);
+  PERFORM _vd_expect('mutation M7: without the tenant term company B reads company A''s plans',
+    'false => true', v_before || ' => ' || v_after);
+
+  -- M8. The plan guard stops standing aside for a company's own cascade.
+  v_probe := format($p$DO $q$ BEGIN DELETE FROM companies WHERE id = %L; END $q$
+  $p$, c_x);
+  v_before := _vd_try(_vd_owner(), NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('app_private.vehicle_day_plan_guard()', 'AND EXISTS (SELECT 1 FROM public.companies c WHERE c.id = OLD.company_id) THEN', 'THEN')$m$, _vd_owner(), NULL, v_probe);
+  PERFORM _vd_expect('mutation M8: without the condition a company holding a confirmed plan cannot be deleted',
+    'rows 0 => ERR P0001 vehicle_day_plan_is_final', v_before || ' => ' || v_after);
+
+  -- M9. The shift key list is opened.
+  v_probe := format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+    '{' || v_head || ', "shifts": [{' || v_shift || ', "starts_local": "2027-04-01T10:00", "ends_local": "2027-04-01T13:00", "driver_id": "x"}]}');
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('public.vehicle_day_plan_save(jsonb)', 'WHERE k.key <> ALL (c_shift_keys)', 'WHERE false')$m$, c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M9: with the key list opened a shift that names a driver is accepted and the driver silently dropped',
+    'ERR 22023 vehicle_day_plan_save: unknown shift key(s): driver_id => true', v_before || ' => ' || v_after);
+
+  -- M10. The view-context refusal trigger is dropped; the policy still refuses, but with a different text.
+  v_probe := format('INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version) VALUES (%L, 2031, 12, 4, 15, ''v'')', c_co_a);
+  v_before := _vd_try(c_view_p, c_s_view, v_probe);
+  v_after  := _vd_mutant('DROP TRIGGER refuse_read_only_context_write ON public.vehicle_day_plans', c_view_p, c_s_view, v_probe);
+  PERFORM _vd_expect('mutation M10: without the refusal trigger the view context is still refused, but no longer by name',
+    'ERR P0001 support_session_required => ERR 42501 new row violates row-level security policy for table "vehicle_day_plans"',
+    v_before || ' => ' || v_after);
+
+  -- Every control left the rules whole: the baselines still hold after all ten.
+  PERFORM _vd_expect('mutations: the ten controls were rolled back, so the policies and triggers are whole', '4|4|2',
+    (SELECT count(*)::text FROM pg_policies WHERE schemaname = 'public' AND tablename = 'vehicle_day_plans') || '|'
+    || (SELECT count(*)::text FROM pg_policies WHERE schemaname = 'public' AND tablename = 'vehicle_day_shifts') || '|'
+    || (SELECT count(*)::text FROM pg_trigger WHERE tgrelid = 'public.vehicle_day_plans'::regclass
+          AND tgname IN ('refuse_read_only_context_write', 'vehicle_day_plan_guard') AND NOT tgisinternal AND tgenabled = 'O'));
 END $$;
 
 
