@@ -1309,7 +1309,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         <table>
           <thead><tr><th>المرحلة</th><th>الاسم</th><th>الحجم</th><th>بتعتمد على</th><th>الحالة</th></tr></thead>
           <tbody>
-            <tr><td class="num">16</td><td>مخطط Stundennachweis صار يقرأ سلوك الملاحظة: الغياب (مرض/إجازة) = ما في شيفت أبدًا بأي يوم من مداه، والإلزامية بتحافظ على نافذتها، والحيادية ما بتعمل شي؛ وتعارض غياب مع ملاحظة إلزامية بيطلع على الشاشة بدل ما ينحسم بصمت. ما بيلمس أي وثيقة محفوظة (كلها من Monatsplanung)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">17</td><td>مخطط Stundennachweis صار يقرأ سلوك الملاحظة: الغياب (مرض/إجازة) = ما في شيفت أبدًا بأي يوم من مداه، والإلزامية بتحافظ على نافذتها، والحيادية ما بتعمل شي؛ وتعارض غياب مع ملاحظة إلزامية بيطلع على الشاشة بدل ما ينحسم بصمت. ما بيلمس أي وثيقة محفوظة (كلها من Monatsplanung)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">0</td><td>الإصدارات والحماية</td><td>صغير–متوسط</td><td>ما في</td><td><span class="pill info">قيد التنفيذ</span></td></tr>
             <tr><td class="num">1</td><td>OTP وأمان الحسابات</td><td>كبير</td><td>0</td><td><span class="pill ok">عالستيج</span></td></tr>
             <tr><td class="num">2</td><td>التصميم والنموذج</td><td>متوسط</td><td>0، وموافقتك</td><td><span class="pill ok">اندمج</span></td></tr>
@@ -1327,6 +1327,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">13</td><td>الاختيار اليدوي للسائق («حل يدوي») صار يرفض السائق المريض أو بإجازة (ملاحظات exclude_from_plan) — كان يفحص بس الملاحظة النصية القديمة</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">14</td><td>غياب السائق: برامتر blockedDates بمحرك Brutto ما حدا بيعبّيه (طلع بقايا ميزة محذوفة، فانشال وانكتب إنو المحرك ما بيراعي الغياب)، وتخمين «غياب / Pflichtnotiz» من نص الملاحظة صار دالة وحدة بدل 4 نسخ</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">15</td><td>نوع الملاحظة وتأثيرها على التخطيط لازم يتّفقوا (قيدين CHECK بالداتابيس؛ التجاوز مسموح لـgeneral وother بس لأن الداتا الحقيقية بتستعمله، وممنوع للأنواع التمانية الباقية)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج (الـkit مش مشغّل)</span></td></tr>
+            <tr><td class="num">16</td><td>ممر الإصلاح النهائي للتداخلات: السائق صار يتحدد بالمعرّف مش بالاسم المعروض (توأم الاسم كان يتنقل بلوكه أيام: 62 نقلة بالقياس، 0 بعد الإصلاح)، والأوقات المكتوبة صارت بتوقيت برلين مش UTC (فرق 60–120 دقيقة بكل بلوك منقول)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
           </tbody>
         </table>
       </div>
