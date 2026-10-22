@@ -153,6 +153,9 @@ function note(over: Partial<StructuredNote> = {}): StructuredNote {
 
 const notesFor = (n: StructuredNote) => new Map<string, StructuredNote[]>([['D1', [n]]]);
 
+/** For the manual-dialog checks below, which are about the Dienstzeit and the weekday, not notes. */
+const NO_NOTES = new Map<string, StructuredNote[]>();
+
 /** A driver with no Dienstzeit at all, so only the note can refuse a block. */
 const anyTimeDriver = driver({
   is_full_day_available: true,
@@ -291,7 +294,7 @@ describe('the manual dialog answers the same as the preview', () => {
       allowDienstzeit,
       allowDaily: false,
       allowMonthly: false,
-    }).blockingChecks;
+    }, NO_NOTES).blockingChecks;
   }
 
   it('does not report a night block as outside the Dienstzeit', () => {
@@ -459,8 +462,8 @@ describe('the hard and bypassable split is where CLAUDE.md puts it', () => {
     ];
     const r = assignBlocksPhase3(blocks, [driver()], { oneVehiclePerDriverDay: true });
     const open = r.unassigned[0].block_id;
-    const strict = evaluateManualCandidate(r, open, 'D1', { allowDienstzeit: false, allowDaily: false, allowMonthly: false });
-    const bypassed = evaluateManualCandidate(r, open, 'D1', { allowDienstzeit: true, allowDaily: false, allowMonthly: false });
+    const strict = evaluateManualCandidate(r, open, 'D1', { allowDienstzeit: false, allowDaily: false, allowMonthly: false }, NO_NOTES);
+    const bypassed = evaluateManualCandidate(r, open, 'D1', { allowDienstzeit: true, allowDaily: false, allowMonthly: false }, NO_NOTES);
     expect(strict.blockingChecks).toContain('Außerhalb Dienstzeit');
     expect(bypassed.blockingChecks).not.toContain('Außerhalb Dienstzeit');
   });
@@ -478,8 +481,25 @@ describe('the hard and bypassable split is where CLAUDE.md puts it', () => {
       allowDienstzeit: true,
       allowDaily: true,
       allowMonthly: true,
-    });
+    }, NO_NOTES);
     expect(e.blockingChecks).toContain('Arbeitstag nicht erlaubt');
+    expect(e.feasible).toBe(false);
+  });
+
+  it('lets no option bypass a structured note, which is hard, in the manual dialog too', () => {
+    // The dialog used to ask only the legacy free-text note, so a driver on sick leave
+    // was offered as assignable. monatsplanungPhase3.manualNotes.test.ts has the rest.
+    const notes = notesFor(note());
+    const r = assignBlocksPhase3([block('C1', '2026-05-22', '10:00', '12:00')], [anyTimeDriver], {
+      oneVehiclePerDriverDay: true,
+      driverNotesMap: notes,
+    });
+    const e = evaluateManualCandidate(r, 'C1', 'D1', {
+      allowDienstzeit: true,
+      allowDaily: true,
+      allowMonthly: true,
+    }, notes);
+    expect(e.blockingChecks).toContain('Notiz-Einschränkung');
     expect(e.feasible).toBe(false);
   });
 
