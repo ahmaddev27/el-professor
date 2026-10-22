@@ -400,6 +400,32 @@ jobs:
             echo "::warning::control: with the access log on the gateway does not write the query either; the check above cannot fail"
           fi
           docker rm -f gateway-with-log > /dev/null
+      - name: The placement report, on a month of invented rides whose answers are known
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
+        run: |
+          docker run -d --name pg-report -e POSTGRES_PASSWORD=ci postgres:16-alpine > /dev/null
+          for _ in $(seq 1 40); do docker exec pg-report pg_isready -U postgres > /dev/null 2>&1 && break; sleep 1; done
+          sleep 2
+          docker exec -i pg-report psql -U postgres -v ON_ERROR_STOP=1 -q < tests/deploy/placement-fixture.sql
+          docker exec -i pg-report psql -U postgres -v ON_ERROR_STOP=1 -A -F '|' \
+            -v company=00000000-0000-4000-8000-0000000000c1 -v year=2026 -v month=5 -f - \
+            < tests/staging/geocode-placement.sql | tee "$RUNNER_TEMP/report.txt"
+          expect() { grep -qF "$1" "$RUNNER_TEMP/report.txt" || { echo "::error::the report lacks: $1"; exit 1; }; }
+          expect 'address cells|placed|11|78.6 %'
+          expect 'address cells|unparseable|1|7.1 %'
+          expect 'address cells|no_house_number|1|7.1 %'
+          expect 'address cells|house_number_not_placed|1|7.1 %'
+          expect 'rides|completed rides in the month|7|'
+          expect 'rides|both ends placed|4|'
+          expect 'rides|one end placed|3|'
+          expect 'rides|no end placed|0|'
+          expect 'straight line|rides compared (both placed, km > 0, line >= 0.2 km)|2|'
+          expect 'straight line|km shorter than the line: a misplaced address or a bad cell|1|'
+          expect 'to look at|trip 00000000-0000-4000-8000-0000000000b2|3.0|line 5.0 km'
+          if grep -qiE 'weg|marktplatz|irgendwo|solingen' "$RUNNER_TEMP/report.txt"; then
+            echo "::error::the report shows an address"; exit 1
+          fi
+          docker rm -f pg-report > /dev/null
       - name: The function, in the real edge runtime, behind the real gateway
         if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
         env:
@@ -447,7 +473,7 @@ jobs:
         if: always() && steps.scope.outputs.run == 'true'
         working-directory: deploy
         run: |
-          docker rm -f edge edge-stub nominatim-stub gateway-with-log > /dev/null 2>&1 || true
+          docker rm -f edge edge-stub nominatim-stub gateway-with-log pg-report > /dev/null 2>&1 || true
           docker compose --profile geocoder down -v || true
 
   # The RLS kit (scripts/rls-test.mjs) builds a throwaway database from production's
