@@ -259,6 +259,8 @@ describe('the table list is the set the migrations define', () => {
     for (const table of [
       'trip_analysis_settings',
       'driver_month_budget',
+      'vehicle_day_plans',
+      'vehicle_day_shifts',
       'notification_deliveries',
       'company_settings',
       'roles',
