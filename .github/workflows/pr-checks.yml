@@ -178,7 +178,18 @@ jobs:
             [ "$state" = healthy ] && break
             sleep 5
           done
-          if [ "$state" != healthy ]; then docker compose --profile osrm logs osrm; echo "::error::osrm did not become healthy ($state)"; exit 1; fi
+          if [ "$state" != healthy ]; then
+            ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid")"
+            echo "--- state"; docker inspect -f '{{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} pid={{.State.Pid}}' "$cid"
+            echo "--- what the health check saw"; docker inspect -f '{{range .State.Health.Log}}exit={{.ExitCode}} output={{.Output}}{{"\n"}}{{end}}' "$cid"
+            echo "--- container log"; docker compose --profile osrm logs osrm
+            echo "--- nearest, from outside"; curl -sS -m 10 -i "http://$ip:5000/nearest/v1/driving/10.0,51.0" || true; echo
+            echo "--- route, from outside"; curl -sS -m 10 -i "http://$ip:5000/route/v1/driving/7.0671,51.1657;7.0771,51.1757?overview=false" || true; echo
+            echo "--- the health check by hand"
+            docker exec "$cid" bash -c 'exec 3<>/dev/tcp/127.0.0.1/5000 && printf "GET /nearest/v1/driving/10.0,51.0 HTTP/1.0\r\n\r\n" >&3 && grep -q "\"code\"" <&3'; echo "exit=$?"
+            echo "--- processes"; docker top "$cid" || true
+            echo "::error::osrm did not become healthy ($state)"; exit 1
+          fi
           ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid")"
           echo "OSRM_URL=http://$ip:5000" >> "$GITHUB_ENV"
           docker inspect -f 'user={{.Config.User}} readonly={{.HostConfig.ReadonlyRootfs}} caps_dropped={{.HostConfig.CapDrop}} memory={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}} ports={{.HostConfig.PortBindings}}' "$cid"
