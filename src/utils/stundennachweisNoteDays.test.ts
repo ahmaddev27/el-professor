@@ -101,6 +101,19 @@ describe('absenceDays: the days an exclusion covers', () => {
     expect(sorted(absenceDays([note], 2026, 10))).toEqual([25]);
   });
 
+  // The two ways a "+24 hours" day boundary goes wrong, one per DST day.
+  it('a note on the day after the 23-hour day does not reach back onto it', () => {
+    const note = absenceRange('a', { y: 2026, m: 3, d: 30 }, { y: 2026, m: 3, d: 30 });
+    expect(sorted(absenceDays([note], 2026, 3))).toEqual([30]);
+  });
+
+  it('a late-evening note on the 25-hour day still lands on that day', () => {
+    const note = absenceRange('a', { y: 2026, m: 10, d: 25 }, { y: 2026, m: 10, d: 25 }, {
+      note_text: 'Spaetschicht frei', start_time: '23:30', end_time: '23:59',
+    });
+    expect(sorted(absenceDays([note], 2026, 10))).toEqual([25]);
+  });
+
   // DECISION, pinned: the plan allocates whole days, so a note that covers part
   // of a day blocks the day. It can only claim fewer hours than were possible.
   it('a timed note blocks its whole day', () => {
