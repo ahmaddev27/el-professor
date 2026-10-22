@@ -177,7 +177,7 @@ SERVICE_FLAGS=("${SERVICE_CMD[@]:1:${#SERVICE_CMD[@]}-2}")
 BASE="${REGION##*/}"
 if [ -z "$SNAPSHOT_DATE" ]; then
   page="$(mktemp)"
-  curl -fsSL --max-time 60 "https://download.geofabrik.de/${REGION}.html" -o "$page" \
+  curl -fsSL --max-time 60 --retry 3 --retry-delay 5 "https://download.geofabrik.de/${REGION}.html" -o "$page" \
     || { rm -f "$page"; fail "could not read the Geofabrik page for $REGION; pass --date YYMMDD"; }
   SNAPSHOT_DATE="$(newest_snapshot_date "$page" "$BASE")"
   rm -f "$page"
@@ -186,7 +186,7 @@ fi
 NAME="$(build_name "$REGION" "$SNAPSHOT_DATE")"
 URL="https://download.geofabrik.de/${REGION}-${SNAPSHOT_DATE}.osm.pbf"
 
-PBF_BYTES="$(curl -fsSIL --max-time 60 "$URL" | tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }')" || true
+PBF_BYTES="$(curl -fsSIL --max-time 60 --retry 3 --retry-delay 5 "$URL" | tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }')" || true
 [ "${PBF_BYTES:-0}" -gt 0 ] || fail "could not read the size of $URL"
 
 # ── What it needs, what the host has ─────────────────────────────────────────
@@ -234,7 +234,7 @@ docker pull "$IMAGE" < /dev/null
 step "extract $NAME"
 mkdir -p "$WORK_DIR"
 PBF="$WORK_DIR/$NAME.osm.pbf"
-EXPECTED_MD5="$(curl -fsSL --max-time 60 "$URL.md5" | awk '{ print $1 }')" || true
+EXPECTED_MD5="$(curl -fsSL --max-time 60 --retry 3 --retry-delay 5 "$URL.md5" | awk '{ print $1 }')" || true
 [[ "$EXPECTED_MD5" =~ ^[0-9a-f]{32}$ ]] || fail "could not read the checksum $URL.md5"
 curl -fL --retry 5 --retry-delay 10 -C - -o "$PBF" "$URL"
 [ "$(md5sum "$PBF" | awk '{ print $1 }')" = "$EXPECTED_MD5" ] || { rm -f "$PBF"; fail "the download does not match its checksum $EXPECTED_MD5; it was removed, run again"; }

@@ -439,6 +439,14 @@ describe('the build script\'s promises', () => {
     expect(at('md5sum "$PBF"')).toBeLessThan(at('run_stage extract'));
   });
 
+  it('retries every request it makes to Geofabrik, because one slow answer from a server it does not run must not end a build', () => {
+    // The CI job of this change failed once, before anything was built, on
+    // `curl: (28) Operation timed out after 60002 milliseconds` reading the snapshot page.
+    const calls = buildCode.split('\n').filter((line) => /\bcurl\b/.test(line));
+    expect(calls.length).toBeGreaterThanOrEqual(4);
+    for (const call of calls) expect(call, call).toContain('--retry');
+  });
+
   it('runs every build step with a memory ceiling below what the host has, a low CPU share and no network', () => {
     const stage = /^run_stage\(\) \{[\s\S]*?^\}/m.exec(buildCode)?.[0] ?? '';
     expect(stage).toContain('--network none');
