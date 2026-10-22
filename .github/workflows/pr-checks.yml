@@ -198,6 +198,8 @@ jobs:
         working-directory: deploy
         run: |
           image="$(docker compose --profile osrm config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["osrm"]["image"])')"
+          echo "--- ready.json of the build ---"
+          docker run --rm -v ya-mobility-staging_osrm-data:/data:ro --entrypoint cat "$image" /data/current/ready.json
           source <(sed -n '/^# >>> osrm data checks$/,/^# <<< osrm data checks$/p' deploy.sh)
           problem="$(osrm_data_problem "$image" ya-mobility-staging_osrm-data)"
           [ -z "$problem" ] || { echo "::error::the guard refuses a good build: $problem"; exit 1; }
@@ -247,7 +249,15 @@ jobs:
       - name: The edge function type-checks under Deno
         if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
         continue-on-error: true
-        run: docker run --rm -v "$PWD":/w -w /w denoland/deno:2.1.4 deno check supabase/functions/travel-route/index.ts
+        run: |
+          # Alone in a directory: next to the repository's package.json Deno looks for node_modules
+          # and refuses the edge-runtime types' own npm imports, which says nothing about the function.
+          cp -r supabase/functions "$RUNNER_TEMP/functions"
+          if docker run --rm -v "$RUNNER_TEMP/functions":/w -w /w denoland/deno:2.1.4 deno check travel-route/index.ts; then
+            echo "deno check: the function type-checks"
+          else
+            echo "::warning::deno check of travel-route/index.ts failed (see the log above); this step does not fail the job"; exit 1
+          fi
       - name: Stop it
         if: always() && steps.scope.outputs.run == 'true'
         working-directory: deploy
