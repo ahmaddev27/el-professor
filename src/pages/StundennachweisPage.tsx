@@ -240,7 +240,7 @@ interface DriverOption {
   allowed_weekdays?: number[] | null;
 }
 
-interface Note {
+export interface Note {
   id: string;
   driver_id: string;
   note_date: string;
@@ -251,7 +251,7 @@ interface Note {
   note_planning_behavior?: string | null;
 }
 
-interface DayRow {
+export interface DayRow {
   dayIndex: number;
   date: Date;
   weekday: string;
@@ -404,7 +404,7 @@ function calcRow(row: DayRow): DayRow {
   };
 }
 
-function calcTotals(rows: DayRow[]): Totals {
+export function calcTotals(rows: DayRow[]): Totals {
   return {
     grundlohn:   rows.reduce((s, r) => s + toMins(r.grundlohn),    0),
     nachtarbeit: rows.reduce((s, r) => s + toMins(r.nachtarbeit),  0),
@@ -495,7 +495,7 @@ function minsToTime(m: number): string {
   return hhmm(Math.floor(clamped / 60), clamped % 60);
 }
 
-function applyMustIncludeNotesToRows(rows: DayRow[], notes: Note[]): DayRow[] {
+export function applyMustIncludeNotesToRows(rows: DayRow[], notes: Note[]): DayRow[] {
   const mustNotes = notes.filter(n => n.note_planning_behavior === 'must_include_in_plan');
   if (mustNotes.length === 0) return rows;
 
@@ -576,7 +576,7 @@ function applyMustIncludeNotesToRows(rows: DayRow[], notes: Note[]): DayRow[] {
 // Divide by 100 for euros. This is the canonical formula used by both the
 // generator and the live display — they must be identical.
 
-function salaryInCents(rows: DayRow[], hourlyRateCents: number): number {
+export function salaryInCents(rows: DayRow[], hourlyRateCents: number): number {
   // Premium-only model (Option B):
   // Every worked minute earns base × 1.00 (wage type 1000).
   // Applicable premiums are additive on top.
@@ -694,7 +694,7 @@ function enforceMandatorySplit(rows: DayRow[], rngSeed: number): void {
 // windowStartMins / windowEndMins: minutes since midnight (e.g. 6*60=360).
 // allowedWeekdays: JS getDay() values (0=Sun, 1=Mon, …, 6=Sat).
 // An empty allowedWeekdays array means "all weekdays allowed".
-interface WorkWindowConstraints {
+export interface WorkWindowConstraints {
   windowStartMins: number;   // earliest a shift may start (inclusive)
   windowEndMins:   number;   // latest a shift may end (inclusive)
   allowedWeekdays: number[]; // empty = no restriction
@@ -718,7 +718,7 @@ function prng(a: number, b: number): number {
   return x - Math.floor(x);
 }
 
-function generatePlan(params: PlanParams): DayRow[] {
+export function generatePlan(params: PlanParams): DayRow[] {
   const { year, month, targetSalary, hourlyRate, notes, seed, grundlohnRatio, bundesland, workWindow } = params;
 
   // Resolved work-window bounds (fallback to full-day if not set)
@@ -1135,7 +1135,7 @@ function generatePlan(params: PlanParams): DayRow[] {
 // The result is a valid, editable DayRow[] that matches the targets as closely
 // as possible while keeping shifts realistic and non-overlapping.
 
-interface TotalsTarget {
+export interface TotalsTarget {
   grundlohn:   number; // total minutes
   nachtarbeit: number;
   nacht04:     number; // column exists but treated the same as nachtarbeit
@@ -1143,7 +1143,7 @@ interface TotalsTarget {
   feiertag:    number;
 }
 
-function generatePlanFromTotals(
+export function generatePlanFromTotals(
   year: number, month: number,
   targets: TotalsTarget,
   notes: Note[],
