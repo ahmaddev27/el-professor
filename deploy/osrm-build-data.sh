@@ -115,6 +115,18 @@ valid_region() { [[ "$1" =~ ^[a-z0-9-]+(/[a-z0-9-]+)*$ ]]; }
 # <region base name>-<snapshot date>, the directory a build lives in.
 build_name() { printf '%s-%s' "${1##*/}" "$2"; }
 
+# MiB from a size as docker stats writes it ("1.234GiB", "512MiB", "800kB").
+to_mib() {
+  awk -v size="$1" 'BEGIN {
+    n = size + 0
+    unit = size; sub(/^[0-9.]+/, "", unit)
+    if (unit == "GiB" || unit == "GB") n *= 1024
+    else if (unit == "KiB" || unit == "kB" || unit == "KB") n /= 1024
+    else if (unit == "B") n /= 1048576
+    printf "%.0f", n
+  }'
+}
+
 # <<< osrm build helpers
 
 # ── Which stack, which image, which snapshot ─────────────────────────────────
@@ -212,16 +224,43 @@ docker run --rm --network none -v "$WORK_DIR":/in:ro -v "$VOLUME":/data --entryp
   -c 'mkdir -p "/data/$1" && cp "/in/$2" "/data/$1/map.osm.pbf"' _ "$NAME" "$NAME.osm.pbf" < /dev/null \
   || fail "could not copy the extract into the volume"
 
-declare -A TOOK
+declare -A TOOK PEAK
+# The highest memory use docker stats shows for a container, sampled while it
+# runs, so the next person learns what the build really took and not what the
+# wiki's table says. Prints MiB, or nothing when it never saw the container.
+peak_memory_mib() {
+  local name="$1" peak=0 seen=no now waited=0
+  while :; do
+    now="$(docker stats --no-stream --format '{{.MemUsage}}' "$name" 2> /dev/null | awk '{ print $1 }')" || now=""
+    if [ -n "$now" ]; then
+      seen=yes
+      now="$(to_mib "$now")"
+      [ "$now" -le "$peak" ] || peak="$now"
+    elif [ "$seen" = yes ]; then
+      break
+    else
+      # Never saw it start: give up rather than outlive a script that failed.
+      waited=$((waited + 1))
+      [ "$waited" -lt 120 ] || break
+    fi
+    sleep 1
+  done
+  [ "$seen" = no ] || echo "$peak"
+}
+
 run_stage() {
-  local stage="$1" started=$SECONDS
+  local stage="$1" started=$SECONDS sampler status
   shift
   step "$stage"
+  peak_memory_mib "osrm-build-$stage" > "$WORK_DIR/peak-$stage" 2> /dev/null &
+  sampler=$!
   docker run --rm --name "osrm-build-$stage" --network none --memory "${MEM_MIB}m" --memory-swap "${SWAP_MIB}m" \
       --cpus "$BUILD_CPUS" --cpu-shares 256 -v "$VOLUME":/data "$IMAGE" "$@" < /dev/null \
-    || fail "$stage did not finish (exit $?). A kill (137) means it was given less memory than it needed; nothing else on the host was touched. The build is in /data/$NAME of $VOLUME and is not served"
+    || { status=$?; kill "$sampler" 2> /dev/null || true; fail "$stage did not finish (exit $status). A kill (137) means it was given less memory than it needed; nothing else on the host was touched. The build is in /data/$NAME of $VOLUME and is not served"; }
   TOOK[$stage]=$((SECONDS - started))
-  echo "  $stage took ${TOOK[$stage]} s"
+  wait "$sampler" || true
+  PEAK[$stage]="$(cat "$WORK_DIR/peak-$stage" 2> /dev/null || true)"
+  echo "  $stage took ${TOOK[$stage]} s, peak memory ${PEAK[$stage]:-unknown} MiB (sampled once a second)"
 }
 
 run_stage extract osrm-extract -p /opt/car.lua --threads "$BUILD_CPUS" "/data/$NAME/map.osm.pbf"
@@ -253,7 +292,7 @@ echo "  osrm-routed loaded $NAME and answered"
 
 step "switch $NAME in"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-READY="{\"name\":\"$NAME\",\"region\":\"$REGION\",\"snapshot\":\"$SNAPSHOT_DATE\",\"pbf_md5\":\"$EXPECTED_MD5\",\"pbf_bytes\":$PBF_BYTES,\"image\":\"$IMAGE\",\"built_at\":\"$BUILT_AT\",\"seconds\":{\"extract\":${TOOK[extract]},\"partition\":${TOOK[partition]},\"customize\":${TOOK[customize]}}}"
+READY="{\"name\":\"$NAME\",\"region\":\"$REGION\",\"snapshot\":\"$SNAPSHOT_DATE\",\"pbf_md5\":\"$EXPECTED_MD5\",\"pbf_bytes\":$PBF_BYTES,\"image\":\"$IMAGE\",\"built_at\":\"$BUILT_AT\",\"seconds\":{\"extract\":${TOOK[extract]},\"partition\":${TOOK[partition]},\"customize\":${TOOK[customize]}},\"peak_mib\":{\"extract\":${PEAK[extract]:-null},\"partition\":${PEAK[partition]:-null},\"customize\":${PEAK[customize]:-null}}}"
 
 # One container does all of it, so the link moves in one rename and a build is
 # never half switched. ready.json is written first: the guard in deploy.sh reads
@@ -282,7 +321,8 @@ docker run --rm --network none -v "$VOLUME":/data:ro --entrypoint sh "$IMAGE" -c
 
 cat <<DONE
 
-Built $NAME: extract ${TOOK[extract]} s, partition ${TOOK[partition]} s, customize ${TOOK[customize]} s.
+Built $NAME: extract ${TOOK[extract]} s (peak ${PEAK[extract]:-?} MiB), partition ${TOOK[partition]} s (peak ${PEAK[partition]:-?} MiB),
+customize ${TOOK[customize]} s (peak ${PEAK[customize]:-?} MiB). The same figures are in ready.json.
 The service reads /data/current, which now points at it.
 
 Next, only when you mean to:

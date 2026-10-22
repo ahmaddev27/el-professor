@@ -314,6 +314,15 @@ describe.skipIf(!hasBash)('the build script\'s helpers', () => {
     (region) => expect(run('helpers.sh', [`valid_region '${region}' && echo yes || echo no`]).out).toBe('no'),
   );
 
+  it('reads the memory sizes docker stats writes, in MiB', () => {
+    expect(call('to_mib 1.5GiB')).toBe('1536');
+    expect(call('to_mib 512MiB')).toBe('512');
+    expect(call('to_mib 2048kB')).toBe('2');
+    expect(call('to_mib 2048KiB')).toBe('2');
+    expect(call('to_mib 0B')).toBe('0');
+    expect(call('to_mib 12.34GiB')).toBe('12636');
+  });
+
   it('names a build after the region and its snapshot', () => {
     expect(call('build_name europe/germany 261020')).toBe('germany-261020');
     expect(call('build_name europe/germany/nordrhein-westfalen 261020')).toBe('nordrhein-westfalen-261020');
@@ -434,5 +443,30 @@ describe('the build script\'s promises', () => {
     expect(buildCode).not.toMatch(/^\s*docker compose (up|down|restart|stop|rm|kill|build)\b/m);
     expect(buildCode).not.toMatch(/docker (restart|stop|kill|rm -f) (?!"\$CHECK")/);
     expect(buildCode).not.toMatch(/ridy/i);
+  });
+});
+
+describe('CI runs the chain for real, and only when a change touches it', () => {
+  const workflow = repoFile('.github/workflows/pr-checks.yml');
+  const job = workflow.slice(workflow.indexOf('\n  osrm:\n'));
+
+  it('has an osrm job gated by a scope step that diffs the change against its base', () => {
+    expect(job.length).toBeGreaterThan(100);
+    expect(job).toContain('git diff --name-only "$BASE_SHA" HEAD');
+    expect(job).toContain('deploy/(docker-compose');
+    expect(job).toContain('travel-route');
+    expect(job.match(/steps\.scope\.outputs\.run == 'true'/g)?.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('builds with the real script, starts the real compose service and asks it with the live test', () => {
+    expect(job).toContain('./osrm-build-data.sh --region "$REGION"');
+    expect(job).toContain('docker compose --profile osrm up -d osrm');
+    expect(job).toContain('npx vitest run tests/deploy/osrm.live.test.ts');
+    expect(job).toContain('osrm_data_problem');
+  });
+
+  it('checks the service is off without its profile and that its log holds no coordinate', () => {
+    expect(job).toContain('osrm is in the default services');
+    expect(job).toContain("The container logs no coordinate");
   });
 });

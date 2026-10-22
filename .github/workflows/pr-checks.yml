@@ -83,3 +83,134 @@ jobs:
           done
           docker logs export-ci
           exit 1
+
+  # The routing container (deploy/docker-compose.yml, service osrm) is a pinned
+  # image started with flags over data a script built, and none of that is
+  # TypeScript: `npm run build` cannot see a flag the image does not know, a
+  # compose file Docker refuses, or a build script that fails on a real extract.
+  # This job runs the chain for real - the build script, the compose service, the
+  # pinned image - on a regional map, asks the container for routes, and prints
+  # what the build cost and how far the old straight-line estimate was from the
+  # road. It runs only when a change touches those files, because it downloads a map.
+  osrm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REGION: europe/germany/nordrhein-westfalen/duesseldorf-regbez
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this change touch the routing container?
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          if grep -qE '^(deploy/(docker-compose\.yml|deploy\.sh|osrm-build-data\.sh)|supabase/functions/(_shared/travel-route|travel-route/)|tests/deploy/osrm|\.github/workflows/pr-checks\.yml)' <<<"$changed"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing in this change touches the routing container."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install
+        if: steps.scope.outputs.run == 'true'
+        run: npm ci
+      - name: The compose file renders, and the service exists only with its profile
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          cat > .env <<'EOF'
+          PROJECT_NAME=ya-mobility-staging
+          POSTGRES_PASSWORD=ci-not-a-secret
+          JWT_SECRET=ci-not-a-secret-ci-not-a-secret-ci-not-a-secret
+          ANON_KEY=ci-anon
+          SERVICE_ROLE_KEY=ci-service
+          APP_URL=https://app.example.test
+          PUBLIC_URL=https://api.example.test
+          SMTP_HOST=mailpit
+          SMTP_SENDER=noreply@example.test
+          OTP_PEPPER=ci-not-a-secret-ci-not-a-secret-ci-not-a-secret
+          REALTIME_ENC_KEY=ci-not-a-secret
+          REALTIME_SECRET_KEY_BASE=ci-not-a-secret-ci-not-a-secret-ci-not-a-secret-ci-not-a-secret
+          EOF
+          docker compose config -q
+          if docker compose config --services | grep -qx osrm; then echo "::error::osrm is in the default services"; exit 1; fi
+          docker compose --profile osrm config --services | grep -qx osrm
+          docker compose --profile osrm config -q
+          bash -n osrm-build-data.sh
+          shellcheck --severity=warning osrm-build-data.sh
+      - name: Print what the pinned image accepts
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          image="$(docker compose --profile osrm config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["osrm"]["image"])')"
+          docker pull "$image"
+          docker run --rm "$image" osrm-routed --help
+      - name: Build a regional map with the real script
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          sudo env "PATH=$PATH" ./osrm-build-data.sh --check --region "$REGION"
+          sudo env "PATH=$PATH" ./osrm-build-data.sh --region "$REGION" 2>&1 | tee "$RUNNER_TEMP/build.log"
+          {
+            echo '### Map build (script output, regional extract)'
+            echo '```'
+            grep -E 'took|downloaded|extract |memory |disk |Built ' "$RUNNER_TEMP/build.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Start the service the way the compose file does
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          docker compose --profile osrm up -d osrm
+          cid="$(docker compose --profile osrm ps -q osrm)"
+          state=""
+          for _ in $(seq 1 60); do
+            state="$(docker inspect -f '{{.State.Health.Status}}' "$cid")"
+            [ "$state" = healthy ] && break
+            sleep 5
+          done
+          if [ "$state" != healthy ]; then docker compose --profile osrm logs osrm; echo "::error::osrm did not become healthy ($state)"; exit 1; fi
+          ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid")"
+          echo "OSRM_URL=http://$ip:5000" >> "$GITHUB_ENV"
+          docker inspect -f 'user={{.Config.User}} readonly={{.HostConfig.ReadonlyRootfs}} caps_dropped={{.HostConfig.CapDrop}} memory={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}} ports={{.HostConfig.PortBindings}}' "$cid"
+      - name: deploy.sh's guard sees the build, and a missing one
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          image="$(docker compose --profile osrm config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["osrm"]["image"])')"
+          source <(sed -n '/^# >>> osrm data checks$/,/^# <<< osrm data checks$/p' deploy.sh)
+          problem="$(osrm_data_problem "$image" ya-mobility-staging_osrm-data)"
+          [ -z "$problem" ] || { echo "::error::the guard refuses a good build: $problem"; exit 1; }
+          problem="$(osrm_data_problem "$image" ya-mobility-staging_no-such-volume)"
+          [ -n "$problem" ] || { echo "::error::the guard accepts a volume that does not exist"; exit 1; }
+          echo "guard: $problem"
+      - name: Ask the container for routes
+        if: steps.scope.outputs.run == 'true'
+        env:
+          OSRM_LIVE_CENTER: '51.1657,7.0671'
+          OSRM_LIVE_OUTSIDE: '48.1374,11.5755'
+        run: npx vitest run tests/deploy/osrm.live.test.ts
+      - name: The container logs no coordinate
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          docker compose --profile osrm logs osrm > "$RUNNER_TEMP/osrm.log" 2>&1 || true
+          echo "--- container log ---"; cat "$RUNNER_TEMP/osrm.log"; echo "--- end ---"
+          if grep -qE '(7\.0[0-9]{3}|51\.1[0-9]{3})' "$RUNNER_TEMP/osrm.log"; then
+            echo "::error::the container's log holds a coordinate that the live test asked about"; exit 1
+          fi
+      - name: The edge function type-checks under Deno
+        if: steps.scope.outputs.run == 'true'
+        continue-on-error: true
+        run: docker run --rm -v "$PWD":/w -w /w denoland/deno:2.1.4 deno check supabase/functions/travel-route/index.ts
+      - name: Stop it
+        if: always() && steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: docker compose --profile osrm down -v || true
