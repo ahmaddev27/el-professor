@@ -7016,4 +7016,6 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'stn.transfer.notesUnavailable': 'Die Fahrer-Notizen konnten nicht geladen werden. Ein Transfer wird nicht angewendet, solange nicht geprüft werden kann, ob eine Abwesenheitsnotiz dagegen spricht. Bitte neu laden.',
+  'notes.behaviorFixed':    'Vom Notiz-Typ festgelegt. Frei wählbar nur bei „Allgemeine Notiz“ und „Sonstiges“.',
+  'notes.behaviorMismatch': 'Dieser Notiz-Typ und dieses Planungsverhalten passen nicht zusammen. Bitte das Verhalten anpassen oder einen anderen Typ wählen.',
 } as const;
