@@ -520,9 +520,12 @@ services:
   #
   # --verbosity=WARNING: at INFO the server may log the requests it serves, and
   # a request is the two places a passenger was picked up and dropped off.
-  # --max-*-size: the function sends two coordinates, so nothing here accepts
-  # more. --mmap: the files are mapped from the read-only volume instead of
-  # being copied into memory.
+  # --max-*-size: the function sends two coordinates, so the limits sit at the
+  # lowest value osrm-routed accepts. That is 3, not 2: EngineConfig::IsValid
+  # takes a limit only if it is -1 or greater than 2 and otherwise makes the
+  # server exit, silently, with status 1 - which is how this file's first version
+  # met the first CI run that actually started it. --mmap: the files are mapped
+  # from the read-only volume instead of being copied into memory.
   osrm:
     image: ghcr.io/project-osrm/osrm-backend:v26.9.0-debian@sha256:8a1b1bc938412f15f9b5b32d794c4ec6bf4a85dfbbabfa0a014b70b187edb53b
     profiles: [osrm]
@@ -543,10 +546,10 @@ services:
       - --port=5000
       - --threads=2
       - --verbosity=WARNING
-      - --max-viaroute-size=2
-      - --max-table-size=2
-      - --max-trip-size=2
-      - --max-matching-size=2
+      - --max-viaroute-size=3
+      - --max-table-size=3
+      - --max-trip-size=3
+      - --max-matching-size=3
       - --max-nearest-size=1
       - /data/current/map.osrm
     volumes:

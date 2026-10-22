@@ -150,8 +150,9 @@ describe.skipIf(url === '')('the routing container, live', () => {
     }
   });
 
-  it('refuses a third coordinate, which is the flag in the compose file doing its work', async () => {
-    const response = await fetch(`${url}/route/v1/driving/${CENTER.lon},${CENTER.lat};${CENTER.lon + 0.01},${CENTER.lat};${CENTER.lon + 0.02},${CENTER.lat}?overview=false`);
+  it('refuses a fourth coordinate, which is the flag in the compose file doing its work', async () => {
+    const points = [0, 0.01, 0.02, 0.03].map((d) => `${CENTER.lon + d},${CENTER.lat}`).join(';');
+    const response = await fetch(`${url}/route/v1/driving/${points}?overview=false`);
     const body: unknown = await response.json();
     expect(response.status).toBe(400);
     expect(interpretOsrmAnswer(response.status, body)).toEqual({ kind: 'unavailable', reason: 'request_rejected' });

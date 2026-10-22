@@ -118,9 +118,20 @@ describe('the compose service holds no credential and reaches no data path', () 
   it('serves the map in MLD, mapped, quietly, and accepts only the two coordinates it is ever asked about', () => {
     expect(listUnder(osrm, 'command')).toEqual([
       'osrm-routed', '--algorithm=MLD', '--mmap', '--ip=0.0.0.0', '--port=5000', '--threads=2', '--verbosity=WARNING',
-      '--max-viaroute-size=2', '--max-table-size=2', '--max-trip-size=2', '--max-matching-size=2', '--max-nearest-size=1',
+      '--max-viaroute-size=3', '--max-table-size=3', '--max-trip-size=3', '--max-matching-size=3', '--max-nearest-size=1',
       '/data/current/map.osrm',
     ]);
+  });
+
+  it('keeps every size limit where osrm-routed takes it: -1 or above 2 (above 0 for nearest), because it exits without a word for any other', () => {
+    // EngineConfig::IsValid, v26.9.0. The first version of this file said 2, and the first CI run that started the service found out.
+    const flags = listUnder(osrm, 'command');
+    const value = (name: string) => Number(flags.find((f) => f.startsWith(`--max-${name}-size=`))?.split('=')[1]);
+    for (const name of ['viaroute', 'table', 'trip', 'matching']) {
+      const limit = value(name);
+      expect(limit === -1 || limit > 2, `--max-${name}-size=${limit}`).toBe(true);
+    }
+    expect(value('nearest') === -1 || value('nearest') > 0).toBe(true);
   });
 
   it('declares the volume it mounts', () => {
@@ -441,16 +452,20 @@ describe('the build script\'s promises', () => {
     expect(buildCode).toContain('flock -n 9');
   });
 
-  it('starts the new build once, as the service\'s user and read-only, before the link moves to it', () => {
+  it('starts the new build once, as the service\'s user, read-only and with the service\'s own flags, before the link moves to it', () => {
     expect(buildCode).toContain('--user 10001:10001');
     expect(buildCode).toContain('-v "$VOLUME":/data:ro)');
-    expect(at('osrm-routed --algorithm=MLD')).toBeGreaterThan(0);
-    expect(at('osrm-routed --algorithm=MLD')).toBeLessThan(at('mv -T current.new current'));
+    // The flags come from the compose file, not from a copy: a copy is how a flag osrm-routed refuses went unseen.
+    expect(buildCode).toContain('services"]["osrm"]["command"]');
+    expect(buildCode).toContain('SERVICE_FLAGS=("${SERVICE_CMD[@]:1:${#SERVICE_CMD[@]}-2}")');
+    expect(at('osrm-routed "${SERVICE_FLAGS[@]}"')).toBeGreaterThan(0);
+    expect(at('osrm-routed "${SERVICE_FLAGS[@]}"')).toBeLessThan(at('mv -T current.new current'));
   });
 
   it('makes the build readable for that user before it tries, loads it with --trial, and keeps the check container\'s log', () => {
     expect(at('chmod -R a+rX "/data/$1"')).toBeGreaterThan(0);
     expect(at('chmod -R a+rX "/data/$1"')).toBeLessThan(at('osrm-routed --trial'));
+    expect(at('osrm-routed --trial "${SERVICE_FLAGS[@]}"')).toBeGreaterThan(0);
     expect(at('osrm-routed --trial')).toBeLessThan(at('docker run -d --name "$CHECK"'));
     // Not --rm: a container that dies on start must leave its log behind to be read.
     expect(buildCode).not.toMatch(/docker run -d --rm/);

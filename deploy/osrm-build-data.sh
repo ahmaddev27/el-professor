@@ -38,8 +38,18 @@
 # script treats them as memory it may need. Scaled to Germany's 4.5 GiB extract
 # that is, as estimates and not measurements: about 30 GiB at the extract's
 # peak, 22 GB of disk and 9 GiB to serve. --check prints the figures for the
-# extract it is about to build. The wiki gives no times; this script prints the
-# time each step took, which is the measurement.
+# extract it is about to build; the refusal below uses these, the larger ones.
+# The wiki gives no times; this script prints the time each step took and the
+# peak memory each tool reports, and writes both into ready.json.
+#
+# Measured, once, by the CI job of the pull request that added this script
+# (Regierungsbezirk Dusseldorf, 217 MB, two CPUs, the pinned v26.9.0 image):
+# extract 139 s and 1.07 GiB, partition 11 s and 0.26 GiB, customize 4 s and
+# 0.22 GiB, 323 MB of data. The wiki's scaling put that run at 1.4 GiB and 1.0 GB,
+# so it errs high, by a quarter for memory and threefold for disk. Scaled by size
+# to Germany, 22 times larger, the same run is about 24 GiB, 7 GB and an hour on
+# two CPUs. That is an extrapolation across a factor of 22, not a measurement,
+# and the first real build overwrites it with one.
 #
 # ## What it leaves behind
 #
@@ -150,6 +160,18 @@ import json, sys
 print(json.load(sys.stdin)["services"]["osrm"]["image"])
 ')" || fail "could not read the osrm service from docker-compose.yml"
 case "$IMAGE" in *@sha256:*) ;; *) fail "the osrm image is not pinned by digest: $IMAGE" ;; esac
+
+# And the very flags it runs with. The new build is tried with these, not with a
+# copy of them: the first version of the compose file carried a --max-viaroute-size
+# that osrm-routed refuses (a limit must be -1 or above 2), and it refuses by
+# exiting without a word, which a check on other flags could not see.
+mapfile -t SERVICE_CMD < <(docker compose --profile osrm config --format json < /dev/null | python3 -c '
+import json, sys
+print("\n".join(json.load(sys.stdin)["services"]["osrm"]["command"]))
+')
+{ [ "${SERVICE_CMD[0]:-}" = osrm-routed ] && [ "${SERVICE_CMD[${#SERVICE_CMD[@]}-1]}" = /data/current/map.osrm ]; } \
+  || fail "the osrm command in docker-compose.yml is not 'osrm-routed <flags> /data/current/map.osrm', so a build cannot be tried with it"
+SERVICE_FLAGS=("${SERVICE_CMD[@]:1:${#SERVICE_CMD[@]}-2}")
 
 BASE="${REGION##*/}"
 if [ -z "$SNAPSHOT_DATE" ]; then
@@ -284,14 +306,14 @@ docker run --rm --network none -v "$VOLUME":/data --entrypoint sh "$IMAGE" -c 'c
   || fail "could not make the build readable"
 SERVICE_USER=(--network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --user 10001:10001 -v "$VOLUME":/data:ro)
 
-# Does it initialise at all? --trial quits after loading, and says why when it cannot.
-docker run --rm "${SERVICE_USER[@]}" "$IMAGE" osrm-routed --trial --algorithm=MLD --mmap --verbosity=WARNING "/data/$NAME/map.osrm" < /dev/null \
-  || fail "osrm-routed could not load the new build (its message is above); it is not switched in"
+# Does it initialise at all, with the service's own flags? --trial quits after loading.
+docker run --rm "${SERVICE_USER[@]}" "$IMAGE" osrm-routed --trial "${SERVICE_FLAGS[@]}" "/data/$NAME/map.osrm" < /dev/null \
+  || fail "osrm-routed could not start on the new build with the service's own flags (its message is above, if it gave one: for a --max-*-size that is not -1 or above 2 it exits without a word); it is not switched in"
 
 # And does it answer a question over HTTP, the way the service is asked?
 CHECK=osrm-build-check
 trap 'docker rm -f "$CHECK" > /dev/null 2>&1 || true' EXIT
-docker run -d --name "$CHECK" "${SERVICE_USER[@]}" "$IMAGE" osrm-routed --algorithm=MLD --mmap --ip=127.0.0.1 --port=5000 --verbosity=WARNING "/data/$NAME/map.osrm" \
+docker run -d --name "$CHECK" "${SERVICE_USER[@]}" "$IMAGE" osrm-routed "${SERVICE_FLAGS[@]}" "/data/$NAME/map.osrm" \
     < /dev/null > /dev/null
 ANSWERED=no
 for _ in $(seq 1 90); do
