@@ -967,12 +967,14 @@ export function NotesPage() {
                     <option value="exclude_from_plan">{t('notes.effect.exclude')}</option>
                     <option value="must_include_in_plan">{t('notes.effect.require')}</option>
                   </select>
-                  {behaviorLocked && (
-                    <p id="note-behavior-hint" className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      {t('notes.behaviorFixed')}
-                    </p>
-                  )}
                 </div>
+                {/* Its own full-width row: inside the second column the sentence
+                    would wrap into a tall strip on a phone. */}
+                {behaviorLocked && (
+                  <p id="note-behavior-hint" className="col-span-2 text-xs text-[var(--text-tertiary)]">
+                    {t('notes.behaviorFixed')}
+                  </p>
+                )}
               </div>
 
               {/*
