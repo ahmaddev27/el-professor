@@ -7018,4 +7018,8 @@ export const de = {
   'stn.transfer.notesUnavailable': 'Die Fahrer-Notizen konnten nicht geladen werden. Ein Transfer wird nicht angewendet, solange nicht geprüft werden kann, ob eine Abwesenheitsnotiz dagegen spricht. Bitte neu laden.',
   'notes.behaviorFixed':    'Vom Notiz-Typ festgelegt. Frei wählbar nur bei „Allgemeine Notiz“ und „Sonstiges“.',
   'notes.behaviorMismatch': 'Dieser Notiz-Typ und dieses Planungsverhalten passen nicht zusammen. Bitte das Verhalten anpassen oder einen anderen Typ wählen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'stn.noteConflict.item':  '{date}: Die Pflichtnotiz „{mandatory}“ liegt in der Abwesenheit „{absence}“. Für diesen Tag trägt ein neu erzeugter Plan keine Schicht ein. Bitte eine der beiden Notizen korrigieren.',
+  'stn.noteConflict.title': 'Widersprüchliche Notizen',
 } as const;

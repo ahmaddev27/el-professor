@@ -6962,4 +6962,8 @@ export const en: PartialDictionary = {
   'stn.transfer.notesUnavailable': 'The driver notes could not be loaded. A transfer is not applied while it cannot be checked whether an absence note forbids it. Please reload.',
   'notes.behaviorFixed':    'Set by the note type. You can only choose it for “General note” and “Other”.',
   'notes.behaviorMismatch': 'This note type and planning behaviour do not go together. Adjust the behaviour or choose another type.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'stn.noteConflict.item':  '{date}: The mandatory note “{mandatory}” falls inside the absence “{absence}”. A newly generated plan enters no shift for this day. Please correct one of the two notes.',
+  'stn.noteConflict.title': 'Conflicting notes',
 };
