@@ -32,13 +32,15 @@
 --  Four of the five sit on the two types that carry no meaning of their own,
 --  `general` and `other`. The three typed by an operator in a real company are
 --  each "something happened to this driver at this hour and the plan must
---  contain it", which none of the five incident types names; and since
---  13.10.2026 those five require a vehicle, so for such an event with no
---  vehicle, `other` + must_include_in_plan is the only way to say it. The two
---  demo rows come from scripts/seed-demo-company.sql, written "one note per
---  planning behaviour" so the screen and the planner each have all three. Among
---  the 26 notes whose type DOES have a fixed meaning, 25 agree with it, and the
---  one that does not is that seed's `vacation` + `neutral`.
+--  contain it": an authority check, and two sightings of the driver by a third
+--  party. The sightings fit none of the five incident types. The check is what
+--  `kontrolle` is for, but since 13.10.2026 the five require a vehicle, so for an
+--  event with no vehicle `other` + must_include_in_plan is the only way to say
+--  it. Whether each was meant is the operator's to confirm; a row cannot prove
+--  intent. The two demo rows come from scripts/seed-demo-company.sql, written
+--  "one note per planning behaviour" so the screen and the planner each have
+--  all three. Among the 26 notes whose type DOES have a fixed meaning, 25 agree
+--  with it, and the one that does not is that seed's `vacation` + `neutral`.
 --
 --  So the override is a feature for exactly two types and a defect for the other
 --  eight, and the constraint says so instead of choosing one answer for all ten:
@@ -71,8 +73,9 @@
 --  does there is decided by its data, and the NOTICE below says which.
 --
 --  NOT VALID is not "ignore the old rows", and the cost is worth stating.
---  Measured on a real engine (see below): an UPDATE of a row that breaks a NOT
---  VALID constraint is refused unless it also fixes the row, whatever column it
+--  Measured on PostgreSQL 16.6 and 18.6 (tests/rls/note-type-constraint.sql,
+--  section 5, records it): an UPDATE of a row that breaks a NOT VALID
+--  constraint is refused unless it also fixes the row, whatever column it
 --  touches; and deleting a car that such a note names is refused too, because
 --  the foreign key's ON DELETE SET NULL is an UPDATE of the note. Reads and
 --  DELETEs are untouched. The Notizen screen refuses the save with its own
@@ -90,8 +93,8 @@
 --  accepts it in a CHECK. It is privilege. A CHECK is evaluated as the role that
 --  writes the row, the Notizen screen writes as `authenticated`, and that role
 --  has no USAGE on app_private and no EXECUTE on the function (revoked on
---  purpose). Measured on PostgreSQL 18.6 with the repository's own function
---  body, a CHECK of `note_planning_behavior = app_private.note_behavior_for(
+--  purpose). Measured on PostgreSQL 16.6 and 18.6 with the repository's own
+--  function body, a CHECK of `note_planning_behavior = app_private.note_behavior_for(
 --  note_type) OR note_type IN ('general', 'other')`:
 --
 --    owner inserts sick / exclude_from_plan            accepted
@@ -99,9 +102,10 @@
 --                                                      for function
 --    authenticated inserts general / neutral           42501, the same
 --
---  The last line is the one that matters: the call is permission-checked when
---  the expression is prepared, not when the OR reaches it, so the rule would
---  refuse every note the screen writes, including the ones it allows. It is the
+--  The last line is the one that matters: the call is refused even for a note
+--  the OR would have passed without ever reaching the function, so the rule
+--  would refuse every note the screen writes, including the ones it allows. (The
+--  observation is what is claimed, not the mechanism behind it.) It is the
 --  failure of the Rollen screen (a trigger naming app_private as the caller), and
 --  the first line is why a probe run by the owner never sees it. A wrapper in
 --  `public` fails twice: ungranted it is 42501 on the wrapper, granted it is
