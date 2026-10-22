@@ -1040,7 +1040,7 @@ BEGIN
     (v -> 'm4')::text,
     '[10, 11, 12, 14, 15, 17, 20, 21, 22, 24, 30, 31, 32, 33, 34, 36, 72, 100, 101, 104, 105, 106, 113, 130, 133, 134, 135, 136, 137, 138, 139, 141, 142, 150, 151, 152, 153, 155, 156]');
 
-  PERFORM _dp_rec(208, 'M5. created_by not pinned: the two probes that save as a colleague notice',
+  PERFORM _dp_rec(208, 'M5. created_by not pinned: the three probes that save as a colleague notice (20, 21, 141)',
     (v -> 'm5')::text, _dp_nums('n IN (20, 21, 141)')::text);
 
   -- 101 names a reviewer. 139 does not, and still notices: on an UPDATE a column the
