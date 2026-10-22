@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2 } from 'lucide-react';
-import { Alert, Button } from '../components/ui';
+import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2, Paperclip } from 'lucide-react';
+import { Alert, Badge, Button } from '../components/ui';
 import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
 import ConfirmationModal from '../components/ConfirmationModal';
 import type { ExportOptions } from '../utils/excelExport';
@@ -15,9 +15,20 @@ import { useCompanyScope } from '../hooks/useCompanyScope';
 import { deleteChecked, updateChecked } from '../lib/writeOutcome';
 import type { TranslationKey } from '../i18n';
 import {
-  noteBehaviorFor, noteBehaviorIsFree, notePairAllowed, noteVehicleMissing, noteVehicleRequired,
+  INCIDENT_NOTE_TYPES, noteBehaviorFor, noteBehaviorIsFree, notePairAllowed, noteVehicleMissing, noteVehicleRequired,
   type NotePlanningBehavior,
 } from '../utils/noteRules';
+import {
+  EMPTY_PROVENANCE_FORM, PROVENANCE_PROBLEM_KEYS, entrySourceOf, eventDetailsApply, provenanceErrorKey,
+  provenanceFormOf, provenancePayload, reviewedFieldsChanged, verificationOf,
+  type NoteProvenance, type ProvenanceFormValues, type ReviewedFormValues,
+} from '../utils/noteProvenance';
+import {
+  attachEvidence, decideNote, detachEvidence, openEvidence, removeEvidenceFile,
+  type EvidenceClient, type ReviewDecision,
+} from '../lib/driverNoteProvenance';
+import { NoteProvenanceFields } from '../components/notes/NoteProvenanceFields';
+import { NoteReviewPanel } from '../components/notes/NoteReviewPanel';
 
 interface Driver {
   id: string;
@@ -35,7 +46,7 @@ interface Car {
   status: string;
 }
 
-interface Note {
+interface Note extends NoteProvenance {
   id: string;
   driver_id: string;
   note_date: string;
@@ -139,6 +150,13 @@ const RANGE_NOTE_TYPES = new Set(['sick', 'vacation', 'off']);
 
 type FilterMode = 'all' | 'date' | 'week' | 'month';
 
+const EVIDENCE_PROBLEM_KEYS: Record<'empty' | 'size' | 'type' | 'upload', TranslationKey> = {
+  empty: 'notes.prov.err.evidenceEmpty',
+  size: 'notes.prov.err.evidenceSize',
+  type: 'notes.prov.err.evidenceType',
+  upload: 'notes.prov.err.evidenceUpload',
+};
+
 const inputStyle: React.CSSProperties = {
   background: 'var(--bg-subtle)',
   border: '1px solid var(--border)',
@@ -149,7 +167,7 @@ const inputStyle: React.CSSProperties = {
   outline: 'none',
 };
 
-interface FormData {
+interface FormData extends ProvenanceFormValues {
   driver_id: string;
   car_id: string;             // '' means no car: the field is optional
   note_date: string;          // datetime-local — kept for backward compat / must_include times
@@ -165,6 +183,7 @@ interface FormData {
 }
 
 const DEFAULT_FORM: FormData = {
+  ...EMPTY_PROVENANCE_FORM,
   driver_id:              '',
   car_id:                 '',
   note_date:              format(new Date(), "yyyy-MM-dd'T'HH:mm"),
@@ -178,6 +197,36 @@ const DEFAULT_FORM: FormData = {
   start_time:             '',
   end_time:               '',
 };
+
+/**
+ * What a review covers, as the form holds it. The database takes a decision back
+ * when saving changes any of these (utils/noteProvenance.ts, REVIEWED_COLUMNS);
+ * this is only the warning, shown before the save.
+ */
+function reviewedOf(form: FormData): ReviewedFormValues {
+  return {
+    driver_id: form.driver_id,
+    car_id: form.car_id,
+    note_type: form.note_type,
+    is_full_day: form.is_full_day,
+    start_date: form.start_date,
+    end_date: form.use_date_range ? form.end_date : form.start_date,
+    start_time: form.is_full_day ? '' : form.start_time,
+    end_time: form.is_full_day ? '' : form.end_time,
+    occurred_at: form.occurred_at,
+    reported_at: form.reported_at,
+    latitude: form.latitude,
+    longitude: form.longitude,
+    location_accuracy_m: form.location_accuracy_m,
+    note_text: form.note_text.trim(),
+  };
+}
+
+/** `dd.MM.yyyy HH:mm` of a stored moment, or '' when it cannot be read. */
+function momentLabel(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '' : format(date, 'dd.MM.yyyy HH:mm');
+}
 
 // Takes the translator explicitly: this is module scope, where t() is not a
 // value. Currently unreferenced, kept because it encodes the label rule.
@@ -229,6 +278,14 @@ export function NotesPage() {
   const [exportError, setExportError] = useState('');
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+  // What the dialog showed when a saved note was opened. An edit sends only the
+  // provenance fields that differ from it, and the review panel's warning
+  // compares against it. Null for a new note.
+  const [initialProvenance, setInitialProvenance] = useState<ProvenanceFormValues | null>(null);
+  const [initialReviewed, setInitialReviewed] = useState<ReviewedFormValues | null>(null);
+  // Account id to the name shown beside a note's author, reviewer and history.
+  const [people, setPeople] = useState<Map<string, string>>(new Map());
+  const [provBusy, setProvBusy] = useState(false);
   // Notes from the driver app are notes the moment they arrive (owner,
   // 13.10.2026), so there is no inbox. What can still be waiting is one whose
   // driver nobody has linked yet: it is recorded and becomes a note when the
@@ -274,6 +331,15 @@ export function NotesPage() {
     })();
   }, [companyId]);
 
+  // A review or a document changes the stored note while its dialog is open;
+  // show what is stored. The list entry is the same object the dialog opened
+  // with until a reload replaces it, so a dialog nobody touched is left alone.
+  useEffect(() => {
+    if (!editingNote) return;
+    const stored = notes.find(note => note.id === editingNote.id);
+    if (stored && stored !== editingNote) setEditingNote(stored);
+  }, [notes]);
+
   const loadWaitingForLink = async () => {
     if (!companyId) {
       setWaitingForLink(null);
@@ -287,10 +353,21 @@ export function NotesPage() {
     setWaitingForLink(error ? null : count ?? 0);
   };
 
+  // Names for the accounts a note names. A failed read leaves them unnamed, which
+  // the panel shows as unknown: a missing name is not worth failing the screen for.
+  const loadPeople = async () => {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('user_id, full_name, email')
+      .eq('company_id', companyId);
+    setPeople(new Map((data ?? []).map((row: { user_id: string; full_name: string | null; email: string | null }) =>
+      [row.user_id, row.full_name || row.email || ''] as const)));
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([loadNotes(), loadDrivers(), loadCars(), loadWaitingForLink()]);
+      await Promise.all([loadNotes(), loadDrivers(), loadCars(), loadWaitingForLink(), loadPeople()]);
     } catch (error: any) {
       showToast('error', error.message || t('salaries.loadFailed'));
     } finally {
@@ -376,6 +453,13 @@ export function NotesPage() {
       return;
     }
 
+    // A new note sends what was filled in; an edit sends what was changed.
+    const provenance = provenancePayload(formData, editingNote ? initialProvenance : null);
+    if (!provenance.ok) {
+      showToast('error', t(PROVENANCE_PROBLEM_KEYS[provenance.problem]));
+      return;
+    }
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error(t('common.notAuthenticated'));
@@ -404,6 +488,7 @@ export function NotesPage() {
         end_time:               (!formData.is_full_day && formData.end_time)   ? formData.end_time   : null,
         start_date:             startDate || null,
         end_date:               endDate   || null,
+        ...provenance.payload,
       };
 
       if (editingNote) {
@@ -426,7 +511,8 @@ export function NotesPage() {
       handleCloseModal();
       loadNotes();
     } catch (error: any) {
-      showToast('error', error.message || t('settings.saveFailed'));
+      const friendly = provenanceErrorKey(error);
+      showToast('error', friendly ? t(friendly) : error.message || t('settings.saveFailed'));
     }
   };
 
@@ -434,7 +520,8 @@ export function NotesPage() {
     setEditingNote(note);
     const sd = note.start_date ?? format(new Date(note.note_date), 'yyyy-MM-dd');
     const ed = note.end_date   ?? sd;
-    setFormData({
+    const opened: FormData = {
+      ...provenanceFormOf(note),
       driver_id:              note.driver_id,
       car_id:                 note.car_id ?? '',
       note_date:              format(new Date(note.note_date), "yyyy-MM-dd'T'HH:mm"),
@@ -447,7 +534,10 @@ export function NotesPage() {
       is_full_day:            note.is_full_day ?? false,
       start_time:             note.start_time ?? '',
       end_time:               note.end_time   ?? '',
-    });
+    };
+    setFormData(opened);
+    setInitialProvenance(provenanceFormOf(note));
+    setInitialReviewed(reviewedOf(opened));
     setShowModal(true);
   };
 
@@ -457,6 +547,7 @@ export function NotesPage() {
 
   const confirmDeleteNote = async () => {
     const id = deleteConfirm.noteId;
+    const evidence = notes.find(note => note.id === id)?.evidence_path;
     setDeleteConfirm({ open: false, noteId: '' });
     try {
       const outcome = await deleteChecked(supabase, 'driver_notes', q =>
@@ -466,7 +557,11 @@ export function NotesPage() {
         return;
       }
       if (outcome === 'gone') showToast('error', t('common.writeAlreadyGone'));
-      else showToast('success', t('notes.deleted'));
+      else {
+        showToast('success', t('notes.deleted'));
+        // The note is gone; a document nobody points at is a personal document nobody can reach.
+        if (evidence) void removeEvidenceFile(supabase as unknown as EvidenceClient, evidence);
+      }
       loadNotes();
     } catch (error: any) {
       showToast('error', error.message || t('common.errorDelete'));
@@ -477,6 +572,70 @@ export function NotesPage() {
     setShowModal(false);
     setEditingNote(null);
     setFormData(DEFAULT_FORM);
+    setInitialProvenance(null);
+    setInitialReviewed(null);
+  };
+
+  // ── What a saved note says about itself (lib/driverNoteProvenance.ts) ──────
+  // The database stamps the reviewer and the time and ignores the request's
+  // word on them; these only ask. Each write is checked, because a role without
+  // the Notizen right meets a policy that hides the row and answers 200.
+  const nameOf = (userId: string | null | undefined): string =>
+    (userId && people.get(userId)) || t('notes.prov.unknownPerson');
+
+  const runProvenanceWrite = async (write: () => Promise<'done' | 'refused' | 'gone' | 'reason_missing'>) => {
+    setProvBusy(true);
+    try {
+      const outcome = await write();
+      if (outcome === 'reason_missing') showToast('error', t('notes.prov.err.rejectReason'));
+      else if (outcome === 'refused') showToast('error', t('common.writeRefused'));
+      else if (outcome === 'gone') { showToast('error', t('common.writeAlreadyGone')); handleCloseModal(); }
+      else showToast('success', t('notes.prov.saved'));
+      await loadNotes();
+    } catch (error: any) {
+      const friendly = provenanceErrorKey(error);
+      showToast('error', friendly ? t(friendly) : error.message || t('settings.saveFailed'));
+    } finally {
+      setProvBusy(false);
+    }
+  };
+
+  const handleDecide = (decision: ReviewDecision) => {
+    if (!editingNote || !companyId) return;
+    void runProvenanceWrite(() => decideNote(supabase, companyId, editingNote.id, decision));
+  };
+
+  const handleAttach = async (file: File) => {
+    if (!editingNote || !companyId) return;
+    setProvBusy(true);
+    try {
+      const result = await attachEvidence(supabase as unknown as EvidenceClient, {
+        companyId, noteId: editingNote.id, file,
+      });
+      if (result.ok) showToast('success', t('notes.prov.evidence.added'));
+      else if (result.problem === 'refused') showToast('error', t('common.writeRefused'));
+      else if (result.problem === 'gone') { showToast('error', t('common.writeAlreadyGone')); handleCloseModal(); }
+      else showToast('error', t(EVIDENCE_PROBLEM_KEYS[result.problem]));
+      await loadNotes();
+    } catch (error: any) {
+      showToast('error', error.message || t('notes.prov.err.evidenceUpload'));
+    } finally {
+      setProvBusy(false);
+    }
+  };
+
+  const handleOpenEvidence = async () => {
+    const path = editingNote?.evidence_path;
+    if (!path) return;
+    const opened = await openEvidence(supabase as unknown as EvidenceClient, path);
+    if (!opened) showToast('error', t('notes.prov.err.evidenceOpen'));
+  };
+
+  const handleRemoveEvidence = () => {
+    const path = editingNote?.evidence_path;
+    if (!editingNote || !companyId || !path) return;
+    void runProvenanceWrite(() =>
+      detachEvidence(supabase as unknown as EvidenceClient, companyId, editingNote.id, path));
   };
 
   const handleMonthChange = (dir: 'prev' | 'next') => {
@@ -543,6 +702,12 @@ export function NotesPage() {
           { key: 'createdAt', label: t('notes.createdAt'),          width: 18 },
           { key: 'updatedAt', label: t('notes.updatedAt'),          width: 18 },
           { key: 'createdBy', label: t('notes.createdBy'),          width: 20 },
+          { key: 'occurredAt', label: t('notes.prov.occurredAt'),       width: 18 },
+          { key: 'reportedAt', label: t('notes.prov.reportedAt'),       width: 18 },
+          { key: 'receivedAt', label: t('notes.prov.col.received'),     width: 18 },
+          { key: 'source',     label: t('notes.prov.col.source'),       width: 22 },
+          { key: 'review',     label: t('notes.prov.col.review'),       width: 14 },
+          { key: 'evidence',   label: t('notes.prov.col.evidence'),     width: 10, align: 'center' },
         ],
         rows: toExport.map(note => ({
           driver: getDriverName(note),
@@ -560,6 +725,12 @@ export function NotesPage() {
           updatedAt: fmtDateTime(note.updated_at),
           // A note from the driver app has no user; its author is the driver.
           createdBy: note.submitted_by_name ?? note.created_by ?? '',
+          occurredAt: fmtDateTime(note.occurred_at ?? undefined),
+          reportedAt: fmtDateTime(note.reported_at ?? undefined),
+          receivedAt: fmtDateTime(note.received_at ?? undefined),
+          source: t(`notes.prov.source.${entrySourceOf(note)}`),
+          review: t(`notes.prov.status.${verificationOf(note)}`),
+          evidence: yesNo(Boolean(note.evidence_path)),
         })),
       };
 
@@ -876,8 +1047,28 @@ export function NotesPage() {
                         {note.cars.kennzeichen}
                       </span>
                     )}
+                    {/* A reviewed or rejected note says so. An unreviewed incident says so too:
+                        "a Blitzer somebody typed" must not read as one a document backs. */}
+                    {verificationOf(note) === 'verified' && (
+                      <Badge tone="positive">{t('notes.prov.status.verified')}</Badge>
+                    )}
+                    {verificationOf(note) === 'rejected' && (
+                      <Badge tone="critical">{t('notes.prov.status.rejected')}</Badge>
+                    )}
+                    {verificationOf(note) === 'unverified'
+                      && (INCIDENT_NOTE_TYPES as readonly string[]).includes(note.note_type ?? '') && (
+                      <Badge>{t('notes.prov.status.unverified')}</Badge>
+                    )}
+                    {note.evidence_path && (
+                      <Badge tone="brand"><Paperclip aria-hidden />{t('notes.prov.chip.evidence')}</Badge>
+                    )}
                   </div>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note, t)}</p>
+                  {note.occurred_at && (
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      {t('notes.prov.occurredLine', { date: momentLabel(note.occurred_at) })}
+                    </p>
+                  )}
                   {note.note_planning_behavior && note.note_planning_behavior !== 'neutral' && (
                     <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
                       style={note.note_planning_behavior === 'exclude_from_plan'
@@ -1098,6 +1289,31 @@ export function NotesPage() {
                   placeholder={t('notes.descPlaceholder')}
                 />
               </div>
+
+              {eventDetailsApply(formData.note_type) && (
+                <NoteProvenanceFields
+                  values={formData}
+                  onChange={patch => setFormData(p => ({ ...p, ...patch }))}
+                />
+              )}
+
+              {editingNote ? (
+                <NoteReviewPanel
+                  provenance={editingNote}
+                  authorName={editingNote.submitted_by_name ?? nameOf(editingNote.created_by)}
+                  nameOf={nameOf}
+                  mayEdit={mayEdit}
+                  evidenceOffered={eventDetailsApply(formData.note_type)}
+                  busy={provBusy}
+                  willReset={initialReviewed !== null && reviewedFieldsChanged(initialReviewed, reviewedOf(formData))}
+                  onDecide={handleDecide}
+                  onAttach={file => void handleAttach(file)}
+                  onOpenEvidence={() => void handleOpenEvidence()}
+                  onRemoveEvidence={handleRemoveEvidence}
+                />
+              ) : (
+                <p className="text-xs text-[var(--text-tertiary)]">{t('notes.prov.saveFirst')}</p>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={handleCloseModal}

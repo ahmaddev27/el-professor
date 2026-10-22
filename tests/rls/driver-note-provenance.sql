@@ -812,14 +812,19 @@ BEGIN
 
   PERFORM _dp_rec(180, 'the door, as service_role, files the note as accepted', v_resp, 'accepted');
 
-  PERFORM _dp_rec(181, 'the note it wrote is driver_app: no author, the driver''s name, the clock, and nothing recorded about when it happened',
-    (SELECT coalesce(n.created_by::text, '-') || '|' || n.entry_source || '|' || coalesce(n.submitted_by_name, '-')
+  -- The driver's name is compared with the driver row as it is now, not with the
+  -- seed's: an earlier file in the kit leaves it changed.
+  PERFORM _dp_rec(181, 'the note it wrote is driver_app: no author, the driver''s own name, the clock, and nothing recorded about when it happened',
+    (SELECT coalesce(n.created_by::text, '-') || '|' || n.entry_source
+            || '|' || (n.submitted_by_name = d.name)::text
             || '|' || (n.received_at IS NOT NULL AND n.received_at > '2020-01-01')::text
             || '|' || coalesce(n.occurred_at::text, 'null') || '|' || coalesce(n.reported_at::text, 'null')
             || '|' || n.verification_status || '|' || jsonb_array_length(n.change_log)::text
-       FROM partner_note_submissions s JOIN driver_notes n ON n.id = s.driver_note_id
+       FROM partner_note_submissions s
+       JOIN driver_notes n ON n.id = s.driver_note_id
+       JOIN drivers d ON d.id = n.driver_id
       WHERE s.company_id = v_co AND s.external_submission_id = 'dp-door-1'),
-    '-|driver_app|Driver A|true|null|null|unverified|0');
+    '-|driver_app|true|true|null|null|unverified|0');
 END $$;
 
 -- ─── 10. the support-write audit does not copy the new text or the position ─
