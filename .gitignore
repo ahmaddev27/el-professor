@@ -56,3 +56,11 @@ e2e/playwright-report
 # A reference file the owner shares into the repo root; never part of the product.
 FleetBook_*.html
 bash.exe.stackdump
+# Spreadsheets dropped in the repo root while testing an import or an export.
+# Three of them (uber.xlsx, a generated SIMULIERT_ workbook and a scratch file)
+# were swept into a commit by `git add -A` on 22.10.2026 and reached staging:
+# 898 KB of a real customer's ride export and a simulated Fahrtenbuch, neither
+# of which belongs in version control. Put a sample under tests/fixtures/ with
+# a name that says what it is, or keep it outside the checkout.
+/*.xlsx
+SIMULIERT_*.xlsx

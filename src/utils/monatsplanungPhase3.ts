@@ -1946,12 +1946,18 @@ export interface ManualAssignOptions {
  * `blockingChecks` holds the German strings the screens have always matched on
  * — they are the discriminator, not the message, and they must not change.
  * `reasonKey` covers only the two refusals that produce no blocking check.
+ *
+ * `driverNotesMap` is the structured notes the screen has loaded, keyed by driver.
+ * It is a required argument because a `Phase3Result` does not carry the map its plan
+ * was made with: a caller that could leave it out would ask only the legacy free-text
+ * note, and that is how a driver on sick leave came to be offered as assignable.
  */
 export function evaluateManualCandidate(
   result: Phase3Result,
   blockId: string,
   driverId: string,
   options: ManualAssignOptions,
+  driverNotesMap: Map<string, StructuredNote[]>,
 ): { feasible: boolean; reason: string; reasonKey?: EngineMessageKey; blockingChecks: string[] } {
   const u = result.unassigned.find(b => b.block_id === blockId);
   if (!u) return { feasible: false, reason: 'Block nicht in Liste der offenen Blöcke', reasonKey: 'engine.phase3.manual.blockNotOpen', blockingChecks: [] };
@@ -1979,8 +1985,10 @@ export function evaluateManualCandidate(
       }
     }
   }
-  // Notiz (strict) — legacy fallback only (structured notes not available in manual eval without notes map)
-  if (checkNote(driver, u)) blocking.push('Notiz-Einschränkung');
+  // Notiz (strict, no exception): the structured exclude_from_plan notes, then the legacy
+  // free text. The same two functions in the order the automatic pass asks them, so the
+  // dialog and the planner cannot disagree about one driver and one block.
+  if (checkStructuredNote(driver, u, driverNotesMap) || checkNote(driver, u)) blocking.push('Notiz-Einschränkung');
   // Overlap (ALWAYS strict)
   if (checkOverlap(state, u)) blocking.push('Fahrer-Überlappung');
   // Switch (ALWAYS strict)
@@ -2198,8 +2206,9 @@ export function applyManualAssignment(
   blockId: string,
   driverId: string,
   options: ManualAssignOptions,
+  driverNotesMap: Map<string, StructuredNote[]>,
 ): { ok: boolean; reason: string; reasonKey?: EngineMessageKey; blockingChecks?: string[]; result: Phase3Result } {
-  const feas = evaluateManualCandidate(current, blockId, driverId, options);
+  const feas = evaluateManualCandidate(current, blockId, driverId, options, driverNotesMap);
   if (!feas.feasible) {
     return { ok: false, reason: feas.reason, reasonKey: feas.reasonKey, blockingChecks: feas.blockingChecks, result: current };
   }
