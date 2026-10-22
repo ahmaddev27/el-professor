@@ -283,4 +283,8 @@ jobs:
       - name: Stop it
         if: always() && steps.scope.outputs.run == 'true'
         working-directory: deploy
-        run: docker compose --profile osrm down -v || true
+        run: |
+          # The two containers started by hand sit on the compose network; without removing them first
+          # `down` reports the network as still in use.
+          docker rm -f edge edge-stub osrm-info > /dev/null 2>&1 || true
+          docker compose --profile osrm down -v || true
