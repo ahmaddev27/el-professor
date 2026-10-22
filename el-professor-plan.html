@@ -1325,6 +1325,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">12</td><td>آخر ست حالات حذف صامت (دفعات الرواتب، Fixkosten، مستلمو الإشعارات، أكواد الإحالة، Ausgleich، استبدال الخطة المحفوظة) صارت تتحقق من الصفوف</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">13</td><td>الاختيار اليدوي للسائق («حل يدوي») صار يرفض السائق المريض أو بإجازة (ملاحظات exclude_from_plan) — كان يفحص بس الملاحظة النصية القديمة</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">14</td><td>غياب السائق: برامتر blockedDates بمحرك Brutto ما حدا بيعبّيه (طلع بقايا ميزة محذوفة، فانشال وانكتب إنو المحرك ما بيراعي الغياب)، وتخمين «غياب / Pflichtnotiz» من نص الملاحظة صار دالة وحدة بدل 4 نسخ</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">15</td><td>التخطيط اليومي لكل مركبة صار سجلّ محفوظ: جدولين (vehicle_day_plans / vehicle_day_shifts) ودالتين للحفظ والتأكيد، ساعة بداية يوم التشغيل محفوظة بصف الخطة وما بتنشتق، وبلا أي عمود سائق (السائق بيتعيّن بآخر الشهر). الشاشة لسا ما بتستدعيه</td><td>كبير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
           </tbody>
         </table>
       </div>
