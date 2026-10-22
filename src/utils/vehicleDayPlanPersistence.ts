@@ -26,7 +26,10 @@
  *    stored, and computes nothing from a constant.
  * 2. **No driver.** A shift is a vehicle, a day and a window. The payload's keys
  *    are a closed list (the RPC refuses any other), and a test compares it with
- *    the RPC's own list in the migration.
+ *    the RPC's own list in the migration. The same goes for what the keys hold:
+ *    every field of a shift is sent as the JSON type the RPC requires, and the
+ *    summary is a closed object of numbers, so there is no field in which a
+ *    driver, a ride or an address could travel.
  * 3. **No ride, no address, no fare.** `expected_revenue_cents` is the engine's
  *    estimate for a window.
  *
@@ -77,13 +80,35 @@ export interface VehicleDayShiftPayload {
   evidence_days: number;
 }
 
+/**
+ * What a plan was made with: settings and counts, all numbers. The database
+ * accepts a closed object here (`app_private.vehicle_day_plan_summary_problem`):
+ * fourteen keys, five of which are totals it computes itself and writes over
+ * anything sent, every value a number, and the months of history as YYYYMM
+ * numbers (202608 is August 2026). A key, a text or a nested value outside that
+ * is refused, which is what keeps the one free-form column of the plan from
+ * carrying a driver.
+ */
+export interface VehicleDaySummaryPayload {
+  min_shift_minutes: number;
+  max_shift_minutes: number;
+  min_break_minutes: number;
+  max_shifts_per_vehicle_per_day: number;
+  min_revenue_per_hour_cents: number;
+  block_gap_minutes: number;
+  min_evidence_days: number;
+  history_months: number[];
+  /** Present only when the month was planned towards a target; absent otherwise (a null is not a number). */
+  target_revenue_cents?: number;
+}
+
 export interface VehicleDayPlanSavePayload {
   year: number;
   month: number;
   operating_day_start_hour: number;
   slot_minutes: number;
   algorithm_version: string;
-  summary: Record<string, unknown>;
+  summary: VehicleDaySummaryPayload;
   shifts: VehicleDayShiftPayload[];
 }
 
@@ -145,12 +170,13 @@ function shiftPayload(shift: RecommendedShift, index: number): VehicleDayShiftPa
 
 /**
  * What the plan was made with, for a reader who wants to know: settings and
- * counts only. The database writes five totals over it and refuses any value
- * over 16 KiB; it is a convenience, never a source.
+ * counts only, as numbers (see `VehicleDaySummaryPayload`). The database writes
+ * five totals over it. It is a convenience, never a source. A target that is not
+ * a non-negative number is left out, like a month planned without one.
  */
-export function provenanceOf(source: VehicleDayPlanSource): Record<string, unknown> {
+export function provenanceOf(source: VehicleDayPlanSource): VehicleDaySummaryPayload {
   const { recommendation, profile } = source;
-  return {
+  const summary: VehicleDaySummaryPayload = {
     min_shift_minutes: recommendation.settings.minShiftMinutes,
     max_shift_minutes: recommendation.settings.maxShiftMinutes,
     min_break_minutes: recommendation.settings.minBreakMinutes,
@@ -158,9 +184,11 @@ export function provenanceOf(source: VehicleDayPlanSource): Record<string, unkno
     min_revenue_per_hour_cents: recommendation.settings.minRevenuePerHourCents,
     block_gap_minutes: profile.settings.blockGapMinutes,
     min_evidence_days: profile.settings.minEvidenceDays,
-    history_months: profile.historyMonths.map(m => ({ year: m.year, month: m.month })),
-    target_revenue_cents: source.targetRevenueCents ?? null,
+    history_months: profile.historyMonths.map(m => m.year * 100 + m.month),
   };
+  const target = source.targetRevenueCents;
+  if (typeof target === 'number' && Number.isFinite(target) && target >= 0) summary.target_revenue_cents = target;
+  return summary;
 }
 
 /** The plan as `vehicle_day_plan_save` reads it. Throws for a source `notSavable` names. */
@@ -249,6 +277,7 @@ export function reasonOf(error: RpcError): VehicleDaySaveReason {
   const hint = (error.hint ?? '').trim();
   if (PLAIN_HINTS.has(hint)) return hint as VehicleDaySaveReason;
   if (hint === 'vehicle_day_plan_rows_lost') return 'rows_lost';
+  if (hint === 'vehicle_day_plan_summary_invalid') return 'invalid_payload';
   if (hint.startsWith('vehicle_day_shift_')) return 'shift_inconsistent';
   const code = error.code ?? '';
   if (code.startsWith('22') || code.startsWith('23')) return 'invalid_payload';

@@ -191,7 +191,7 @@ describe('toSavePayload', () => {
     for (const s of holiday) expect([s.is_holiday, s.day_type]).toEqual([true, 6]);
   });
 
-  it('records the settings and the history it was made with, and nothing about a ride', () => {
+  it('records the settings and the history it was made with, as numbers, and nothing about a ride', () => {
     const summary = toSavePayload(sourceFor(15, 4, { targetRevenueCents: 500000 })).summary;
     expect(Object.keys(summary).sort()).toEqual([
       'block_gap_minutes', 'history_months', 'max_shift_minutes', 'max_shifts_per_vehicle_per_day',
@@ -199,7 +199,18 @@ describe('toSavePayload', () => {
       'target_revenue_cents',
     ]);
     expect(summary.target_revenue_cents).toBe(500000);
-    expect(provenanceOf(sourceFor(15, 4)).target_revenue_cents).toBeNull();
+    // YYYYMM, the one shape the database accepts for a month: 202608 is August 2026.
+    expect(summary.history_months).toEqual([202608, 202609]);
+  });
+
+  it('leaves the target out when the month was planned without one, and when it is not a number', () => {
+    // A null is not a number, and the database refuses it: the key is absent instead.
+    expect(provenanceOf(sourceFor(15, 4))).not.toHaveProperty('target_revenue_cents');
+    expect(provenanceOf(sourceFor(15, 4, { targetRevenueCents: null }))).not.toHaveProperty('target_revenue_cents');
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(provenanceOf(sourceFor(15, 4, { targetRevenueCents: bad })), String(bad)).not.toHaveProperty('target_revenue_cents');
+    }
+    expect(provenanceOf(sourceFor(15, 4, { targetRevenueCents: 0 })).target_revenue_cents).toBe(0);
   });
 });
 
@@ -211,10 +222,62 @@ describe('the payload is joined to the migration', () => {
     return [...found[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]);
   }
 
+  /** The jsonb object a constant of the save RPC holds: every key a shift may carry, with its JSON type. */
+  function rpcShape(name: string): Record<string, string> {
+    const found = new RegExp(`${name}\\s+CONSTANT jsonb := '(\\{[^']*\\})'`).exec(MIGRATION);
+    if (!found) throw new Error(`${name} not found in the migration`);
+    return JSON.parse(found[1]) as Record<string, string>;
+  }
+
   it('sends exactly the keys the RPC accepts, at the top and per shift', () => {
     const payload = toSavePayload(sourceFor(15, 4));
     expect(Object.keys(payload).sort()).toEqual([...rpcList('c_top_keys')].sort());
-    expect(Object.keys(payload.shifts[0]).sort()).toEqual([...rpcList('c_shift_keys')].sort());
+    expect(Object.keys(payload.shifts[0]).sort()).toEqual(Object.keys(rpcShape('c_shift_shape')).sort());
+  });
+
+  it.each(COMBOS)('slot %i minutes, hour %i: every field of every shift is the JSON type the RPC requires', (slot, hour) => {
+    const shape = rpcShape('c_shift_shape');
+    for (const shift of toSavePayload(sourceFor(slot, hour)).shifts) {
+      for (const [key, value] of Object.entries(shift)) {
+        expect(typeof value, `${key} of ${JSON.stringify(shift)}`).toBe(shape[key]);
+      }
+    }
+  });
+
+  it('sends a summary the database will accept: its keys, numbers only, the months as YYYYMM', () => {
+    const allowed = rpcList('c_keys');
+    // Pinned from the migration, so a widened ceiling or a longer list is a conversation and not a drift.
+    expect(/c_ceiling\s+CONSTANT numeric := 1000000000000000;/.test(MIGRATION)).toBe(true);
+    expect(/jsonb_array_length\(p_summary -> 'history_months'\) > 240/.test(MIGRATION)).toBe(true);
+    for (const target of [undefined, 500000]) {
+      const summary = toSavePayload(sourceFor(15, 4, { targetRevenueCents: target })).summary;
+      for (const [key, value] of Object.entries(summary)) {
+        expect(allowed, key).toContain(key);
+        if (key === 'history_months') {
+          const months = value as number[];
+          expect(Array.isArray(months) && months.length <= 240).toBe(true);
+          for (const month of months) {
+            expect(Number.isInteger(month) && month >= 200001 && month <= 210012 && month % 100 >= 1 && month % 100 <= 12, String(month)).toBe(true);
+          }
+        } else {
+          expect(typeof value, key).toBe('number');
+          expect(Number.isFinite(value) && (value as number) >= 0 && (value as number) <= 1e15, key).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('agrees with the database about the version token the engine writes', () => {
+    const found = /CHECK \(algorithm_version ~ '([^']+)'\)/.exec(MIGRATION);
+    expect(found).not.toBeNull();
+    const token = new RegExp(found![1]);
+    expect(token.test(SHIFT_RECOMMENDATION_ALGORITHM_VERSION)).toBe(true);
+    expect(token.test(toSavePayload(sourceFor(15, 4)).algorithm_version)).toBe(true);
+    // ... and a sentence is not a version.
+    expect(token.test('driver Max Mustermann')).toBe(false);
+    expect(token.test('')).toBe(false);
+    expect(token.test('a'.repeat(101))).toBe(false);
+    expect(token.test('a'.repeat(100))).toBe(true);
   });
 
   it('sends no key that names a driver, a ride, an address or a fare', () => {
@@ -345,6 +408,7 @@ describe('saveVehicleDayPlan', () => {
     [{ hint: 'no_company', code: '42501' }, 'no_company'],
     [{ hint: 'not_authorized', code: '42501' }, 'not_authorized'],
     [{ hint: 'vehicle_day_plan_rows_lost', code: 'P0001' }, 'rows_lost'],
+    [{ hint: 'vehicle_day_plan_summary_invalid', code: 'P0001' }, 'invalid_payload'],
     [{ hint: 'vehicle_day_shift_moments_mismatch', code: 'P0001' }, 'shift_inconsistent'],
     [{ hint: 'vehicle_day_shift_minutes_mismatch', code: 'P0001' }, 'shift_inconsistent'],
     [{ hint: 'vehicle_day_shift_positions_invalid', code: 'P0001' }, 'shift_inconsistent'],

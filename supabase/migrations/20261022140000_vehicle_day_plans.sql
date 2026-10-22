@@ -65,9 +65,27 @@
   Not nullable and not "for later": absent. The driver belongs to the month-end
   assignment, which is a different slice and a different table. Self-check 9
   reads the catalogue and fails a release in which a column of either table is
-  named like a driver, a ride, an address or a fare, and the save RPC refuses a
-  payload that carries a key it does not know, so a client that sends a driver
-  is told so and not silently ignored.
+  named like a driver, a ride, an address or a fare. A column is not the only
+  place a driver can be put, so the other doors are closed as well:
+
+    · the save RPC refuses a key it does not know, at the top of the payload and
+      in a shift, and names it, so a client that sends a driver is told so and
+      not silently ignored;
+    · every field of a shift must arrive as the JSON type it is stored as. A
+      vehicle that is an object would otherwise be flattened into text by
+      jsonb_to_recordset and stored as the first hundred characters of a driver
+      record;
+    · summary is a closed object: fourteen named keys, every value a number, and
+      history_months a list of YYYYMM numbers. One function,
+      app_private.vehicle_day_plan_summary_problem, is the whole definition. The
+      plan guard applies it to every INSERT and to every edit of a draft, so a
+      direct write meets it as well, and the save RPC applies it before it
+      touches anything;
+    · algorithm_version is a token (letters, digits and . _ / + : -), by a CHECK.
+
+  What stays free text is vehicle: the engine's identifier for a car, the plate
+  from the import, trimmed, 1 to 100 characters. The database cannot tell a
+  plate from any other short string and does not pretend to.
 
   ── RULE 3: NO RIDE, NO ADDRESS, NO FARE ─────────────────────────────────────
 
@@ -92,16 +110,33 @@
   the algorithm_version's business, and copying them here would leave two places
   to change and one to forget.
 
-  generation is the database's: the number of earlier plans for this month that
-  were ever confirmed. The shift engine is deterministic and has no seed, so it
-  is not monthly_plans' counter of "Neu generieren"; it numbers revisions of the
-  month's plan. A draft saved twice therefore carries the same number twice.
+  Three limits are stated rather than hidden. The overlap check takes a vehicle
+  as its exact text, as the engine does: 'B-AB 123' and 'b-ab 123', or two
+  spellings that differ by a space, are two vehicles. It is made per plan, so
+  shifts of two plans across a month boundary are not compared. And shift_index,
+  the engine's rank of a shift among the vehicle's shifts of the day by start, is
+  held to 0-3 and to the unique key, not to that order.
 
-  summary keeps five totals the database computes from the rows it is given
-  (shift_count, vehicle_count, operating_day_count, total_minutes,
-  expected_revenue_cents) and overwrites whatever the client sent under those
-  names; anything else in it is the client's provenance (the settings, the
-  months of history) and a convenience, never a source.
+  generation is the database's. When a plan is saved it is one more than the
+  highest generation among the month's plans that have left the draft state, and
+  0 when none has. Through vehicle_day_plan_save, which keeps at most one draft
+  per month, that numbers the revisions of the month's plan 0, 1, 2 ... in the
+  order they were confirmed. It is not a counter anything depends on: a draft
+  written directly beside another draft gets the same number, and two plans
+  confirmed in turn from such drafts can share one. The shift engine is
+  deterministic and has no seed, so it is not monthly_plans' counter of "Neu
+  generieren"; a draft saved twice carries the same number twice.
+
+  summary keeps five totals the database computes from the rows the save was
+  given (shift_count, vehicle_count, operating_day_count, total_minutes,
+  expected_revenue_cents), written over whatever the client sent under those
+  names, and nine settings the plan was made with (min_shift_minutes,
+  max_shift_minutes, min_break_minutes, max_shifts_per_vehicle_per_day,
+  min_revenue_per_hour_cents, block_gap_minutes, min_evidence_days,
+  target_revenue_cents when the month was planned towards one, and
+  history_months as a list of YYYYMM numbers). Both are conveniences for a list
+  screen and never a source. The totals are the save RPC's: a direct write to a
+  draft's shifts leaves them as they were.
 
   ── ACCESS, AND WHY THE PAGE IS documents ────────────────────────────────────
 
@@ -132,11 +167,16 @@
   leaves one audit row). tests/rls/platform-contexts.sql section 14 and
   tests/rls/support-write-audit.sql section 1 fail a table that carries one
   without the other. What a support session costs here is one audit row per row
-  written, measured on the local replica of the kit (PostgreSQL 16.6, a loaded
-  machine, not the VPS): a month of 3100 shifts (100 vehicles, 31 days, a payload
-  of 1 MB) saves in 1.1 s for a company member and in 6.3 s inside a support
-  session, which writes 3101 audit rows (3100 support_write.vehicle_day_shifts.insert
-  and one for the plan). Confirming the same month takes 0.1 s.
+  written. Measured on the local replica of the kit (PostgreSQL 16.6 on one
+  developer machine, not the VPS, so a ratio and not a promise): a month of 3100
+  shifts (100 vehicles, 31 days, a payload of 1 MB) saves in 0.3 s for a company
+  member and in 2.0 to 2.5 s inside a support session, which writes 3101 audit
+  rows (3100 support_write.vehicle_day_shifts.insert and one for the plan). The
+  largest month the engine plans for 100 vehicles, 12,400 shifts, saves in 1.2 to
+  2.4 s for a member; the API roles stop a statement at 8 s, which bounds one save.
+  Confirming either takes a few hundredths of a second, right after the save too,
+  when the planner's figures do not yet know the plan (section 6 says what the
+  join this replaced cost there).
 
   anon holds nothing. authenticated holds SELECT, INSERT, UPDATE and DELETE and
   nothing else. The service role holds nothing, on the tables and on both RPCs:
@@ -144,9 +184,9 @@
 
   ── COMPATIBILITY: this does NOT bump deploy/SCHEMA_EPOCH ────────────────────
 
-  Two new tables, three new trigger functions, two new RPCs. Nothing existing is
-  altered, so the previous release runs unchanged beside them and never reads
-  them. Company deletion needs no edit either: app_private.company_deletion_tables()
+  Two new tables, two trigger functions and two helpers, two new RPCs. Nothing
+  existing is altered, so the previous release runs unchanged beside them and
+  never reads them. Company deletion needs no edit either: app_private.company_deletion_tables()
   reads the catalogue, and both tables cascade from companies.
 
   tests/rls/vehicle-day-plans.sql is this file's kit. tests/rls/matrix.sql
@@ -171,11 +211,15 @@ CREATE TABLE IF NOT EXISTS public.vehicle_day_plans (
   -- The slot length start_position and end_position are counted in.
   slot_minutes             integer     NOT NULL,
   -- SHIFT_RECOMMENDATION_ALGORITHM_VERSION at the time: the rules that made the rows.
-  algorithm_version        text        NOT NULL
-                             CHECK (char_length(algorithm_version) BETWEEN 1 AND 100),
-  -- Assigned by the guard on insert: how many plans of this month were
-  -- confirmed before this one. Not a seed (the engine has none).
+  -- A token, by algorithm_version_token below: it names the rules, it is not a
+  -- place to write in.
+  algorithm_version        text        NOT NULL,
+  -- Assigned by the guard on insert: one more than the highest generation among
+  -- the month's plans that have left the draft state, 0 when none has. Not a
+  -- seed (the engine has none); see the header.
   generation               integer     NOT NULL DEFAULT 0 CHECK (generation >= 0),
+  -- A closed object of numbers (rule 2): app_private.vehicle_day_plan_summary_problem,
+  -- which the guard applies to every insert and to every edit of a draft.
   summary                  jsonb       NOT NULL DEFAULT '{}'::jsonb
                              CHECK (jsonb_typeof(summary) = 'object'),
   confirmed_at             timestamptz NULL,
@@ -191,6 +235,11 @@ CREATE TABLE IF NOT EXISTS public.vehicle_day_plans (
     CHECK (operating_day_start_hour BETWEEN 0 AND 23),
   CONSTRAINT vehicle_day_plans_slot_minutes_supported
     CHECK (slot_minutes IN (15, 30, 60)),
+  CONSTRAINT vehicle_day_plans_algorithm_version_token
+    CHECK (algorithm_version ~ '^[A-Za-z0-9][A-Za-z0-9._/+:-]{0,99}$'),
+  -- Behind the guard, which holds the summary to fourteen numbers and a list of
+  -- at most 240 months, far below this: kept so that the size stays bounded if
+  -- the guard is ever off.
   CONSTRAINT vehicle_day_plans_summary_small
     CHECK (octet_length(summary::text) <= 16384),
   CONSTRAINT vehicle_day_plans_confirmed_together
@@ -216,8 +265,14 @@ COMMENT ON COLUMN public.vehicle_day_plans.operating_day_start_hour IS
   'operating day. Fixed for the plan''s life. (20261022140000)';
 
 COMMENT ON COLUMN public.vehicle_day_plans.generation IS
-  'How many plans of this month were confirmed before this one. Assigned by the '
-  'guard. Not a seed: the shift engine is deterministic. (20261022140000)';
+  'One more than the highest generation among the month''s plans that have left '
+  'the draft state, 0 when none has. Assigned by the guard when the plan is '
+  'saved. Not a seed: the shift engine is deterministic. (20261022140000)';
+
+COMMENT ON COLUMN public.vehicle_day_plans.summary IS
+  'A closed object of numbers: five totals the save RPC computes and nine '
+  'settings the plan was made with. Never a source, and never free text '
+  '(app_private.vehicle_day_plan_summary_problem, 20261022140000).';
 
 -- One confirmed plan per company and month, in the database and not only in the
 -- screen. Drafts are not unique: a month that has a saved plan may still have a
@@ -241,10 +296,12 @@ CREATE TABLE IF NOT EXISTS public.vehicle_day_shifts (
   operating_date                  date        NOT NULL,
   -- The identifier the engine plans with (the plate from the import, trimmed).
   -- No foreign key to the fleet table: a plan is a record of a decision and must
-  -- not change or disappear when the fleet table does.
+  -- not change or disappear when the fleet table does. The one free-text field of
+  -- a shift: the database cannot tell a plate from any other short string.
   vehicle                         text        NOT NULL,
-  -- Which of the vehicle's shifts on that operating day, in start order. The
-  -- engine plans at most four a day.
+  -- Which of the vehicle's shifts on that operating day, 0 to 3. The engine
+  -- plans at most four a day and numbers them by start; the database holds the
+  -- number to its range and to the unique key, not to that order.
   shift_index                     integer     NOT NULL,
   -- Half-open slot range within the operating day, counted in the plan's
   -- slot_minutes from its operating_day_start_hour.
@@ -301,7 +358,8 @@ COMMENT ON COLUMN public.vehicle_day_shifts.expected_revenue_cents IS
 CREATE INDEX IF NOT EXISTS vehicle_day_shifts_company_idx
   ON public.vehicle_day_shifts (company_id);
 
--- The overlap check of vehicle_day_plan_confirm reads one plan's shifts by vehicle.
+-- The overlap check of vehicle_day_plan_confirm reads one plan's shifts vehicle by
+-- vehicle, start by start.
 CREATE INDEX IF NOT EXISTS vehicle_day_shifts_vehicle_idx
   ON public.vehicle_day_shifts (plan_id, vehicle, starts_local);
 
@@ -319,6 +377,18 @@ CREATE INDEX IF NOT EXISTS vehicle_day_shifts_vehicle_idx
   be deleted. By the time a cascade reaches a child the parent row is deleted,
   so the refusal stays in force for every ordinary write (a shift of a plan of a
   company that exists) and stands aside for exactly the cascade.
+
+  The row is read FOR KEY SHARE, held to the end of the transaction, and that
+  conflicts with the FOR UPDATE vehicle_day_plan_confirm takes on it. Read without
+  a lock the answer "draft" was stale the moment it was given: a shift written
+  while a confirmation was under way saw a plan that was not confirmed yet,
+  waited on the foreign key check for the confirmation to commit, and then landed
+  in a confirmed plan -- two overlapping shifts the confirmation had just checked
+  for, or, for a DELETE, which has no foreign key check to wait on, a confirmed
+  plan with no shift at all. With the lock the write and the confirmation take
+  turns, in either order, and whichever comes second sees what the first did.
+  tests/rls/vehicle-day-plans-concurrency.sql runs the two orders with two
+  sessions.
 */
 CREATE OR REPLACE FUNCTION app_private.vehicle_day_plan_parent_is_open(p_plan_id uuid, p_company_id uuid)
 RETURNS public.vehicle_day_plans
@@ -329,7 +399,7 @@ AS $fn$
 DECLARE
   v_plan public.vehicle_day_plans;
 BEGIN
-  SELECT * INTO v_plan FROM public.vehicle_day_plans p WHERE p.id = p_plan_id;
+  SELECT * INTO v_plan FROM public.vehicle_day_plans p WHERE p.id = p_plan_id FOR KEY SHARE;
 
   IF NOT FOUND THEN
     RETURN v_plan;
@@ -359,7 +429,86 @@ COMMENT ON FUNCTION app_private.vehicle_day_plan_parent_is_open(uuid, uuid) IS
   'no longer exists, is a cascade and is allowed (20261022140000).';
 
 /*
-  The plan's own guard. Three rules:
+  What may stand in a plan's summary, in one place. NULL means it may; any other
+  answer names the first thing that may not, in words a caller can show.
+
+  The summary is a closed object (rule 2): fourteen keys and no other, every
+  value a number from 0 to 10^15, and history_months a list of at most 240
+  YYYYMM numbers (month 01 to 12). The five totals are the save RPC's own and the
+  other nine are the settings the plan was made with; both are conveniences for a
+  list screen, never a source. A string, a nested object, a boolean or a null is
+  refused, so the field cannot carry a driver, a ride, an address or a fare, in a
+  key or in a value. Decimals are allowed: the engine's block gap is any
+  non-negative number of minutes.
+
+  Pure. The plan guard and the save RPC, both SECURITY DEFINER, are its only
+  callers, and no CHECK constraint names it: authenticated holds no USAGE on
+  app_private, and a CHECK is evaluated as the writer.
+*/
+CREATE OR REPLACE FUNCTION app_private.vehicle_day_plan_summary_problem(p_summary jsonb)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE
+  c_keys    CONSTANT text[] := ARRAY['shift_count', 'vehicle_count', 'operating_day_count',
+                                     'total_minutes', 'expected_revenue_cents',
+                                     'min_shift_minutes', 'max_shift_minutes', 'min_break_minutes',
+                                     'max_shifts_per_vehicle_per_day', 'min_revenue_per_hour_cents',
+                                     'block_gap_minutes', 'min_evidence_days',
+                                     'target_revenue_cents', 'history_months'];
+  c_ceiling CONSTANT numeric := 1000000000000000;
+  v_bad     text;
+BEGIN
+  IF p_summary IS NULL OR jsonb_typeof(p_summary) <> 'object' THEN
+    RETURN 'the summary is not an object';
+  END IF;
+
+  SELECT string_agg(k.key, ', ' ORDER BY k.key) INTO v_bad
+    FROM jsonb_object_keys(p_summary) AS k(key)
+   WHERE k.key <> ALL (c_keys);
+  IF v_bad IS NOT NULL THEN
+    RETURN 'unknown key(s): ' || left(v_bad, 200);
+  END IF;
+
+  SELECT string_agg(e.key, ', ' ORDER BY e.key) INTO v_bad
+    FROM jsonb_each(p_summary) AS e(key, value)
+   WHERE e.key <> 'history_months'
+     AND NOT CASE WHEN jsonb_typeof(e.value) = 'number'
+                  THEN (e.value #>> '{}')::numeric BETWEEN 0 AND c_ceiling
+                  ELSE false END;
+  IF v_bad IS NOT NULL THEN
+    RETURN 'not a number from 0 to 10^15: ' || v_bad;
+  END IF;
+
+  IF p_summary ? 'history_months' THEN
+    IF jsonb_typeof(p_summary -> 'history_months') <> 'array'
+       OR jsonb_array_length(p_summary -> 'history_months') > 240 THEN
+      RETURN 'history_months is not a list of at most 240 months';
+    END IF;
+    IF EXISTS (SELECT 1
+                 FROM jsonb_array_elements(p_summary -> 'history_months') AS m(value)
+                WHERE NOT CASE WHEN jsonb_typeof(m.value) = 'number'
+                               THEN (m.value #>> '{}')::numeric = trunc((m.value #>> '{}')::numeric)
+                                AND (m.value #>> '{}')::numeric BETWEEN 200001 AND 210012
+                                AND mod((m.value #>> '{}')::numeric, 100) BETWEEN 1 AND 12
+                               ELSE false END) THEN
+      RETURN 'history_months holds something that is not a YYYYMM month';
+    END IF;
+  END IF;
+
+  RETURN NULL;
+END;
+$fn$;
+
+COMMENT ON FUNCTION app_private.vehicle_day_plan_summary_problem(jsonb) IS
+  'NULL when a vehicle day plan''s summary is the closed object of numbers rule 2 '
+  'allows, else the first thing that is not (20261022140000).';
+
+/*
+  The plan's own guard. Four rules:
 
     · a plan's key and its provenance are fixed: its company, year and month, and
       the operating-day start hour, slot length and algorithm version that built
@@ -369,10 +518,15 @@ COMMENT ON FUNCTION app_private.vehicle_day_plan_parent_is_open(uuid, uuid) IS
       edited or deleted while its company exists;
     · status is not the client's. It moves only inside vehicle_day_plan_confirm,
       which sets a transaction-local marker naming the plan and the transaction.
-      The actor and the time are the database's on both transitions.
+      The actor and the time are the database's on both transitions;
+    · the summary of a draft is the closed object of numbers that
+      app_private.vehicle_day_plan_summary_problem describes, on insert and on
+      every edit that changes it (rule 2: the one free-form column of the plan
+      cannot carry a driver).
 
-  generation is assigned here on insert: the number of earlier plans of this
-  month that were ever confirmed, so every writer gets the same answer.
+  generation is assigned here on insert: one more than the highest generation
+  among the month's plans that have left the draft state, so every writer gets
+  the same answer.
 */
 CREATE OR REPLACE FUNCTION app_private.vehicle_day_plan_guard()
 RETURNS trigger
@@ -381,9 +535,10 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $fn$
 DECLARE
-  c_marker CONSTANT text := 'app_private.vehicle_day_plan_transition';
-  v_uid    uuid := auth.uid();
-  v_moves  boolean;
+  c_marker  CONSTANT text := 'app_private.vehicle_day_plan_transition';
+  v_uid     uuid := auth.uid();
+  v_moves   boolean;
+  v_problem text;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     -- A confirmed plan is the month's record and a superseded one is its
@@ -416,6 +571,12 @@ BEGIN
     NEW.created_at          := now();
     NEW.updated_by          := v_uid;
     NEW.updated_at          := now();
+
+    v_problem := app_private.vehicle_day_plan_summary_problem(NEW.summary);
+    IF v_problem IS NOT NULL THEN
+      RAISE EXCEPTION 'Die Zusammenfassung des Fahrzeug-Tagesplans enthält etwas, das dort nicht stehen darf: %', v_problem
+        USING ERRCODE = 'P0001', HINT = 'vehicle_day_plan_summary_invalid';
+    END IF;
     RETURN NEW;
   END IF;
 
@@ -474,14 +635,23 @@ BEGIN
       USING ERRCODE = 'P0001', HINT = 'vehicle_day_plan_is_final';
   END IF;
 
+  IF NEW.summary IS DISTINCT FROM OLD.summary THEN
+    v_problem := app_private.vehicle_day_plan_summary_problem(NEW.summary);
+    IF v_problem IS NOT NULL THEN
+      RAISE EXCEPTION 'Die Zusammenfassung des Fahrzeug-Tagesplans enthält etwas, das dort nicht stehen darf: %', v_problem
+        USING ERRCODE = 'P0001', HINT = 'vehicle_day_plan_summary_invalid';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $fn$;
 
 COMMENT ON FUNCTION app_private.vehicle_day_plan_guard() IS
   'Keeps a vehicle day plan with its company, month and provenance, freezes it '
-  'once confirmed, lets only vehicle_day_plan_confirm move its status, and '
-  'assigns generation (20261022140000).';
+  'once confirmed, lets only vehicle_day_plan_confirm move its status, holds a '
+  'draft''s summary to the closed object of numbers, and assigns generation '
+  '(20261022140000).';
 
 /*
   The shift guard. Beyond keeping a shift inside its plan and company, it is the
@@ -652,7 +822,7 @@ END $mig$;
       "operating_day_start_hour": 4,
       "slot_minutes": 15,
       "algorithm_version": "shift-recommendation/1.0.0",
-      "summary": { ... },              -- optional, an object: the client's provenance
+      "summary": { ... },              -- optional, a closed object of numbers (see below)
       "shifts": [
         { "operating_date": "2026-11-03", "vehicle": "B-AB 123", "shift_index": 0,
           "start_position": 24, "end_position": 36,
@@ -666,6 +836,11 @@ END $mig$;
   Both lists of keys are CLOSED. A key outside them is refused with 22023 and
   named, because rule 2 is not only about columns: a client that sends a driver,
   a ride or an address must be told it was not stored, not left believing it was.
+  Every field of a shift must also arrive as the JSON type it is stored as
+  (c_shift_shape names them), and algorithm_version must be a string: the coercion
+  of jsonb_to_recordset would otherwise turn an object into the text of an object
+  and store it as a vehicle. summary is closed too, to the fourteen numeric keys
+  app_private.vehicle_day_plan_summary_problem allows.
 
   Four things it does that are not bookkeeping:
 
@@ -688,19 +863,22 @@ RETURNS jsonb
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = public, pg_catalog
+SET search_path = pg_catalog, public
 AS $fn$
 DECLARE
   c_top_keys   CONSTANT text[] := ARRAY['year', 'month', 'operating_day_start_hour',
                                         'slot_minutes', 'algorithm_version', 'summary', 'shifts'];
-  c_shift_keys CONSTANT text[] := ARRAY['operating_date', 'vehicle', 'shift_index',
-                                        'start_position', 'end_position', 'starts_local',
-                                        'ends_local', 'minutes', 'day_type', 'is_holiday',
-                                        'expected_revenue_cents', 'expected_revenue_per_hour_cents',
-                                        'confidence', 'evidence_days'];
+  -- Every key a shift may carry, with the JSON type it must arrive as.
+  c_shift_shape CONSTANT jsonb := '{"operating_date": "string", "vehicle": "string",
+      "shift_index": "number", "start_position": "number", "end_position": "number",
+      "starts_local": "string", "ends_local": "string", "minutes": "number",
+      "day_type": "number", "is_holiday": "boolean", "expected_revenue_cents": "number",
+      "expected_revenue_per_hour_cents": "number", "confidence": "string",
+      "evidence_days": "number"}';
   v_caller     uuid := auth.uid();
   v_company    uuid;
   v_unknown    text;
+  v_problem    text;
   v_year       integer;
   v_month      integer;
   v_hour       integer;
@@ -759,6 +937,11 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
+  IF jsonb_typeof(p_payload -> 'algorithm_version') <> 'string' THEN
+    RAISE EXCEPTION 'vehicle_day_plan_save: algorithm_version must be a JSON string'
+      USING ERRCODE = '22023';
+  END IF;
+
   v_year  := (p_payload ->> 'year')::integer;
   v_month := (p_payload ->> 'month')::integer;
   v_hour  := (p_payload ->> 'operating_day_start_hour')::integer;
@@ -769,6 +952,11 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
   v_summary := coalesce(p_payload -> 'summary', '{}'::jsonb);
+  v_problem := app_private.vehicle_day_plan_summary_problem(v_summary);
+  IF v_problem IS NOT NULL THEN
+    RAISE EXCEPTION 'vehicle_day_plan_save: summary: %', v_problem
+      USING ERRCODE = '22023';
+  END IF;
 
   v_shifts := coalesce(p_payload -> 'shifts', '[]'::jsonb);
   IF jsonb_typeof(v_shifts) <> 'array' THEN
@@ -779,9 +967,20 @@ BEGIN
   SELECT string_agg(DISTINCT k.key, ', ' ORDER BY k.key) INTO v_unknown
     FROM jsonb_array_elements(v_shifts) AS e(value)
    CROSS JOIN LATERAL jsonb_object_keys(e.value) AS k(key)
-   WHERE k.key <> ALL (c_shift_keys);
+   WHERE NOT (c_shift_shape ? k.key);
   IF v_unknown IS NOT NULL THEN
     RAISE EXCEPTION 'vehicle_day_plan_save: unknown shift key(s): %', v_unknown
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- A field of the wrong JSON type is refused and named, not coerced.
+  SELECT string_agg(w.bad, ', ' ORDER BY w.bad) INTO v_unknown
+    FROM (SELECT DISTINCT format('%s (expected %s, got %s)', kv.key, c_shift_shape ->> kv.key, jsonb_typeof(kv.value)) AS bad
+            FROM jsonb_array_elements(v_shifts) AS e(value)
+           CROSS JOIN LATERAL jsonb_each(e.value) AS kv(key, value)
+           WHERE jsonb_typeof(kv.value) <> c_shift_shape ->> kv.key) w;
+  IF v_unknown IS NOT NULL THEN
+    RAISE EXCEPTION 'vehicle_day_plan_save: shift field(s) of the wrong JSON type: %', v_unknown
       USING ERRCODE = '22023';
   END IF;
 
@@ -800,6 +999,11 @@ BEGIN
      AND p.status = 'draft';
   GET DIAGNOSTICS v_discarded = ROW_COUNT;
 
+  -- The totals are written clamped at zero. A negative total can only come from a
+  -- shift the table refuses a moment later (minutes_positive, revenue_not_negative),
+  -- and that is the refusal a caller should read: without the clamp the summary
+  -- rule would speak first and name a total instead of the shift's own field. The
+  -- clamp keeps nothing wrong: the whole save is rolled back in that case.
   INSERT INTO public.vehicle_day_plans (company_id, year, month, operating_day_start_hour,
                                         slot_minutes, algorithm_version, summary)
   VALUES (v_company, v_year, v_month, v_hour, v_slot,
@@ -808,8 +1012,8 @@ BEGIN
             'shift_count',            v_want,
             'vehicle_count',          v_vehicles,
             'operating_day_count',    v_days,
-            'total_minutes',          v_minutes,
-            'expected_revenue_cents', v_revenue))
+            'total_minutes',          greatest(v_minutes, 0),
+            'expected_revenue_cents', greatest(v_revenue, 0)))
   RETURNING id, generation INTO v_plan_id, v_generation;
 
   INSERT INTO public.vehicle_day_shifts (company_id, plan_id, operating_date, vehicle, shift_index,
@@ -871,6 +1075,15 @@ COMMENT ON FUNCTION public.vehicle_day_plan_save(jsonb) IS
   enough is a setting of the engine (and of its algorithm_version), not a rule
   of the schema.
 
+  The check is one pass over the plan's shifts, vehicle by vehicle in start
+  order, and not a join of the table with itself. The join was correct and
+  unsafe: right after a bulk save the planner's figures do not know the new plan
+  yet, it expects one row, takes a nested loop with the plan as the only index
+  condition and compares every shift with every other. Against the API roles'
+  statement timeout of 8 s that took 2 to 3.5 s for 3100 shifts on a quiet
+  machine and 5 to 11 s on a busy one, and never finished for 12,400. The pass is
+  the same answer without a join to choose badly.
+
   Refusals are return values, never exceptions, because the screen has to offer
   the choice between replacing the active plan and keeping it. A broken argument
   contract and a caller who may not be here raise, as they do everywhere else.
@@ -881,7 +1094,7 @@ RETURNS jsonb
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = public, pg_catalog
+SET search_path = pg_catalog, public
 AS $fn$
 DECLARE
   c_marker     CONSTANT text := 'app_private.vehicle_day_plan_transition';
@@ -946,13 +1159,16 @@ BEGIN
 
   -- A vehicle is never on the road twice at once. Half-open intervals, the
   -- engine's own comparison: a shift that ends when the next begins overlaps
-  -- nothing. b.id > a.id counts each pair once.
+  -- nothing. In start order a shift overlaps an earlier one of its vehicle exactly
+  -- when the latest end among the shifts before it lies after its own start.
   SELECT count(*) INTO v_n
-    FROM public.vehicle_day_shifts a
-    JOIN public.vehicle_day_shifts b
-      ON b.plan_id = a.plan_id AND b.vehicle = a.vehicle AND b.id > a.id
-   WHERE a.plan_id = p_plan_id
-     AND tsrange(a.starts_local, a.ends_local, '[)') && tsrange(b.starts_local, b.ends_local, '[)');
+    FROM (SELECT s.starts_local,
+                 max(s.ends_local) OVER (PARTITION BY s.vehicle
+                                         ORDER BY s.starts_local, s.ends_local, s.id
+                                         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS earlier_end
+            FROM public.vehicle_day_shifts s
+           WHERE s.plan_id = p_plan_id) w
+   WHERE w.earlier_end > w.starts_local;
   IF v_n > 0 THEN
     RETURN jsonb_build_object('success', false, 'reason', 'vehicle_overlap',
       'error', 'Ein Fahrzeug ist in zwei Schichten gleichzeitig eingeplant.');
@@ -1009,11 +1225,12 @@ COMMENT ON FUNCTION public.vehicle_day_plan_confirm(uuid, boolean) IS
 
 -- ─── 7. ownership and privileges ────────────────────────────────────────────
 
--- The guards and both RPCs are SECURITY DEFINER; CREATE OR REPLACE keeps
--- whatever owner a function had, so the owner is stated.
+-- The guards, the helpers and both RPCs are SECURITY DEFINER; CREATE OR REPLACE
+-- keeps whatever owner a function had, so the owner is stated.
 ALTER FUNCTION app_private.vehicle_day_plan_guard()                    OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.vehicle_day_shift_guard()                   OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.vehicle_day_plan_parent_is_open(uuid, uuid) OWNER TO CURRENT_USER;
+ALTER FUNCTION app_private.vehicle_day_plan_summary_problem(jsonb)     OWNER TO CURRENT_USER;
 ALTER FUNCTION public.vehicle_day_plan_save(jsonb)                     OWNER TO CURRENT_USER;
 ALTER FUNCTION public.vehicle_day_plan_confirm(uuid, boolean)          OWNER TO CURRENT_USER;
 
@@ -1023,6 +1240,7 @@ ALTER FUNCTION public.vehicle_day_plan_confirm(uuid, boolean)          OWNER TO 
 REVOKE ALL ON FUNCTION app_private.vehicle_day_plan_guard()                    FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.vehicle_day_shift_guard()                   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.vehicle_day_plan_parent_is_open(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION app_private.vehicle_day_plan_summary_problem(jsonb)     FROM PUBLIC, anon, authenticated, service_role;
 
 -- Supabase's default privileges grant EXECUTE on every new public function to
 -- PUBLIC, anon, authenticated and service_role. Both RPCs read auth.uid(), and
@@ -1040,6 +1258,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.vehicle_day_plans  TO authe
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.vehicle_day_shifts TO authenticated;
 
 -- ─── 8. self-check ──────────────────────────────────────────────────────────
+--
+-- What a release can be told without a second session and without data: the
+-- catalogue, the bodies of the functions with their comments removed
+-- (app_private.function_code, which raises for a signature that does not
+-- resolve, so a renamed function cannot make a `!~` check below pass on NULL),
+-- and the one pure helper, run on literals. The behaviour itself -- every
+-- refusal, the lifecycle, the races -- is tests/rls/vehicle-day-plans.sql and
+-- tests/rls/vehicle-day-plans-concurrency.sql.
 
 DO $mig$
 DECLARE
@@ -1047,12 +1273,14 @@ DECLARE
   c_funcs  CONSTANT text[] := ARRAY['app_private.vehicle_day_plan_guard()',
                                     'app_private.vehicle_day_shift_guard()',
                                     'app_private.vehicle_day_plan_parent_is_open(uuid,uuid)',
+                                    'app_private.vehicle_day_plan_summary_problem(jsonb)',
                                     'public.vehicle_day_plan_save(jsonb)',
                                     'public.vehicle_day_plan_confirm(uuid,boolean)'];
   v_tbl    text;
   v_sig    text;
   v_wrong  text;
   v_src    text;
+  v_guard  text;
 BEGIN
   FOREACH v_tbl IN ARRAY c_tables LOOP
     -- 1. The table exists with row level security on.
@@ -1121,14 +1349,17 @@ BEGIN
       RAISE EXCEPTION 'vehicle day plans self-check 4: the table privileges on % are not anon none, authenticated SELECT/INSERT/UPDATE/DELETE, service_role none', v_tbl;
     END IF;
 
-    -- 5. Every table carries its own guard, as an enabled BEFORE INSERT OR
-    --    UPDATE OR DELETE row trigger (tgtype 31 = ROW 1 + BEFORE 2 + INSERT 4
-    --    + DELETE 8 + UPDATE 16).
+    -- 5. Every table carries its OWN guard, not the other table's, as an enabled
+    --    BEFORE INSERT OR UPDATE OR DELETE row trigger (tgtype 31 = ROW 1 +
+    --    BEFORE 2 + INSERT 4 + DELETE 8 + UPDATE 16), wired to that function.
+    v_guard := CASE v_tbl WHEN 'vehicle_day_plans' THEN 'vehicle_day_plan_guard'
+                                                   ELSE 'vehicle_day_shift_guard' END;
     IF NOT EXISTS (SELECT 1 FROM pg_trigger g
                     WHERE g.tgrelid = format('public.%I', v_tbl)::regclass
-                      AND g.tgname IN ('vehicle_day_plan_guard', 'vehicle_day_shift_guard')
-                      AND NOT g.tgisinternal AND g.tgtype = 31 AND g.tgenabled = 'O') THEN
-      RAISE EXCEPTION 'vehicle day plans self-check 5: % does not carry its guard as an enabled BEFORE INSERT OR UPDATE OR DELETE row trigger', v_tbl;
+                      AND g.tgname = v_guard
+                      AND NOT g.tgisinternal AND g.tgtype = 31 AND g.tgenabled = 'O'
+                      AND g.tgfoid = format('app_private.%I()', v_guard)::regprocedure) THEN
+      RAISE EXCEPTION 'vehicle day plans self-check 5: % does not carry %() as an enabled BEFORE INSERT OR UPDATE OR DELETE row trigger', v_tbl, v_guard;
     END IF;
   END LOOP;
 
@@ -1145,10 +1376,10 @@ BEGIN
     RAISE EXCEPTION 'vehicle day plans self-check 6: the one-confirmed-plan-per-month index is missing or has changed shape: %', coalesce(v_wrong, 'absent');
   END IF;
 
-  -- 7. Every function: SECURITY DEFINER, a pinned search_path, an owner that
-  --    can reach app_private, and no EXECUTE for a role the API authenticates
-  --    as (the two public RPCs excepted, which authenticated must be able to
-  --    call and anon and the service role must not).
+  -- 7. Every function: SECURITY DEFINER, a search_path pinned with pg_catalog
+  --    first, an owner that can reach app_private, and no EXECUTE for a role the
+  --    API authenticates as (the two public RPCs excepted, which authenticated
+  --    must be able to call and anon and the service role must not).
   FOREACH v_sig IN ARRAY c_funcs LOOP
     IF to_regprocedure(v_sig) IS NULL THEN
       RAISE EXCEPTION 'vehicle day plans self-check 7: % is missing', v_sig;
@@ -1157,8 +1388,8 @@ BEGIN
       RAISE EXCEPTION 'vehicle day plans self-check 7: % is not SECURITY DEFINER', v_sig;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c(setting)
-                    WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=%') THEN
-      RAISE EXCEPTION 'vehicle day plans self-check 7: % has no pinned search_path', v_sig;
+                    WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=pg_catalog,%') THEN
+      RAISE EXCEPTION 'vehicle day plans self-check 7: % does not pin its search_path with pg_catalog first', v_sig;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
                     WHERE p.oid = to_regprocedure(v_sig)
@@ -1180,17 +1411,18 @@ BEGIN
   -- 8. Both RPCs are VOLATILE (so supabase-js calls them with POST and not in a
   --    read-only transaction), both ask the state helper and the Dokumente page
   --    with the not_authorized hint, and both take the advisory lock on the
-  --    month.
+  --    month. The bodies are read with their comments removed, so a gate that
+  --    survives only as a comment is not a gate.
   FOREACH v_sig IN ARRAY ARRAY['public.vehicle_day_plan_save(jsonb)',
                                'public.vehicle_day_plan_confirm(uuid,boolean)'] LOOP
     IF (SELECT p.provolatile FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig)) <> 'v' THEN
       RAISE EXCEPTION 'vehicle day plans self-check 8: % is not VOLATILE', v_sig;
     END IF;
-    v_src := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig));
+    v_src := app_private.function_code(v_sig);
     IF v_src !~ 'get_active_company_id' THEN
       RAISE EXCEPTION 'vehicle day plans self-check 8: % does not ask get_active_company_id()', v_sig;
     END IF;
-    IF v_src !~ 'current_role_permits\(''documents'', true\)' OR v_src !~ 'not_authorized' THEN
+    IF v_src !~ 'IF\s+NOT\s+public\.current_role_permits\(''documents'',\s*true\)\s+THEN\s+RAISE\s+EXCEPTION[^;]*not_authorized' THEN
       RAISE EXCEPTION 'vehicle day plans self-check 8: % lost the Dokumente page gate or its not_authorized hint', v_sig;
     END IF;
     IF v_src !~ 'pg_advisory_xact_lock' THEN
@@ -1199,15 +1431,16 @@ BEGIN
   END LOOP;
 
   -- The save RPC keeps its two closed key lists and writes the totals itself.
-  v_src := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('public.vehicle_day_plan_save(jsonb)'));
+  v_src := app_private.function_code('public.vehicle_day_plan_save(jsonb)');
   IF v_src !~ 'unknown payload key' OR v_src !~ 'unknown shift key'
+     OR v_src !~ 'k\.key\s*<>\s*ALL\s*\(c_top_keys\)' OR v_src !~ 'NOT\s*\(c_shift_shape\s*\?\s*k\.key\)'
      OR v_src !~ 'operating_day_count' OR v_src !~ 'vehicle_day_plan_rows_lost' THEN
     RAISE EXCEPTION 'vehicle day plans self-check 8: vehicle_day_plan_save lost a closed key list, the totals it writes or its row count';
   END IF;
 
   -- 9. Rules 2 and 3. No column of either table is named like a driver, a ride,
   --    an address or a fare; no foreign key points at the trips or the drivers;
-  --    and none of the five functions names either table.
+  --    and none of the six functions names either table.
   SELECT string_agg(format('%s.%s', c.relname, a.attname), ', ' ORDER BY c.relname, a.attname) INTO v_wrong
     FROM pg_attribute a
     JOIN pg_class c ON c.oid = a.attrelid
@@ -1229,15 +1462,19 @@ BEGIN
 
   SELECT string_agg(f.sig, ', ') INTO v_wrong
     FROM unnest(c_funcs) AS f(sig)
-   WHERE (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(f.sig)) ~* 'fahrtenbuch_trips|\mdrivers\M';
+   WHERE app_private.function_code(f.sig) ~* 'fahrtenbuch_trips|\mdrivers\M';
   IF v_wrong IS NOT NULL THEN
     RAISE EXCEPTION 'vehicle day plans self-check 9: a vehicle-day function names the trips or the drivers: %', v_wrong;
   END IF;
 
   -- 10. Rule 1. The operating day's start hour is a NOT NULL column with no
   --     default and a 0-23 check; the plan guard fixes it for the plan's life;
-  --     the shift guard recomputes the moments from the stored value; and the
-  --     slot length and the algorithm version are stored beside it.
+  --     the shift guard recomputes the moments from the stored value and refuses
+  --     a contradiction; and the slot length and the algorithm version are
+  --     stored beside it. The shift guard's conditions are matched whole, each
+  --     as `IF <condition> THEN RAISE ... <its hint>`, because a pattern that
+  --     asks only whether a name occurs is satisfied by `IF false AND <the
+  --     condition>`, and the condition is the rule.
   IF NOT EXISTS (SELECT 1 FROM pg_attribute a
                   WHERE a.attrelid = 'public.vehicle_day_plans'::regclass
                     AND a.attname IN ('operating_day_start_hour', 'slot_minutes', 'algorithm_version')
@@ -1252,20 +1489,26 @@ BEGIN
   IF v_wrong IS NULL OR v_wrong !~ 'operating_day_start_hour' OR v_wrong !~ '0' OR v_wrong !~ '23' THEN
     RAISE EXCEPTION 'vehicle day plans self-check 10: the 0-23 check on operating_day_start_hour is missing: %', coalesce(v_wrong, 'absent');
   END IF;
-  v_src := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('app_private.vehicle_day_plan_guard()'));
-  IF v_src !~ 'OLD\.operating_day_start_hour' OR v_src !~ 'OLD\.slot_minutes' OR v_src !~ 'OLD\.algorithm_version'
-     OR v_src !~ 'vehicle_day_plan_key_fixed' THEN
+  v_src := app_private.function_code('app_private.vehicle_day_plan_guard()');
+  IF v_src !~ 'NEW\.operating_day_start_hour\s+IS\s+DISTINCT\s+FROM\s+OLD\.operating_day_start_hour'
+     OR v_src !~ 'NEW\.slot_minutes\s+IS\s+DISTINCT\s+FROM\s+OLD\.slot_minutes'
+     OR v_src !~ 'NEW\.algorithm_version\s+IS\s+DISTINCT\s+FROM\s+OLD\.algorithm_version'
+     OR v_src !~ 'THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_plan_key_fixed' THEN
     RAISE EXCEPTION 'vehicle day plans self-check 10: the plan guard no longer fixes the hour, the slot length and the algorithm version';
   END IF;
-  v_src := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('app_private.vehicle_day_shift_guard()'));
-  IF v_src !~ 'v_plan\.operating_day_start_hour' OR v_src !~ 'v_plan\.slot_minutes'
-     OR v_src !~ 'vehicle_day_shift_moments_mismatch' OR v_src !~ 'vehicle_day_shift_minutes_mismatch'
-     OR v_src !~ 'vehicle_day_shift_outside_month' OR v_src !~ 'vehicle_day_shift_positions_invalid' THEN
-    RAISE EXCEPTION 'vehicle day plans self-check 10: the shift guard no longer recomputes the shift from the stored hour and slot length';
+  v_src := app_private.function_code('app_private.vehicle_day_shift_guard()');
+  IF v_src !~ 'v_from_min\s*:=\s*v_plan\.operating_day_start_hour\s*\*\s*60\s*\+\s*NEW\.start_position\s*\*\s*v_plan\.slot_minutes'
+     OR v_src !~ 'v_to_min\s*:=\s*v_plan\.operating_day_start_hour\s*\*\s*60\s*\+\s*NEW\.end_position\s*\*\s*v_plan\.slot_minutes'
+     OR v_src !~ 'IF\s+NEW\.starts_local\s+IS\s+DISTINCT\s+FROM\s+NEW\.operating_date::timestamp\s*\+\s*make_interval\(mins\s*=>\s*v_from_min\)\s+OR\s+NEW\.ends_local\s+IS\s+DISTINCT\s+FROM\s+NEW\.operating_date::timestamp\s*\+\s*make_interval\(mins\s*=>\s*v_to_min\)\s+THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_shift_moments_mismatch'
+     OR v_src !~ 'IF\s+NEW\.minutes\s+IS\s+DISTINCT\s+FROM\s+\(NEW\.end_position\s*-\s*NEW\.start_position\)\s*\*\s*v_plan\.slot_minutes\s+THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_shift_minutes_mismatch'
+     OR v_src !~ 'IF\s+NEW\.end_position\s*>\s*1440\s*/\s*v_plan\.slot_minutes\s+THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_shift_positions_invalid'
+     OR v_src !~ 'IF\s+EXTRACT\(YEAR\s+FROM\s+NEW\.operating_date\)::integer\s+IS\s+DISTINCT\s+FROM\s+v_plan\.year\s+OR\s+EXTRACT\(MONTH\s+FROM\s+NEW\.operating_date\)::integer\s+IS\s+DISTINCT\s+FROM\s+v_plan\.month\s+THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_shift_outside_month' THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 10: the shift guard no longer recomputes the shift from the stored hour and slot length, or no longer refuses a contradiction';
   END IF;
 
   -- 11. The named constraints the kit and the client lean on.
   FOREACH v_sig IN ARRAY ARRAY['vehicle_day_plans_slot_minutes_supported',
+                               'vehicle_day_plans_algorithm_version_token',
                                'vehicle_day_plans_status_matches_confirmation',
                                'vehicle_day_plans_confirmed_together',
                                'vehicle_day_plans_superseded_together',
@@ -1289,6 +1532,13 @@ BEGIN
   IF v_wrong !~ '15' OR v_wrong !~ '30' OR v_wrong !~ '60' THEN
     RAISE EXCEPTION 'vehicle day plans self-check 11: the supported slot lengths are not 15, 30 and 60: %', v_wrong;
   END IF;
+  SELECT pg_get_constraintdef(c.oid) INTO v_wrong
+    FROM pg_constraint c
+   WHERE c.conrelid = 'public.vehicle_day_plans'::regclass
+     AND c.conname = 'vehicle_day_plans_algorithm_version_token';
+  IF v_wrong !~ 'algorithm_version' OR v_wrong !~ '\{0,99\}' OR v_wrong !~ '\^\[A-Za-z0-9\]' THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 11: algorithm_version is not held to a token of at most 100 characters: %', v_wrong;
+  END IF;
 
   -- 12. The status a plan is born with, and the generation it starts from.
   IF (SELECT a.atthasdef FROM pg_attribute a
@@ -1302,11 +1552,11 @@ BEGIN
   --     bodies that refuse a change to a confirmed plan carry the condition
   --     20261016140000 added to the monthly plan's copies, and the foreign keys
   --     from companies cascade.
-  v_src := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('app_private.vehicle_day_plan_guard()'));
+  v_src := app_private.function_code('app_private.vehicle_day_plan_guard()');
   IF v_src !~ 'FROM\s+public\.companies\s+c\s+WHERE\s+c\.id\s*=\s*OLD\.company_id' THEN
     RAISE EXCEPTION 'vehicle day plans self-check 13: the plan guard refuses a delete even when the company is gone';
   END IF;
-  v_src := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure('app_private.vehicle_day_plan_parent_is_open(uuid,uuid)'));
+  v_src := app_private.function_code('app_private.vehicle_day_plan_parent_is_open(uuid,uuid)');
   IF v_src !~ 'FROM\s+public\.companies\s+c\s+WHERE\s+c\.id\s*=\s*p_company_id' THEN
     RAISE EXCEPTION 'vehicle day plans self-check 13: parent_is_open refuses a write even when the company is gone';
   END IF;
@@ -1315,6 +1565,70 @@ BEGIN
          AND k.conrelid IN ('public.vehicle_day_plans'::regclass, 'public.vehicle_day_shifts'::regclass)
          AND k.confdeltype = 'c') <> 2 THEN
     RAISE EXCEPTION 'vehicle day plans self-check 13: both tables must cascade from companies';
+  END IF;
+
+  -- 14. Rule 2, the summary. The helper is pure, so it is run here on literals:
+  --     NULL for a summary of the allowed shape, and a named problem for
+  --     anything else. The plan guard asks it on every insert and on every edit
+  --     of a draft that changes the summary, and the save RPC asks it before it
+  --     writes anything.
+  IF app_private.vehicle_day_plan_summary_problem('{}'::jsonb) IS NOT NULL
+     OR app_private.vehicle_day_plan_summary_problem(
+          '{"shift_count": 3, "vehicle_count": 1, "operating_day_count": 2, "total_minutes": 540, "expected_revenue_cents": 12345, "min_shift_minutes": 180, "max_shift_minutes": 285, "min_break_minutes": 30, "max_shifts_per_vehicle_per_day": 2, "min_revenue_per_hour_cents": 2000, "block_gap_minutes": 30.5, "min_evidence_days": 2, "target_revenue_cents": 500000, "history_months": [202608, 202609]}'::jsonb
+        ) IS NOT NULL THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 14: the summary helper refuses a summary of the allowed shape';
+  END IF;
+  FOR v_wrong IN
+    SELECT unnest(ARRAY['{"driver_id": "d1"}', '{"rides": []}', '{"note": "free text"}',
+                        '{"shift_count": "3"}', '{"shift_count": null}', '{"shift_count": true}',
+                        '{"shift_count": -1}', '{"shift_count": [3]}', '{"min_shift_minutes": {"a": 1}}',
+                        '{"total_minutes": 1000000000000001}',
+                        '{"history_months": [{"year": 2026, "month": 8}]}', '{"history_months": ["202608"]}',
+                        '{"history_months": [202613]}', '{"history_months": [202600]}',
+                        '{"history_months": [202608.5]}', '{"history_months": 202608}',
+                        '{"history_months": null}', '[]', '"x"', 'null'])
+  LOOP
+    IF app_private.vehicle_day_plan_summary_problem(v_wrong::jsonb) IS NULL THEN
+      RAISE EXCEPTION 'vehicle day plans self-check 14: the summary helper admits %', v_wrong;
+    END IF;
+  END LOOP;
+  IF app_private.vehicle_day_plan_summary_problem(NULL) IS NULL
+     OR app_private.vehicle_day_plan_summary_problem(
+          (SELECT jsonb_build_object('history_months', jsonb_agg(202608)) FROM generate_series(1, 241))) IS NULL THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 14: the summary helper admits a NULL summary or a history of 241 months';
+  END IF;
+  -- The guard asks the helper in both places, each as `ask, then refuse by the
+  -- hint`: once at the end of the INSERT branch, once for an edit that changes
+  -- the summary.
+  v_src := app_private.function_code('app_private.vehicle_day_plan_guard()');
+  IF v_src !~ 'NEW\.updated_at\s*:=\s*now\(\);\s*v_problem\s*:=\s*app_private\.vehicle_day_plan_summary_problem\(NEW\.summary\);\s*IF\s+v_problem\s+IS\s+NOT\s+NULL\s+THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_plan_summary_invalid'
+     OR v_src !~ 'IF\s+NEW\.summary\s+IS\s+DISTINCT\s+FROM\s+OLD\.summary\s+THEN\s+v_problem\s*:=\s*app_private\.vehicle_day_plan_summary_problem\(NEW\.summary\);\s*IF\s+v_problem\s+IS\s+NOT\s+NULL\s+THEN\s+RAISE\s+EXCEPTION[^;]*vehicle_day_plan_summary_invalid' THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 14: the plan guard no longer applies the summary rule to inserts and edits';
+  END IF;
+  v_src := app_private.function_code('public.vehicle_day_plan_save(jsonb)');
+  IF v_src !~ 'app_private\.vehicle_day_plan_summary_problem\(v_summary\)'
+     OR v_src !~ 'jsonb_typeof\(p_payload\s*->\s*''algorithm_version''\)\s*<>\s*''string'''
+     OR v_src !~ 'jsonb_typeof\(kv\.value\)\s*<>\s*c_shift_shape\s*->>\s*kv\.key' THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 14: the save RPC no longer applies the summary rule or the JSON type checks';
+  END IF;
+
+  -- 15. Two properties a one-session kit cannot see, kept in the source because
+  --     the behaviour needs a second session (tests/rls/vehicle-day-plans-
+  --     concurrency.sql) or a table the planner has stale figures for.
+  --     (a) A shift write reads its plan FOR KEY SHARE, which conflicts with the
+  --         FOR UPDATE confirm takes on that row.
+  --     (b) The overlap check is one pass over the plan's shifts, not a join of
+  --         the table with itself.
+  v_src := app_private.function_code('app_private.vehicle_day_plan_parent_is_open(uuid,uuid)');
+  IF v_src !~ 'FROM\s+public\.vehicle_day_plans\s+p\s+WHERE\s+p\.id\s*=\s*p_plan_id\s+FOR\s+KEY\s+SHARE\s*;' THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 15: parent_is_open no longer reads the plan FOR KEY SHARE';
+  END IF;
+  v_src := app_private.function_code('public.vehicle_day_plan_confirm(uuid,boolean)');
+  IF v_src !~ 'WHERE\s+p\.id\s*=\s*p_plan_id\s+FOR\s+UPDATE\s*;'
+     OR v_src !~ 'PARTITION\s+BY\s+s\.vehicle'
+     OR v_src !~ 'ROWS\s+BETWEEN\s+UNBOUNDED\s+PRECEDING\s+AND\s+1\s+PRECEDING'
+     OR v_src ~* 'JOIN\s+public\.vehicle_day_shifts' THEN
+    RAISE EXCEPTION 'vehicle day plans self-check 15: vehicle_day_plan_confirm lost its FOR UPDATE on the plan or its single-pass overlap check';
   END IF;
 
   RAISE NOTICE 'vehicle day plans self-check: passed';

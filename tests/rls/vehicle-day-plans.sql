@@ -46,13 +46,14 @@
                     one shape (SELECT is the tenant term or the read seam, no role
                     term; every write repeats one predicate as USING and WITH
                     CHECK plus the Dokumente page), both context triggers, the
-                    guard, privileges, the five functions, and a closed list of
+                    guard, privileges, the six functions, and a closed list of
                     columns
     2. the rules    rule 1: the hour, the slot length and the algorithm version
                     are NOT NULL with no default; rule 2: nothing named like a
                     driver, and a payload key the RPC does not know is refused by
                     name; rule 3: no foreign key to the trips or the drivers and
-                    no ride, address or fare key
+                    no ride, address or fare key; the summary, the JSON types of
+                    a shift and the version are closed too (8b)
     3. the hour     the stored hour is the reading: the same positions are 10:00
                     to 13:00 under hour 4 and 06:00 to 09:00 under hour 0, an
                     overnight shift and the end of the day are stored verbatim, a
@@ -75,11 +76,27 @@
    11. deletion     a company holding a confirmed and a superseded plan can still
                     be deleted (the defect 20261016140000 fixed for the monthly
                     plan), while the same delete of one plan is refused
-   12. mutations    ten controls: break one rule inside a subtransaction, require
-                    the probe to notice, and let the rollback restore it
+   7b. overlap      the one-pass check against the comparison of every pair, on
+                    60 plans and by hand; 12b: a month of 3100 shifts under a
+                    statement timeout
+   8b. rule 2       the summary is a closed object of numbers, a shift field has
+                    the JSON type it is stored as, the version is a token --
+                    through the RPC and through a direct write
+   12. mutations    fourteen controls: break one rule inside a subtransaction,
+                    require the probe to notice, and let the rollback restore it
 
   The matrix lines for both tables, and the EXECUTE grants of both RPCs, are in
-  tests/rls/matrix.sql.
+  tests/rls/matrix.sql. What one session cannot show -- a shift written while a
+  confirmation is open, in either order -- is tests/rls/vehicle-day-plans-
+  concurrency.sql, which opens two sessions through dblink.
+
+  Two controls are not in this file because what they measure is the planner's
+  and not the schema's. The one-pass overlap check (7b, 12b) was compared with
+  the self-join it replaced by running this file against both on PostgreSQL 16.6:
+  the join passed 7b, being correct, and failed 12b with a cancelled statement; the
+  pass passed both. The migration's own self-check (section 8) was run against
+  fifteen deliberately broken copies of the migration and refused each by the
+  check meant for it.
 */
 
 \set ON_ERROR_STOP on
@@ -508,17 +525,18 @@ BEGIN
       NOT has_schema_privilege(v_role, 'app_private', 'USAGE'));
   END LOOP;
 
-  -- The three guards: SECURITY DEFINER, a pinned search_path, executable by no
-  -- API role. A SECURITY INVOKER function here would be 42501 for every company
-  -- administrator, which is PR #117's defect.
+  -- The two guards and the two helpers: SECURITY DEFINER, a search_path pinned
+  -- with pg_catalog first, executable by no API role. A SECURITY INVOKER function
+  -- here would be 42501 for every company administrator, which is PR #117's defect.
   FOREACH v_sig IN ARRAY ARRAY['app_private.vehicle_day_plan_guard()',
                                'app_private.vehicle_day_shift_guard()',
-                               'app_private.vehicle_day_plan_parent_is_open(uuid,uuid)'] LOOP
+                               'app_private.vehicle_day_plan_parent_is_open(uuid,uuid)',
+                               'app_private.vehicle_day_plan_summary_problem(jsonb)'] LOOP
     PERFORM _vd_ok(format('shape: %s is SECURITY DEFINER with a pinned search_path', v_sig),
       to_regprocedure(v_sig) IS NOT NULL
       AND (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig))
       AND EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c(setting)
-                   WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=%'));
+                   WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=pg_catalog,%'));
     PERFORM _vd_ok(format('privileges: no API role can execute %s', v_sig),
       NOT has_function_privilege('anon', to_regprocedure(v_sig), 'EXECUTE')
       AND NOT has_function_privilege('authenticated', to_regprocedure(v_sig), 'EXECUTE')
@@ -533,17 +551,17 @@ BEGIN
       to_regprocedure(v_sig) IS NOT NULL
       AND (SELECT p.prosecdef AND p.provolatile = 'v' FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig))
       AND EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c(setting)
-                   WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=%'));
+                   WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=pg_catalog,%'));
     PERFORM _vd_ok(format('privileges: %s is authenticated''s alone', v_sig),
       has_function_privilege('authenticated', to_regprocedure(v_sig), 'EXECUTE')
       AND NOT has_function_privilege('anon', to_regprocedure(v_sig), 'EXECUTE')
       AND NOT has_function_privilege('service_role', to_regprocedure(v_sig), 'EXECUTE'));
+    -- Read with the comments removed, so a gate that survives only as a comment is not one.
     PERFORM _vd_ok(format('shape: %s asks the state helper, the Dokumente page and takes the month''s lock', v_sig),
-      (SELECT p.prosrc ~ 'get_active_company_id'
-              AND p.prosrc ~ 'current_role_permits\(''documents'', true\)'
-              AND p.prosrc ~ 'not_authorized'
-              AND p.prosrc ~ 'pg_advisory_xact_lock'
-         FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig)));
+      (SELECT f.code ~ 'get_active_company_id'
+              AND f.code ~ 'IF\s+NOT\s+public\.current_role_permits\(''documents'',\s*true\)\s+THEN\s+RAISE\s+EXCEPTION[^;]*not_authorized'
+              AND f.code ~ 'pg_advisory_xact_lock'
+         FROM (SELECT app_private.function_code(v_sig) AS code) f));
   END LOOP;
 
   -- A closed list of columns. A new column is a deliberate edit of this line, and
@@ -616,16 +634,16 @@ BEGIN
                  AND c.conrelid IN ('public.vehicle_day_plans'::regclass, 'public.vehicle_day_shifts'::regclass)
                  AND c.confrelid IN (to_regclass('public.fahrtenbuch_trips'), to_regclass('public.drivers'))),
              '<none>'));
-  PERFORM _vd_expect('rule 3: none of the five functions names the trips or the drivers',
+  PERFORM _vd_expect('rule 3: none of the six functions names the trips or the drivers',
     '<none>',
     coalesce((SELECT string_agg(f.sig, ', ')
                 FROM unnest(ARRAY['app_private.vehicle_day_plan_guard()',
                                   'app_private.vehicle_day_shift_guard()',
                                   'app_private.vehicle_day_plan_parent_is_open(uuid,uuid)',
+                                  'app_private.vehicle_day_plan_summary_problem(jsonb)',
                                   'public.vehicle_day_plan_save(jsonb)',
                                   'public.vehicle_day_plan_confirm(uuid,boolean)']) AS f(sig)
-               WHERE (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(f.sig))
-                       ~* 'fahrtenbuch_trips|\mdrivers\M'),
+               WHERE app_private.function_code(f.sig) ~* 'fahrtenbuch_trips|\mdrivers\M'),
              '<none>'));
   PERFORM _vd_ok('rule 3: fahrtenbuch_trips still has no UPDATE policy, which a plan that "applied" would have needed',
     NOT EXISTS (SELECT 1 FROM pg_policies p
@@ -825,7 +843,7 @@ BEGIN
     '4', (SELECT operating_day_start_hour::text FROM vehicle_day_plans WHERE id = v_plan));
   PERFORM _vd_expect('hour: the same update of a field that may change is accepted (the control)',
     'rows 1',
-    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = summary || ''{"note": "x"}''::jsonb WHERE id = %L', v_plan)));
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = summary || ''{"min_shift_minutes": 180}''::jsonb WHERE id = %L', v_plan)));
 END $$;
 
 -- 3f. The two nights a year the clocks change. A shift is stored as wall-clock
@@ -1302,6 +1320,150 @@ BEGIN
     (SELECT generation::text FROM vehicle_day_plans WHERE id = (v_res ->> 'plan_id')::uuid));
 END $$;
 
+-- ─── 7b. the overlap check is one pass, and it answers what every pair answers ──
+--
+-- vehicle_day_plan_confirm used to join the plan's shifts with themselves. A
+-- reviewer measured that at 3 to 11 seconds for a month of 3100 shifts saved a
+-- moment before, when the planner's figures did not know the plan yet (the API
+-- roles stop a statement at 8). It is now one pass in start order. The old query
+-- is written out below as the ORACLE, and sixty plans are built from md5 -- so
+-- the same plans come out on every PostgreSQL -- and confirmed through the real
+-- function: it must say "overlap" exactly when the oracle counts a pair. The
+-- month of 3100 shifts, and the statement timeout, are section 12b.
+
+/* One plan, a pure function of p_case, built as the owner in a subtransaction
+   that is always rolled back. The mix is the point: the slot length decides how
+   crowded a day is (a 60-minute slot gives 24 positions, a 15-minute slot 96), the
+   number of vehicles and days and shifts a day vary with the case, and a day
+   with a single shift cannot overlap. Returns '<pairs that overlap>|<answer>'. */
+CREATE OR REPLACE FUNCTION _vd_overlap_case(p_case integer) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  c_co      CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  c_admin   CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_plan    uuid := gen_random_uuid();
+  v_hour    integer := (ARRAY[4, 0, 22, 4])[1 + p_case % 4];
+  v_slot    integer := (ARRAY[60, 30, 15, 60, 30, 15])[1 + p_case % 6];
+  v_vehicles integer := 1 + (p_case / 4) % 4;
+  v_days    integer := 1 + (p_case / 2) % 3;
+  v_most    integer := 1 + (p_case / 3) % 4;
+  v_pos     integer;
+  v_bytes   bytea;
+  v_k       integer;
+  v_start   integer;
+  v_len     integer;
+  v_pairs   bigint;
+  v_res     jsonb;
+  v_out     text;
+BEGIN
+  v_pos := 1440 / v_slot;
+  BEGIN
+    PERFORM _vd_reset();
+    INSERT INTO vehicle_day_plans (id, company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version)
+    VALUES (v_plan, c_co, 2060, 3, v_hour, v_slot, 'v');
+    FOR v IN 1..v_vehicles LOOP
+      FOR d IN 1..v_days LOOP
+        v_bytes := decode(md5(p_case || ':' || v || ':' || d), 'hex');
+        v_k := 1 + get_byte(v_bytes, 0) % v_most;
+        FOR i IN 0..v_k - 1 LOOP
+          v_bytes := decode(md5(p_case || ':' || v || ':' || d || ':' || i), 'hex');
+          v_start := get_byte(v_bytes, 0) % (v_pos - 1);
+          v_len := 1 + get_byte(v_bytes, 1) % least(8, v_pos - v_start);
+          PERFORM _vd_put_shift(c_co, v_plan, DATE '2060-03-01' + (d - 1), 'VD-R' || v, i,
+                                v_start, v_start + v_len, v_hour, v_slot);
+        END LOOP;
+      END LOOP;
+    END LOOP;
+
+    -- The oracle: every pair of one vehicle's shifts, half-open, counted once.
+    SELECT count(*) INTO v_pairs
+      FROM vehicle_day_shifts a
+      JOIN vehicle_day_shifts b ON b.plan_id = a.plan_id AND b.vehicle = a.vehicle AND b.id > a.id
+     WHERE a.plan_id = v_plan
+       AND tsrange(a.starts_local, a.ends_local, '[)') && tsrange(b.starts_local, b.ends_local, '[)');
+
+    PERFORM _vd_as(c_admin);
+    v_res := public.vehicle_day_plan_confirm(v_plan);
+    PERFORM _vd_reset();
+    RAISE EXCEPTION USING ERRCODE = 'ZZ051',
+      MESSAGE = v_pairs || '|' || coalesce(v_res ->> 'reason', 'confirmed');
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ051' THEN
+      v_out := SQLERRM;
+  END;
+  PERFORM _vd_reset();
+  RETURN v_out;
+END $$;
+
+DO $$
+DECLARE
+  v_case    integer;
+  v_got     text;
+  v_pairs   bigint;
+  v_wrong   text := '';
+  v_overlap integer := 0;
+  v_clean   integer := 0;
+BEGIN
+  FOR v_case IN 0..59 LOOP
+    v_got := _vd_overlap_case(v_case);
+    v_pairs := split_part(v_got, '|', 1)::bigint;
+    IF v_pairs > 0 THEN v_overlap := v_overlap + 1; ELSE v_clean := v_clean + 1; END IF;
+    IF split_part(v_got, '|', 2) IS DISTINCT FROM (CASE WHEN v_pairs > 0 THEN 'vehicle_overlap' ELSE 'confirmed' END) THEN
+      v_wrong := v_wrong || format(' case %s [%s]', v_case, v_got);
+    END IF;
+  END LOOP;
+  PERFORM _vd_expect('overlap: on 60 plans the one-pass check says "overlap" exactly when a pair overlaps',
+    '<none>', coalesce(nullif(v_wrong, ''), '<none>'));
+  PERFORM _vd_ok(format('overlap: …and the 60 plans held both answers (%s with an overlap, %s clean)', v_overlap, v_clean),
+    v_overlap >= 10 AND v_clean >= 10);
+END $$;
+
+-- The edges by hand, on one vehicle, through the same function: touching is not
+-- overlapping, containment and identical windows are, and so is a shift that
+-- begins inside one that began earlier on the same start.
+DO $$
+DECLARE
+  c_admin CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  c_co    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_plan  uuid;
+  v_rec   record;
+  v_res   jsonb;
+  v_out   text;
+BEGIN
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('a shift that ends when the next begins',            ARRAY[24, 36, 36, 48],             'ok'),
+      ('a shift that begins one slot before the other ends', ARRAY[24, 36, 35, 48],             'vehicle_overlap'),
+      ('identical windows',                                  ARRAY[24, 36, 24, 36],             'vehicle_overlap'),
+      ('one inside the other',                               ARRAY[24, 60, 30, 36],             'vehicle_overlap'),
+      ('two with one start and different ends',              ARRAY[24, 36, 24, 30],             'vehicle_overlap'),
+      ('the later one listed first',                         ARRAY[40, 48, 24, 41],             'vehicle_overlap'),
+      ('a gap between them',                                 ARRAY[24, 36, 37, 48],             'ok')
+    ) AS t(what, pos, expected)
+  LOOP
+    BEGIN
+      PERFORM _vd_reset();
+      v_plan := gen_random_uuid();
+      INSERT INTO vehicle_day_plans (id, company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version)
+      VALUES (v_plan, c_co, 2060, 4, 4, 15, 'v');
+      PERFORM _vd_put_shift(c_co, v_plan, DATE '2060-04-05', 'VD-E', 0, v_rec.pos[1], v_rec.pos[2], 4);
+      PERFORM _vd_put_shift(c_co, v_plan, DATE '2060-04-05', 'VD-E', 1, v_rec.pos[3], v_rec.pos[4], 4);
+      -- another vehicle at the same hour overlaps nothing
+      PERFORM _vd_put_shift(c_co, v_plan, DATE '2060-04-05', 'VD-F', 0, v_rec.pos[1], v_rec.pos[2], 4);
+      PERFORM _vd_as(c_admin);
+      v_res := public.vehicle_day_plan_confirm(v_plan);
+      v_out := CASE WHEN (v_res ->> 'success')::boolean THEN 'ok' ELSE v_res ->> 'reason' END;
+      PERFORM _vd_reset();
+      RAISE EXCEPTION USING ERRCODE = 'ZZ052', MESSAGE = v_out;
+    EXCEPTION
+      WHEN SQLSTATE 'ZZ052' THEN
+        v_out := SQLERRM;
+    END;
+    PERFORM _vd_reset();
+    PERFORM _vd_expect('overlap: ' || v_rec.what, v_rec.expected, v_out);
+  END LOOP;
+END $$;
+
 -- ─── 8. what the save refuses, and what it computes ─────────────────────────
 
 DO $$
@@ -1313,7 +1475,6 @@ DECLARE
   v_out   text;
   v_hint  text;
   v_rec   record;
-  v_big   text;
 BEGIN
   -- 8a. A new save replaces the month's draft rather than adding a second.
   PERFORM _vd_as(c_admin);
@@ -1324,14 +1485,14 @@ BEGIN
   PERFORM _vd_expect('save: the first save of a month discards nothing', '0', v_res ->> 'discarded_drafts');
 
   -- 8b. Three shifts, two vehicles, two operating days. The client lies about the
-  -- totals and keeps a note of its own; the database writes the totals itself.
+  -- totals and sends settings of its own; the database writes the totals itself.
   PERFORM _vd_as(c_admin);
   v_res := public.vehicle_day_plan_save(
     _vd_payload(2027, 9, 4, 15, jsonb_build_array(
       _vd_shift(DATE '2027-09-06', 'VD-S', 0, 24, 36, 4, 15, 12345),
       _vd_shift(DATE '2027-09-07', 'VD-S', 0, 24, 40, 4, 15, 12345),
       _vd_shift(DATE '2027-09-06', 'VD-T', 0, 24, 36, 4, 15, 12345)))
-    || '{"summary": {"shift_count": 999, "total_minutes": -1, "note": "kept", "history_months": [{"year": 2027, "month": 7}]}}'::jsonb);
+    || '{"summary": {"shift_count": 999, "total_minutes": 1, "min_shift_minutes": 180, "history_months": [202707]}}'::jsonb);
   PERFORM _vd_reset();
   PERFORM _vd_expect('save: a second save of the month discards the earlier draft and says so', '1',
     v_res ->> 'discarded_drafts');
@@ -1343,8 +1504,8 @@ BEGIN
     (SELECT concat_ws('|', summary ->> 'shift_count', summary ->> 'vehicle_count', summary ->> 'operating_day_count',
                       summary ->> 'total_minutes', summary ->> 'expected_revenue_cents')
        FROM vehicle_day_plans WHERE id = (v_res ->> 'plan_id')::uuid));
-  PERFORM _vd_expect('save: …and keeps the client''s own provenance beside them', 'kept|2027',
-    (SELECT (summary ->> 'note') || '|' || (summary -> 'history_months' -> 0 ->> 'year')
+  PERFORM _vd_expect('save: …and keeps the client''s own settings beside them', '180|202707',
+    (SELECT (summary ->> 'min_shift_minutes') || '|' || (summary -> 'history_months' ->> 0)
        FROM vehicle_day_plans WHERE id = (v_res ->> 'plan_id')::uuid));
   v_first := (v_res ->> 'plan_id')::uuid;
 
@@ -1398,11 +1559,7 @@ BEGIN
   END LOOP;
   PERFORM _vd_expect('save: NULL is not an object either', 'ERR 22023 vehicle_day_plan_save: p_payload must be a JSON object',
     _vd_try(c_admin, NULL, 'SELECT public.vehicle_day_plan_save(NULL)::text'));
-  v_big := '{"year": 2027, "month": 1, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v", "shifts": [], "summary": {"x": "'
-           || repeat('a', 17000) || '"}}';
-  PERFORM _vd_expect('save: a summary of 17,000 bytes is not a place to keep a document',
-    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_summary_small"',
-    _vd_try(c_admin, NULL, format('SELECT public.vehicle_day_plan_save(%L::jsonb)::text', v_big)));
+  -- A summary is not a place to keep a document or a driver: section 8b.
 
   -- 8e. One shift at a time. Thursday 2027-09-02 is day type 3; Wednesday 2027-09-01 is 2.
   FOR v_rec IN
@@ -1454,6 +1611,184 @@ BEGIN
         _vd_shift(DATE '2027-09-02', 'VD-S', 0, 24, 36, 4), _vd_shift(DATE '2027-09-02', 'VD-S', 0, 40, 48, 4)))::text)));
 END $$;
 
+
+-- ─── 8b. rule 2 at the other doors: the summary, the JSON types, the version ─
+--
+-- A column is not the only place a driver, a ride or an address can be put, and
+-- the reviewer of this migration showed three others: the summary was accepted
+-- verbatim up to its size, jsonb_to_recordset turned any JSON value into the text
+-- of a vehicle, and algorithm_version was any 100 characters. Each is closed, and
+-- each refusal is asserted by the text it is refused with.
+
+DO $$
+DECLARE
+  c_admin CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  c_co    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_head  CONSTANT text := '"year": 2027, "month": 10, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "v"';
+  v_full  CONSTANT text := '{"shift_count": 3, "vehicle_count": 1, "operating_day_count": 2, "total_minutes": 540, "expected_revenue_cents": 12345, "min_shift_minutes": 180, "max_shift_minutes": 285, "min_break_minutes": 30, "max_shifts_per_vehicle_per_day": 2, "min_revenue_per_hour_cents": 2000, "block_gap_minutes": 30.5, "min_evidence_days": 2, "target_revenue_cents": 500000, "history_months": [202608, 202609]}';
+  v_240   text := (SELECT jsonb_build_object('history_months', jsonb_agg(202608))::text FROM generate_series(1, 240));
+  v_241   text := (SELECT jsonb_build_object('history_months', jsonb_agg(202608))::text FROM generate_series(1, 241));
+  v_rec   record;
+BEGIN
+  -- 8b-1. The helper itself, on literals: the one definition of what may stand in a summary.
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('an empty summary',                          '{}',                                              '<none>'),
+      ('every key, with a decimal block gap',       v_full,                                            '<none>'),
+      ('zero is a number',                          '{"shift_count": 0}',                              '<none>'),
+      ('the ceiling, 10^15',                        '{"total_minutes": 1000000000000000}',             '<none>'),
+      ('an empty history',                          '{"history_months": []}',                          '<none>'),
+      ('the first and the last month allowed',      '{"history_months": [200001, 210012]}',            '<none>'),
+      ('240 months',                                v_240,                                             '<none>'),
+      ('a driver id',                               '{"driver_id": "d1"}',                             'unknown key(s): driver_id'),
+      ('several keys, sorted',                      '{"rides": [], "driver_name": "x", "shift_count": 1}', 'unknown key(s): driver_name, rides'),
+      ('a note',                                    '{"note": "free text"}',                           'unknown key(s): note'),
+      ('a key spelled with a capital',              '{"Shift_Count": 1}',                              'unknown key(s): Shift_Count'),
+      ('a string where a number belongs',           '{"shift_count": "3"}',                            'not a number from 0 to 10^15: shift_count'),
+      ('a null',                                    '{"shift_count": null}',                           'not a number from 0 to 10^15: shift_count'),
+      ('a boolean',                                 '{"shift_count": true}',                           'not a number from 0 to 10^15: shift_count'),
+      ('a negative number',                         '{"total_minutes": -1}',                           'not a number from 0 to 10^15: total_minutes'),
+      ('a number past the ceiling',                 '{"total_minutes": 1000000000000001}',             'not a number from 0 to 10^15: total_minutes'),
+      ('a list where a number belongs',             '{"shift_count": [3]}',                            'not a number from 0 to 10^15: shift_count'),
+      ('an object where a number belongs',          '{"min_shift_minutes": {"a": 1}}',                 'not a number from 0 to 10^15: min_shift_minutes'),
+      ('two wrong values, both named',              '{"shift_count": "x", "total_minutes": "y"}',      'not a number from 0 to 10^15: shift_count, total_minutes'),
+      ('months as objects',                         '{"history_months": [{"year": 2026, "month": 8}]}', 'history_months holds something that is not a YYYYMM month'),
+      ('a month as a string',                       '{"history_months": ["202608"]}',                  'history_months holds something that is not a YYYYMM month'),
+      ('month 13',                                  '{"history_months": [202613]}',                    'history_months holds something that is not a YYYYMM month'),
+      ('month 00',                                  '{"history_months": [202600]}',                    'history_months holds something that is not a YYYYMM month'),
+      ('a fractional month',                        '{"history_months": [202608.5]}',                  'history_months holds something that is not a YYYYMM month'),
+      ('a year before 2000',                        '{"history_months": [199912]}',                    'history_months holds something that is not a YYYYMM month'),
+      ('a year after 2100',                         '{"history_months": [210101]}',                    'history_months holds something that is not a YYYYMM month'),
+      ('a null among the months',                   '{"history_months": [202608, null]}',              'history_months holds something that is not a YYYYMM month'),
+      ('a history that is not a list',              '{"history_months": 202608}',                      'history_months is not a list of at most 240 months'),
+      ('a history that is null',                    '{"history_months": null}',                        'history_months is not a list of at most 240 months'),
+      ('241 months',                                v_241,                                             'history_months is not a list of at most 240 months'),
+      ('a summary that is a list',                  '[]',                                              'the summary is not an object'),
+      ('a summary that is a string',                '"x"',                                             'the summary is not an object'),
+      ('a summary that is JSON null',               'null',                                            'the summary is not an object')
+    ) AS t(what, summary, expected)
+  LOOP
+    PERFORM _vd_expect('summary: ' || v_rec.what, v_rec.expected,
+      coalesce(app_private.vehicle_day_plan_summary_problem(v_rec.summary::jsonb), '<none>'));
+  END LOOP;
+  PERFORM _vd_expect('summary: a SQL NULL is not a summary either', 'the summary is not an object',
+    app_private.vehicle_day_plan_summary_problem(NULL));
+
+  -- 8b-2. Through the save RPC: refused before anything is touched, with 22023 and the problem named.
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('a summary with a driver id',         '{"driver_id": "d1", "shift_count": 1}', 'ERR 22023 vehicle_day_plan_save: summary: unknown key(s): driver_id'),
+      ('a summary with a list of rides',     '{"rides": [{"from": "Hauptstr 1", "fare": 12.5}]}', 'ERR 22023 vehicle_day_plan_save: summary: unknown key(s): rides'),
+      ('a summary with a note',              '{"note": "kept"}',                      'ERR 22023 vehicle_day_plan_save: summary: unknown key(s): note'),
+      ('a summary whose value is text',      '{"min_shift_minutes": "Max Mustermann"}', 'ERR 22023 vehicle_day_plan_save: summary: not a number from 0 to 10^15: min_shift_minutes'),
+      ('a summary whose value is an object', '{"block_gap_minutes": {"driver": "x"}}', 'ERR 22023 vehicle_day_plan_save: summary: not a number from 0 to 10^15: block_gap_minutes'),
+      ('months as objects',                  '{"history_months": [{"year": 2027, "month": 7}]}', 'ERR 22023 vehicle_day_plan_save: summary: history_months holds something that is not a YYYYMM month'),
+      ('a summary of 17,000 bytes of text',  ('{"x": "' || repeat('a', 17000) || '"}'), 'ERR 22023 vehicle_day_plan_save: summary: unknown key(s): x'),
+      ('the full summary, which is allowed', v_full,                                  'true')
+    ) AS t(what, summary, expected)
+  LOOP
+    PERFORM _vd_expect('save: ' || v_rec.what, v_rec.expected,
+      _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+        '{' || v_head || ', "summary": ' || v_rec.summary || ', "shifts": []}')));
+  END LOOP;
+
+  -- 8b-3. A field of a shift must arrive as the type it is stored as.
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('a vehicle that is an object',   '{"vehicle": {"driver": "Max Mustermann", "fare": 12}}', 'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: vehicle (expected string, got object)'),
+      ('a vehicle that is a list',      '{"vehicle": ["a", "b"]}',                'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: vehicle (expected string, got array)'),
+      ('a vehicle that is a number',    '{"vehicle": 12345}',                     'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: vehicle (expected string, got number)'),
+      ('a vehicle that is null',        '{"vehicle": null}',                      'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: vehicle (expected string, got null)'),
+      ('a holiday flag that is text',   '{"is_holiday": "false"}',                'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: is_holiday (expected boolean, got string)'),
+      ('minutes that are text',         '{"minutes": "180"}',                     'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: minutes (expected number, got string)'),
+      ('a confidence that is a number', '{"confidence": 1}',                      'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: confidence (expected string, got number)'),
+      ('a date that is a number',       '{"operating_date": 20271001}',           'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: operating_date (expected string, got number)'),
+      ('two fields at once, sorted',    '{"vehicle": {"a": 1}, "is_holiday": 0}', 'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: is_holiday (expected boolean, got number), vehicle (expected string, got object)')
+    ) AS t(what, override, expected)
+  LOOP
+    PERFORM _vd_expect('save: ' || v_rec.what, v_rec.expected,
+      _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+        _vd_payload(2027, 10, 4, 15, jsonb_build_array(
+          _vd_shift(DATE '2027-10-01', 'VD-T', 0, 24, 36, 4) || v_rec.override::jsonb))::text)));
+  END LOOP;
+
+  -- 8b-4. The version is a token, and a string.
+  FOR v_rec IN
+    SELECT * FROM (VALUES
+      ('an algorithm_version that is an object',  '{"driver": "x"}', 'ERR 22023 vehicle_day_plan_save: algorithm_version must be a JSON string'),
+      ('an algorithm_version that is a number',   '5',               'ERR 22023 vehicle_day_plan_save: algorithm_version must be a JSON string'),
+      ('an algorithm_version that is a list',     '["v"]',           'ERR 22023 vehicle_day_plan_save: algorithm_version must be a JSON string'),
+      ('an algorithm_version that is null',       'null',            'ERR 22023 vehicle_day_plan_save: year, month, operating_day_start_hour, slot_minutes and algorithm_version are required'),
+      ('an algorithm_version that is a sentence', '"driver Max Mustermann"',
+         'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token"'),
+      ('an algorithm_version that starts with a dash', '"-v"',
+         'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token"'),
+      ('an algorithm_version of 101 characters',  ('"' || repeat('a', 101) || '"'),
+         'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token"'),
+      ('an algorithm_version of 100 characters',  ('"' || repeat('a', 100) || '"'), 'true'),
+      ('the engine''s own version',                '"shift-recommendation/1.0.0"',   'true')
+    ) AS t(what, version, expected)
+  LOOP
+    PERFORM _vd_expect('save: ' || v_rec.what, v_rec.expected,
+      _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+        '{"year": 2027, "month": 10, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": '
+        || v_rec.version || ', "shifts": []}')));
+  END LOOP;
+END $$;
+
+-- 8b-5. The same rule for a write that never meets the RPC: a direct INSERT or
+-- UPDATE of a draft meets the plan guard, which names the summary rule by its own
+-- hint; a CHECK refuses the version; the size limit stands behind the guard.
+DO $$
+DECLARE
+  c_admin CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  c_co    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_ins   CONSTANT text := 'INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version, summary) VALUES (%L, 2062, %s, 4, 15, %L, %L)';
+  v_draft CONSTANT uuid := _vd_id('plan:a-draft');
+  v_big   text := '{"x": "' || repeat('a', 17000) || '"}';
+BEGIN
+  PERFORM _vd_expect('direct: a plan with a driver in its summary is refused by the guard', 'ERR P0001 vehicle_day_plan_summary_invalid',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 1, 'v', '{"driver_id": "x"}')));
+  PERFORM _vd_expect('direct: …so is a text where a number belongs', 'ERR P0001 vehicle_day_plan_summary_invalid',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 2, 'v', '{"shift_count": "Max Mustermann"}')));
+  PERFORM _vd_expect('direct: …and a nested list of rides', 'ERR P0001 vehicle_day_plan_summary_invalid',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 3, 'v', '{"history_months": [{"from": "Hauptstr 1"}]}')));
+  PERFORM _vd_expect('direct: …and 17,000 bytes of text (the key is unknown first)', 'ERR P0001 vehicle_day_plan_summary_invalid',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 4, 'v', v_big)));
+  PERFORM _vd_expect('direct: a summary of the allowed shape is stored (the control)', 'rows 1',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 5, 'v', '{"shift_count": 0, "history_months": [202601]}')));
+  PERFORM _vd_expect('direct: a plan without a summary gets the empty object (the control)', 'rows 1',
+    _vd_try(c_admin, NULL, format('INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version) VALUES (%L, 2062, 6, 4, 15, ''v'')', c_co)));
+
+  PERFORM _vd_expect('direct: a draft''s summary cannot be edited into one that names a driver', 'ERR P0001 vehicle_day_plan_summary_invalid',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = summary || ''{"driver_id": "x"}''::jsonb WHERE id = %L', v_draft)));
+  PERFORM _vd_expect('direct: …nor into text where a number belongs', 'ERR P0001 vehicle_day_plan_summary_invalid',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = ''{"shift_count": "x"}'' WHERE id = %L', v_draft)));
+  PERFORM _vd_expect('direct: …but it can be edited into one of the allowed shape (the control)', 'rows 1',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = ''{"shift_count": 7}'' WHERE id = %L', v_draft)));
+  PERFORM _vd_expect('direct: an update that leaves the summary alone is not asked about it', 'rows 1',
+    _vd_try(c_admin, NULL, format('UPDATE vehicle_day_plans SET summary = summary WHERE id = %L', v_draft)));
+
+  PERFORM _vd_expect('direct: an algorithm_version that is a sentence is refused by name',
+    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token"',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 7, 'driver Max Mustermann', '{}')));
+  PERFORM _vd_expect('direct: …and an empty one',
+    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token"',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 8, '', '{}')));
+  PERFORM _vd_expect('direct: …and one with a line break',
+    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token"',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 9, E'v\nx', '{}')));
+  PERFORM _vd_expect('direct: …a token with every character it may carry is accepted', 'rows 1',
+    _vd_try(c_admin, NULL, format(v_ins, c_co, 10, 'a-Z_0.9/+:b', '{}')));
+
+  -- With the guard off, the 16 KiB limit is what is left: a text that size is
+  -- refused by its own constraint, and a driver in the summary is no longer.
+  PERFORM _vd_expect('direct: with the guard off, 17,000 bytes are still refused, by the size limit',
+    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_summary_small"',
+    _vd_mutant('ALTER TABLE vehicle_day_plans DISABLE TRIGGER vehicle_day_plan_guard', c_admin, NULL, format(v_ins, c_co, 11, 'v', v_big)));
+  PERFORM _vd_expect('direct: …and with the guard off a driver in the summary is stored (which is why the guard is the rule)', 'rows 1',
+    _vd_mutant('ALTER TABLE vehicle_day_plans DISABLE TRIGGER vehicle_day_plan_guard', c_admin, NULL, format(v_ins, c_co, 12, 'v', '{"driver_id": "x"}')));
+END $$;
 
 -- ─── 9. company and account state ───────────────────────────────────────────
 
@@ -1803,7 +2138,7 @@ BEGIN
   v_probe := format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
     '{' || v_head || ', "shifts": [{' || v_shift || ', "starts_local": "2027-04-01T10:00", "ends_local": "2027-04-01T13:00", "driver_id": "x"}]}');
   v_before := _vd_try(c_admin, NULL, v_probe);
-  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('public.vehicle_day_plan_save(jsonb)', 'WHERE k.key <> ALL (c_shift_keys)', 'WHERE false')$m$, c_admin, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('public.vehicle_day_plan_save(jsonb)', 'WHERE NOT (c_shift_shape ? k.key)', 'WHERE false')$m$, c_admin, NULL, v_probe);
   PERFORM _vd_expect('mutation M9: with the key list opened a shift that names a driver is accepted and the driver silently dropped',
     'ERR 22023 vehicle_day_plan_save: unknown shift key(s): driver_id => true', v_before || ' => ' || v_after);
 
@@ -1815,14 +2150,99 @@ BEGIN
     'ERR P0001 support_session_required => ERR 42501 new row violates row-level security policy for table "vehicle_day_plans"',
     v_before || ' => ' || v_after);
 
-  -- Every control left the rules whole: the baselines still hold after all ten.
-  PERFORM _vd_expect('mutations: the ten controls were rolled back, so the policies and triggers are whole', '4|4|2',
+  -- M11. The plan guard stops applying the summary rule (rule 2). A direct insert is the door.
+  v_probe := format('INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version, summary) VALUES (%L, 2031, 7, 4, 15, ''v'', ''{"driver_id": "x"}'')', c_co_a);
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('app_private.vehicle_day_plan_guard()', 'IF v_problem IS NOT NULL THEN', 'IF false THEN')$m$, c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M11: without the guard''s check a plan inserted directly keeps a driver in its summary',
+    'ERR P0001 vehicle_day_plan_summary_invalid => rows 1', v_before || ' => ' || v_after);
+
+  -- M12. The save RPC stops applying the summary rule. The guard is the second wall: the
+  -- driver is still refused, but no longer by the RPC's own sentence.
+  v_probe := format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+    '{' || v_head || ', "summary": {"driver_id": "x"}, "shifts": []}');
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('public.vehicle_day_plan_save(jsonb)', 'IF v_problem IS NOT NULL THEN', 'IF false THEN')$m$, c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M12: without the RPC''s check the plan guard still refuses the driver, by its own hint',
+    'ERR 22023 vehicle_day_plan_save: summary: unknown key(s): driver_id => ERR P0001 vehicle_day_plan_summary_invalid',
+    v_before || ' => ' || v_after);
+
+  -- M13. The save RPC stops holding a shift's fields to their JSON types: an object is
+  -- flattened by jsonb_to_recordset into the text of an object, and stored as a vehicle.
+  v_probe := format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+    '{' || v_head || ', "shifts": [{' || v_shift || ', "starts_local": "2027-04-01T10:00", "ends_local": "2027-04-01T13:00", "vehicle": {"driver": "Max"}}]}');
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant($m$SELECT _vd_mutate_fn('public.vehicle_day_plan_save(jsonb)', 'WHERE jsonb_typeof(kv.value) <> c_shift_shape ->> kv.key', 'WHERE false')$m$, c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M13: without the type check a vehicle that is an object is stored as the text of one',
+    'ERR 22023 vehicle_day_plan_save: shift field(s) of the wrong JSON type: vehicle (expected string, got object) => true',
+    v_before || ' => ' || v_after);
+
+  -- M14. The algorithm_version token check is dropped: any 100 characters are a version.
+  v_probe := format('SELECT (public.vehicle_day_plan_save(%L::jsonb) ->> ''success'')',
+    '{"year": 2027, "month": 4, "operating_day_start_hour": 4, "slot_minutes": 15, "algorithm_version": "driver Max Mustermann", "shifts": []}');
+  v_before := _vd_try(c_admin, NULL, v_probe);
+  v_after  := _vd_mutant('ALTER TABLE vehicle_day_plans DROP CONSTRAINT vehicle_day_plans_algorithm_version_token', c_admin, NULL, v_probe);
+  PERFORM _vd_expect('mutation M14: without the token check a sentence is stored as an algorithm version',
+    'ERR 23514 new row for relation "vehicle_day_plans" violates check constraint "vehicle_day_plans_algorithm_version_token" => true',
+    v_before || ' => ' || v_after);
+
+  -- Every control left the rules whole: the baselines still hold after all fourteen.
+  PERFORM _vd_expect('mutations: the fourteen controls were rolled back, so the policies and triggers are whole', '4|4|2',
     (SELECT count(*)::text FROM pg_policies WHERE schemaname = 'public' AND tablename = 'vehicle_day_plans') || '|'
     || (SELECT count(*)::text FROM pg_policies WHERE schemaname = 'public' AND tablename = 'vehicle_day_shifts') || '|'
     || (SELECT count(*)::text FROM pg_trigger WHERE tgrelid = 'public.vehicle_day_plans'::regclass
           AND tgname IN ('refuse_read_only_context_write', 'vehicle_day_plan_guard') AND NOT tgisinternal AND tgenabled = 'O'));
 END $$;
 
+
+-- ─── 12b. a month of 6200 shifts, saved a moment ago, confirmed inside a timeout ─
+--
+-- The failure behind section 7b's rewrite, as the shipped code answers it. The
+-- statistics are taken first, so they know the plans there are and not the one
+-- below (the state a database is in whenever a month is saved: the planner
+-- expects one row for a plan it has never seen). The save and the confirmation
+-- are two statements, as they are two requests; the second runs under a
+-- statement timeout of 3 seconds, where the API roles allow 8.
+--
+-- What this can and cannot show. The earlier query compared every shift with
+-- every other when the planner took a nested loop with the plan as the only index
+-- condition, and on PostgreSQL 16.6 it did, in exactly this state: 6200 shifts
+-- took 7 to 8 seconds and were cancelled here (the one-pass check takes a few
+-- hundredths). Whether another version chooses the same join is the planner's
+-- business and not something a file can force, so on such a version the earlier
+-- query would pass this check; the shape of the query is therefore also pinned in
+-- the migration's self-check 15, and its answers by section 7b.
+
+ANALYZE public.vehicle_day_shifts;
+ANALYZE public.vehicle_day_plans;
+
+DO $$
+DECLARE
+  c_admin CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_res   jsonb;
+BEGIN
+  PERFORM _vd_as(c_admin);
+  v_res := public.vehicle_day_plan_save(_vd_payload(2061, 3, 4, 15, (
+    SELECT jsonb_agg(_vd_shift(d::date, 'VD-BIG-' || lpad(v::text, 3, '0'), 0, 24, 36, 4))
+      FROM generate_series(DATE '2061-03-01', DATE '2061-03-31', interval '1 day') AS d,
+           generate_series(1, 200) AS v)));
+  PERFORM _vd_reset();
+  PERFORM set_config('vd.big_plan', v_res ->> 'plan_id', true);
+  PERFORM _vd_expect('scale: 200 vehicles over 31 days are saved in one call', '6200|200',
+    (v_res ->> 'shift_count') || '|' || (v_res ->> 'vehicle_count'));
+END $$;
+
+SET LOCAL statement_timeout = '3s';
+
+DO $$
+DECLARE
+  c_admin CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+BEGIN
+  PERFORM _vd_expect('scale: …and the month is confirmed inside a statement timeout of 3 s, right after it was saved', 'true',
+    _vd_try(c_admin, NULL, format('SELECT (public.vehicle_day_plan_confirm(%L) ->> ''success'')', current_setting('vd.big_plan'))));
+END $$;
+
+RESET statement_timeout;
 
 -- ─── 13. the verdict ────────────────────────────────────────────────────────
 --
