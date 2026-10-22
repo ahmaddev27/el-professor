@@ -2,10 +2,25 @@
 // Runs after Phase 3 completes. Detects driver/vehicle overlaps in the final
 // assigned block list and attempts to move Inhaber / planned blocks to clean
 // free slots. Regular driver blocks are never moved automatically.
+//
+// Two bases this pass keeps straight, both from measured defects:
+//
+// - Driver identity is the `driver_id`, never the display name. A company can
+//   hold two driver records with one name (the owner and an inactive employee
+//   record). Keyed on the name, their ordinary simultaneous blocks "overlapped"
+//   and the pass moved one of them, in time, by days.
+// - Time is local. Phase 1 builds `actual_start_ms` with `new Date(y, m, d, h,
+//   min)` and writes the wall clock beside it, so every number here is a real
+//   instant and every string and boundary is read and written through LOCAL
+//   calendar parts. `Date.UTC` and `getUTC*` are one or two hours away from the
+//   instant the same block carries (the defect Phase 3's `parseLocalIsoMs`
+//   documents), and a day is 23, 24 or 25 hours long.
 
 import type { AssignedBlock } from './monatsplanungPhase3';
 // Type-only: the pass names a dictionary key beside its German text.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+import { parseLocalDatetime } from './driverNoteValidation';
+import { localDateKey, nextLocalMidnightMs } from './localDayWindow';
 
 const LOG_PREFIX = '[FinalOverlapRepair]';
 
@@ -84,39 +99,37 @@ export interface RepairPassResult {
 
 // ── Ms helpers ────────────────────────────────────────────────────────────────
 
-function parseLocalIsoMs(iso: string): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
-  if (!m) return 0;
-  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
-}
-
+// The fallback for a block that carries no instant of its own. Its string is a
+// local wall clock, so it is read as one; read as UTC it lands one or two hours
+// away from the instant Phase 1 stores for the same block.
 function blockStartMs(b: AssignedBlock): number {
-  return b.actual_start_ms != null ? b.actual_start_ms : parseLocalIsoMs(b.block_start_datetime);
+  return b.actual_start_ms != null ? b.actual_start_ms : parseLocalDatetime(b.block_start_datetime);
 }
 
 function blockEndMs(b: AssignedBlock): number {
-  return b.actual_end_ms != null ? b.actual_end_ms : parseLocalIsoMs(b.block_end_datetime);
+  return b.actual_end_ms != null ? b.actual_end_ms : parseLocalDatetime(b.block_end_datetime);
 }
 
-function msToIso(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-}
-
+/** HH:mm on the local wall clock. */
 function msToHHMM(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** The local wall clock of an instant, in the form Phase 1 writes `block_*_datetime`. */
+function msToIso(ms: number): string {
+  return `${localDateKey(ms)}T${msToHHMM(ms)}`;
 }
 
 // ── Interval index ────────────────────────────────────────────────────────────
 
 /** Build a RepairEntry from an AssignedBlock. */
-function toEntry(b: AssignedBlock, inhaberDriverId: string, inhaberDriverName: string): RepairEntry {
+function toEntry(b: AssignedBlock, inhaberDriverId: string): RepairEntry {
+  // The owner is a driver record. Another record with the same display name is
+  // not the owner: a namesake employee is a regular driver, so not shiftable.
   const isInhaber =
     (inhaberDriverId && b.driver_id === inhaberDriverId) ||
-    (inhaberDriverName && b.driver_name === inhaberDriverName) ||
     b.driver_name?.toLowerCase().includes('inhaber') ||
     b.assignment_reason?.toLowerCase().includes('inhaber') ||
     false;
@@ -159,8 +172,10 @@ function detectConflicts(entries: RepairEntry[]): ConflictPair[] {
       const pairKey = [a.blockId, b.blockId].sort().join('|');
       if (seen.has(pairKey)) continue;
 
-      // Driver overlap
-      if (a.driverName === b.driverName && a.driverName) {
+      // Driver overlap: one driver record holding two blocks at once. The display
+      // name is not identity, and an empty id is "unknown", which is never the
+      // same driver as another unknown (the rule an empty name already had).
+      if (a.driverId === b.driverId && a.driverId) {
         seen.add(pairKey);
         const kind: ConflictPair['kind'] = a.isInhaber ? 'inhaber' : 'driver';
         pairs.push({ kind, blockA: a, blockB: b, overlapMs });
@@ -191,15 +206,24 @@ function chooseCandidate(pair: ConflictPair): RepairEntry | null {
   return a.isShiftable ? a : b;
 }
 
-/** Month boundary ms. */
+/**
+ * Month boundary ms: local midnights. Blocks are local instants, so a month that
+ * began at 00:00 UTC began at 02:00 Berlin time in summer and 01:00 in winter,
+ * and a month is its days plus or minus the hour a clock change adds or takes.
+ */
 function monthBounds(year: number, month: number): { monthStartMs: number; monthEndMs: number } {
-  const monthStartMs = Date.UTC(year, month - 1, 1);
-  const monthEndMs = Date.UTC(year, month, 1) - 1; // last ms of month
+  const monthStartMs = new Date(year, month - 1, 1).getTime();
+  const monthEndMs = new Date(year, month, 1).getTime() - 1; // last ms of month
   return { monthStartMs, monthEndMs };
 }
 
+/** Whether `b` is a block of the driver record `driverId`. An empty id owns nothing. */
+function belongsToDriver(b: AssignedBlock, driverId: string): boolean {
+  return driverId !== '' && (b.driver_id ?? '') === driverId;
+}
+
 /**
- * Build free windows for a given driverName (or vehicleId) from the current
+ * Build free windows for one driver record (or vehicle) from the current
  * index, within the month boundaries.
  */
 function buildFreeWindowsForEntity(
@@ -248,8 +272,11 @@ function buildFreeWindowsForEntity(
 
 /**
  * Main repair pass. Takes the Phase 3 `assigned` array plus month/year and
- * the Inhaber driver name. Returns a new assigned array with conflicts resolved
+ * the Inhaber driver. Returns a new assigned array with conflicts resolved
  * where possible, plus a full diagnostic report.
+ *
+ * `inhaberDriverId` identifies the owner; `inhaberDriverName` is only logged.
+ * Without an id no block is the owner's by identity.
  */
 export function repairFinalOverlaps(
   assigned: AssignedBlock[],
@@ -287,7 +314,7 @@ export function repairFinalOverlaps(
   while (iterations < MAX_ITERATIONS) {
     iterations++;
 
-    const entries = blocks.map(b => toEntry(b, inhaberDriverId, inhaberDriverName));
+    const entries = blocks.map(b => toEntry(b, inhaberDriverId));
     const conflicts = detectConflicts(entries);
 
     console.log(LOG_PREFIX, `iteration ${iterations}: ${conflicts.length} conflicts`);
@@ -331,7 +358,7 @@ export function repairFinalOverlaps(
 
       // Build current busy slots for driver and vehicle of candidate
       const driverBusy = blocks
-        .filter(b => b.block_id !== candidate.blockId && b.driver_name === candidate.driverName)
+        .filter(b => b.block_id !== candidate.blockId && belongsToDriver(b, candidate.driverId))
         .map(b => ({ startMs: blockStartMs(b), endMs: blockEndMs(b) }));
       const vehicleBusy = blocks
         .filter(b => b.block_id !== candidate.blockId && b.vehicle_identifier === candidate.vehicle)
@@ -375,7 +402,7 @@ export function repairFinalOverlaps(
           // Exact overlap check with all OTHER blocks
           const driverOk = !blocks.some(b => {
             if (b.block_id === candidate.blockId) return false;
-            if (b.driver_name !== candidate.driverName) return false;
+            if (!belongsToDriver(b, candidate.driverId)) return false;
             const bs = blockStartMs(b);
             const be = blockEndMs(b);
             return tryStart < be && tryEnd > bs;
@@ -392,14 +419,14 @@ export function repairFinalOverlaps(
           if (!vehicleOk) continue;
 
           // Vehicle switch buffer check for Inhaber
-          if (candidate.isInhaber || candidate.driverName === inhaberDriverName) {
+          if (candidate.isInhaber) {
             let bufferOk = true;
             let bufferToUse = vehicleSwitchBufferMinutes;
             const candidateVehicle = candidate.vehicle;
 
             // Find adjacent blocks for this driver
             const driverBlocks = blocks
-              .filter(b => b.block_id !== candidate.blockId && b.driver_name === candidate.driverName)
+              .filter(b => b.block_id !== candidate.blockId && belongsToDriver(b, candidate.driverId))
               .map(b => ({ startMs: blockStartMs(b), endMs: blockEndMs(b), vehicle: b.vehicle_identifier }))
               .sort((a, b) => a.startMs - b.startMs);
 
@@ -500,7 +527,7 @@ export function repairFinalOverlaps(
   }
 
   // ── Final validation ───────────────────────────────────────────────────────
-  const finalEntries = blocks.map(b => toEntry(b, inhaberDriverId, inhaberDriverName));
+  const finalEntries = blocks.map(b => toEntry(b, inhaberDriverId));
   const finalConflicts = detectConflicts(finalEntries);
 
   const fahrerConflicts = finalConflicts.filter(c => c.kind === 'driver');
@@ -553,6 +580,10 @@ export function repairFinalOverlaps(
  * Build Inhaber free windows from the final repaired block list.
  * Returns a Map<YYYY-MM-DD, Array<{startMs, endMs, durationSec}>> for display.
  * Free windows are the gaps between Inhaber blocks within each day.
+ *
+ * Nothing calls this today, and it still names the owner by display name, so a
+ * namesake record's blocks would count as the owner's. Whoever wires it up
+ * passes the id and keys on it, as `repairFinalOverlaps` does.
  */
 export function buildInhaberFreeWindows(
   assignedBlocks: AssignedBlock[],
@@ -569,27 +600,27 @@ export function buildInhaberFreeWindows(
 
   const result = new Map<string, Array<{ startMs: number; endMs: number; durationSec: number }>>();
 
-  // Group by service_date
+  // Group by the local calendar day the block starts on
   const byDate = new Map<string, Array<AssignedBlock>>();
   for (const b of inhaberBlocks) {
-    const day = (b.actual_start_ms ? new Date(b.actual_start_ms) : new Date(parseLocalIsoMs(b.block_start_datetime))).toISOString().slice(0, 10);
+    const day = localDateKey(blockStartMs(b));
     const arr = byDate.get(day) ?? [];
     arr.push(b);
     byDate.set(day, arr);
   }
 
-  // For each day in the month, compute free windows
-  const msPerDay = 24 * 60 * 60 * 1000;
-  for (let dayMs = monthStartMs; dayMs <= monthEndMs; dayMs += msPerDay) {
-    const date = new Date(dayMs);
-    const dayKey = date.toISOString().slice(0, 10);
-    const dayStart = dayMs;
-    const dayEnd = dayMs + msPerDay;
+  // For each local day in the month, compute free windows. A day is 23, 24 or 25
+  // hours long, so each boundary is the next local midnight and never a fixed
+  // step: 86 400 000 ms drifts an hour at a clock change and stays off for the
+  // rest of the month.
+  for (let dayStart = monthStartMs; dayStart <= monthEndMs; dayStart = nextLocalMidnightMs(dayStart)) {
+    const dayKey = localDateKey(dayStart);
+    const dayEnd = nextLocalMidnightMs(dayStart);
 
     const dayBlocks = byDate.get(dayKey) ?? [];
     if (dayBlocks.length === 0) {
       // Entire day is free
-      result.set(dayKey, [{ startMs: dayStart, endMs: dayEnd, durationSec: msPerDay / 1000 }]);
+      result.set(dayKey, [{ startMs: dayStart, endMs: dayEnd, durationSec: (dayEnd - dayStart) / 1000 }]);
       continue;
     }
 
@@ -623,9 +654,7 @@ export function buildInhaberFreeWindows(
   return result;
 }
 
-/** Format ms as HH:mm for display. */
+/** Format ms as HH:mm on the local wall clock, for display. */
 export function fmtRepairMs(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return msToHHMM(ms);
 }
