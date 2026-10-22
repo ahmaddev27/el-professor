@@ -3265,6 +3265,7 @@ function GehaltsabweichungSection({
       const { data } = await supabase
         .from('driver_notes')
         .select('driver_id, note_planning_behavior, is_full_day, start_date, end_date, note_date, start_time, end_time')
+        .eq('company_id', companyId)
         .in('driver_id', driverIds)
         .eq('note_planning_behavior', 'exclude_from_plan');
       if (cancelled || !data) return;

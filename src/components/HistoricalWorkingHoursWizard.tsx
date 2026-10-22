@@ -10070,7 +10070,13 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
   useEffect(() => {
     if (!companyId) return;
     supabase.from('drivers').select('id,name,personalnummer,employment_type,driver_usage_type,planning_hourly_rate,planning_min_salary,planning_max_salary')
-      .eq('company_id', companyId).neq('status', 'archived')
+      // No status filter: `drivers_status_check` admits only 'active' and
+      // 'inactive', so the `.neq('status','archived')` that stood here matched
+      // every row and did nothing ('archived' is a status of companies, planning
+      // runs and imports, never of a driver). Including an inactive driver is
+      // also correct here: this wizard reconstructs a PAST month, and someone who
+      // left since may well have driven it.
+      .eq('company_id', companyId)
       .then(({ data }) => setAllDrivers((data ?? []) as DriverRow[]));
   }, [companyId]);
 
