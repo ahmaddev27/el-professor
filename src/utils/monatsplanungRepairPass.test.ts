@@ -345,6 +345,46 @@ describe('the conflict key is the driver id', () => {
     expect(r.movedBlocks[0].blockId).toBe('o2');
     expect(r.movedBlocks[0].newStartMs).toBe(at(2026, 7, 1, 1, 0));
   });
+
+  it("a namesake whose block an earlier repair placed is shiftable, but is not held to the owner's buffer", () => {
+    // Shiftable is not the same as owner: a repair flag makes any driver's block
+    // movable. The buffer is the owner's rule, so a namesake that merely shares
+    // his name does not inherit it. The geometry is the buffer pair's, with the
+    // moving block and its neighbour both the namesake's.
+    const blocks = [
+      mk({ id: 'n1', driver: NAMESAKE, vehicle: 'V1', startMs: at(2026, 7, 20, 10), durationMin: 120 }),
+      mk({ id: 'n2', driver: NAMESAKE, vehicle: 'V2', startMs: at(2026, 7, 20, 11), durationMin: 90, over: { repair_moved: true } }),
+      mk({ id: 'rita', driver: RITA, vehicle: 'V2', startMs: at(2026, 7, 1, 0), durationMin: 60 }),
+      mk({ id: 'next-door', driver: NAMESAKE, vehicle: 'V1', startMs: at(2026, 7, 1, 0, 20), durationMin: 30 }),
+    ];
+
+    const r = run(blocks, 2026, 7);
+
+    expect(r.movedBlocks).toHaveLength(1);
+    expect(r.movedBlocks[0]).toMatchObject({
+      blockId: 'n2',
+      reason: 'Fahrerüberschneidung',
+      reasonKey: 'engine.repair.conflictKind.driver',
+    });
+    expect(r.movedBlocks[0].newStartMs).toBe(at(2026, 7, 1, 1, 0));
+  });
+
+  it('a block with no driver id has no other blocks to dodge: unknown drivers are not one person', () => {
+    // A vehicle clash moves the shiftable block of a driver nobody can identify.
+    // Another unidentified driver holds the start of the month; it is not his time.
+    const blocks = [
+      mk({ id: 'u1', driver: { id: '', name: 'Unbekannt' }, vehicle: 'V1', startMs: at(2026, 7, 20, 10), durationMin: 120, over: { repair_moved: true } }),
+      mk({ id: 'rita', driver: RITA, vehicle: 'V1', startMs: at(2026, 7, 20, 11), durationMin: 90 }),
+      mk({ id: 'u2', driver: { id: '', name: 'Unbekannt zwei' }, vehicle: 'V3', startMs: at(2026, 7, 1, 0), durationMin: 180 }),
+    ];
+
+    const r = run(blocks, 2026, 7);
+
+    expect(r.movedBlocks).toHaveLength(1);
+    expect(r.movedBlocks[0]).toMatchObject({ blockId: 'u1', reason: 'Fahrzeugüberschneidung' });
+    expect(r.movedBlocks[0].newStartMs).toBe(at(2026, 7, 1, 0));
+    expect(r.conflictsAfter).toBe(0);
+  });
 });
 
 // ── defect 2: the pass writes the local wall clock ──────────────────────────
