@@ -1294,7 +1294,7 @@ export default function MonatsplanungAssignmentPreview({
       allowDienstzeit: resolverDienstzeit,
       allowDaily: resolverDaily,
       allowMonthly: resolverMonthly,
-    });
+    }, driverNotesMap);
     if (!r.ok) {
       // The blocking checks are the engine's discriminators; BLOCKING_CHECK_LABEL
       // turns each into a key. The two refusals that produce none carry a key.
@@ -1386,7 +1386,7 @@ export default function MonatsplanungAssignmentPreview({
     const evalNoBypass = result && resolverBlock
       ? evaluateManualCandidate(result, resolverBlock.block_id, driver.id, {
           allowDienstzeit: false, allowDaily: false, allowMonthly: false,
-        })
+        }, driverNotesMap)
       : { feasible: false, reason: '', blockingChecks: [] as string[] };
     const reasons = evalNoBypass.feasible ? [] : evalNoBypass.blockingChecks;
 
@@ -1428,9 +1428,11 @@ export default function MonatsplanungAssignmentPreview({
     const out = selectedDrivers.map(classifyDriver);
     out.sort((a, b) => a.groupOrder - b.groupOrder || a.driver.name.localeCompare(b.driver.name, 'de'));
     return out;
-    // classifyDriver depends on result/resolverBlock; safe to include selectedDrivers only
+    // classifyDriver reads result, resolverBlock and driverNotesMap. The notes load
+    // asynchronously, so a list classified before they arrive has to be classified again:
+    // left out of this array, a driver on sick leave stays green until something else moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, resolverBlock, selectedDrivers]);
+  }, [result, resolverBlock, selectedDrivers, driverNotesMap]);
 
   const selectedClass = useMemo<DriverClass | null>(() => {
     if (!resolverDriverId) return null;
