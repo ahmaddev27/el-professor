@@ -169,7 +169,19 @@ const NOTE_RANGE_DAY_CAP = 366;
  * or before the start time crosses midnight into the next day; the range's end
  * date is inclusive; and a note with no date at all covers nothing.
  */
-export function noteExclusionIntervals(note: StructuredNote): NoteInterval[] {
+/**
+ * The fields this reads, and nothing more. `StructuredNote` satisfies it, and so
+ * does any other row shape carrying a note's dates and times — which is the
+ * point: a caller that holds a narrower row (the transfer check in
+ * `MonatsplanungStundennachweisPreview` held one, and a fourth copy of this
+ * arithmetic with it) can reuse this instead of writing its own.
+ */
+export type NoteWindowFields = Pick<
+  StructuredNote,
+  'is_full_day' | 'start_date' | 'end_date' | 'note_date' | 'start_time' | 'end_time'
+>;
+
+export function noteExclusionIntervals(note: NoteWindowFields): NoteInterval[] {
   const startDate = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
   const endDate = note.end_date ?? startDate;
   if (!startDate || !endDate) return [];
