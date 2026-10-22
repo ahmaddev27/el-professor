@@ -20,6 +20,7 @@ import {
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { useTravelEstimator } from '../hooks/useTravelEstimator';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { analysisTripFromRow, analyzeTrips } from '../utils/tripAnalysis';
@@ -268,6 +269,11 @@ export default function TripAnalysisPage() {
     if (savedReturnBase) setReturnBase(current => (current.edited ? current : baseFormFromSaved(savedReturnBase)));
   }, [savedReturnBase]);
 
+  // Undefined until there is something to measure with: the engine then uses
+  // noRoutingEstimator and every travel check stays unverifiable. Today there is
+  // no address locator (lib/addressLocator.ts), so it always is.
+  const travelEstimator = useTravelEstimator(analysisTrips, effective.settings);
+
   const analysis = useMemo<{ result: TripAnalysisResult | null; failed: boolean }>(() => {
     if (!effective.settings || tripRows.length === 0) return { result: null, failed: false };
     try {
@@ -277,6 +283,7 @@ export default function TripAnalysisPage() {
           shifts: conversion.shifts,
           settings: effective.settings,
           budgets: budgetInputs(drivers, budgetRows),
+          travelEstimator,
         }),
         failed: false,
       };
@@ -284,7 +291,7 @@ export default function TripAnalysisPage() {
       console.error('Fahrtenanalyse: the analysis failed', error);
       return { result: null, failed: true };
     }
-  }, [analysisTrips, conversion.shifts, effective.settings, drivers, budgetRows, tripRows.length]);
+  }, [analysisTrips, conversion.shifts, effective.settings, drivers, budgetRows, tripRows.length, travelEstimator]);
 
   const result = analysis.result;
 
