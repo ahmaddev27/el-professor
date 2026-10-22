@@ -387,7 +387,7 @@ CREATE INDEX IF NOT EXISTS vehicle_day_shifts_vehicle_idx
   for, or, for a DELETE, which has no foreign key check to wait on, a confirmed
   plan with no shift at all. With the lock the write and the confirmation take
   turns, in either order, and whichever comes second sees what the first did.
-  tests/rls/vehicle-day-plans-concurrency.sql runs the two orders with two
+  tests/rls/vehicle-day-two-sessions.sql runs the two orders with two
   sessions.
 */
 CREATE OR REPLACE FUNCTION app_private.vehicle_day_plan_parent_is_open(p_plan_id uuid, p_company_id uuid)
@@ -1265,7 +1265,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.vehicle_day_shifts TO authe
 -- resolve, so a renamed function cannot make a `!~` check below pass on NULL),
 -- and the one pure helper, run on literals. The behaviour itself -- every
 -- refusal, the lifecycle, the races -- is tests/rls/vehicle-day-plans.sql and
--- tests/rls/vehicle-day-plans-concurrency.sql.
+-- tests/rls/vehicle-day-two-sessions.sql.
 
 DO $mig$
 DECLARE
@@ -1613,8 +1613,8 @@ BEGIN
   END IF;
 
   -- 15. Two properties a one-session kit cannot see, kept in the source because
-  --     the behaviour needs a second session (tests/rls/vehicle-day-plans-
-  --     concurrency.sql) or a table the planner has stale figures for.
+  --     the behaviour needs a second session (tests/rls/vehicle-day-two-
+  --     sessions.sql) or a table the planner has stale figures for.
   --     (a) A shift write reads its plan FOR KEY SHARE, which conflicts with the
   --         FOR UPDATE confirm takes on that row.
   --     (b) The overlap check is one pass over the plan's shifts, not a join of

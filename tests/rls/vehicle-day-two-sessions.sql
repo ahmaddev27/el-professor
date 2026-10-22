@@ -2,6 +2,10 @@
   Vehicle day plans: the races a single session cannot show (migration
   20261022140000).
 
+  Named to sort AFTER vehicle-day-plans.sql: the runner stops at the first file
+  that fails, this is the one that depends on dblink and on a second session, and
+  the main file's 353 answers should be on the screen whatever this one does.
+
   Runs after seed.sql, against the same throwaway database as every other file,
   as supabase_admin. tests/rls/vehicle-day-plans.sql is one transaction and one
   session; a lock is only shown to work by something waiting on it, so this file
@@ -372,10 +376,10 @@ BEGIN
     INTO v_ok, v_bad, v_list
     FROM _vdc_results r;
 
-  RAISE NOTICE 'vehicle day plans, concurrency: % checks, % passed, % differ', v_ok + v_bad, v_ok, v_bad;
+  RAISE NOTICE 'vehicle day plans, two sessions: % checks, % passed, % differ', v_ok + v_bad, v_ok, v_bad;
 
   IF v_bad > 0 THEN
-    RAISE EXCEPTION E'vehicle day plans, concurrency: % check(s) differ from what migration 20261022140000 promises\n%',
+    RAISE EXCEPTION E'vehicle day plans, two sessions: % check(s) differ from what migration 20261022140000 promises\n%',
       v_bad, v_list;
   END IF;
 END $$;

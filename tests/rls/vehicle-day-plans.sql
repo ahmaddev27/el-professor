@@ -87,8 +87,8 @@
 
   The matrix lines for both tables, and the EXECUTE grants of both RPCs, are in
   tests/rls/matrix.sql. What one session cannot show -- a shift written while a
-  confirmation is open, in either order -- is tests/rls/vehicle-day-plans-
-  concurrency.sql, which opens two sessions through dblink.
+  confirmation is open, in either order -- is tests/rls/vehicle-day-two-
+  sessions.sql, which opens two sessions through dblink.
 
   Two controls are not in this file because what they measure is the planner's
   and not the schema's. The one-pass overlap check (7b, 12b) was compared with
