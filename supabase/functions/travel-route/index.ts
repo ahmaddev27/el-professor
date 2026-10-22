@@ -17,7 +17,8 @@
  * for the caller's company with `get_active_company_id()`, the helper every
  * business table asks: a company or an account the screens refuse gets nothing
  * here either, and a platform account gets an answer only inside an open
- * support context. The answer is public geography and reveals nothing of any
+ * context on a company (view or support, as for every business table). The
+ * answer is public geography and reveals nothing of any
  * company, so there is no role gate beyond that; the point of the gate is that
  * the routing container is a CPU on a host shared with another live product,
  * and the anon key must not be able to use it.
