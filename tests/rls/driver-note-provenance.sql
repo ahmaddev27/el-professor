@@ -66,7 +66,8 @@
 
   11. The mutation control, run as the principals who write. Nine rules are
       broken one at a time in a subtransaction that is rolled back, and the set
-      of probes that notice each is compared with the set predicted here. The
+      of probes that notice each is compared with the set predicted here (M0 first:
+      the copy of the guard that M5-M9 change passes the table unchanged). The
       third (M3) is the one that cannot be seen as the owner: a document-key
       CHECK that calls into app_private passes every probe the owner runs and is
       refused for every write `authenticated` makes. M6 is the one whose set is
@@ -425,6 +426,15 @@ INSERT INTO _dp_case VALUES
   _dp_id('editor')::text),
  (24, 'pin', 'the log names whoever saved: an administrator''s edit of the text',
   'admin', _dp_upd(_dp_id('plain'), $s$note_text = 'dp edited by admin'$s$, $e$change_log -> 0 ->> 'by'$e$),
+  _dp_id('admin')::text),
+ -- The property end to end, with nothing about how the guard is written in it: one
+ -- session files a note, another saves it the way the screen saves, and the author
+ -- read back is the first one. (The sequence switches principal with _dp_as.)
+ (25, 'pin', 'filed by one person and saved by another, the way the screen saves: the note is still the first person''s',
+  'admin', 'SEQ:' || _dp_ins(quote_literal(_dp_id('admin')), 'id', quote_literal(_dp_id('fresh'))) || ';;'
+    || 'SELECT _dp_as(''editor'')' || ';;'
+    || _dp_screen_save(_dp_id('fresh'), _dp_id('editor'), 'dp edited') || ';;'
+    || format('SELECT created_by::text FROM driver_notes WHERE id = %L', _dp_id('fresh')),
   _dp_id('admin')::text);
 
 -- 3. the three dates ──────────────────────────────────────────────────────────
@@ -855,6 +865,14 @@ END $$;
 --  is what makes a count mean anything: a battery that mismatched everything
 --  under every mutation would also "catch" it. Every probe is run as the
 --  principal the table names, which is a principal who writes notes.
+--
+--  A mutation never edits the stored source of anything it did not write in this
+--  file. The constraints are dropped and re-added from text written below, the
+--  trigger is dropped, and the guard's own code is replaced whole by the kit's
+--  copy of it with one switch turned (M5-M7, M9), after M0 has shown that copy
+--  passes the table untouched. Splicing a fragment into the stored source made
+--  the kit depend on the migration's indentation and on the line endings of
+--  whatever carried it to the database; see _dp_install_guard_copy.
 
 SET CONSTRAINTS ALL IMMEDIATE;
 
@@ -880,23 +898,198 @@ BEGIN
   RETURN v_bad;
 END $$;
 
-/* The edited definition of the guard: one fragment replaced, which must occur exactly once. */
-CREATE OR REPLACE FUNCTION _dp_edit_guard(p_find text, p_replace text) RETURNS void
-LANGUAGE plpgsql AS $$
-DECLARE v_def text := pg_get_functiondef('app_private.driver_note_provenance_guard()'::regprocedure);
+/*
+  The guard, written out in full, for the mutation controls that change its code.
+
+  Those mutations used to be made by splicing a fragment of the guard's STORED
+  source. That ties the kit to how the migration is indented and to the line
+  endings of whatever carried it to the database: `git archive` on a machine with
+  core.autocrlf exports every line with a carriage return, so a fragment ending
+  in a newline never matched the source the database held, and the kit stopped
+  there (found on the VPS, 22.10.2026). This copy is the kit's own text, so nothing
+  below depends on the migration's formatting or on the platform that wrote it.
+
+  It is the guard with four switches, chosen by the transaction-local setting
+  `dp.mutation`. With none set it is the guard. M0 holds it to that: the whole
+  table must pass against it, or the copy is not the guard and M5-M9 prove
+  nothing. It is installed over the real function inside a subtransaction that is
+  rolled back, so every other probe in this file runs against the real one.
+
+  If the real guard changes, the copy does not follow it by itself, and that is
+  caught the way any drift is: the table gains a probe for the new behaviour, the
+  real function passes it, the copy fails M0, and the copy is brought up to date
+  in the same commit.
+*/
+CREATE OR REPLACE FUNCTION _dp_install_guard_copy() RETURNS void
+LANGUAGE plpgsql AS $inst$
 BEGIN
-  IF (length(v_def) - length(replace(v_def, p_find, ''))) <> length(p_find) THEN
-    RAISE EXCEPTION '_dp_edit_guard: the fragment % occurs other than once in the guard', quote_literal(p_find);
+  EXECUTE $copy$
+CREATE OR REPLACE FUNCTION app_private.driver_note_provenance_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $gd$
+DECLARE
+  -- The one thing this copy does differently from the guard, if anything.
+  c_mutation CONSTANT text := coalesce(current_setting('dp.mutation', true), '');
+
+  c_kept CONSTANT text[] := ARRAY[
+    'company_id', 'driver_id', 'car_id', 'note_type', 'note_planning_behavior',
+    'is_full_day', 'start_date', 'end_date', 'start_time', 'end_time',
+    'occurred_at', 'reported_at', 'latitude', 'longitude', 'location_accuracy_m',
+    'evidence_path', 'verification_status', 'reviewed_by', 'reviewed_at'];
+  c_text CONSTANT text[] := ARRAY['note_text', 'rejected_reason'];
+  -- m9: note_date counted among the things a review covers.
+  c_reviewed CONSTANT text[] := ARRAY[
+    'driver_id', 'car_id', 'note_type', 'is_full_day', 'start_date', 'end_date',
+    'start_time', 'end_time', 'occurred_at', 'reported_at', 'latitude', 'longitude',
+    'location_accuracy_m', 'evidence_path', 'note_text']
+    || CASE WHEN c_mutation = 'm9' THEN ARRAY['note_date'] ELSE ARRAY[]::text[] END;
+
+  v_uid      uuid := auth.uid();
+  v_old      jsonb;
+  v_new      jsonb;
+  v_key      text;
+  v_changed  text[]  := '{}';
+  v_previous jsonb   := '{}'::jsonb;
+  v_decided  boolean;
+  v_reset    boolean := false;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF v_uid IS NOT NULL THEN
+      NEW.created_by          := v_uid;
+      NEW.submitted_by_name   := NULL;
+      NEW.entry_source        := 'manual';
+      NEW.received_at         := now();
+      NEW.verification_status := 'unverified';
+      NEW.reviewed_by         := NULL;
+      NEW.reviewed_at         := NULL;
+      NEW.rejected_reason     := NULL;
+      NEW.change_log          := '[]'::jsonb;
+    ELSE
+      NEW.entry_source := coalesce(NEW.entry_source,
+        CASE WHEN NEW.created_by IS NULL AND NEW.submitted_by_name IS NOT NULL
+             THEN 'driver_app' ELSE 'system' END);
+      NEW.received_at  := coalesce(NEW.received_at, now());
+    END IF;
+    RETURN NEW;
   END IF;
-  EXECUTE replace(v_def, p_find, p_replace);
-END $$;
+
+  v_old := to_jsonb(OLD);
+
+  v_decided := NEW.verification_status IS DISTINCT FROM OLD.verification_status
+            OR NEW.rejected_reason     IS DISTINCT FROM OLD.rejected_reason
+            OR (v_uid IS NULL
+                AND (NEW.reviewed_by IS DISTINCT FROM OLD.reviewed_by
+                     OR NEW.reviewed_at IS DISTINCT FROM OLD.reviewed_at));
+
+  NEW.change_log := OLD.change_log;
+
+  IF v_uid IS NOT NULL THEN
+    -- m5: created_by is not pinned.
+    IF c_mutation <> 'm5' THEN
+      NEW.created_by      := OLD.created_by;
+    END IF;
+    NEW.submitted_by_name := OLD.submitted_by_name;
+    NEW.entry_source      := OLD.entry_source;
+    NEW.received_at       := OLD.received_at;
+
+    IF v_decided THEN
+      IF NEW.verification_status = 'unverified' THEN
+        NEW.reviewed_by := NULL;  NEW.reviewed_at := NULL;  NEW.rejected_reason := NULL;
+      ELSE
+        -- m6: a request may choose the reviewer.
+        NEW.reviewed_by := CASE WHEN c_mutation = 'm6' THEN coalesce(NEW.reviewed_by, v_uid) ELSE v_uid END;
+        NEW.reviewed_at := now();
+        IF NEW.verification_status = 'verified' THEN
+          NEW.rejected_reason := NULL;
+        END IF;
+      END IF;
+    ELSE
+      NEW.reviewed_by := OLD.reviewed_by;
+      NEW.reviewed_at := OLD.reviewed_at;
+    END IF;
+  END IF;
+
+  IF OLD.verification_status <> 'unverified' AND NOT v_decided THEN
+    v_new := to_jsonb(NEW);
+    FOREACH v_key IN ARRAY c_reviewed LOOP
+      IF v_old -> v_key IS DISTINCT FROM v_new -> v_key THEN
+        v_reset := true;
+        EXIT;
+      END IF;
+    END LOOP;
+    -- m7: a decision outlives a change to what it covered.
+    IF v_reset AND c_mutation <> 'm7' THEN
+      NEW.verification_status := 'unverified';
+      NEW.reviewed_by         := NULL;
+      NEW.reviewed_at         := NULL;
+      NEW.rejected_reason     := NULL;
+    END IF;
+  END IF;
+
+  v_new := to_jsonb(NEW);
+  FOREACH v_key IN ARRAY c_kept LOOP
+    IF v_old -> v_key IS DISTINCT FROM v_new -> v_key THEN
+      v_changed  := v_changed || v_key;
+      v_previous := v_previous || jsonb_build_object(v_key, v_old -> v_key);
+    END IF;
+  END LOOP;
+  FOREACH v_key IN ARRAY c_text LOOP
+    IF v_old -> v_key IS DISTINCT FROM v_new -> v_key THEN
+      v_changed := v_changed || v_key;
+    END IF;
+  END LOOP;
+
+  IF cardinality(v_changed) > 0 THEN
+    NEW.change_log := NEW.change_log || jsonb_build_array(
+      jsonb_build_object('at', now(), 'by', v_uid,
+                         'changed', to_jsonb(v_changed), 'previous', v_previous)
+      || CASE WHEN v_reset THEN jsonb_build_object('verification_reset', true)
+              ELSE '{}'::jsonb END);
+  END IF;
+
+  RETURN NEW;
+END;
+$gd$
+  $copy$;
+END $inst$;
+
+/*
+  One mutation: the setup statements run in order inside a subtransaction, the
+  battery is run against what they made, and the subtransaction is always rolled
+  back. A setup that fails is recorded under `<key>_error` and not raised: a broken
+  harness must show up as the mutation's probe failing, with the reason beside it,
+  and not as the whole file stopping before the probes after it have run.
+*/
+CREATE OR REPLACE FUNCTION _dp_mutant(p_key text, p_setup text[], p_groups text[],
+                                      p_only int[] DEFAULT NULL, p_force_who text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql AS $mutant$
+DECLARE
+  v_out  jsonb := '{}';
+  v_stmt text;
+BEGIN
+  BEGIN
+    FOREACH v_stmt IN ARRAY p_setup LOOP
+      EXECUTE v_stmt;
+    END LOOP;
+    v_out := jsonb_build_object(p_key, _dp_battery(p_groups, p_force_who, p_only));
+    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ009' THEN NULL;
+    WHEN OTHERS THEN v_out := jsonb_build_object(p_key || '_error', SQLERRM);
+  END;
+  RETURN v_out;
+END $mutant$;
 
 CREATE OR REPLACE FUNCTION _dp_mutations() RETURNS jsonb
 LANGUAGE plpgsql AS $mut$
 DECLARE
-  v    jsonb := '{}';
+  v     jsonb := '{}';
   v_all text[] := ARRAY['stamp', 'pin', 'dates', 'evidence', 'location', 'verify', 'reset', 'log'];
   v_ev  text[] := ARRAY['evidence'];
+  c_copy CONSTANT text := 'SELECT _dp_install_guard_copy()';
   -- The document-key probes whose answer is the CHECK's and nobody else's: the
   -- five keys stored (40-44), the nineteen refused (45-63), a new note naming a
   -- key in another company's folder (72) and another note's key (76). Not the
@@ -904,23 +1097,21 @@ DECLARE
   -- the owner's whatever the mutation.
   c_check_only CONSTANT int[] := ARRAY[40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 72, 76];
 BEGIN
-  -- M1. the document-key rule is gone.
-  BEGIN
-    EXECUTE 'ALTER TABLE public.driver_notes DROP CONSTRAINT driver_notes_evidence_path_shape';
-    v := v || jsonb_build_object('m1', _dp_battery(v_ev));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  -- M0. The control for the controls: the kit's copy of the guard, with nothing
+  --     broken, passes the whole table.
+  v := v || _dp_mutant('m0', ARRAY[c_copy], v_all);
 
-  -- M2. the rule written the way receipts_document_prefix is: the company's folder, and nothing more.
-  BEGIN
-    EXECUTE 'ALTER TABLE public.driver_notes DROP CONSTRAINT driver_notes_evidence_path_shape';
-    EXECUTE 'ALTER TABLE public.driver_notes ADD CONSTRAINT driver_notes_evidence_path_shape '
-         || 'CHECK (evidence_path IS NULL OR company_id IS NULL OR evidence_path LIKE (company_id::text || ''/%''))';
-    v := v || jsonb_build_object('m2', _dp_battery(v_ev));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  -- M1. The document-key rule is gone.
+  v := v || _dp_mutant('m1',
+    ARRAY['ALTER TABLE public.driver_notes DROP CONSTRAINT driver_notes_evidence_path_shape'], v_ev);
 
-  -- M3. the same rule, written the obvious way: by asking a function in
+  -- M2. The rule written the way receipts_document_prefix is: the company's folder, and nothing more.
+  v := v || _dp_mutant('m2', ARRAY[
+    'ALTER TABLE public.driver_notes DROP CONSTRAINT driver_notes_evidence_path_shape',
+    'ALTER TABLE public.driver_notes ADD CONSTRAINT driver_notes_evidence_path_shape '
+      || 'CHECK (evidence_path IS NULL OR company_id IS NULL OR evidence_path LIKE (company_id::text || ''/%''))'], v_ev);
+
+  -- M3. The same rule, written the obvious way: by asking a function in
   --     app_private. It means the same thing, so the owner sees nothing wrong.
   --     `authenticated` cannot execute it, and the CHECK is refused for every
   --     write that gets as far as it, with a privilege error and not a rule.
@@ -941,52 +1132,29 @@ BEGIN
     v := v || jsonb_build_object('m3_note',
       _dp_try('admin', _dp_upd(_dp_id('plain'), $s$note_text = 'a note that names no document at all'$s$)));
     RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ009' THEN NULL;
+    WHEN OTHERS THEN v := v || jsonb_build_object('m3_error', SQLERRM);
+  END;
 
-  -- M4. the trigger is gone.
-  BEGIN
-    EXECUTE 'DROP TRIGGER driver_notes_provenance_guard ON public.driver_notes';
-    v := v || jsonb_build_object('m4', _dp_battery(v_all));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  -- M4. The trigger is gone.
+  v := v || _dp_mutant('m4', ARRAY['DROP TRIGGER driver_notes_provenance_guard ON public.driver_notes'], v_all);
 
+  -- M5-M7 and M9 change the guard's code: the kit's copy, one switch turned.
   -- M5. created_by is not pinned on UPDATE.
-  BEGIN
-    PERFORM _dp_edit_guard(E'    NEW.created_by        := OLD.created_by;\n', '');
-    v := v || jsonb_build_object('m5', _dp_battery(v_all));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  v := v || _dp_mutant('m5', ARRAY[c_copy, $s$SELECT set_config('dp.mutation', 'm5', true)$s$], v_all);
+  -- M6. A request may choose the reviewer.
+  v := v || _dp_mutant('m6', ARRAY[c_copy, $s$SELECT set_config('dp.mutation', 'm6', true)$s$], v_all);
+  -- M7. A decision outlives a change to what it covered.
+  v := v || _dp_mutant('m7', ARRAY[c_copy, $s$SELECT set_config('dp.mutation', 'm7', true)$s$], v_all);
 
-  -- M6. a request may choose the reviewer.
-  BEGIN
-    PERFORM _dp_edit_guard('NEW.reviewed_by := v_uid; NEW.reviewed_at := now();',
-                           'NEW.reviewed_by := coalesce(NEW.reviewed_by, v_uid); NEW.reviewed_at := now();');
-    v := v || jsonb_build_object('m6', _dp_battery(v_all));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
-
-  -- M7. a decision outlives a change to what it covered.
-  BEGIN
-    PERFORM _dp_edit_guard('IF v_reset THEN', 'IF false THEN');
-    v := v || jsonb_build_object('m7', _dp_battery(v_all));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
-
-  -- M8. a decision may name no reviewer.
-  BEGIN
-    EXECUTE 'ALTER TABLE public.driver_notes DROP CONSTRAINT driver_notes_review_stamp';
-    v := v || jsonb_build_object('m8', _dp_battery(v_all));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  -- M8. A decision may name no reviewer.
+  v := v || _dp_mutant('m8',
+    ARRAY['ALTER TABLE public.driver_notes DROP CONSTRAINT driver_notes_review_stamp'], v_all);
 
   -- M9. note_date counts as part of what was reviewed, so the screen's own
   --     no-op save (which recomputes it to the minute) takes verifications back.
-  BEGIN
-    PERFORM _dp_edit_guard($f$'location_accuracy_m', 'evidence_path', 'note_text'];$f$,
-                           $f$'location_accuracy_m', 'evidence_path', 'note_text', 'note_date'];$f$);
-    v := v || jsonb_build_object('m9', _dp_battery(v_all));
-    RAISE EXCEPTION USING ERRCODE = 'ZZ009', MESSAGE = 'back';
-  EXCEPTION WHEN SQLSTATE 'ZZ009' THEN NULL; END;
+  v := v || _dp_mutant('m9', ARRAY[c_copy, $s$SELECT set_config('dp.mutation', 'm9', true)$s$], v_all);
 
   RETURN v;
 END $mut$;
@@ -1006,6 +1174,16 @@ DECLARE
   v        jsonb := _dp_mutations();
   v_after  int[] := _dp_battery(ARRAY['stamp', 'pin', 'dates', 'evidence', 'location', 'verify', 'reset', 'log']);
 BEGIN
+  -- A mutation whose setup fails is recorded under `<key>_error`, not raised, so the
+  -- file goes on to its other probes and this one names what broke.
+  PERFORM _dp_rec(198, 'every mutation could be set up: no harness error (a setup that failed is reported here, with its reason)',
+    coalesce((SELECT string_agg(k || ': ' || (v ->> k), '; ' ORDER BY k)
+                FROM jsonb_object_keys(v) AS k WHERE right(k, 6) = '_error'), 'none'),
+    'none');
+
+  PERFORM _dp_rec(199, 'M0. the kit''s own copy of the guard, with nothing broken, passes the whole table: the copy M5-M9 mutate is the guard',
+    (v -> 'm0')::text, '[]');
+
   PERFORM _dp_rec(200, 'before: the whole table is clean against the real rules, as the principals who write',
     cardinality(v_before)::text, '0');
 
@@ -1038,10 +1216,10 @@ BEGIN
   -- and the "nothing should happen" probes (131, 132, 140, 154, 157).
   PERFORM _dp_rec(207, 'M4. trigger dropped: exactly the stamping, pinning, review, reset and log probes notice',
     (v -> 'm4')::text,
-    '[10, 11, 12, 14, 15, 17, 20, 21, 22, 24, 30, 31, 32, 33, 34, 36, 72, 100, 101, 104, 105, 106, 113, 130, 133, 134, 135, 136, 137, 138, 139, 141, 142, 150, 151, 152, 153, 155, 156]');
+    '[10, 11, 12, 14, 15, 17, 20, 21, 22, 24, 25, 30, 31, 32, 33, 34, 36, 72, 100, 101, 104, 105, 106, 113, 130, 133, 134, 135, 136, 137, 138, 139, 141, 142, 150, 151, 152, 153, 155, 156]');
 
-  PERFORM _dp_rec(208, 'M5. created_by not pinned: the three probes that save as a colleague notice (20, 21, 141)',
-    (v -> 'm5')::text, _dp_nums('n IN (20, 21, 141)')::text);
+  PERFORM _dp_rec(208, 'M5. created_by not pinned: the probes that save as a colleague notice (20, 21, 141), and the end-to-end one (25)',
+    (v -> 'm5')::text, _dp_nums('n IN (20, 21, 25, 141)')::text);
 
   -- 101 names a reviewer. 139 does not, and still notices: on an UPDATE a column the
   -- request does not mention keeps its stored value, so under this mutation a note
