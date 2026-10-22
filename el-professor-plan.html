@@ -1323,6 +1323,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">10</td><td>حذف السائق صار تعطيل (الحذف كان يُرفض بالـtrigger أو يمسح الرواتب بصمت)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">11</td><td>حذف الفواتير (RPC جديدة: المدفوعة ممنوعة، غير المدفوعة تلغي فترة وصولها؛ الزرّ ما كان موجود)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج (الـkit مش مشغّل)</span></td></tr>
             <tr><td class="num">12</td><td>آخر ست حالات حذف صامت (دفعات الرواتب، Fixkosten، مستلمو الإشعارات، أكواد الإحالة، Ausgleich، استبدال الخطة المحفوظة) صارت تتحقق من الصفوف</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">13</td><td>غياب السائق: برامتر blockedDates بمحرك Brutto ما حدا بيعبّيه (طلع بقايا ميزة محذوفة، فانشال وانكتب إنو المحرك ما بيراعي الغياب)، وتخمين «غياب / Pflichtnotiz» من نص الملاحظة صار دالة وحدة بدل 4 نسخ</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
           </tbody>
         </table>
       </div>
