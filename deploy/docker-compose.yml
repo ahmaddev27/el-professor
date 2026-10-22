@@ -11,11 +11,18 @@
 # reimplementing all 193 as application code, which is where the audit found
 # nine authorization holes. Keeping the stack keeps the boundary.
 #
-# Surveyed reality of the target VPS (2026-09-10):
+# Surveyed reality of the target VPS, re-measured 2026-10-22 (first surveyed
+# 2026-09-10; the disk figures below are the ones that moved, so re-measure
+# rather than quote this block):
 #   - ridy-caddy-1 (caddy:2-alpine) already owns :80 and :443
 #   - ridy runs Laravel + MySQL + OSRM + Nominatim on network `ridy_default`
-#   - 21 GB of 31 GB free, 792 GB of 1 TB free
-#   - nothing but 22/80/443 listens on 0.0.0.0 — no exposed databases
+#     (ridy_osrm_data 14.8 GB, ridy_nominatim_data 106 GB - THEIRS, and their
+#     server is off limits)
+#   - one root volume: /dev/vda4, 1007 GB with 773 GB free (21% used), plus a
+#     944 MB /boot. The 2026-09-10 note read '21 GB of 31 GB free, 792 GB of
+#     1 TB free'; there is no 31 GB volume on this host at all, and quoting the
+#     21 was enough on its own to argue against adding a routing container.
+#   - nothing but 22/80/443 listens on 0.0.0.0 - no exposed databases
 #
 # So this stack publishes NO host ports at all. It joins ridy's network and the
 # existing Caddy reverse-proxies to it by container name. Nothing of ridy's is
