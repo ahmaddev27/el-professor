@@ -1264,12 +1264,37 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO abrechnung_handovers (company_id, year, month, week_number, driver_name, amount)
      VALUES ({co}, 2099, 1, 2, 'MX Fahrer neu', 5.00)$q$,
   $q$amount = amount$q$),
+-- The forward plan per vehicle and operating day (20261022140000): the monthly
+-- plan's shape with the same Dokumente page on every write, so a viewer and an
+-- editor read it and write none of it. Each probe row is a *draft*, because a
+-- confirmed plan is frozen and its U and D cells would be T for everybody, the
+-- owner included. The shift's moments follow from the plan's stored hour: hour 4
+-- and positions 24 to 36 are 10:00 to 13:00, and 5 and 6 October 2026 are a
+-- Monday and a Tuesday, which is what day_type 0 and 1 say.
+(74, 'vehicle_day_plans', $q$id = {id}$q$,
+  $q$INSERT INTO vehicle_day_plans (id, company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version)
+     VALUES ({id}, {co}, 2026, 10, 4, 15, 'mx')$q$, NULL,
+  $q$INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version)
+     VALUES ({co}, 2026, 11, 4, 15, 'mx')$q$,
+  $q$summary = summary$q$),
+(75, 'vehicle_day_shifts', $q$id = {id}$q$,
+  $q$INSERT INTO vehicle_day_shifts (id, company_id, plan_id, operating_date, vehicle, shift_index, start_position, end_position,
+                                     starts_local, ends_local, minutes, day_type, is_holiday, expected_revenue_cents,
+                                     expected_revenue_per_hour_cents, confidence, evidence_days)
+     VALUES ({id}, {co}, {ref:vehicle_day_plans}, '2026-10-05', 'MX-CAR', 0, 24, 36,
+             '2026-10-05 10:00', '2026-10-05 13:00', 180, 0, false, 100, 33, 'low', 1)$q$, NULL,
+  $q$INSERT INTO vehicle_day_shifts (company_id, plan_id, operating_date, vehicle, shift_index, start_position, end_position,
+                                     starts_local, ends_local, minutes, day_type, is_holiday, expected_revenue_cents,
+                                     expected_revenue_per_hour_cents, confidence, evidence_days)
+     VALUES ({co}, {ref:vehicle_day_plans}, '2026-10-06', 'MX-CAR', 0, 24, 36,
+             '2026-10-06 10:00', '2026-10-06 13:00', 180, 1, false, 100, 33, 'low', 1)$q$,
+  $q$minutes = minutes$q$),
 -- The Fahrtenanalyse's address cache (20261023100000): the other two
 -- Fahrtenanalyse tables' shape, an administrator writes and every member reads,
 -- anon holding no privilege at all. The key is unique per company and the
 -- fixture's carries the side, so A's row moved into B collides with nothing of B's;
 -- the insert probe uses a key of its own.
-(74, 'geocode_cache', $q$id = {id}$q$,
+(76, 'geocode_cache', $q$id = {id}$q$,
   $q$INSERT INTO geocode_cache (id, company_id, address_key, lat, lon, geocoder_version)
      VALUES ({id}, {co}, 'mx-{s} 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$, NULL,
   $q$INSERT INTO geocode_cache (company_id, address_key, lat, lon, geocoder_version)
@@ -1404,7 +1429,12 @@ INSERT INTO _mx_move VALUES
 ('monthly_plans',                        $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_guard refuses it even for the owner'),
 ('monthly_plan_drivers',                 $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_driver_guard refuses it even for the owner'),
 ('monthly_plan_blocks',                  $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner'),
-('monthly_plan_block_trips',             $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner');
+('monthly_plan_block_trips',             $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner'),
+-- 20261022140000: a plan stays with its company, month and the hour that built
+-- it, and a shift stays with its plan, so both guards refuse the move before
+-- any WITH CHECK is reached, for the owner too.
+('vehicle_day_plans',                    $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_plan_guard refuses it even for the owner'),
+('vehicle_day_shifts',                   $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_shift_guard refuses it even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1731,6 +1761,20 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('monthly_plans',                      'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_plans',                      'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_plans',                      'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261022140000: the monthly plan's cells, because the shape is the monthly
+-- plan's. Insert is YR for the supervisor and the administrator (the other
+-- company's row is the policy's), RR for the viewer and the editor (no
+-- can_edit on the Dokumente page), and the guard answers every move with T.
+('vehicle_day_plans',                  'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_plans',                  'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('vehicle_day_plans',                  'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_plans',                  'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_plans',                  'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('vehicle_day_shifts',                 'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_shifts',                 'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('vehicle_day_shifts',                 'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_shifts',                 'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_shifts',                 'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -2113,6 +2157,8 @@ UPDATE _mx_expected x
      'notification_recipients',
      -- 20261019110000: the same shape and the same two triggers
      'abrechnung_handovers',
+     -- 20261022140000: the same shape and the same two triggers
+     'vehicle_day_plans', 'vehicle_day_shifts',
      -- 20261023100000: the same shape and the same two triggers
      'geocode_cache');
 
@@ -3387,6 +3433,21 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
      'NYYYYYY', NULL),
 
+    -- The vehicle day plan's two RPCs (20261022140000), probed the same way and for
+    -- the same reason: both CHANGE STATE (a save takes the month's advisory lock and
+    -- discards the month's draft), and this harness runs one probe per principal
+    -- against one fixture. Their authorization is probed per principal, each call
+    -- in its own transaction, in tests/rls/vehicle-day-plans.sql: the viewer and
+    -- the editor print not_authorized, a suspended company and a platform owner
+    -- with no context print no_company, anon prints a missing GRANT, a view context
+    -- prints not_authorized and a support session saves.
+    ('vehicle_day_plan_save(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.vehicle_day_plan_save(jsonb)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+    ('vehicle_day_plan_confirm(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.vehicle_day_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
     -- anon's EXECUTE revoked by 20260427075001 and 20260428102656.
@@ -3930,6 +3991,9 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- probed per principal in tests/rls/monthly-plan.sql.
     ('monthly_plan_save(execute grant only)',                        'YY'),
     ('monthly_plan_confirm(execute grant only)',                     'YY'),
+    -- 20261022140000: the same two grants, read as boolean answers like the monthly plan's.
+    ('vehicle_day_plan_save(execute grant only)',                    'YY'),
+    ('vehicle_day_plan_confirm(execute grant only)',                 'YY'),
     -- The partner and receipt prerequisites. Measured, and two of the three
     -- corrected a guess of mine: a support session DRAWS a Belegnummer and
     -- PASSES the OCR gate, because current_role_permits() has a platform branch
@@ -3997,6 +4061,8 @@ BEGIN
       ('company_role_delete(company role of A)'),
       ('monthly_plan_save(execute grant only)'),
       ('monthly_plan_confirm(execute grant only)'),
+      ('vehicle_day_plan_save(execute grant only)'),
+      ('vehicle_day_plan_confirm(execute grant only)'),
       ('partner_submission_claim_driver(confirmed link of A)'),
       ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
       ('partner_driver_link_confirm(pending link of A)'),

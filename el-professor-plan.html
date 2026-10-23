@@ -1309,6 +1309,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         <table>
           <thead><tr><th>المرحلة</th><th>الاسم</th><th>الحجم</th><th>بتعتمد على</th><th>الحالة</th></tr></thead>
           <tbody>
+            <tr><td class="num">17</td><td>مخطط Stundennachweis صار يقرأ سلوك الملاحظة: الغياب (مرض/إجازة) = ما في شيفت أبدًا بأي يوم من مداه، والإلزامية بتحافظ على نافذتها، والحيادية ما بتعمل شي؛ وتعارض غياب مع ملاحظة إلزامية بيطلع على الشاشة بدل ما ينحسم بصمت. ما بيلمس أي وثيقة محفوظة (كلها من Monatsplanung)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">0</td><td>الإصدارات والحماية</td><td>صغير–متوسط</td><td>ما في</td><td><span class="pill info">قيد التنفيذ</span></td></tr>
             <tr><td class="num">1</td><td>OTP وأمان الحسابات</td><td>كبير</td><td>0</td><td><span class="pill ok">عالستيج</span></td></tr>
             <tr><td class="num">2</td><td>التصميم والنموذج</td><td>متوسط</td><td>0، وموافقتك</td><td><span class="pill ok">اندمج</span></td></tr>
@@ -1328,8 +1329,9 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">15</td><td>نوع الملاحظة وتأثيرها على التخطيط لازم يتّفقوا (قيدين CHECK بالداتابيس؛ التجاوز مسموح لـgeneral وother بس لأن الداتا الحقيقية بتستعمله، وممنوع للأنواع التمانية الباقية)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج (الـkit مش مشغّل)</span></td></tr>
             <tr><td class="num">16</td><td>ممر الإصلاح النهائي للتداخلات: السائق صار يتحدد بالمعرّف مش بالاسم المعروض (توأم الاسم كان يتنقل بلوكه أيام: 62 نقلة بالقياس، 0 بعد الإصلاح)، والأوقات المكتوبة صارت بتوقيت برلين مش UTC (فرق 60–120 دقيقة بكل بلوك منقول)</td><td>صغير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
             <tr><td class="num">17</td><td>ملاحظة السائق صارت تسجّل من وين إجت ومدى الوثوق فيها ومتى صار الحدث فعلاً (3 تواريخ، مسار المستند بقيد CHECK، حالة تحقق بمراجع مختوم من الـtrigger، موقع، سجل تغييرات؛ المخطِّط ما بيقرا شي منهم، ولقيت إن Stundennachweis بتحط Pflichtnotiz حسب لحظة الكتابة مو لحظة الحدث)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج (الـkit مش مشغّل)</span></td></tr>
-            <tr><td class="num">18</td><td>حاوية OSRM خاصة فينا + مقدّر زمن التنقّل لفحص السفر (مطفية افتراضياً، والشاشة ما بتتغيّر قبل قرار الـgeocoder)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
-            <tr><td class="num">19</td><td>محدّد العناوين لفحص السفر: Nominatim تبع ridy ورا gateway تبعنا + كاش لكل شركة (مطفي افتراضياً، وبسقف تغطية ~83% من الخلايا)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">18</td><td>التخطيط اليومي لكل مركبة صار سجلّ محفوظ: جدولين (vehicle_day_plans / vehicle_day_shifts) ودالتين للحفظ والتأكيد، ساعة بداية يوم التشغيل محفوظة بصف الخطة وما بتنشتق، وبلا أي عمود سائق ولا أي حقل حر بيتّسع لسائق (السائق بيتعيّن بآخر الشهر). مراجعة مستقلة لقت ثغرتين حقيقيتين (تأكيد الخطة بطيء جداً على شهر كبير، ووردية بتدخل خطة مؤكّدة وقت التأكيد) وانصلحوا بفحص لكل وحدة. الشاشة لسا ما بتستدعيه</td><td>كبير</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">19</td><td>حاوية OSRM خاصة فينا + مقدّر زمن التنقّل لفحص السفر (مطفية افتراضياً، والشاشة ما بتتغيّر قبل قرار الـgeocoder)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
+            <tr><td class="num">20</td><td>محدّد العناوين لفحص السفر: Nominatim تبع ridy ورا gateway تبعنا + كاش لكل شركة (مطفي افتراضياً، وبسقف تغطية ~83% من الخلايا)</td><td>متوسط</td><td>—</td><td><span class="pill info">PR مفتوح عالستيج</span></td></tr>
           </tbody>
         </table>
       </div>
