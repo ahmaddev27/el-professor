@@ -71,6 +71,7 @@ runs:
               dist \
               deploy/docker-compose.yml deploy/deploy.sh deploy/kong.yml deploy/nginx-spa.conf \
               deploy/init-db deploy/export-service deploy/SCHEMA_EPOCH \
+              deploy/geocoder-gateway.conf \
               supabase/functions supabase/migrations \
             | on_host "release ${ENVIRONMENT} ${GITHUB_SHA}"
             ;;

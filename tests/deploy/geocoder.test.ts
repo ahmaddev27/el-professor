@@ -273,3 +273,71 @@ describe.skipIf(!hasBash)('compose_profiles_problem (deploy.sh) and the geocoder
     expect(problem('production', 'nominatim')).toMatch(/does not know/);
   });
 });
+
+// ── The config file has to reach the host, and a rollback has to survive it ──
+// The release that introduced geocoder-gateway.conf did not teach the release
+// path to ship it: neither the tar in .github/actions/host/action.yml nor
+// ci-release.sh's install_release named it, so deploy.sh died on
+// `sha256sum: geocoder-gateway.conf: No such file or directory` and the staging
+// release of 23.10.2026 stopped half way. These pin both halves of the repair.
+
+function hashStep(profiles: string, writeConf: boolean): string {
+  const step = mkdtempSync(join(tmpdir(), 'geocoder-hash-'));
+  if (writeConf) writeFileSync(join(step, 'geocoder-gateway.conf'), 'server { listen 8080; }\n');
+  writeFileSync(join(step, 'run.sh'),
+    'set -euo pipefail\n' +
+    `cd "${posix(step)}"\n` +
+    'fail() { echo "REFUSED: $*"; exit 3; }\n' +
+    `PROFILES="${profiles}"\n` +
+    `${block(deploySh, 'geocoder config hash')}\n` +
+    'echo "SHA=$GEOCODER_CONFIG_SHA"\n');
+  const r = spawnSync('bash', [posix(join(step, 'run.sh'))], { encoding: 'utf8', timeout: 20_000 });
+  rmSync(step, { recursive: true, force: true });
+  return `${r.stdout}${r.stderr}`.replace(/\r/g, '').trim();
+}
+
+describe.skipIf(!hasBash)('the gateway config is hashed when present and refused only when needed', () => {
+  it('hashes the file when it is there', () => {
+    expect(hashStep('staging', true)).toMatch(/SHA=[0-9a-f]{16}$/);
+  });
+
+  it('lets a release through without it while the profile is off, so a rollback works', () => {
+    // A rollback keeps the CURRENT deploy.sh against an older release's files,
+    // so "absent" is a state the newest code must tolerate, not an error.
+    expect(hashStep('staging', false)).toContain('SHA=absent');
+    expect(hashStep('staging,osrm', false)).toContain('SHA=absent');
+  });
+
+  it('refuses when the profile names geocoder and the file is not in the release', () => {
+    // A gateway started against a config this release never shipped is a proxy
+    // whose rules nobody has read - and it proxies to another product's service.
+    for (const list of ['staging,geocoder', 'geocoder', 'staging,osrm,geocoder', 'geocoder,staging']) {
+      expect(hashStep(list, false), list).toMatch(/REFUSED: COMPOSE_PROFILES names geocoder but/);
+    }
+  });
+});
+
+describe('the release path ships the gateway config', () => {
+  const action = repoFile('.github/actions/host/action.yml');
+  const wrapper = repoFile('deploy/ci-release.sh');
+
+  it('CI puts it in the tar it sends to the host', () => {
+    expect(folded(action)).toContain('deploy/geocoder-gateway.conf');
+  });
+
+  it('the wrapper stores it with the release and installs it into the live checkout', () => {
+    expect(wrapper).toContain('cp "$work/deploy/geocoder-gateway.conf" "$rel/deploy/"');
+    expect(wrapper).toContain('install -m 644 "$src/deploy/geocoder-gateway.conf" "$DIR/deploy/"');
+  });
+
+  it('removes it on a rollback onto a release from before it', () => {
+    // Without the remove, an old release would run against a config it never
+    // shipped - the mirror of the failure this change repairs.
+    expect(wrapper).toContain('rm -f "$DIR/deploy/geocoder-gateway.conf"');
+  });
+
+  it('treats it as optional on both read sides, or a rollback would refuse', () => {
+    expect(wrapper).toContain('if [ -f "$work/deploy/geocoder-gateway.conf" ]');
+    expect(wrapper).toContain('if [ -f "$src/deploy/geocoder-gateway.conf" ]');
+  });
+});
