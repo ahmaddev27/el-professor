@@ -18,10 +18,17 @@
 #   - ridy runs Laravel + MySQL + OSRM + Nominatim on network `ridy_default`
 #     (ridy_osrm_data 14.8 GB, ridy_nominatim_data 106 GB - THEIRS, and their
 #     server is off limits)
-#   - one root volume: /dev/vda4, 1007 GB with 773 GB free (21% used), plus a
-#     944 MB /boot. The 2026-09-10 note read '21 GB of 31 GB free, 792 GB of
-#     1 TB free'; there is no 31 GB volume on this host at all, and quoting the
-#     21 was enough on its own to argue against adding a routing container.
+#   - one root volume: /dev/vda4, 1007 GB with 770 GB free (21% used), plus a
+#     944 MB /boot
+#   - 31 GB of RAM, 19 GB available (free -g, 2026-10-23)
+#   The 2026-09-10 note read '21 GB of 31 GB free, 792 GB of 1 TB free', and
+#   both halves were right: the first pair is MEMORY and the second the disk.
+#   A 2026-10-22 edit to this block read the 31 as a volume, declared that no
+#   such volume exists and called the old note wrong. That was the error, and
+#   it dismissed the figure that actually binds here - a routing graph is built
+#   in RAM, not on disk (see the osrm service's own note below), so memory is
+#   the constraint to check before enabling that profile, and the disk never
+#   was.
 #   - nothing but 22/80/443 listens on 0.0.0.0 - no exposed databases
 #
 # So this stack publishes NO host ports at all. It joins ridy's network and the
