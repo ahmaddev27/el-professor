@@ -112,7 +112,12 @@
                     20261016140000 fixed for the monthly plan), while the same
                     delete of the one row is refused
    12. mutations    fourteen controls: break one rule inside a subtransaction,
-                    require the probe to notice, and let the rollback restore it
+                    require the probe to notice, and let the rollback restore it.
+                    M14 is the one whose first expectation was WRONG and whose
+                    measurement is the better statement: a view context meets two
+                    independent walls here, so dropping the refusal trigger leaves
+                    the Dokumente page gate standing. Its own comment has the
+                    numbers.
 
   The matrix lines for both tables, and the EXECUTE grants of the three RPCs, are
   in tests/rls/matrix.sql.
@@ -1639,16 +1644,38 @@ BEGIN
   PERFORM _dma_expect('mutation M13: without the tenant term company B reads company A''s assignments',
     'false => true', v_before || ' => ' || v_after);
 
-  -- M14. The view-context refusal trigger is dropped: a view context writes the
-  --      company it only opened to read.
+  /*
+    M14. The view-context refusal trigger is dropped -- and A VIEW CONTEXT STILL
+    WRITES NOTHING, because there are TWO independent walls here and this control
+    removes one of them. MEASURED on the VPS, 23.10.2026, against the expectation
+    this line first carried (`=> rows 1`), which was wrong:
+
+      with the trigger:     ERR P0001 support_session_required   (the trigger)
+      without the trigger:  ERR 42501 new row violates row-level security policy
+
+    The second wall is the Dokumente page gate inside the write policies.
+    current_role_permits() has a platform branch that grants edit AS THE
+    COMPANY'S OWN ADMINISTRATOR WOULD -- but only inside a SUPPORT session (3.4a),
+    so for a VIEW context it answers false and the policy's WITH CHECK refuses the
+    row on its own. tests/rls/matrix.sql says the same of monthly_plan_save and
+    _confirm, for the same reason.
+
+    So the control stands as a control -- the answer changes when the rule is
+    removed, which is all a mutation control has to show -- and what it records is
+    worth more than the sentence it replaced: the refusal trigger is not the only
+    thing keeping a view context out of this table, and `support_session_required`
+    is the trigger's own word and can come from nowhere else, which is what
+    section 10 asserts.
+  */
   v_probe := format(
     'INSERT INTO driver_month_assignments (company_id, year, month, driver_id, plan_id) VALUES (%L, 2020, 1, %L, %L)',
     c_co_a, c_d12c, c_plan20);
   v_before := _dma_try(c_view_p, c_s_view, v_probe);
   v_after  := _dma_mutant('DROP TRIGGER refuse_read_only_context_write ON public.driver_month_assignments',
     c_view_p, c_s_view, v_probe);
-  PERFORM _dma_expect('mutation M14: without the refusal trigger a view context writes the company it only opened to read',
-    'ERR P0001 support_session_required => rows 1', v_before || ' => ' || v_after);
+  PERFORM _dma_expect('mutation M14: without the refusal trigger a view context is still refused -- by the Dokumente page gate, the second of two walls',
+    'ERR P0001 support_session_required => ERR 42501 new row violates row-level security policy for table "driver_month_assignments"',
+    v_before || ' => ' || v_after);
 END $$;
 
 -- ─── 13. the verdict ────────────────────────────────────────────────────────
