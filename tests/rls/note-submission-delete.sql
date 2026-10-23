@@ -110,13 +110,16 @@
      section-5 company wall saw the submission as another company's row it
      would refuse and roll the operator's delete back.
 
-     Probe 36 records an asymmetry this change does not resolve:
-     `app_private.support_write_redaction_pattern` names `driver_notes.note_text`
-     and names nothing on `partner_note_submissions`, so the note's audit row
-     redacts the free text about a person's absence while the cascaded
-     submission's row copies the same text in full. That is measured here so
-     the next reader sees it; widening the pattern is a data-protection
-     decision and was not taken as a side effect of a delete fix.
+     Probes 37 and 43 are the redaction half. They recorded an asymmetry this
+     file's own change did not resolve:
+     `app_private.support_write_redaction_pattern` named `driver_notes.note_text`
+     and nothing on `partner_note_submissions`, so the note's audit row redacted
+     the free text about a person's absence while the cascaded submission's row
+     copied the same sentence in full. `20261023180000` closed it, and the two
+     probes are now the positive assertion on the cascade path: both rows are
+     markers and the sentence is in neither, while the submission's identifiers
+     and status still are. The pattern's own rules — which column of which
+     table, and why — are `support-write-redaction.sql`'s.
 
   8. The mutation controls, which are what make sections 0 to 7 worth reading.
 
@@ -126,7 +129,8 @@
   tenant-state.sql, permission-coverage.sql), the note's own type and
   provenance rules (note-type-constraint.sql, driver-note-provenance.sql), the
   submission table's shape (partner-note-intake.sql, driver-deletion.sql
-  section 6), the redaction rules of the audit row (support-write-audit.sql),
+  section 6), the redaction rules of the audit row (support-write-audit.sql and
+  support-write-redaction.sql),
   and nothing about what SHOULD have happened to the submission record — that
   was the owner's decision, not this file's finding.
 
@@ -774,17 +778,26 @@ BEGIN
       || '/' || r_sub.category || '/' || r_sub.outcome,
     'ns-ext-5/null/support/ok');
 
-  -- RECORDED, not endorsed, and not changed here.
-  -- `app_private.support_write_redaction_pattern` names `driver_notes.note_text`
-  -- and names nothing at all on `partner_note_submissions`, so the note's own
-  -- audit row hides the free text about a person's absence while the cascaded
-  -- submission's row copies the same sentence in full. Widening the pattern is
-  -- a data-protection decision; making one as a side effect of a delete fix is
-  -- not. This probe is here so the asymmetry is measured rather than inferred.
-  PERFORM _ns_rec(37, 'the note''s audit row redacts note_text; the cascaded submission''s does not',
+  -- The asymmetry this probe recorded is closed by `20261023180000`, which gave
+  -- `app_private.support_write_redaction_pattern` an arm for
+  -- `partner_note_submissions` naming `note_text` and `rejected_reason`. Before
+  -- it, the note's own audit row hid the free text about a person's absence
+  -- while the cascaded submission's row copied the same sentence in full; this
+  -- probe is what measured that, and it is kept here, as the positive
+  -- assertion, so the fix is proved on the cascade path too. The redaction
+  -- rules themselves are `support-write-redaction.sql`'s.
+  PERFORM _ns_rec(37, 'both audit rows redact note_text: the note''s and the cascaded submission''s',
     (r_note.before_value -> 'values' -> 'note_text')::text
-      || ' / ' || (r_sub.before_value -> 'values' ->> 'note_text'),
-    '{"redacted": true} / ns support');
+      || ' / ' || (r_sub.before_value -> 'values' -> 'note_text')::text,
+    '{"redacted": true} / {"redacted": true}');
+
+  PERFORM _ns_rec(43, 'and the sentence itself is nowhere in the cascaded row, while its identifiers are',
+    (CASE WHEN position('ns support' IN
+            coalesce(r_sub.before_value::text, '') || coalesce(r_sub.after_value::text, '')) = 0
+          THEN 'absent' ELSE 'PRESENT' END)
+      || ' / ' || (r_sub.before_value -> 'values' ->> 'external_submission_id')
+      || ' / ' || (r_sub.before_value -> 'values' ->> 'status'),
+    'absent / ns-ext-5 / accepted');
 END $$;
 
 -- ─── 8. the mutation controls ───────────────────────────────────────────────
@@ -930,10 +943,10 @@ DECLARE
   v_msg text := '';
 BEGIN
   -- A probe that never recorded cannot fail, so the count is asserted first.
-  IF (SELECT count(*) FROM _ns_out) <> 42 THEN
-    RAISE EXCEPTION 'note submission delete: % of 42 probes recorded — missing: %',
+  IF (SELECT count(*) FROM _ns_out) <> 43 THEN
+    RAISE EXCEPTION 'note submission delete: % of 43 probes recorded — missing: %',
       (SELECT count(*) FROM _ns_out),
-      (SELECT string_agg(n::text, ', ' ORDER BY n) FROM generate_series(1, 42) AS g(n)
+      (SELECT string_agg(n::text, ', ' ORDER BY n) FROM generate_series(1, 43) AS g(n)
         WHERE NOT EXISTS (SELECT 1 FROM _ns_out o WHERE o.n = g.n));
   END IF;
 
