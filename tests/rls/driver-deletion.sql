@@ -39,10 +39,15 @@
        its sibling, and probes 9 to 12 and 14 moved with it. Both sides of
        that cell are in section 4, because a cell that moves silently is how
        a gate stops gating.
-    5. `partner_receipt_submissions.receipt_id` -- SET NULL against
-       `partner_receipt_submissions_accepted_has_receipt`. This one refuses
-       deleting the BELEG rather than the driver, and it was not in the list I
-       set out to test; the constraint names turned it up while reading.
+    5. `partner_receipt_submissions.receipt_id` -- CASCADE since
+       `20261023150000`. This one is about deleting the BELEG rather than the
+       driver, and it was not in the list I set out to test; the constraint
+       names turned it up while reading. It was SET NULL against
+       `partner_receipt_submissions_accepted_has_receipt`, which refused the
+       delete outright and so made every Beleg that came from an accepted
+       submission undeletable; probes 13 and 16 moved with the owner's
+       decision of 23.10.2026, and section 5 carries the reason. The note
+       sibling in 4 above keeps SET NULL, so the two now differ on purpose.
 
   HOW IT REPORTS. Every probe writes its outcome to a temp table and the
   assertions run at the end, together, so one run answers all five questions
@@ -242,9 +247,26 @@ BEGIN
 END
 $$;
 
--- ─── 5. an accepted receipt submission pins the Beleg ──────────────────────
--- Not a driver deletion at all: this one refuses deleting the RECEIPT. It was
+-- ─── 5. an accepted receipt submission no longer pins the Beleg ────────────
+-- Not a driver deletion at all: this one is about deleting the RECEIPT. It was
 -- not on the list of readings to settle; the constraint names turned it up.
+--
+-- MOVED 23.10.2026 by `20261023150000`. This probe read `ERR 23514
+-- %partner_receipt_submissions_accepted_has_receipt%` and the comment above it
+-- called the refusal correct behaviour — "the submission keeps its record" —
+-- which nobody had checked against what an operator is then supposed to do
+-- with a mistyped Beleg. The answer was nothing: `ON DELETE SET NULL` against
+-- the accepted-has-receipt CHECK made EVERY Beleg produced by an accepted
+-- submission permanently undeletable, 20 of them on production. The owner
+-- chose `ON DELETE CASCADE`, so the delete succeeds and the submission goes
+-- with it, and he accepted that the record of the driver's submission is lost
+-- with the Beleg. `tests/rls/partner-submission-delete.sql` is that change's
+-- own file and reproduces the old refusal in its section 1.
+--
+-- The note sibling in section 4 is deliberately NOT moved: its FK is still
+-- `ON DELETE SET NULL`, so probes 9 to 12 stand, and the two tables now
+-- disagree on purpose. Probes 14 and 15 below count foreign KEYS rather than
+-- their actions, so both still read 1.
 
 INSERT INTO receipts (id, receipt_number, date, description, driver_name, company_id)
 VALUES ('dd300000-0000-4000-8000-000000000002', 'BEL-DD-2', current_date, 'dd pinned',
@@ -258,19 +280,31 @@ VALUES ('dd800000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 
 DO $$
 BEGIN
-  PERFORM _dd_rec(13, 'a Beleg behind an accepted submission cannot be deleted',
+  PERFORM _dd_rec(13, 'a Beleg behind an accepted submission deletes, and the submission cascades with it',
     _dd_try($q$DELETE FROM receipts WHERE id = 'dd300000-0000-4000-8000-000000000002'$q$),
-    'ERR 23514 %partner_receipt_submissions_accepted_has_receipt%', true);
+    'ok');
+
+  PERFORM _dd_rec(16, 'so the submission row is gone rather than left accepted naming nothing',
+    (SELECT count(*)::text FROM partner_receipt_submissions
+      WHERE id = 'dd800000-0000-4000-8000-000000000001'),
+    '0');
 END
 $$;
 
--- ───────── 6. the two siblings agree, read out of the catalogue
+-- ───────── 6. both siblings have a foreign key, read out of the catalogue
 -- Until 20261007100000 probe 14 expected ZERO: `driver_note_id` had no
 -- foreign key while `receipt_id` had one, and that asymmetry was the whole
 -- cause of section 4's old behaviour. The migration closed it, so both
 -- probes expect one now, and a migration that drops either key fails here
 -- rather than in a customer's data. A comment claiming the shape is not
 -- evidence; these two probes are.
+--
+-- What these two probes do NOT say, since 20261023150000, is that the two keys
+-- carry the same ACTION. `receipt_id` is CASCADE and `driver_note_id` is still
+-- SET NULL, which is why section 4's refusal stands while section 5's is gone.
+-- The actions are not asserted here on purpose: pinning the note side would
+-- fail the release that answers the other half of the owner's question, and
+-- probes 9 to 12 already flip when it is answered.
 
 DO $$
 DECLARE
