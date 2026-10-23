@@ -30,15 +30,19 @@
        not an edge: a real driver is probably undeletable today.
     3. `partner_driver_links.driver_id` -- SET NULL against
        `partner_driver_links_linked_has_driver`.
-    4. `partner_note_submissions.driver_note_id` -- which did NOT refuse when
+    4. `partner_note_submissions.driver_note_id` -- CASCADE since
+       `20261023160000`, and this cell has moved twice. It did NOT refuse when
        this file was written, because the column carried no foreign key at
-       all. The reading was right about the mechanism and wrong about the
-       schema, and it was wrong in the dangerous direction: the delete
-       succeeded and left the accepted submission pointing at a deleted
-       note. `20261007100000` added the missing key, so it refuses now like
-       its sibling, and probes 9 to 12 and 14 moved with it. Both sides of
-       that cell are in section 4, because a cell that moves silently is how
-       a gate stops gating.
+       all: the reading was right about the mechanism and wrong about the
+       schema, and wrong in the dangerous direction, the delete succeeding and
+       leaving the accepted submission pointing at a deleted note.
+       `20261007100000` added the missing key with `ON DELETE SET NULL`, so it
+       refused like its sibling and probes 9 to 12 and 14 moved with it. That
+       refusal then turned out to make every such note -- and its driver --
+       permanently undeletable, three of them on production, so the owner
+       chose the cascade on 23.10.2026 and probes 9 to 12 moved again. All
+       three states are in section 4, because a cell that moves silently is
+       how a gate stops gating.
     5. `partner_receipt_submissions.receipt_id` -- CASCADE since
        `20261023150000`. This one is about deleting the BELEG rather than the
        driver, and it was not in the list I set out to test; the constraint
@@ -47,7 +51,9 @@
        delete outright and so made every Beleg that came from an accepted
        submission undeletable; probes 13 and 16 moved with the owner's
        decision of 23.10.2026, and section 5 carries the reason. The note
-       sibling in 4 above keeps SET NULL, so the two now differ on purpose.
+       sibling in 4 above took the same action in `20261023160000`, so the two
+       agree again -- and that symmetry is now PINNED by that migration's
+       self-check 7 rather than left to a comment.
 
   HOW IT REPORTS. Every probe writes its outcome to a temp table and the
   assertions run at the end, together, so one run answers all five questions
@@ -194,26 +200,42 @@ BEGIN
 END
 $$;
 
--- ───────── 4. an accepted note submission refuses the delete, since 20261007100000
--- THE CELL MOVED, and this file records both sides of it.
+-- ───────── 4. an accepted note submission no longer pins the driver
+-- THE CELL HAS MOVED TWICE, and this file records all three states of it.
 --
 -- MEASURED 06.10.2026, when this file was written: the delete SUCCEEDED. I
--- had expected the refusal and asserted it; the kit refused the expectation.
+-- had expected a refusal and asserted it; the kit refused the expectation.
 -- `partner_note_submissions.driver_note_id` carried NO FOREIGN KEY while its
 -- sibling `partner_receipt_submissions.receipt_id` carried one, so nothing
 -- fired: the note cascaded away and the submission was left `accepted`
 -- pointing at a row that no longer existed. The CHECK cannot catch that,
 -- because a dangling uuid is still non-null.
 --
--- `20261007100000` adds the missing key with the same `ON DELETE SET NULL`,
--- so the behaviour is now what section 5 has always done for receipts, and
--- probe 14 flipped with it. The original reading was right about the
--- mechanism and wrong about the schema.
+-- `20261007100000` added the missing key with the same `ON DELETE SET NULL`,
+-- and from then until today the delete was REFUSED: the chain is one step
+-- longer than the others, so deleting the driver deleted the note
+-- (`driver_notes.driver_id` is CASCADE), which SET NULLed the submission's
+-- `driver_note_id` while its status was still 'accepted', and
+-- `partner_note_submissions_accepted_has_note` then refused the whole
+-- statement. Probes 9 to 12 asserted that refusal as correct behaviour.
 --
--- The chain is one step longer than the others: `driver_notes.driver_id` is
--- CASCADE, so deleting the driver deletes the note, which SET NULLs the
--- submission's `driver_note_id` while its status is still 'accepted', and
--- the CHECK then refuses the whole delete.
+-- MOVED AGAIN 23.10.2026 by `20261023160000`, for the reason its sibling
+-- moved a migration earlier: nobody had asked what an operator does with a
+-- mistaken note afterwards, and the answer was nothing. A refusal raised by a
+-- constraint on a table two hops from the statement made every driver note
+-- produced by an accepted submission undeletable, AND its driver with it —
+-- three such notes on production, all Y&A Mobility. The owner chose `ON
+-- DELETE CASCADE`, the same answer he gave for the Beleg the same day, and he
+-- accepted that the record of the driver's report goes with the note.
+--
+-- So the four probes below flip together: the driver deletes, the note goes
+-- with it, and the submission goes with the note. The old refusal is not
+-- lost — `tests/rls/note-submission-delete.sql` section 1 reproduces it by
+-- swapping the action back, which is where a before-and-after belongs.
+--
+-- Both siblings are CASCADE again, so the asymmetry recorded here on 23.10 is
+-- closed; `20261023160000`'s self-check 7 pins both, and probe 14 below is
+-- unaffected because it counts foreign KEYS and not their actions.
 
 INSERT INTO driver_notes (id, created_by, driver_id, note_text, company_id)
 VALUES ('dd200000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001',
@@ -229,21 +251,24 @@ VALUES ('dd700000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 
 DO $$
 BEGIN
-  PERFORM _dd_rec(9, 'a driver whose note backs an accepted submission cannot be deleted',
+  PERFORM _dd_rec(9, 'a driver whose note backs an accepted submission now deletes',
     _dd_try($q$DELETE FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'$q$),
-    'ERR 23514 %partner_note_submissions_accepted_has_note%', true);
+    'ok');
 
-  PERFORM _dd_rec(10, 'so the driver is still there',
-    (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'), '1');
+  PERFORM _dd_rec(10, 'so the driver is gone',
+    (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'), '0');
 
-  PERFORM _dd_rec(11, 'and the note it depends on is still there',
+  PERFORM _dd_rec(11, 'and its note went with it, driver_notes.driver_id being CASCADE',
     (SELECT count(*)::text FROM driver_notes WHERE id = 'dd200000-0000-4000-8000-000000000002'),
-    '1');
+    '0');
 
-  PERFORM _dd_rec(12, 'and the submission still names it',
-    (SELECT driver_note_id::text FROM partner_note_submissions
+  -- Counted rather than read back as a column: the row is GONE, so reading
+  -- `driver_note_id` would answer NULL both for a cascaded row and for one left
+  -- behind with its reference nulled — the two states this change is between.
+  PERFORM _dd_rec(12, 'and the submission is gone too, rather than left accepted naming nothing',
+    (SELECT count(*)::text FROM partner_note_submissions
       WHERE id = 'dd700000-0000-4000-8000-000000000001'),
-    'dd200000-0000-4000-8000-000000000002');
+    '0');
 END
 $$;
 
@@ -263,10 +288,10 @@ $$;
 -- with the Beleg. `tests/rls/partner-submission-delete.sql` is that change's
 -- own file and reproduces the old refusal in its section 1.
 --
--- The note sibling in section 4 is deliberately NOT moved: its FK is still
--- `ON DELETE SET NULL`, so probes 9 to 12 stand, and the two tables now
--- disagree on purpose. Probes 14 and 15 below count foreign KEYS rather than
--- their actions, so both still read 1.
+-- The note sibling in section 4 moved the same way in `20261023160000`, the
+-- other half of the same question the owner answered the same day, so probes
+-- 9 to 12 flipped with it. Probes 14 and 15 below count foreign KEYS rather
+-- than their actions, so both still read 1.
 
 INSERT INTO receipts (id, receipt_number, date, description, driver_name, company_id)
 VALUES ('dd300000-0000-4000-8000-000000000002', 'BEL-DD-2', current_date, 'dd pinned',
@@ -299,12 +324,13 @@ $$;
 -- rather than in a customer's data. A comment claiming the shape is not
 -- evidence; these two probes are.
 --
--- What these two probes do NOT say, since 20261023150000, is that the two keys
--- carry the same ACTION. `receipt_id` is CASCADE and `driver_note_id` is still
--- SET NULL, which is why section 4's refusal stands while section 5's is gone.
--- The actions are not asserted here on purpose: pinning the note side would
--- fail the release that answers the other half of the owner's question, and
--- probes 9 to 12 already flip when it is answered.
+-- What these two probes still do NOT say is that the two keys carry the same
+-- ACTION. Both are CASCADE as of `20261023150000` and `20261023160000`, and
+-- the actions are deliberately not asserted HERE: they are pinned together by
+-- `20261023160000`'s self-check 7, which is the one place that sorts after
+-- both changes, and measured by section 0 of
+-- `tests/rls/note-submission-delete.sql`. Pinning them in this file as well
+-- would be a third copy of the same rule with no third reader.
 
 DO $$
 DECLARE
