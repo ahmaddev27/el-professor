@@ -49,7 +49,8 @@ import { createLookupEstimator, requestKey } from './lookup';
 
 export type LocatedAddress =
   | { readonly kind: 'located'; readonly point: GeoPoint; readonly precision: AddressPrecision }
-  | { readonly kind: 'unlocated' };
+  /** `reason` says why in a word (`no_house_number`, `too_coarse`, `unreachable`); the estimate carries it as `address_<reason>`. */
+  | { readonly kind: 'unlocated'; readonly reason?: string };
 
 export interface AddressLocator {
   /** An address missing from the answer, or answered `unlocated`, is an address it could not place. */
@@ -92,11 +93,17 @@ async function locateAll(locator: AddressLocator, addresses: readonly string[]):
   }
 }
 
+/** Why a pair has no points: the reason of the first end the locator could not place, or the plain one. */
+function unplacedReason(from: LocatedAddress | undefined, to: LocatedAddress | undefined): string {
+  const unplaced = from?.kind === 'located' ? to : from;
+  return unplaced?.kind === 'unlocated' && unplaced.reason ? `address_${unplaced.reason}` : 'address_not_located';
+}
+
 function planFor(request: TravelEstimateRequest, places: ReadonlyMap<string, LocatedAddress> | null, legs: Map<string, RoutePair>): Plan {
   if (places === null) return { kind: 'unavailable', reason: 'locator_failed' };
   const from = places.get(request.fromAddress);
   const to = places.get(request.toAddress);
-  if (from?.kind !== 'located' || to?.kind !== 'located') return { kind: 'unavailable', reason: 'address_not_located' };
+  if (from?.kind !== 'located' || to?.kind !== 'located') return { kind: 'unavailable', reason: unplacedReason(from, to) };
   const id = legId(from.point, to.point);
   if (!legs.has(id)) legs.set(id, { id, from: from.point, to: to.point });
   return { kind: 'leg', id, fromPrecision: from.precision, toPrecision: to.precision };

@@ -20,6 +20,7 @@ import {
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { useAppAddressLocator } from '../hooks/useAppAddressLocator';
 import { useTravelEstimator } from '../hooks/useTravelEstimator';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -270,9 +271,12 @@ export default function TripAnalysisPage() {
   }, [savedReturnBase]);
 
   // Undefined until there is something to measure with: the engine then uses
-  // noRoutingEstimator and every travel check stays unverifiable. Today there is
-  // no address locator (lib/addressLocator.ts), so it always is.
-  const travelEstimator = useTravelEstimator(analysisTrips, effective.settings);
+  // noRoutingEstimator and every travel check stays unverifiable. That is the case
+  // while the travel_estimator flag is off (lib/addressLocator.ts says what turning
+  // it on needs and costs), and it is the case for every ride whose addresses cannot
+  // be placed at house level.
+  const addressLocator = useAppAddressLocator();
+  const travelEstimator = useTravelEstimator(analysisTrips, effective.settings, { locator: addressLocator });
 
   const analysis = useMemo<{ result: TripAnalysisResult | null; failed: boolean }>(() => {
     if (!effective.settings || tripRows.length === 0) return { result: null, failed: false };

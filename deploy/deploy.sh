@@ -275,7 +275,8 @@ sys.stdout.write(text)
 # What COMPOSE_PROFILES may name. `staging` is the mail catcher and belongs to
 # staging alone: on production it would swallow real mail, and staging without
 # it has nowhere to send. `osrm` is the routing container (deploy/osrm-build-data.sh
-# builds what it serves), and either stack may opt in. Anything else is a typo or
+# builds what it serves) and `geocoder` the gateway to ridy's Nominatim
+# (deploy/geocoder-gateway.conf); either stack may opt in to either. Anything else is a typo or
 # a profile this release has never heard of, and a typo that reads as "none" is
 # how a service silently does not start.
 # $1 = production|staging, $2 = the list as .env writes it. Prints nothing when
@@ -288,8 +289,8 @@ compose_profiles_problem() {
   for name in ${names[@]+"${names[@]}"}; do
     case "$name" in
       staging) has_staging=yes ;;
-      osrm) ;;
-      *) echo "COMPOSE_PROFILES names '$name', which this release does not know (it knows staging and osrm)"; return ;;
+      osrm|geocoder) ;;
+      *) echo "COMPOSE_PROFILES names '$name', which this release does not know (it knows staging, osrm and geocoder)"; return ;;
     esac
   done
   if [ "$environment" = staging ] && [ "$has_staging" != yes ]; then
@@ -614,7 +615,8 @@ step "release"
 # service definition, and compose recreates exactly the containers affected.
 KONG_CONFIG_SHA="$(sha256sum kong.yml | cut -c1-16)"
 NGINX_CONFIG_SHA="$(sha256sum nginx-spa.conf | cut -c1-16)"
-export KONG_CONFIG_SHA NGINX_CONFIG_SHA
+GEOCODER_CONFIG_SHA="$(sha256sum geocoder-gateway.conf | cut -c1-16)"
+export KONG_CONFIG_SHA NGINX_CONFIG_SHA GEOCODER_CONFIG_SHA
 
 # The routes GoTrue would create an account on once its signup is open. Only
 # Kong's request-termination plugin answers them with this message: the
