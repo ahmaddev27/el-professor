@@ -111,6 +111,22 @@ describe('prefetchTravelEstimates', () => {
     expect(routing.calls.flat()).toHaveLength(1);
   });
 
+  it('carries the reason the locator gave for an address it could not place into the estimate, from the first end that failed', async () => {
+    const routing = everythingRoutes();
+    const requests = [request('t1', 't2', 'A', 'Street'), request('t2', 't3', 'Street', 'Square'), request('t3', 't4', 'A', 'B')];
+    const table: Record<string, LocatedAddress> = {
+      A: located(1),
+      B: located(2),
+      Street: { kind: 'unlocated', reason: 'no_house_number' },
+      Square: { kind: 'unlocated', reason: 'too_coarse' },
+    };
+    const estimator = await prefetchTravelEstimates(requests, { locator: locatorOf(table).locator, router: routing.router, now });
+    expect(estimator.estimate(requests[0])).toMatchObject({ kind: 'unavailable', reason: 'address_no_house_number' });
+    expect(estimator.estimate(requests[1])).toMatchObject({ kind: 'unavailable', reason: 'address_no_house_number' });
+    expect(estimator.estimate(requests[2]).kind).toBe('estimated');
+    expect(routing.calls.flat()).toHaveLength(1);
+  });
+
   it('answers locator_failed for everything, and asks no router, when the locator itself fails', async () => {
     const routing = everythingRoutes();
     const locator: AddressLocator = { locate: async () => { throw new Error('geocoder down'); } };

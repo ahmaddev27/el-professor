@@ -288,3 +288,228 @@ jobs:
           # `down` reports the network as still in use.
           docker rm -f edge edge-stub osrm-info > /dev/null 2>&1 || true
           docker compose --profile osrm down -v || true
+
+  geocoder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this change touch the geocoder gateway?
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          if echo "$changed" | grep -qE '^(deploy/(docker-compose\.yml|deploy\.sh|geocoder-gateway\.conf)|supabase/functions/(_shared/(geocode-core|travel-route-core)|geocode-address/|main/)|tests/deploy/(geocod|gateway|nominatim|edge-)|\.github/workflows/pr-checks\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing in this change touches the geocoder gateway."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version-file: .nvmrc
+      - name: The compose file renders, the gateway exists only with its profile, the configuration is valid nginx
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          cat > .env <<'EOF'
+          PROJECT_NAME=ya-mobility-staging
+          POSTGRES_PASSWORD=ci-not-a-secret
+          JWT_SECRET=ci-not-a-secret-ci-not-a-secret-ci-not-a-secret
+          ANON_KEY=ci-anon
+          SERVICE_ROLE_KEY=ci-service
+          APP_URL=https://app.example.test
+          PUBLIC_URL=https://api.example.test
+          SMTP_HOST=mailpit
+          SMTP_SENDER=noreply@example.test
+          OTP_PEPPER=ci-not-a-secret-ci-not-a-secret-ci-not-a-secret
+          REALTIME_ENC_KEY=ci-not-a-secret
+          REALTIME_SECRET_KEY_BASE=ci-not-a-secret-ci-not-a-secret-ci-not-a-secret-ci-not-a-secret
+          EOF
+          # The compose file names ridy's network as external; on a runner there is no ridy, so make the name.
+          docker network create ridy_default
+          docker compose config -q
+          if docker compose config --services | grep -qx geocoder-gateway; then echo "::error::the gateway is in the default services"; exit 1; fi
+          docker compose --profile geocoder config --services | grep -qx geocoder-gateway
+          docker compose --profile geocoder config -q
+          image="$(docker compose --profile geocoder config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["geocoder-gateway"]["image"])')"
+          docker run --rm -v "$PWD/geocoder-gateway.conf":/etc/nginx/conf.d/default.conf:ro "$image" nginx -t
+      - name: Start the gateway with nothing behind it - it must come up, stay healthy and answer 502
+        if: steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          docker compose --profile geocoder up -d geocoder-gateway
+          cid="$(docker compose --profile geocoder ps -q geocoder-gateway)"
+          state=""
+          for _ in $(seq 1 30); do
+            state="$(docker inspect -f '{{.State.Health.Status}}' "$cid")"
+            [ "$state" = healthy ] && break
+            sleep 2
+          done
+          if [ "$state" != healthy ]; then
+            echo "--- state"; docker inspect -f '{{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$cid"
+            echo "--- what the health check saw"; docker inspect -f '{{range .State.Health.Log}}exit={{.ExitCode}} output={{.Output}}{{"\n"}}{{end}}' "$cid"
+            echo "--- container log"; docker compose --profile geocoder logs geocoder-gateway
+            echo "::error::the gateway did not become healthy ($state)"; exit 1
+          fi
+          ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$cid" | awk '{print $1}')"
+          echo "GATEWAY_URL=http://$ip:8080" >> "$GITHUB_ENV"
+          docker inspect -f 'readonly={{.HostConfig.ReadonlyRootfs}} caps_dropped={{.HostConfig.CapDrop}} caps_added={{.HostConfig.CapAdd}} security={{.HostConfig.SecurityOpt}} memory={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}} ports={{.NetworkSettings.Ports}} networks={{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$cid" | tee "$RUNNER_TEMP/gateway-inspect.txt"
+          grep -q 'readonly=true' "$RUNNER_TEMP/gateway-inspect.txt"
+          grep -q 'networks=.*ridy_default' "$RUNNER_TEMP/gateway-inspect.txt"
+          grep -q 'networks=.*ya-mobility-staging_default' "$RUNNER_TEMP/gateway-inspect.txt"
+          GATEWAY_URL="http://$ip:8080" node ../tests/deploy/gateway-e2e.mjs down
+      - name: Put the stand-in for ridy's Nominatim behind it, under the name the real one has on ridy_default
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          docker run -d --name nominatim-stub --network ridy_default --network-alias nominatim \
+            -v "$PWD/tests/deploy":/s:ro node:22-bookworm-slim node /s/nominatim-stub.mjs
+          ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nominatim-stub)"
+          for _ in $(seq 1 30); do curl -fsS -m 3 "http://$ip:8080/status" > /dev/null 2>&1 && break; sleep 1; done
+          curl -fsS -m 3 "http://$ip:8080/status"; echo
+          echo "STUB_URL=http://$ip:8080" >> "$GITHUB_ENV"
+      - name: The gateway with the stand-in behind it
+        if: steps.scope.outputs.run == 'true'
+        run: node tests/deploy/gateway-e2e.mjs up
+      - name: The gateway logs no request, and a control shows the check can fail
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
+        working-directory: deploy
+        run: |
+          token="ZZTOKEN$RANDOM$RANDOM"
+          curl -s -o /dev/null "$GATEWAY_URL/search?street=1%20$token&postalcode=42651&city=Solingen"
+          curl -s -o /dev/null "$GATEWAY_URL/search?street=1%20$token&postalcode=42651&city=Solingen"
+          docker compose --profile geocoder logs geocoder-gateway > "$RUNNER_TEMP/gateway.log" 2>&1 || true
+          echo "--- gateway log ---"; cat "$RUNNER_TEMP/gateway.log"; echo "--- end ---"
+          if grep -qE "$token|street=|postalcode=" "$RUNNER_TEMP/gateway.log"; then
+            echo "::error::the gateway's log holds a query"; exit 1
+          fi
+          # The control: the same configuration with the access log on writes the token.
+          sed 's#access_log off;#access_log /dev/stdout;#' geocoder-gateway.conf > "$RUNNER_TEMP/with-log.conf"
+          image="$(docker compose --profile geocoder config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["geocoder-gateway"]["image"])')"
+          docker run -d --name gateway-with-log --network ridy_default -v "$RUNNER_TEMP/with-log.conf":/etc/nginx/conf.d/default.conf:ro "$image"
+          cip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' gateway-with-log)"
+          for _ in $(seq 1 20); do curl -fsS -m 2 "http://$cip:8080/healthz" > /dev/null 2>&1 && break; sleep 1; done
+          curl -s -o /dev/null "http://$cip:8080/search?street=1%20$token&postalcode=42651&city=Solingen"
+          if docker logs gateway-with-log 2>&1 | grep -q "$token"; then
+            echo "control: with the access log on the same gateway writes the address, so access_log off is what keeps it out"
+          else
+            echo "::warning::control: with the access log on the gateway does not write the query either; the check above cannot fail"
+          fi
+          docker rm -f gateway-with-log > /dev/null
+      - name: The placement report, on a month of invented rides whose answers are known
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
+        run: |
+          docker run -d --name pg-report -e POSTGRES_PASSWORD=ci postgres:16-alpine > /dev/null
+          for _ in $(seq 1 40); do docker exec pg-report pg_isready -U postgres > /dev/null 2>&1 && break; sleep 1; done
+          sleep 2
+          docker exec -i pg-report psql -U postgres -v ON_ERROR_STOP=1 -q < tests/deploy/placement-fixture.sql
+          docker exec -i pg-report psql -U postgres -v ON_ERROR_STOP=1 -A -F '|' \
+            -v company=00000000-0000-4000-8000-0000000000c1 -v year=2026 -v month=5 -f - \
+            < tests/staging/geocode-placement.sql | tee "$RUNNER_TEMP/report.txt"
+          expect() { grep -qF "$1" "$RUNNER_TEMP/report.txt" || { echo "::error::the report lacks: $1"; exit 1; }; }
+          expect 'address cells|placed|11|78.6 %'
+          expect 'address cells|unparseable|1|7.1 %'
+          expect 'address cells|no_house_number|1|7.1 %'
+          expect 'address cells|house_number_not_placed|1|7.1 %'
+          expect 'rides|completed rides in the month|7|'
+          expect 'rides|both ends placed|4|'
+          expect 'rides|one end placed|3|'
+          expect 'rides|no end placed|0|'
+          expect 'straight line|rides compared (both placed, km > 0, line >= 0.2 km)|2|'
+          expect 'straight line|km shorter than the line: a misplaced address or a bad cell|1|'
+          expect 'to look at|trip 00000000-0000-4000-8000-0000000000b2|3.0|line 5.0 km'
+          if grep -qiE 'weg|marktplatz|irgendwo|solingen' "$RUNNER_TEMP/report.txt"; then
+            echo "::error::the report shows an address"; exit 1
+          fi
+          docker rm -f pg-report > /dev/null
+      - name: The function, in the real edge runtime, behind the real gateway
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
+        env:
+          JWT_SECRET: ci-jwt-secret-ci-jwt-secret-ci-jwt-secret-0001
+        run: |
+          net=ya-mobility-staging_default
+          docker run -d --name edge-stub --network "$net" -v "$PWD/tests/deploy":/s:ro node:22-bookworm-slim node /s/edge-stub.mjs
+          docker run -d --name edge --network "$net" -p 127.0.0.1:9000:9000 \
+            -v "$PWD/supabase/functions":/home/deno/functions:ro \
+            -e JWT_SECRET -e SUPABASE_ANON_KEY=ci-anon -e SUPABASE_URL=http://edge-stub:8000 -e APP_URL=https://app.example.test \
+            supabase/edge-runtime:v1.76.2 start --main-service /home/deno/functions/main
+          for _ in $(seq 1 60); do curl -s -o /dev/null -m 3 http://127.0.0.1:9000/ && break; sleep 2; done
+          status=0
+          node tests/deploy/geocode-e2e.mjs warm || true
+          node tests/deploy/geocode-e2e.mjs || status=1
+          echo "--- their service is removed (the 12 s let the gateway's cache of its address run out)"
+          docker rm -f nominatim-stub > /dev/null
+          sleep 12
+          node tests/deploy/geocode-e2e.mjs upstream-down || status=1
+          echo "--- our gateway is stopped"
+          docker stop ya-mobility-staging-geocoder-gateway-1 > /dev/null
+          node tests/deploy/geocode-e2e.mjs gateway-down || status=1
+          if [ "$status" != 0 ]; then echo "--- edge runtime log"; docker logs edge 2>&1 | tail -60; fi
+          exit "$status"
+      - name: The edge function logs counts and no address
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
+        run: |
+          docker logs edge 2>&1 | grep '"fn":"geocode-address"' | head -5 || true
+          if docker logs edge 2>&1 | grep -qE 'Hauptstra|Doppelweg|Zwillingsweg|Nurstra|Postleitzahlweg|Nirgendwoweg|Kaputtweg|nigstra'; then
+            echo "::error::the edge runtime's log holds an address"; exit 1
+          fi
+      - name: The edge function type-checks under Deno
+        if: ${{ !cancelled() && steps.scope.outputs.run == 'true' }}
+        continue-on-error: true
+        run: |
+          # Alone in a directory: next to the repository's package.json Deno looks for node_modules
+          # and refuses the edge-runtime types' own npm imports, which says nothing about the function.
+          cp -r supabase/functions "$RUNNER_TEMP/functions"
+          if docker run --rm -v "$RUNNER_TEMP/functions":/w -w /w denoland/deno:2.1.4 deno check geocode-address/index.ts; then
+            echo "deno check: the function type-checks"
+          else
+            echo "::warning::deno check of geocode-address/index.ts failed (see the log above); this step does not fail the job"; exit 1
+          fi
+      - name: Stop it
+        if: always() && steps.scope.outputs.run == 'true'
+        working-directory: deploy
+        run: |
+          docker rm -f edge edge-stub nominatim-stub gateway-with-log pg-report > /dev/null 2>&1 || true
+          docker compose --profile geocoder down -v || true
+
+  # The RLS kit (scripts/rls-test.mjs) builds a throwaway database from production's
+  # schema fixture, applies every migration newer than it, and runs every file in
+  # tests/rls against it. Until now it was the only SQL gate and it ran only where
+  # someone ran it by hand: a migration that could not apply sat green and mergeable.
+  # It runs here when a change touches the database, in a container of its own.
+  rls-kit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this change touch the database?
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          if echo "$changed" | grep -qE '^(supabase/migrations/|tests/rls/|tests/fixtures/|scripts/rls-test\.mjs|\.github/workflows/pr-checks\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing in this change touches the database."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version-file: .nvmrc
+      - name: Run the kit
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          status=0
+          node scripts/rls-test.mjs > "$RUNNER_TEMP/rls.log" 2>&1 || status=$?
+          echo "--- the last of the kit's output (exit $status) ---"
+          tail -n 120 "$RUNNER_TEMP/rls.log"
+          grep -E 'geocode' "$RUNNER_TEMP/rls.log" | head -40 || true
+          exit "$status"
