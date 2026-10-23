@@ -732,8 +732,25 @@ BEGIN
   RETURN v_bad;
 END $$;
 
+/*
+  Each mutation runs inside a subtransaction that is rolled back by raising
+  `ZZ011`, which is also what undoes the schema change. The COUNT is therefore
+  assigned to a variable declared OUT HERE and recorded only after the handler
+  has run: plpgsql variables are memory and survive the rollback, while
+  anything `_ps_rec` inserted inside the block would go with it.
+
+  The first version of this file called `_ps_rec` inside each block, so all
+  three mutation rows were rolled back and the verdict counted 34 probes
+  instead of 37 — the three that were silently missing were exactly the
+  controls, so a wrong count would never have failed the run. That is the
+  "a probe that cannot fail proves nothing" trap, and the kit printing its
+  probe count is what exposed it.
+*/
 DO $$
-DECLARE v_bad integer;
+DECLARE
+  v_m1  integer;
+  v_m2  integer;
+  v_m3  integer;
 BEGIN
   PERFORM _ps_rec(33, 'control: against the real schema the battery has no mismatch',
     _ps_battery()::text, '0');
@@ -745,12 +762,12 @@ BEGIN
   --     having it in the battery.
   BEGIN
     PERFORM _ps_set_action('n');
-    v_bad := _ps_battery();
-    PERFORM _ps_rec(34, 'mutation M1 (ON DELETE SET NULL, the original defect) moves three of four probes',
-      v_bad::text, '3');
+    v_m1 := _ps_battery();
     RAISE EXCEPTION USING ERRCODE = 'ZZ011', MESSAGE = 'rollback M1';
   EXCEPTION WHEN SQLSTATE 'ZZ011' THEN NULL;
   END;
+  PERFORM _ps_rec(34, 'mutation M1 (ON DELETE SET NULL, the original defect) moves three of four probes',
+    v_m1::text, '3');
 
   -- M2. NO ACTION: deleting the Beleg is refused by the foreign key itself,
   --     23503 and not 23514, which is why the probes compare by name. Two move
@@ -758,12 +775,12 @@ BEGIN
   --     because its statement is the one that is refused.
   BEGIN
     PERFORM _ps_set_action('a');
-    v_bad := _ps_battery();
-    PERFORM _ps_rec(35, 'mutation M2 (NO ACTION) moves three of four probes',
-      v_bad::text, '3');
+    v_m2 := _ps_battery();
     RAISE EXCEPTION USING ERRCODE = 'ZZ011', MESSAGE = 'rollback M2';
   EXCEPTION WHEN SQLSTATE 'ZZ011' THEN NULL;
   END;
+  PERFORM _ps_rec(35, 'mutation M2 (NO ACTION) moves three of four probes',
+    v_m2::text, '3');
 
   -- M3. the page gate removed from receipts_delete. Only the viewer moves — to
   --     `rows 1` — so the cascade probes are not quietly measuring the role
@@ -772,12 +789,12 @@ BEGIN
     EXECUTE 'DROP POLICY receipts_delete ON public.receipts';
     EXECUTE $p$CREATE POLICY receipts_delete ON public.receipts FOR DELETE TO authenticated
                  USING (company_id = (SELECT get_active_company_id()))$p$;
-    v_bad := _ps_battery();
-    PERFORM _ps_rec(36, 'mutation M3 (the receipts page gate dropped) moves one of four probes',
-      v_bad::text, '1');
+    v_m3 := _ps_battery();
     RAISE EXCEPTION USING ERRCODE = 'ZZ011', MESSAGE = 'rollback M3';
   EXCEPTION WHEN SQLSTATE 'ZZ011' THEN NULL;
   END;
+  PERFORM _ps_rec(36, 'mutation M3 (the receipts page gate dropped) moves one of four probes',
+    v_m3::text, '1');
 
   PERFORM _ps_rec(37, 'control: after the three mutations are rolled back the battery is clean again',
     _ps_battery()::text, '0');
@@ -791,6 +808,16 @@ DECLARE
   r     record;
   v_msg text := '';
 BEGIN
+  -- A probe that never recorded cannot fail, so the count is asserted first.
+  -- This file's mutation controls were rolled back with their own
+  -- subtransactions once and the run was green with 34 of 37 rows present.
+  IF (SELECT count(*) FROM _ps_out) <> 37 THEN
+    RAISE EXCEPTION 'partner submission delete: % of 37 probes recorded — missing: %',
+      (SELECT count(*) FROM _ps_out),
+      (SELECT string_agg(n::text, ', ' ORDER BY n) FROM generate_series(1, 37) AS g(n)
+        WHERE NOT EXISTS (SELECT 1 FROM _ps_out o WHERE o.n = g.n));
+  END IF;
+
   SELECT count(*) INTO v_bad FROM _ps_out WHERE NOT matched;
   IF v_bad = 0 THEN
     RAISE NOTICE '── partner submission delete: all % probes matched ──',
