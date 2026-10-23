@@ -8,14 +8,20 @@
   driver note produced by an accepted submission was permanently undeletable —
   and so was its driver, `driver_notes.driver_id` being CASCADE, which turns
   the same delete into the same refusal one step further away. Three such notes
-  on production, measured read-only on 23.10.2026. The owner chose `ON DELETE
-  CASCADE` the same day, the same answer he had just given for the Beleg.
+  on production, measured read-only on 23.10.2026 -- all belonging to ONE
+  driver, which 666 rows of `fahrtenbuch_trips` and a linked partner row
+  already pin for reasons this change does not touch, so **zero** drivers are
+  undeletable because of this defect today and section 4 measures the mechanism
+  rather than an incident. The owner chose `ON DELETE CASCADE` the same day,
+  the same answer he had just given for the Beleg.
 
   This is the twin of `partner-submission-delete.sql` and is built on it. What
   is NOT a copy is section 4, the driver chain: on the receipt side the only
   way in is deleting the Beleg, while here the Fahrer screen's delete reaches
-  the same submission through two cascades, and that is the shape production's
-  three rows actually sit in.
+  the same submission through two cascades. Production's three rows all hang
+  off ONE driver that 666 trips and a linked partner row already pin for other
+  reasons, so section 4 measures the mechanism and not one of those three
+  deletions: the next such note need not belong to a pinned driver.
 
   ## What each section says, and why it is not obvious
 
@@ -59,12 +65,16 @@
      cascade reaching a row the caller cannot touch directly, rather than
      merely that something happened.
 
-     The fixture and production differ on the DELETE grant and probe 5 pins the
-     difference rather than hiding it: the fixture is a `--schema=public` dump
-     carrying no privileges, so the table gets Supabase's default grants,
-     DELETE included, and the caller's own statement answers `rows 0` here
-     where production answers `42501`. Both mean the row is out of reach, which
-     is why probe 16 asserts the row's survival as well as the answer.
+     The wall is the POLICY and not a missing privilege, measured on production
+     rather than inherited: `authenticated` holds the FULL Supabase default set
+     on this table there -- DELETE and INSERT included -- so the caller's own
+     DELETE answers `rows 0` in production for the same reason it does here,
+     the table having no DELETE policy to put the row in scope. Probe 8 pins
+     that grant, and probe 17 asserts the row's survival as well as the
+     statement's answer, because `rows 0` on its own does not say the row is
+     still there. **This corrects `partner-submission-delete.sql`**, which
+     records production as granting only SELECT/TRIGGER/TRUNCATE/UPDATE and a
+     `42501` there; see probe 8's comment.
 
   4. The driver chain, which is what production's three rows look like. The
      Fahrer screen deletes a driver; `driver_notes.driver_id` is CASCADE, so
@@ -448,14 +458,20 @@ BEGIN
                 AND NOT g.tgisinternal)::text),
     '1/2');
 
-  -- MEASURED, and NOT the product's privileges. On production `authenticated`
-  -- holds no DELETE on this table, so a member's own DELETE there is refused
-  -- 42501. The kit's fixture is a `--schema=public` dump and carries no
-  -- privileges, so the table is created by the migration under Supabase's
-  -- default grants, which include DELETE — and the same statement answers
-  -- `rows 0` here instead, the policy having no row to offer it. This probe
-  -- pins the FIXTURE's grant so probe 16's shape is never read as production's.
-  PERFORM _ns_rec(8, 'the fixture grants `authenticated` DELETE here where production does not',
+  -- MEASURED on production, read-only, 23.10.2026, and it CORRECTS
+  -- `partner-submission-delete.sql`. That file records production as granting
+  -- `authenticated` only SELECT, TRIGGER, TRUNCATE and UPDATE on its own
+  -- submission table, and concludes that a member's DELETE there is refused
+  -- 42501 where the fixture answers `rows 0`. Both partner submission tables
+  -- in fact carry the FULL Supabase default set on production —
+  -- DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE — for
+  -- `anon`, `authenticated` and `service_role` alike. So the fixture and
+  -- production agree here, and the only thing keeping a member out is the
+  -- MISSING DELETE POLICY (probe 5), which puts the row outside the
+  -- statement's scope and answers `rows 0`. That is why probe 17 asserts the
+  -- row SURVIVED as well as what the statement answered: `rows 0` alone would
+  -- also be the answer of a delete that worked on nothing.
+  PERFORM _ns_rec(8, 'production and the fixture both grant `authenticated` DELETE here, so the missing policy is the only wall',
     (SELECT coalesce(string_agg(privilege_type, ',' ORDER BY privilege_type), 'none')
        FROM information_schema.role_table_grants
       WHERE table_schema = 'public' AND table_name = 'partner_note_submissions'
@@ -534,10 +550,10 @@ DO $$
 BEGIN
   -- `rows 0` and not a refusal: with no DELETE policy the statement matches no
   -- row and reports success having changed nothing — the class recorded as "a
-  -- DELETE the SELECT policy hides removes zero rows and reports success". On
-  -- production the same statement is `42501`, the DELETE grant being absent
-  -- there (probe 8); the row is out of reach either way, which is what the
-  -- second half of this probe asserts.
+  -- DELETE the SELECT policy hides removes zero rows and reports success".
+  -- Production answers the same, the grant being present there too (probe 8),
+  -- so this is the product's behaviour and not a fixture artefact. The second
+  -- half of the probe is what makes it evidence: the row is still there.
   PERFORM _ns_rec(17, 'the same administrator''s own DELETE on the submission table removes nothing, and the row survives it',
     _ns_delete_then(_ns_id('user:admin'),
       format('DELETE FROM partner_note_submissions WHERE id = %L', _ns_id('sub:tenant')),

@@ -34,11 +34,28 @@
 --  ── Measured, read-only on production, 23.10.2026 ─────────────────────────
 --
 --    partner_note_submissions_driver_note_id_fkey   confdeltype = 'n'
---    accepted note submissions naming a note        3   (all Y&A Mobility)
+--    partner_note_submissions rows, all accepted    3   (all Y&A Mobility)
+--    accepted submissions naming a driver note      3
+--    driver_notes rows                             41
 --    dangling driver_note references                0
+--    distinct drivers behind those three notes      1
 --
---  Three driver notes on production cannot be deleted, and neither can the
---  drivers behind them.
+--  **Three driver notes on production cannot be deleted. ZERO drivers are
+--  undeletable because of this, and saying otherwise would be an overclaim.**
+--  All three notes belong to one driver, and that driver is pinned twice over
+--  by things this change does not touch: 666 rows of `fahrtenbuch_trips` name
+--  it as `original_driver_id` against the immutability trigger, and it holds a
+--  `linked` `partner_driver_links` row. So the driver-level refusal below is a
+--  real mechanism with no instance in production's data today -- the shape
+--  matters because the next such note need not be a pinned driver's, not
+--  because three deletions are blocked by it.
+--
+--  The Beleg sibling read 21 accepted submissions naming a Beleg on the same
+--  pass, where `20261023150000` recorded 20 the same day; one more arrived in
+--  between. Neither cascade migration is applied to production yet (its newest
+--  ledger row is `20261016170000_income_negative_uber_amounts`, 17.10.2026),
+--  which is what makes the ordering argument below a live concern and not a
+--  hypothetical.
 --
 --  ── The owner's decision, 23.10.2026 ──────────────────────────────────────
 --
@@ -65,6 +82,20 @@
 --  than asserted — `tests/rls/note-submission-delete.sql` section 3 deletes a
 --  note as a company administrator, who reaches that row by no other means,
 --  and counts the submission rows afterwards.
+--
+--  **The wall is the POLICY and not a missing grant, and that is a correction
+--  to `20261023150000`.** Its header and its kit file both record production
+--  as granting `authenticated` only "SELECT, TRIGGER, TRUNCATE and UPDATE" on
+--  the receipt submission table, and conclude that a member's own DELETE there
+--  answers `42501` in production where the fixture answers `rows 0`. Measured
+--  on production today, both tables carry the **full** Supabase default set —
+--  `DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE` — for
+--  `anon`, `authenticated` and `service_role` alike. So the statement answers
+--  `rows 0` in production too, for the same reason it does in the fixture: the
+--  table has no DELETE policy, so the row is not in the statement's scope. The
+--  conclusion that the caller cannot reach the row is unchanged; the mechanism
+--  recorded for it was wrong, and the probe below pins the grant rather than a
+--  difference that does not exist.
 --
 --  Both context triggers stay, untouched, and a cascade fires row triggers, so
 --  a support session's delete still leaves its audit row — one for the note

@@ -56,8 +56,19 @@
 --  ── Why a cascade works although the table is unwritable by any client ────
 --
 --  `20261008160000` dropped the UPDATE policy and the table has never had an
---  INSERT or DELETE policy; `authenticated` holds no DELETE *grant* on it
---  either (measured on production: SELECT, TRIGGER, TRUNCATE, UPDATE only).
+--  INSERT or DELETE policy.
+--
+--  [CORRECTED 23.10.2026 by `20261023160000`, which re-measured this read-only
+--  on production. This paragraph claimed `authenticated` holds no DELETE
+--  *grant* on the table either, "measured on production: SELECT, TRIGGER,
+--  TRUNCATE, UPDATE only". That is WRONG: both partner submission tables carry
+--  the full Supabase default set there — DELETE, INSERT, REFERENCES, SELECT,
+--  TRIGGER, TRUNCATE, UPDATE — for `anon`, `authenticated` and `service_role`
+--  alike. So a member's own DELETE answers `rows 0` in production as it does
+--  in the kit, and the wall is the MISSING DELETE POLICY alone, not a missing
+--  privilege. Nothing about the cascade or this migration changes; the reason
+--  recorded for the caller's statement failing did.]
+--
 --  Neither blocks the cascade, because a referential action is not the caller's
 --  statement: PostgreSQL runs it as the table's owner and bypasses row
 --  security. That is the crux of this change and it is measured rather than
