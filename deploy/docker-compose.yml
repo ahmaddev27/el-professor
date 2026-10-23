@@ -487,6 +487,99 @@ services:
       resources:
         limits: { memory: 512M, pids: 128 }
 
+  # ── Routing: OSRM, for the travel check of the Fahrtenanalyse ─────────────
+  # Answers "how long does a car need from here to there" for the travel-route
+  # edge function (supabase/functions/travel-route), which is its only caller
+  # and the only way the browser reaches it. Our own container, on purpose: ridy
+  # runs an OSRM of its own for its dispatch, and a Fahrtenanalyse of a whole
+  # month must never land on that. The two cannot meet: this service is on our
+  # network only, and ridy's `osrm` is a name on ridy's.
+  #
+  # OFF UNLESS ASKED FOR. The `osrm` profile keeps it out of every release that
+  # does not turn it on, so merging the change that added it starts nothing and
+  # pulls nothing. Turning it on is two steps and a person does both:
+  #   1. deploy/osrm-build-data.sh builds the map data into the volume osrm-data
+  #      (a long job and tens of gigabytes of memory for Germany; the header of that script
+  #      says what and why not inside a release);
+  #   2. COMPOSE_PROFILES in .env names osrm (staging: staging,osrm), and a
+  #      release starts it. deploy.sh refuses that release when the volume holds
+  #      no finished build.
+  #
+  # Same safety argument as export-service: it holds no credential and no
+  # database connection, it cannot reach one (our network is the only one it is
+  # on, and nothing it does needs a name other than its own), and it is given
+  # the map read-only. The data in the volume is OpenStreetMap, which is public;
+  # the questions it is asked are two coordinates and its answers are numbers.
+  # tests/deploy/osrm.test.ts fails the build if it gains a variable, a
+  # secret, a host port or a second volume.
+  #
+  # Pinned by digest. The data format of a build belongs to the OSRM version
+  # that wrote it, so the builder (deploy/osrm-build-data.sh) takes this very
+  # line as its image, and a new version is a new build. Update both by changing
+  # this one line and running the script again.
+  #
+  # --verbosity=WARNING: at INFO the server may log the requests it serves, and
+  # a request is the two places a passenger was picked up and dropped off.
+  # --max-*-size: the function sends two coordinates, so the limits sit at the
+  # lowest value osrm-routed accepts. That is 3, not 2: EngineConfig::IsValid
+  # takes a limit only if it is -1 or greater than 2 and otherwise makes the
+  # server exit, silently, with status 1 - which is how this file's first version
+  # met the first CI run that actually started it. --mmap: the files are mapped
+  # from the read-only volume instead of being copied into memory.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v26.9.0-debian@sha256:8a1b1bc938412f15f9b5b32d794c4ec6bf4a85dfbbabfa0a014b70b187edb53b
+    profiles: [osrm]
+    restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
+    user: '10001:10001'
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - osrm-routed
+      - --algorithm=MLD
+      - --mmap
+      - --ip=0.0.0.0
+      - --port=5000
+      - --threads=2
+      - --verbosity=WARNING
+      - --max-viaroute-size=3
+      - --max-table-size=3
+      - --max-trip-size=3
+      - --max-matching-size=3
+      - --max-nearest-size=1
+      - /data/current/map.osrm
+    volumes:
+      - osrm-data:/data:ro
+    expose:
+      - '5000'
+    # The image has no curl or wget, so this reads the answer over bash's
+    # /dev/tcp, the way deploy.sh probes Kong. Any JSON answer with a `code`
+    # means the server is up with its data loaded: a route in a region the map
+    # does not cover is a NoSegment, and that is still an answer.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/5000 && printf "GET /nearest/v1/driving/10.0,51.0 HTTP/1.0\r\n\r\n" >&3 && grep -q "\"code\"" <&3'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    # Sized from OSRM's own table (wiki, "Disk and Memory Requirements"): the car
+    # profile needs about 123 GiB of RAM for the 61 GiB planet, and "sizes scale
+    # roughly linear with input data size". Germany's extract is 4.5 GiB, which
+    # makes about 9 GiB; 12 leaves room. A starting point to raise or lower
+    # after `docker stats`, as the database's is. The process cap is `pids`
+    # inside the limits map, never a top-level `pids_limit` (see export-service).
+    deploy:
+      resources:
+        limits: { memory: '${OSRM_MEM_LIMIT:-12G}', pids: 64 }
+
   # ── Gateway — the single origin the browser talks to ──────────────────────
   kong:
     image: kong:2.8.1
@@ -633,6 +726,9 @@ services:
 volumes:
   db-data:
   storage-data:
+  # The routing container's map data, written by deploy/osrm-build-data.sh and
+  # mounted read-only by the osrm service. Only created when the profile is used.
+  osrm-data:
 
 networks:
   default:
