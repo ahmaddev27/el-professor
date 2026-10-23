@@ -1155,6 +1155,33 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       <Notice tone="info">{t('imp.notice.withoutInstant', { count: preview.withoutInstant })}</Notice>
                     )}
 
+                    {/*
+                      An order time that is not a timestamp. The column is the
+                      row's duplicate key and is stored as text, parsed into no
+                      column of its own, so nothing on the row says it cannot
+                      be read — see the count's comment in buildTripRows. The
+                      rows are still imported and no value is guessed; this is
+                      what stops a malformed file from being taken in silently.
+                    */}
+                    {build.unreadableOrderTransmission > 0 && (
+                      <Notice tone="warning">
+                        <p>
+                          {t('imp.notice.unreadableOrderTransmission', {
+                            count: build.unreadableOrderTransmission,
+                            column: orderTransmissionCol,
+                          })}
+                        </p>
+                        {build.sampleUnreadableOrderTransmission.length > 0 && (
+                          <p className="text-xs text-[color:var(--text-secondary)]">
+                            {t('imp.examples')}:{' '}
+                            <span className="font-mono">
+                              {build.sampleUnreadableOrderTransmission.map(v => `"${String(v)}"`).join(', ')}
+                            </span>
+                          </p>
+                        )}
+                      </Notice>
+                    )}
+
                     <Notice tone="info">
                       <p>
                         {orderTransmissionCol

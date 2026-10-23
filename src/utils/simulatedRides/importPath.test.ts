@@ -38,7 +38,13 @@ describe('the generated sheet', () => {
     expect(cancelled['Uhrzeit des Fahrtbeginns']).toBe('\\N');
     expect(cancelled.Kilometer).toBe(0);
     expect(String(rows[0]['Standort des Fahrzeugs bei Auftragsuebermittlung'])).toMatch(/^-?\d+(\.\d+)? -?\d+(\.\d+)?$/);
-    expect(String(rows[0]['Uhrzeit der Auftragsuebermittlung'])).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+    // Every row, not rows[0]. generateFromFigures sorts the rides by order
+    // time, so row 0 is always the first ride of the earliest shift — the one
+    // ride whose transmit is a whole-millisecond offset from the shift start.
+    // Checking it alone could not see FB-HIGH-001's 23 % of malformed cells.
+    for (const row of rows) {
+      expect(String(row['Uhrzeit der Auftragsuebermittlung'])).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+    }
   });
 });
 

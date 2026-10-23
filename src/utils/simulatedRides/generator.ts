@@ -233,7 +233,12 @@ function approachDuringRide(ctx: Context, prev: PrevRide, latestStartMs: number)
   const drive = deadheadSeconds(roadKm(prev.dropoff, pickup), localHour(prev.endMs));
   const room = Math.max(0, (latestStartMs - JITTER_MARGIN_MS - prev.endMs) / 1000 - drive);
   const slack = Math.min(clampSeconds(logNormal(rng, SLACK_MEDIAN_SECONDS, SLACK_SIGMA), SLACK_MAX_SECONDS), Math.floor(room)) + rng.int(0, 40);
-  const early = logNormal(rng, EARLY_MEDIAN_SECONDS, EARLY_SIGMA) * 1000;
+  // Whole milliseconds. This is the one place a ride instant was ever drawn
+  // from a continuous distribution, and it was the whole of FB-HIGH-001: a
+  // fractional `early` left `orderTransmittedMs` fractional, and the export
+  // wrote `25.441.665771484375` for it. Rounded here, where the value is made,
+  // rather than only where it is printed — the printer is the second wall.
+  const early = Math.round(logNormal(rng, EARLY_MEDIAN_SECONDS, EARLY_SIGMA) * 1000);
   const transmitMs = Math.max(prev.startMs + 60_000, prev.endMs - early) + rng.int(0, 999);
   return { orderPos: positionDuring(prev, transmitMs), transmitMs, pickup, startMs: prev.endMs + (drive + slack) * 1000 };
 }
@@ -316,6 +321,29 @@ function groupBy<T>(items: readonly T[], key: (t: T) => string): Map<string, T[]
   return out;
 }
 
+/** The five instants of a ride row, in the order the sheet writes them. */
+const RIDE_INSTANT_FIELDS = ['orderReceivedMs', 'orderTransmittedMs', 'plannedPickupMs', 'startMs', 'endMs'] as const;
+
+/**
+ * Every instant of every ride is a whole number of milliseconds.
+ *
+ * The rule is checked here, read back from the output, and not only kept by
+ * the one line that draws a sub-millisecond value, because a rule enforced at
+ * a single site is lost by the next writer without a sound: a fractional
+ * instant printed `18:49:25.441.665771484375`, a timestamp with two decimal
+ * points that nothing can parse, and no test and no screen said a word
+ * (FB-HIGH-001). SimulatedRidesPage builds no file while this reports
+ * anything, so a future producer of a fractional instant fails loudly.
+ */
+function checkWholeMilliseconds(rides: readonly SimRide[]): string[] {
+  return rides.flatMap(ride => RIDE_INSTANT_FIELDS.flatMap(field => {
+    const ms = ride[field];
+    return ms === null || Number.isInteger(ms)
+      ? []
+      : [`${ride.shiftId}: ${field} is ${ms}, not a whole number of milliseconds`];
+  }));
+}
+
 function checkShiftLengths(shifts: readonly SimShift[]): string[] {
   return shifts.flatMap(s => {
     const minutes = (s.endMs - s.startMs) / 60_000;
@@ -381,5 +409,10 @@ function checkRideChain(rides: readonly SimRide[], base: GeoPoint): string[] {
 
 /** Every rule of the brief, read back from the output. Empty means the month is physically consistent. */
 export function validateRides(month: GeneratedMonth, base: GeoPoint): string[] {
-  return [...checkShiftLengths(month.shifts), ...checkVehicleDays(month.shifts), ...checkRideChain(month.rides, base)];
+  return [
+    ...checkWholeMilliseconds(month.rides),
+    ...checkShiftLengths(month.shifts),
+    ...checkVehicleDays(month.shifts),
+    ...checkRideChain(month.rides, base),
+  ];
 }

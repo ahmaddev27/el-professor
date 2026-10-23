@@ -679,3 +679,60 @@ describe('matching an imported driver name', () => {
     expect(legacyFirstHit('Max Müller', one)).toEqual({ matchedDriverId: null, confirmed: false });
   });
 });
+
+describe('an order-transmission cell that is not a timestamp (FB-HIGH-001)', () => {
+  /*
+    The audited month carried 52 cells of "Uhrzeit der Auftragsuebermittlung"
+    with two decimal points. DATETIME_RE admits one fractional group, so such a
+    value does not parse — and this column is parsed into no column of the
+    trip: it is hashed as text into source_row_key and copied into
+    raw_data_json. Before this count nothing anywhere said that a row holds an
+    order time which cannot be read.
+
+    The row is still kept and no value is invented. Flagging it on the row
+    needs a ninth review_reasons value, which the CHECK constraint of
+    20260922100000 does not admit, so that is a migration and the owner's call.
+  */
+  const MALFORMED = '2026-10-01 18:49:25.441.665771484375';
+  const ALSO_MALFORMED = '2026-10-01 18:55:41.929.50390625';
+
+  it('counts the row and keeps an example of what the cell held', () => {
+    const { stats } = buildTripRows(context([
+      uberRow({ order: MALFORMED }),
+      uberRow({ order: '2026-10-01 18:30:00.146' }),
+      uberRow({ order: ALSO_MALFORMED }),
+    ]));
+    expect(stats.unreadableOrderTransmission).toBe(2);
+    expect(stats.sampleUnreadableOrderTransmission).toEqual([MALFORMED, ALSO_MALFORMED]);
+  });
+
+  it('keeps the row, invents no time, and still gives it its key', () => {
+    const { built, stats } = buildTripRows(context([uberRow({ order: MALFORMED })]));
+    expect(built.length).toBe(1);
+    expect(stats.unreadableOrderTransmission).toBe(1);
+    expect(built[0].row.source_row_key_basis).toBe('derived_order_transmission');
+    expect(built[0].keyMaterial).toContain(MALFORMED);
+    // Start and end are untouched: those columns were readable.
+    expect(built[0].row.time_source).toBe('source_start_end');
+    expect(built[0].row.start_at).not.toBeNull();
+  });
+
+  it('reports nothing for a value the published format accepts, a longer fraction included', () => {
+    const { stats } = buildTripRows(context([
+      uberRow({ order: '2026-10-01 18:30:00.146' }),
+      uberRow({ order: '2026-10-01 18:30:01.146789' }),
+      uberRow({ order: '2026-10-01 18:30:02' }),
+      uberRow({ order: '01.10.2026 18:30:03' }),
+    ]));
+    expect(stats.unreadableOrderTransmission).toBe(0);
+    expect(stats.sampleUnreadableOrderTransmission).toEqual([]);
+  });
+
+  it('reports nothing for an empty cell, for the null marker, or for a file with no such column', () => {
+    const empty = buildTripRows(context([uberRow({ order: '\\N' }), uberRow({ order: '' })]));
+    expect(empty.stats.unreadableOrderTransmission).toBe(0);
+    const noColumn = buildTripRows(context([uberRow({ order: MALFORMED })], { orderTransmissionCol: '' }));
+    expect(noColumn.stats.unreadableOrderTransmission).toBe(0);
+    expect(noColumn.built[0].row.source_row_key_basis).toBe('derived_driver_start_plate');
+  });
+});
