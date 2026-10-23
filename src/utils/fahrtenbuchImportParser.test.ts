@@ -23,8 +23,10 @@ import {
   normalise,
   normaliseDriverName,
   normalisePlate,
+  durationMinutes,
   parseDate,
   parseTime,
+  rideDurationMinutes,
   sha256HexOfBytes,
   sha256HexOfText,
   sourceRowKeyMaterial,
@@ -207,8 +209,31 @@ describe('absolute times', () => {
       expect(row.start_at).toBe('2026-03-29T00:50:00.000Z');
       expect(row.end_at).toBe('2026-03-29T01:10:00.000Z');
       expect(Date.parse(row.end_at as string) - Date.parse(row.start_at as string)).toBe(20 * 60 * 1000);
-      // duration_minutes keeps its old rule (HH:MM arithmetic); start_at/end_at are the real length.
-      expect(row.duration_minutes).toBe(80);
+      // `duration_minutes` is the ride, not the clock face. The HH:MM pair says
+      // 03:10 − 01:50 = 80; the hour 02:00–03:00 did not happen, so the ride
+      // lasted 20 minutes. This assertion read 80 before the derivation moved
+      // onto the instants.
+      expect(row.duration_minutes).toBe(20);
+      // The stored HH:MM columns are untouched: they are what the file said.
+      expect(row.start_time).toBe('01:50');
+      expect(row.end_time).toBe('03:10');
+    });
+
+    it('reproduces the one production row this corrects, to the second', () => {
+      // Production row 0ba35175-1c75-4ad0-884a-36e65dfb30b1 (read-only, 23.10.2026):
+      // vehicle SG-YA14, assigned driver Mhmoud Zedya, trip_date 2026-03-29,
+      // start_at 00:42:40Z, end_at 01:01:46Z, duration_minutes 79 stored
+      // against 19.10 minutes elapsed. Both wall times fall inside 00:00–04:00
+      // on a Sunday. The stored row is NOT changed by this fix — the column is
+      // immutable by trigger — and this test is a statement about what the
+      // importer computes from the same input from now on.
+      const { row } = buildOne({ date: '2026-03-29', start: '2026-03-29 01:42:40.000', end: '2026-03-29 03:01:46.000' });
+      expect(row.start_at).toBe('2026-03-29T00:42:40.000Z');
+      expect(row.end_at).toBe('2026-03-29T01:01:46.000Z');
+      expect(row.start_time).toBe('01:42');
+      expect(row.end_time).toBe('03:01');
+      expect(durationMinutes('01:42', '03:01')).toBe(79);   // what was stored
+      expect(row.duration_minutes).toBe(19);                // what is computed now
     });
   });
 
@@ -231,6 +256,18 @@ describe('absolute times', () => {
       const t = deriveTripTimes({ startCell: '02:30', endCell: '02:50', tripDate: '2026-10-25', startTime: '02:30', endTime: '02:50' });
       expect(t.timeSource).toBe('ambiguous');
       expect(t.startAt).toBeNull();
+    });
+
+    it('counts the repeated hour once for each time it happened', () => {
+      // The mirror of the March case, and the one the wall clock under-states:
+      // 01:30 is still CEST and 03:30 already CET, so the ride spans three
+      // hours while the clock face shows two. Staging holds one real row of
+      // this shape, stored 60 minutes short (measured 23.10.2026).
+      const { row } = buildOne({ date: '2026-10-25', start: '2026-10-25 01:30:00.000', end: '2026-10-25 03:30:00.000' });
+      expect(row.start_at).toBe('2026-10-24T23:30:00.000Z');
+      expect(row.end_at).toBe('2026-10-25T02:30:00.000Z');
+      expect(durationMinutes('01:30', '03:30')).toBe(120);  // the clock face
+      expect(row.duration_minutes).toBe(180);               // the ride
     });
   });
 
@@ -321,6 +358,80 @@ describe('statuses', () => {
     const { built } = buildTripRows(context([uberRow({})], { statusCol: '' }));
     expect(built[0].row.trip_status).toBe('unknown');
     expect(built[0].row.source_status).toBeNull();
+  });
+});
+
+describe('duration_minutes is the ride, measured from the instants', () => {
+  it('agrees with the old HH:MM rule on every ride length of an ordinary day', () => {
+    // This is the safety claim behind correcting the writer and leaving the
+    // stored rows alone: off a DST transition the new figure is not merely
+    // close to the old one, it is the same number. Each instant is truncated
+    // to its own minute before subtracting, which is exactly what reading the
+    // HH:MM pair did — the seconds were never part of the old figure, so they
+    // must not round it now.
+    const hhmm = (m: number) =>
+      `${String(Math.floor((m % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    let compared = 0;
+    for (let startMin = 0; startMin < 24 * 60; startMin += 7) {
+      for (const lengthMin of [1, 14, 59, 60, 137, 480, 1439]) {
+        const startTime = hhmm(startMin);
+        const endTime = hhmm(startMin + lengthMin);
+        const t = deriveTripTimes({
+          startCell: startTime, endCell: endTime,
+          tripDate: '2026-08-12', startTime, endTime,   // an ordinary Wednesday
+        });
+        expect(t.startAt).not.toBeNull();
+        expect(rideDurationMinutes(t.startAt, t.endAt, startTime, endTime))
+          .toBe(durationMinutes(startTime, endTime));
+        compared += 1;
+      }
+    }
+    expect(compared).toBeGreaterThan(1400);
+  });
+
+  it('keeps the seconds out of the figure, as the HH:MM rule did', () => {
+    // 23:50:10 → 00:09:45 is 19 minutes 35 seconds. The old figure was 19,
+    // and it stays 19: rounding the elapsed time would have made it 20 and
+    // moved a column on every ordinary row in the database.
+    const { row } = buildOne({ date: '2026-08-14', start: '2026-08-14 23:50:10.000', end: '2026-08-15 00:09:45.000' });
+    expect(row.duration_minutes).toBe(19);
+    expect(row.duration_minutes).toBe(durationMinutes('23:50', '00:09'));
+  });
+
+  it('keeps the HH:MM figure when the row carries no instants', () => {
+    // A wall time inside the spring gap names no instant at all, and none is
+    // invented. The old rule is what is left to read, so it stands.
+    expect(rideDurationMinutes(null, null, '02:30', '03:10')).toBe(40);
+    const { row } = buildOne({ date: '2026-03-29', start: '2026-03-29 02:30:00.000', end: '2026-03-29 03:10:00.000' });
+    expect(row.time_source).toBe('ambiguous');
+    expect(row.start_at).toBeNull();
+    expect(row.duration_minutes).toBe(40);
+  });
+
+  it('keeps the HH:MM figure when the instants run backwards, so the row still inserts', () => {
+    // The column is CHECK (duration_minutes >= 0). A negative figure would
+    // refuse the insert and lose a ride that the importer otherwise keeps and
+    // flags `end_before_start`.
+    const back = rideDurationMinutes('2026-08-12T10:00:00.000Z', '2026-08-12T09:00:00.000Z', '12:00', '11:00');
+    expect(back).toBe(durationMinutes('12:00', '11:00'));
+    expect(back).toBeGreaterThanOrEqual(0);
+  });
+
+  it('never returns a non-number, whatever it is handed', () => {
+    expect(rideDurationMinutes('not a timestamp', 'nor this', '10:00', '10:30')).toBe(30);
+    expect(rideDurationMinutes(null, '2026-08-12T10:00:00.000Z', '10:00', '10:30')).toBe(30);
+    expect(rideDurationMinutes('2026-08-12T10:00:00.000Z', null, '10:00', '10:30')).toBe(30);
+  });
+
+  it('leaves a cancelled ride without a figure, instants or not', () => {
+    // The gate at the call site is unchanged. This row is cancelled, so it has
+    // no clock times — but its cells do parse, so it does have instants, and
+    // the figure must still be NULL. Staging holds one such row.
+    const { row } = buildOne({ status: 'storniert' });
+    expect(row.is_canceled).toBe(true);
+    expect(row.start_at).not.toBeNull();
+    expect(row.start_time).toBeNull();
+    expect(row.duration_minutes).toBeNull();
   });
 });
 
