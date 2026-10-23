@@ -679,8 +679,13 @@ BEGIN
     -- THE GATE. One helper, one clock, and the answer is the database's.
     v_remaining := app_private.driver_month_assignment_days_remaining(NEW.year, NEW.month);
     IF v_remaining > 0 THEN
+      -- No semicolon in this sentence, on purpose: self-check 10b matches the
+      -- whole clause as `IF <condition> THEN RAISE EXCEPTION ... <its hint>` with
+      -- `[^;]*` between, and a semicolon inside the message ends that span. The
+      -- first version of this file had one and the self-check refused it, which
+      -- is the check doing its job on its own author.
       IF NEW.early_reason IS NULL OR btrim(NEW.early_reason) = '' THEN
-        RAISE EXCEPTION 'Die Fahrerzuordnung für %/% kann erst nach dem Monatsende erfolgen; es fehlen noch % Tag(e). Mit einer Begründung ist sie trotzdem möglich.',
+        RAISE EXCEPTION 'Die Fahrerzuordnung für %/% kann erst nach dem Monatsende erfolgen. Es fehlen noch % Tag(e), und mit einer Begründung ist sie trotzdem möglich.',
           NEW.month, NEW.year, v_remaining
           USING ERRCODE = 'P0001', HINT = 'driver_month_assignment_month_not_ended';
       END IF;
