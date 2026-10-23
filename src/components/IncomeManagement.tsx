@@ -9,6 +9,7 @@ import { pageWriteRights } from '../lib/pageWriteRights';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
 import { handleDatabaseError } from '../utils/errorHandler';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { buildIncomeSheets } from '../utils/listExportSheets';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { tallyTrips } from '../utils/incomeTrips';
@@ -165,13 +166,21 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     try {
       setLoading(true);
       setLoadFailed(false);
-      const { data, error } = await supabase
-        .from('income')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('date', { ascending: false });
-
-      if (error) throw error;
+      // Paged, for the reason in fetchAllPaginated's header and measured in
+      // useDatabase's receipts read: a bare select stops at 1000 rows and says
+      // nothing. The largest company held 854 income rows on 23.10.2026 — not
+      // yet truncated, but it grows every week, and the failure is silent.
+      // `id` breaks the tie, because a date is not unique.
+      const data = await fetchAllPaginated<Income>(
+        (from, to) => supabase
+          .from('income')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('date', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: t('overview.load.umsaetze') },
+      );
       setIncomes(data || []);
     } catch (err: any) {
       console.error('Error loading incomes:', err);
