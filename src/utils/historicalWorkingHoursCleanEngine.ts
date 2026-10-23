@@ -16,7 +16,7 @@ import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 // Type-only: the engine names a dictionary key beside its German text and
 // never resolves one. See src/i18n/engineMessage.ts.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
-import { localHourMs } from './localDayWindow';
+import { localHourMs, nextLocalMidnightMs } from './localDayWindow';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1672,7 +1672,25 @@ export function shiftOverlappingInhaberBlocks(
     // Original day (local wall-clock time)
     const origDateLocal = new Date(block.startMs);
     const origDayStart = new Date(origDateLocal.getFullYear(), origDateLocal.getMonth(), origDateLocal.getDate(), 0, 0, 0, 0).getTime();
-    const origDayEnd   = origDayStart + 24 * 60 * 60 * 1000;
+    // The END of that calendar day, not midnight plus a fixed day length.
+    // `origDayStart` is already local midnight and was always right; the end was
+    // not. A German local day is 23 hours on the spring transition and 25 on the
+    // autumn one, so `+ 24 h` named the wrong instant on both:
+    //   - 25.10.2026 (25 h): it named local 23:00, so the same-day pass stopped
+    //     an hour early and the four slots in 23:00–24:00 fell through to the
+    //     rest-of-month pass, where they are emitted with `sameDay: false`.
+    //     Selection prefers a same-day slot over ANY other before it compares
+    //     offsets, so a genuinely-same-day 23:15 slot loses to a same-day slot
+    //     many hours away — a different final time, and 23:00 sits in the 20:00
+    //     night band while the winner may not.
+    //   - 29.03.2026 (23 h): it named local 01:00 on the 30th, so the same-day
+    //     pass reached four slots on the NEXT calendar day and offered them as
+    //     same-day. 29.03.2026 is a Sunday and the 30th is not, so that placed
+    //     Sunday work on a Monday with the Sonntagszuschlag decided by the day
+    //     the block ends up on.
+    // `nextLocalMidnightMs` steps the calendar day, so the window is exactly the
+    // block's own local day on all 365. See src/utils/localDayWindow.ts.
+    const origDayEnd   = nextLocalMidnightMs(origDayStart);
 
     // We will try same-day slots first, then rest of month
     // Build candidate list lazily to avoid huge arrays
