@@ -46,12 +46,13 @@
      the section shows the cascade reaching a row the caller cannot touch
      directly, rather than merely that something happened.
 
-     The fixture and production differ on the grant and probe 6 pins the
-     difference rather than hiding it: the fixture is a `--schema=public` dump
-     carrying no privileges, so the table gets Supabase's default grants, DELETE
-     included, and the caller's own statement answers `rows 0` here where
-     production answers `42501`. Both mean the row is out of reach, which is why
-     probe 15 asserts the row's survival as well as the answer.
+     CORRECTED 23.10.2026 (`20261023160000`): this paragraph read that the
+     fixture and production differ on the DELETE grant, so that the caller's
+     own statement answers `rows 0` here and `42501` there. Re-measured
+     read-only on production, both partner submission tables carry the FULL
+     Supabase default set, DELETE and INSERT included, for all three API
+     roles. So the two agree and the wall is the MISSING DELETE POLICY alone,
+     which is why probe 15 asserts the row's survival as well as the answer.
 
   4. The neighbours. A Beleg with no submission at all still deletes; a
      `pending` submission belonging to a DIFFERENT Beleg is untouched by the
@@ -390,15 +391,20 @@ BEGIN
         AND tablename = 'partner_receipt_submissions'
         AND cmd IN ('INSERT', 'UPDATE', 'DELETE')), 'none');
 
-  -- MEASURED, and NOT the product's privileges. On production `authenticated`
-  -- holds SELECT, TRIGGER, TRUNCATE and UPDATE on this table and no DELETE
-  -- (read-only, 23.10.2026), so a member's own DELETE there is refused 42501.
-  -- The kit's fixture is a `--schema=public` dump and carries no privileges, so
-  -- the table is re-created by the migration under Supabase's default grants,
-  -- which include DELETE — and the same statement answers `rows 0` here
-  -- instead, the policy having no row to offer it. This probe pins the
-  -- FIXTURE's grant so probe 15's shape below is never read as the product's.
-  PERFORM _ps_rec(6, 'the fixture grants `authenticated` DELETE here where production does not',
+  -- CORRECTED 23.10.2026, re-measured read-only on production while the note
+  -- sibling was being fixed (`20261023160000`). This comment used to say
+  -- `authenticated` holds SELECT, TRIGGER, TRUNCATE and UPDATE here and no
+  -- DELETE, so that a member's own DELETE is 42501 in production where the
+  -- fixture answers `rows 0`. **That is wrong.** Both partner submission
+  -- tables carry the full Supabase default set on production -- DELETE,
+  -- INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE -- for `anon`,
+  -- `authenticated` and `service_role` alike. The fixture and production
+  -- agree, and the only thing keeping a member out of this table is the
+  -- MISSING DELETE POLICY (probe 5), which puts the row outside the
+  -- statement's scope and answers `rows 0`. The probe's assertion is unchanged
+  -- and still passes; only the reason recorded beside it was false, and probe
+  -- 15 asserting the row's survival is what carries the point either way.
+  PERFORM _ps_rec(6, 'production and the fixture both grant `authenticated` DELETE here, so the missing policy is the only wall',
     (SELECT coalesce(string_agg(privilege_type, ',' ORDER BY privilege_type), 'none')
        FROM information_schema.role_table_grants
       WHERE table_schema = 'public' AND table_name = 'partner_receipt_submissions'
@@ -481,9 +487,10 @@ BEGIN
   -- `rows 0` and not a refusal: with no DELETE policy the statement matches no
   -- row and reports success having changed nothing — `fahrtenbuch_trips`' shape
   -- and the class recorded as "a DELETE the SELECT policy hides removes zero
-  -- rows and reports success". On production the same statement is `42501`,
-  -- because the DELETE grant is absent there (probe 6); the row is out of reach
-  -- either way, which is what the second half of this probe asserts.
+  -- rows and reports success". Production answers the same, the grant being
+  -- present there too (probe 6, corrected 23.10.2026), so this is the
+  -- product's behaviour and not a fixture artefact; the second half of the
+  -- probe is what makes it evidence -- the row is still there.
   PERFORM _ps_rec(15, 'the same administrator''s own DELETE on the submission table removes nothing, and the row survives it',
     _ps_delete_then(_ps_id('user:admin'),
       format('DELETE FROM partner_receipt_submissions WHERE id = %L', _ps_id('sub:tenant')),
