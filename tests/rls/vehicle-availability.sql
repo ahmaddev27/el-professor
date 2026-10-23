@@ -760,8 +760,12 @@ BEGIN
     _va_verdict(c_a2, DATE '2029-06-30', 4));
   PERFORM _va_expect('5c …and unavailable on the first operating day that starts after it',
     'unavailable/tuev_expired', _va_verdict(c_a2, DATE '2029-07-01', 4));
+  -- On A4, not A3: section 4 left a window on A3 that covers operating day
+  -- 2029-05-07 under hour 4, so A3 would read `recorded` here for a reason that
+  -- has nothing to do with a TÜV. A4 carries no window and, until 5.2 below, no
+  -- check either, so the only thing that can speak is its absent TÜV date.
   PERFORM _va_expect('5d a NULL TÜV is UNKNOWN, not expired: the car is available',
-    'available', _va_verdict(c_a3, DATE '2029-05-07', 4));
+    'available', _va_verdict(c_a4, DATE '2029-05-07', 4));
   -- The 60-day warning window is deliberately not read here: a TÜV expiring in a
   -- fortnight does not stop a car driving today, and reading the warning as
   -- unavailability would take a quarter of a fleet off the road.
@@ -1226,8 +1230,11 @@ BEGIN
   -- 10j the operating day's LENGTH is one calendar day: with it shortened to
   --     half a day, the window of 4a stops falling in operating day 07.05 under
   --     hour 4. This is the control for the whole of section 4.
+  -- `available/` and not `available`: this probe builds the string inline and
+  -- always writes the separator, where _va_verdict omits it for an empty source
+  -- list. The trailing slash IS the empty list.
   PERFORM _va_expect('10j control: with the operating day shortened, the hour-4 window stops being found',
-    'available',
+    'available/',
     _va_mutant(
       format('SELECT _va_mutate_fn(%L, %L, %L)',
              'public.vehicle_availability_on(uuid,date,integer)',
@@ -1239,7 +1246,20 @@ BEGIN
 
   -- 10k and the plan-scoped reader really takes the hour from the plan row: with
   --     a literal 0 substituted for it, the hour-4 plan of 9a stops reporting its
-  --     conflict. This is the control for rule 2.
+  --     conflict. This is the control for rule 2, and it is the one assertion of
+  --     this file that the whole slice turns on.
+  --
+  --     It counts the UNAVAILABLE rows and not every row: plan:hour4 also holds
+  --     9h's unresolved plate, whose verdict does not depend on the hour at all,
+  --     so a bare count could never reach 0 and the control would have been
+  --     measuring the wrong thing. Both sides are measured, so "it dropped"
+  --     cannot be a plan that was empty to begin with.
+  PERFORM _va_expect('10k baseline: unmutated, the hour-4 plan reports exactly one unavailable shift',
+    '1',
+    _va_try(c_admin, NULL, format(
+      'SELECT count(*)::text FROM public.vehicle_day_plan_availability(%L) WHERE verdict = ''unavailable''',
+      _va_id('plan:hour4'))));
+
   PERFORM _va_expect('10k control: with a literal hour substituted, the hour-4 plan stops reporting its conflict',
     '0',
     _va_mutant(
@@ -1247,7 +1267,8 @@ BEGIN
              'public.vehicle_day_plan_availability(uuid)',
              'r.q_date, v_hour) a', 'r.q_date, 0) a'),
       c_admin, NULL, format(
-      'SELECT count(*)::text FROM public.vehicle_day_plan_availability(%L)', _va_id('plan:hour4'))));
+      'SELECT count(*)::text FROM public.vehicle_day_plan_availability(%L) WHERE verdict = ''unavailable''',
+      _va_id('plan:hour4'))));
 END $$;
 
 -- ─── 11. the verdict ────────────────────────────────────────────────────────
