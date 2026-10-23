@@ -149,6 +149,10 @@ const REASON_LABEL_KEYS: Record<ReviewReason, TranslationKey> = {
   end_before_start:  'imp.reason.endBeforeStart',
   missing_driver:    'imp.reason.missingDriver',
   unknown_status:    'imp.reason.unknownStatus',
+  // 20261023170000's ninth reason. The Record is typed on ReviewReason, so a
+  // tenth reason fails to compile until it has a label here and in both
+  // dictionaries — the same fail-closed shape SEED_PLAN_FEATURES has.
+  unreadable_order_transmission: 'imp.reason.unreadableOrderTransmission',
 };
 
 /** DD.MM.YYYY HH:MM:SS of an instant, on the clock the file was written in. */

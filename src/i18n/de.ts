@@ -7101,4 +7101,7 @@ export const de = {
   'notes.prov.review.saveBeforeReview': 'Änderungen erst speichern, dann prüfen: Eine Prüfung gilt für den gespeicherten Stand.',
   'stn.noteConflict.item':  '{date}: Die Pflichtnotiz „{mandatory}“ liegt in der Abwesenheit „{absence}“. Für diesen Tag trägt ein neu erzeugter Plan keine Schicht ein. Bitte eine der beiden Notizen korrigieren.',
   'stn.noteConflict.title': 'Widersprüchliche Notizen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.reason.unreadableOrderTransmission': 'Uhrzeit der Auftragsübermittlung nicht lesbar',
 } as const;
