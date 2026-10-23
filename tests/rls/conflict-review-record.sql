@@ -1078,8 +1078,10 @@ BEGIN
 
   -- 9d no column name, no constraint name and no word of the guard calls
   --    anything a violation.
-  SELECT string_agg(found, ', ') INTO v_hit FROM (
-    SELECT a.attname::text AS found FROM pg_attribute a
+  -- `hit` and not `found`: plpgsql declares an implicit FOUND, and a column
+  -- alias of that name is "ambiguous" rather than shadowing it.
+  SELECT string_agg(hit, ', ') INTO v_hit FROM (
+    SELECT a.attname::text AS hit FROM pg_attribute a
      WHERE a.attrelid = to_regclass('public.conflict_reviews') AND a.attnum > 0
        AND lower(a.attname) ~ ('(' || array_to_string(v_words, '|') || ')')
     UNION ALL
@@ -1091,7 +1093,7 @@ BEGIN
       JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'app_private' AND p.proname = 'conflict_review_guard'
        AND lower(p.prosrc) ~ ('(' || array_to_string(v_words, '|') || ')')
-  ) AS t(found);
+  ) AS t(hit);
   PERFORM _cr_expect('9d nothing in the table or its guard names a verdict', '<null>',
     coalesce(v_hit, '<null>'));
 
