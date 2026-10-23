@@ -302,8 +302,8 @@ DECLARE
   v_gen  text := _swr_pattern('no_such_table');
 BEGIN
   PERFORM _swr_rec(1, 'the pattern is a pure sql expression, SECURITY INVOKER, with search_path pinned',
-    (SELECT l.lanname || '/' || p.provolatile || '/' || p.prosecdef::text
-              || '/' || array_to_string(p.proconfig, ',') || '/' || pg_get_userbyid(p.proowner)
+    (SELECT l.lanname::text || '/' || p.provolatile::text || '/' || p.prosecdef::text
+              || '/' || array_to_string(p.proconfig, ',') || '/' || pg_get_userbyid(p.proowner)::text
        FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = v_oid),
     'sql/i/false/search_path=pg_catalog/supabase_admin');
 
