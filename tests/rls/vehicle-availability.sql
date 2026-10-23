@@ -527,14 +527,14 @@ DECLARE
   c_co_a CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
 BEGIN
   PERFORM _va_expect('2a a window that ends before it starts is refused, by a check constraint',
-    'ERR 23514 vehicle_unavailability_window_ordered',
+    'ERR 23514 new row for relation "vehicle_unavailability" violates check constraint "vehicle_unavailability_window_ordered"',
     _va_try(_va_owner(), NULL, format(
       'INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, ends_local, reason) '
       || 'VALUES (%L, %L, ''2029-05-10 08:00'', ''2029-05-09 08:00'', ''workshop'')',
       c_co_a, _va_id('car:a1'))));
 
   PERFORM _va_expect('2b …and one that ends exactly when it starts, which is an empty window',
-    'ERR 23514 vehicle_unavailability_window_ordered',
+    'ERR 23514 new row for relation "vehicle_unavailability" violates check constraint "vehicle_unavailability_window_ordered"',
     _va_try(_va_owner(), NULL, format(
       'INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, ends_local, reason) '
       || 'VALUES (%L, %L, ''2029-05-10 08:00'', ''2029-05-10 08:00'', ''workshop'')',
@@ -548,7 +548,7 @@ BEGIN
       c_co_a, _va_id('car:a1'))));
 
   PERFORM _va_expect('2d a reason outside the closed list is refused',
-    'ERR 23514 vehicle_unavailability_reason_known',
+    'ERR 23514 new row for relation "vehicle_unavailability" violates check constraint "vehicle_unavailability_reason_known"',
     _va_try(_va_owner(), NULL, format(
       'INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, reason) '
       || 'VALUES (%L, %L, ''2029-05-10 08:00'', ''urlaub'')',
@@ -567,7 +567,7 @@ BEGIN
       c_co_a, _va_id('car:a1'))));
 
   PERFORM _va_expect('2f an oversized note is refused',
-    'ERR 23514 vehicle_unavailability_note_bounded',
+    'ERR 23514 new row for relation "vehicle_unavailability" violates check constraint "vehicle_unavailability_note_bounded"',
     _va_try(_va_owner(), NULL, format(
       'INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, reason, note) '
       || 'VALUES (%L, %L, ''2029-05-10 08:00'', ''other'', repeat(''x'', 501))',
@@ -596,14 +596,14 @@ DECLARE
   v_win  uuid;
 BEGIN
   PERFORM _va_expect('3a company A''s window on company B''s car is refused, for the owner too, by the foreign key',
-    'ERR 23503 vehicle_unavailability_car_of_company',
+    'ERR 23503 insert or update on table "vehicle_unavailability" violates foreign key constraint "vehicle_unavailability_car_of_company"',
     _va_try(_va_owner(), NULL, format(
       'INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, reason) '
       || 'VALUES (%L, %L, ''2029-05-10 08:00'', ''workshop'')',
       c_co_a, _va_id('car:b1'))));
 
   PERFORM _va_expect('3b …and so is a car that does not exist at all',
-    'ERR 23503 vehicle_unavailability_car_of_company',
+    'ERR 23503 insert or update on table "vehicle_unavailability" violates foreign key constraint "vehicle_unavailability_car_of_company"',
     _va_try(_va_owner(), NULL, format(
       'INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, reason) '
       || 'VALUES (%L, %L, ''2029-05-10 08:00'', ''workshop'')',

@@ -579,7 +579,7 @@ BEGIN
        AND u.starts_local < v_to
        AND (u.ends_local IS NULL OR u.ends_local > v_from)
   ) THEN
-    v_sources := v_sources || 'recorded';
+    v_sources := array_append(v_sources, 'recorded');
   END IF;
 
   -- 2. An expired TÜV: the car may not be on the road for an operating day that
@@ -588,7 +588,7 @@ BEGIN
   --    treat it as expired either. The 60-day warning window is deliberately
   --    not read here: availability is not a warning.
   IF v_tuev IS NOT NULL AND p_operating_date > v_tuev THEN
-    v_sources := v_sources || 'tuev_expired';
+    v_sources := array_append(v_sources, 'tuev_expired');
   END IF;
 
   -- 3. The latest Werkstatt check on or before the operating date, in ONE pass
@@ -603,7 +603,7 @@ BEGIN
    LIMIT 1;
 
   IF v_status = 'negative' THEN
-    v_sources := v_sources || 'werkstatt_negative';
+    v_sources := array_append(v_sources, 'werkstatt_negative');
   END IF;
 
   IF array_length(v_sources, 1) IS NULL THEN
