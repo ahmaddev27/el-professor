@@ -1,7 +1,12 @@
 # A per-company timezone — blast-radius assessment
 
-**Status: assessment only. No production code, no migration, no test change.
-Awaiting the owner's answers to §4 before any code is written.**
+**Status: ANSWERED. The owner read this assessment on 23.10.2026 and decided
+NOT to build a per-company timezone. The ten questions in §4 are therefore
+not open any more — they are the reasoning behind a decision, kept because the
+next person to be asked for this feature will need them.**
+
+**No production code, no migration, no test change. See §0 for the decision and
+what was built instead.**
 
 Written 23.10.2026, against `staging` at `11f4017`.
 
@@ -10,6 +15,59 @@ Everything below is marked **measured** (a command was run, a file was read) or
 repository contradicts a measurement, the measurement is given and the reading
 is named as wrong — including one case where this repository's own comment is
 overstated.
+
+---
+
+---
+
+## 0. The decision, 23.10.2026
+
+**A per-company timezone is not built.** The owner decided this after reading
+the assessment below, in answer to an external audit that asked for it
+(`corection/FleetBook_Claude_Correction_Prompt.txt` §3: *"Make parse/serialize
+timezone aware, and configurable per tenant"*).
+
+**The reasons, each measured below rather than asserted here:**
+
+1. **Nobody needs it.** Every current customer is a German company, so all three
+   of the zones §2.1 separates — the source file's, Uber's operating week, and
+   the employees' — have the same value for all of them. The request is an
+   auditor's checklist item, not a customer's.
+
+2. **It would make an unverified payroll rule configurable instead of correct.**
+   `Docs/audit/REMEDIATION-PLAN.md` Phase 0c records that the application carries
+   **four competing premium tables and none has been checked against §3b EStG**.
+   Parameterising a rate of unknown correctness turns a partial error into a
+   configurable one (§3.4).
+
+3. **The only safety net over this code cannot see the change.** §3.2 measured
+   the whole golden-master suite green under four foreign zones, with a positive
+   control proving the run was real. A per-tenant timezone could silently re-band
+   every night shift and the masters would stay green — while §3.3 measured
+   Lohnart 1501 moving 2.5 h on a single shift and the Sunday premium swinging by
+   a whole shift.
+
+4. **The repository decided the opposite three days earlier and enforces it**
+   (§1). Reversing a decision that a self-check fails a release over is a real
+   cost, and the rail was working as designed.
+
+**What was built instead, from this assessment's own findings.** §3.2's measured
+blindness of the golden masters is a defect in its own right, independent of any
+timezone: the premium windows compute a day's end as a fixed millisecond offset
+from local midnight, so on **25.10.2026 (a 25-hour day, and a Sunday)** the last
+hour of Sunday is attributed to Monday, and Sunday carries a 50 % premium. That
+is being fixed on its own branch, with golden cases that cross both transitions
+and that **fail under a wrong zone** — which is the coverage this assessment
+showed was missing.
+
+**What this costs, stated rather than hidden.** The audit's §3 request is
+answered with a reasoned refusal and not with a change, which the audit itself
+permits (*"Keep warnings unresolved if evidence is insufficient"*). If a
+non-German customer is ever signed, this document is the starting point and
+question 2 of §4 — what happens to data already stored, which was computed in
+`Europe/Berlin` with nothing recording that it was — becomes harder to answer
+the longer it waits, because nothing is recording the zone beside a stored
+figure today and §5's stage 1 is what would.
 
 ---
 
