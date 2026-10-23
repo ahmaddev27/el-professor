@@ -103,6 +103,11 @@ install_release() {
   # not fail here: compose removes the service as an orphan instead.
   rm -rf "$DIR/deploy/export-service"
   if [ -d "$src/deploy/export-service" ]; then cp -r "$src/deploy/export-service" "$DIR/deploy/export-service"; fi
+  # A single-file bind mount whose hash is a compose label, so it travels
+  # like kong.yml - and the remove comes first, so a rollback onto a release
+  # from before it does not leave the newer config behind for old code.
+  rm -f "$DIR/deploy/geocoder-gateway.conf"
+  if [ -f "$src/deploy/geocoder-gateway.conf" ]; then install -m 644 "$src/deploy/geocoder-gateway.conf" "$DIR/deploy/"; fi
   rm -rf "$DIR/supabase/functions";  cp -r "$src/supabase/functions"  "$DIR/supabase/functions"
   rm -rf "$DIR/supabase/migrations"; cp -r "$src/supabase/migrations" "$DIR/supabase/migrations"
   rm -rf "$DIR/deploy/dist.new";     cp -r "$src/dist"                "$DIR/deploy/dist.new"
@@ -208,6 +213,10 @@ if [ "$VERB" = release ]; then
   cp -r "$work/deploy/init-db" "$rel/deploy/init-db"
   # Optional, so an archive from before the export service is still accepted.
   if [ -d "$work/deploy/export-service" ]; then cp -r "$work/deploy/export-service" "$rel/deploy/export-service"; fi
+  # The geocoder gateway's config travels the same way and for the same
+  # reason: an archive from before it carries none, and deploy.sh tolerates
+  # that while COMPOSE_PROFILES does not name geocoder.
+  if [ -f "$work/deploy/geocoder-gateway.conf" ]; then cp "$work/deploy/geocoder-gateway.conf" "$rel/deploy/"; fi
   cp -r "$work/supabase/functions" "$work/supabase/migrations" "$rel/supabase/"
   epoch=1
   if [ -f "$work/deploy/SCHEMA_EPOCH" ]; then
