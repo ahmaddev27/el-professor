@@ -1315,12 +1315,17 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO driver_month_assignments (company_id, year, month, driver_id, plan_id, early_reason)
      VALUES ({co}, 2026, 10, {ref:drivers2}, {ref:vehicle_day_plans}, 'MX Matrix')$q$,
   $q$assigned_minutes = assigned_minutes$q$),
+-- 79 and not 78: origin/feat/vehicle-availability already takes 76 (geocode_cache,
+-- from the branch it is built on) and 78 (vehicle_unavailability), measured on
+-- 23.10.2026 against every remote branch. ord is ORDER BY only, but a duplicate
+-- scrambles the probe order, so the free numbers are taken rather than the
+-- contiguous ones.
 -- One live claim per window (driver_month_assignment_shifts_one_claim_per_shift),
 -- so the INSERT probe needs the fixture's own claim out of the way first: ins_pre
 -- deletes it as the owner and the rollback puts it back, as it does for
 -- company_settings. minutes must be the window's own 180, which the child guard
 -- re-reads from ord 75's row.
-(78, 'driver_month_assignment_shifts', $q$id = {id}$q$,
+(79, 'driver_month_assignment_shifts', $q$id = {id}$q$,
   $q$INSERT INTO driver_month_assignment_shifts (id, company_id, assignment_id, shift_id, minutes)
      VALUES ({id}, {co}, {ref:driver_month_assignments}, {ref:vehicle_day_shifts}, 180)$q$,
   $q$DELETE FROM driver_month_assignment_shifts WHERE company_id = {co}$q$,
