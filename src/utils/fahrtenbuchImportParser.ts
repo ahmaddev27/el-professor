@@ -91,9 +91,17 @@ export type ReviewReason =
   | 'unreadable_end'
   | 'end_before_start'
   | 'missing_driver'
-  | 'unknown_status';
+  | 'unknown_status'
+  | 'unreadable_order_transmission';
 
-/** Canonical order: review_reasons is always written in this order. */
+/**
+ * Canonical order: review_reasons is always written in this order.
+ *
+ * `fahrtenbuch_trips_review_check` admits exactly this set, and
+ * `20261023170000` is the newest migration that defines it — the test that
+ * compares the two reads whichever migration is newest, so a tenth reason
+ * means widening the CHECK in the same release or the build fails.
+ */
 export const REVIEW_REASONS: readonly ReviewReason[] = [
   'missing_trip_date',
   'missing_start',
@@ -103,6 +111,7 @@ export const REVIEW_REASONS: readonly ReviewReason[] = [
   'end_before_start',
   'missing_driver',
   'unknown_status',
+  'unreadable_order_transmission',
 ];
 
 export type SourceRowKeyBasis = 'derived_order_transmission' | 'derived_driver_start_plate';
@@ -965,28 +974,38 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
 
     const driverMatch = ctx.driverMatches.get(driverName);
     const carMatch = plate ? ctx.carMatches.get(plate) : undefined;
-    const reviewReasons = reviewReasonsInOrder(reasons);
     const orderTransmission = cell(row, ctx.orderTransmissionCol);
-    // A malformed order time is counted and shown, never taken in silently.
+    // A malformed order time is flagged ON THE ROW, counted, and shown — never
+    // taken in silently.
     //
     // This column is the row's key (`sourceRowKeyMaterial` hashes its text) and
     // it is parsed into no column of `fahrtenbuch_trips`: `time_source` is
-    // about start and end, and none of the eight `review_reasons` names this
-    // column. So a value that is not a timestamp — the two-decimal-point
-    // strings of FB-HIGH-001 — reached `raw_data_json` and the key with
-    // `needs_review` false and nothing anywhere saying it cannot be read.
+    // about start and end, and until `20261023170000` none of the review
+    // reasons named this column. So a value that is not a timestamp — the
+    // two-decimal-point strings of FB-HIGH-001 — reached `raw_data_json` and
+    // the key with `needs_review` false and nothing anywhere saying it cannot
+    // be read. 369 such rows on staging, every one of them `is_simulated`.
     //
     // The row is still kept and no value is guessed, as the migration's rule
-    // requires. Flagging it ON THE ROW needs a ninth `review_reasons` value and
-    // so a migration widening `fahrtenbuch_trips_review_check`, which is the
-    // owner's call and is not taken here; until then this is the wizard's count
-    // and an operator decides before confirming the import.
+    // requires. The flag says only which cell could not be read.
+    //
+    // `'other'` and NOT "fails the timestamp patterns": an empty cell, and the
+    // two-character null marker `isMissingCell` recognises, both answer
+    // `empty`, and nothing to read is not the same as something unreadable.
+    // Three real (non-simulated) staging rows hold that marker, and a regular
+    // expression over the stored text counts them as malformed where the parser
+    // does not.
+    //
+    // The order matters: `reviewReasonsInOrder` is read below, so this must add
+    // its reason first. `REVIEW_REASONS` puts it last, after `unknown_status`.
     if (classifyTimestampCell(orderTransmission).kind === 'other') {
+      reasons.add('unreadable_order_transmission');
       stats.unreadableOrderTransmission++;
       if (stats.sampleUnreadableOrderTransmission.length < 5) {
         stats.sampleUnreadableOrderTransmission.push(orderTransmission);
       }
     }
+    const reviewReasons = reviewReasonsInOrder(reasons);
     const key = sourceRowKeyMaterial({
       orderTransmission,
       driverName, startWallText: times.startWallText, plate,

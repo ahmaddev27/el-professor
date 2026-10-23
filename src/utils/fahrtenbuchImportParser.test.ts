@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ACTUAL_END_TOKENS, ACTUAL_START_TOKENS } from './planningQualityChecks';
@@ -595,6 +596,26 @@ describe('the migration derives what the browser derives', () => {
   const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
   const migration = read('../../supabase/migrations/20260922100000_fahrtenbuch_import_reliability.sql');
   const quoted = (list: string) => [...list.matchAll(/'([^']*)'/g)].map(m => m[1]);
+
+  /*
+    `review_reasons` is the one list here that a LATER migration redefines:
+    `20261023170000` widened the CHECK to admit a ninth reason, and the next
+    one will widen it again. So that assertion must read the NEWEST migration
+    that defines the set, not the one that introduced it -- the rule
+    `rolePageKeys.test.ts` and `planFeatures.test.ts` already follow for the
+    two other lists this codebase holds in both a migration and TypeScript.
+    Everything else in this block still reads 20260922100000, which is where it
+    lives and where it has not moved.
+  */
+  const migrationsDir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
+  const newestDefining = (needle: string) => {
+    const hits = readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .filter(f => readFileSync(join(migrationsDir, f), 'utf8').includes(needle))
+      .sort();
+    if (hits.length === 0) throw new Error(`no migration defines ${needle}`);
+    return { file: hits[hits.length - 1], text: readFileSync(join(migrationsDir, hits[hits.length - 1]), 'utf8') };
+  };
   const sqlConstant = (name: string) => {
     const m = migration.match(new RegExp(`${name} CONSTANT text\\[\\] := ARRAY\\[([^\\]]*)\\]`));
     if (!m) throw new Error(`${name} not found in the migration`);
@@ -630,9 +651,23 @@ describe('the migration derives what the browser derives', () => {
     expect(migration).toContain(`'${TIME_RE.source}'`);
   });
 
-  it('allows exactly the review reasons, time sources and statuses the parser writes', () => {
-    const reasons = migration.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
+  it('allows exactly the review reasons the parser writes, in the newest migration that says so', () => {
+    const newest = newestDefining('review_reasons <@ ARRAY[');
+    // Named, so a failure says which file was read rather than leaving the
+    // next reader to guess whether the list moved or the parser did.
+    expect(newest.file).toBe('20261023170000_review_reason_order_transmission.sql');
+    const reasons = newest.text.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
     expect(quoted((reasons as RegExpMatchArray)[1])).toEqual([...REVIEW_REASONS]);
+    // And the migration that INTRODUCED the set still names the eight it knew,
+    // so this assertion moving is always a deliberate widening and never a
+    // rewrite of history: 20260922100000 ran once on every live database.
+    const first = migration.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
+    expect(quoted((first as RegExpMatchArray)[1])).toEqual(
+      REVIEW_REASONS.filter(r => r !== 'unreadable_order_transmission'),
+    );
+  });
+
+  it('allows exactly the time sources and statuses the parser writes', () => {
     const sources = migration.match(/CHECK \(time_source IN \(([^)]*)\)\)/);
     expect(quoted((sources as RegExpMatchArray)[1])).toEqual([...TIME_SOURCES]);
     const statuses = migration.match(/trip_status IN \(([^)]*)\)/);
@@ -800,9 +835,22 @@ describe('an order-transmission cell that is not a timestamp (FB-HIGH-001)', () 
     raw_data_json. Before this count nothing anywhere said that a row holds an
     order time which cannot be read.
 
-    The row is still kept and no value is invented. Flagging it on the row
-    needs a ninth review_reasons value, which the CHECK constraint of
-    20260922100000 does not admit, so that is a migration and the owner's call.
+    The row is still kept and no value is invented. Since 20261023170000 it is
+    also FLAGGED: that migration widened fahrtenbuch_trips_review_check to
+    admit a ninth value, 'unreadable_order_transmission', and these tests pin
+    both halves -- the count the wizard shows before the operator confirms, and
+    the reason written onto the row.
+
+    The flag keys on classifyTimestampCell answering 'other', never on "fails
+    the timestamp patterns": an empty cell and the null marker both answer
+    'empty', and nothing to read is not the same as something unreadable.
+    Measured on staging, that distinction is worth exactly three rows -- a SQL
+    regex over the stored text counts 372 where the parser counts 369, and the
+    extra three hold the null marker and are real customer rows, not simulated.
+
+    The name is not unreadable_start, because the ride's start IS readable;
+    saying otherwise would put a false statement on a row that feeds the
+    Stundennachweis.
   */
   const MALFORMED = '2026-10-01 18:49:25.441.665771484375';
   const ALSO_MALFORMED = '2026-10-01 18:55:41.929.50390625';
@@ -828,6 +876,40 @@ describe('an order-transmission cell that is not a timestamp (FB-HIGH-001)', () 
     expect(built[0].row.start_at).not.toBeNull();
   });
 
+  it('flags the row, and names only the cell that could not be read', () => {
+    const { built } = buildTripRows(context([uberRow({ order: MALFORMED })]));
+    expect(built[0].row.review_reasons).toEqual(['unreadable_order_transmission']);
+    expect(built[0].row.needs_review).toBe(true);
+    // NOT unreadable_start: the ride's own start parsed, and claiming it did
+    // not would be a false statement on the row.
+    expect(built[0].row.start_time).not.toBeNull();
+    expect(built[0].row.end_time).not.toBeNull();
+  });
+
+  it('does not change how the row is keyed or deduped', () => {
+    // Measured on staging: all 369 rows whose order cell the parser cannot
+    // read are keyed, all with basis derived_order_transmission, and all 369
+    // keys are distinct. The key hashes the cell as TEXT, so a malformed value
+    // hashes like any other and the per-company dedupe is unaffected -- the
+    // flag is a statement about the row, not about its key.
+    const flagged = buildTripRows(context([uberRow({ order: MALFORMED })]));
+    const clean = buildTripRows(context([uberRow({ order: '2026-10-01 18:30:00.146' })]));
+    expect(flagged.built[0].row.source_row_key_basis)
+      .toBe(clean.built[0].row.source_row_key_basis);
+    expect(flagged.built[0].keyMaterial).not.toBe(clean.built[0].keyMaterial);
+    expect(flagged.built[0].keyMaterial).toBeTruthy();
+  });
+
+  it('takes its place last in the canonical order, beside the other reasons', () => {
+    const { built } = buildTripRows(context([
+      uberRow({ order: MALFORMED, driver: '', status: 'wer weiss' }),
+    ]));
+    expect(built[0].row.review_reasons).toEqual([
+      'missing_driver', 'unknown_status', 'unreadable_order_transmission',
+    ]);
+    expect(built[0].row.needs_review).toBe(true);
+  });
+
   it('reports nothing for a value the published format accepts, a longer fraction included', () => {
     const { stats } = buildTripRows(context([
       uberRow({ order: '2026-10-01 18:30:00.146' }),
@@ -839,11 +921,37 @@ describe('an order-transmission cell that is not a timestamp (FB-HIGH-001)', () 
     expect(stats.sampleUnreadableOrderTransmission).toEqual([]);
   });
 
+  it('flags no row for a value the published format accepts', () => {
+    const { built } = buildTripRows(context([
+      uberRow({ order: '2026-10-01 18:30:00.146' }),
+      uberRow({ order: '01.10.2026 18:30:03' }),
+    ]));
+    expect(built.map(b => b.row.review_reasons)).toEqual([[], []]);
+    expect(built.map(b => b.row.needs_review)).toEqual([false, false]);
+  });
+
   it('reports nothing for an empty cell, for the null marker, or for a file with no such column', () => {
     const empty = buildTripRows(context([uberRow({ order: '\\N' }), uberRow({ order: '' })]));
     expect(empty.stats.unreadableOrderTransmission).toBe(0);
     const noColumn = buildTripRows(context([uberRow({ order: MALFORMED })], { orderTransmissionCol: '' }));
     expect(noColumn.stats.unreadableOrderTransmission).toBe(0);
     expect(noColumn.built[0].row.source_row_key_basis).toBe('derived_driver_start_plate');
+  });
+
+  it('FLAGS no row for an empty cell or the null marker either, which is the three-row difference', () => {
+    // isMissingCell recognises the two-character null marker, so
+    // classifyTimestampCell answers 'empty' and not 'other'. Three REAL
+    // (non-simulated) staging rows hold it, and a SQL regex over the stored
+    // text counts them as malformed where the parser does not -- which is why
+    // the flag keys on the classification and not on a pattern match.
+    const { built } = buildTripRows(context([
+      uberRow({ order: '\\N' }), uberRow({ order: '' }),
+    ]));
+    expect(built.map(b => b.row.review_reasons)).toEqual([[], []]);
+    expect(built.map(b => b.row.needs_review)).toEqual([false, false]);
+    // A file with no such column at all flags nothing either: there is no cell.
+    const noColumn = buildTripRows(context([uberRow({ order: MALFORMED })], { orderTransmissionCol: '' }));
+    expect(noColumn.built[0].row.review_reasons).toEqual([]);
+    expect(noColumn.built[0].row.needs_review).toBe(false);
   });
 });

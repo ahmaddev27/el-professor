@@ -7045,4 +7045,7 @@ export const en: PartialDictionary = {
   'notes.prov.review.saveBeforeReview': 'Save the changes first, then review: a review covers the saved version.',
   'stn.noteConflict.item':  '{date}: The mandatory note “{mandatory}” falls inside the absence “{absence}”. A newly generated plan enters no shift for this day. Please correct one of the two notes.',
   'stn.noteConflict.title': 'Conflicting notes',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.reason.unreadableOrderTransmission': 'Order transmission time not readable',
 };
