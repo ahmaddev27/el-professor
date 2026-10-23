@@ -615,7 +615,23 @@ step "release"
 # service definition, and compose recreates exactly the containers affected.
 KONG_CONFIG_SHA="$(sha256sum kong.yml | cut -c1-16)"
 NGINX_CONFIG_SHA="$(sha256sum nginx-spa.conf | cut -c1-16)"
-GEOCODER_CONFIG_SHA="$(sha256sum geocoder-gateway.conf | cut -c1-16)"
+# >>> geocoder config hash
+# The geocoder gateway's config reached the host only from the release that
+# introduced it, so a rollback onto an older one leaves none - and a rollback
+# keeps THIS deploy.sh, which would then die on a missing file with the
+# gateway switched off and nothing depending on it. It is therefore hashed
+# when present and refused only when the profile actually names it. That
+# refusal is the real guard: a gateway started against a config this release
+# never shipped is a proxy whose rules nobody has read.
+if [ -f geocoder-gateway.conf ]; then
+  GEOCODER_CONFIG_SHA="$(sha256sum geocoder-gateway.conf | cut -c1-16)"
+else
+  case ",$PROFILES," in
+    *,geocoder,*) fail "COMPOSE_PROFILES names geocoder but deploy/geocoder-gateway.conf is not in this release" ;;
+  esac
+  GEOCODER_CONFIG_SHA=absent
+fi
+# <<< geocoder config hash
 export KONG_CONFIG_SHA NGINX_CONFIG_SHA GEOCODER_CONFIG_SHA
 
 # The routes GoTrue would create an account on once its signup is open. Only

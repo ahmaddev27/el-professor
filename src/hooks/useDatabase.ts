@@ -11,6 +11,7 @@ import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 import { numberOrUndefined } from '../utils/receiptDisplay';
 import { deleteChecked, updateChecked } from '../lib/writeOutcome';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
@@ -292,22 +293,32 @@ export const useDatabase = () => {
       addDebugInfo('🔍 Executing query: SELECT * FROM receipts ORDER BY date');
       addDebugInfo(`🔓 Using authenticated access: ${user ? 'Authenticated' : 'Anonymous'}`);
 
-      const { data, error } = await withTimeout(
-        supabase
-          .from('receipts')
-          .select('*')
-          .eq('company_id', companyId)
-          .order('date'),
-        8000
+      // Paged, because PostgREST caps a response at 1000 rows and reports no
+      // error when it truncates. Measured on production 23.10.2026: Y&A
+      // Mobility held 1025 receipts and this read returned the oldest 1000, so
+      // every Beleg from 17.10.2026 on was missing — from this list, from
+      // Gesamtausgaben and the MwSt total, from Abrechnung's cash expenses and
+      // from the Bargeldbestand, which the till was overstated by. Nothing
+      // anywhere said so.
+      //
+      // `id` is the tiebreaker and is not decoration: `date` is a day and is
+      // not unique, and PostgreSQL may break a tie differently on each request,
+      // so paging on `date` alone can repeat a row on one page and drop it from
+      // the next. fetchAllPaginated's own header states the same rule.
+      const data = await fetchAllPaginated<any>(
+        (from, to) => withTimeout(
+          supabase
+            .from('receipts')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('date')
+            .order('id', { ascending: true })
+            .range(from, to),
+          8000
+        ),
+        // Domain vocabulary: 'Beleg' stays German in both languages.
+        { label: 'Belege' },
       );
-      
-      if (error) {
-        addDebugInfo(`❌ Error fetching receipts: ${error.message}`);
-        addDebugInfo(`❌ Error code: ${error.code}`);
-        addDebugInfo(`❌ Error hint: ${error.hint}`);
-        addDebugInfo(`❌ Error details: ${JSON.stringify(error.details)}`);
-        throw error;
-      }
       
       addDebugInfo(`📊 Database receipts raw data: ${JSON.stringify(data?.slice(0, 2))}... (showing first 2)`);
       addDebugInfo(`📊 Total receipts found: ${data?.length || 0}`);
