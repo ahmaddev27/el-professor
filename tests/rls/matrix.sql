@@ -1326,7 +1326,17 @@ INSERT INTO _mx_move VALUES
 ('user_profiles',                        $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('user_sessions',                        $q$user_id = {other_admin}$q$, NULL, 'Y', 'through its user'),
 ('drivers',                              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
-('cars',                                 $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20261023130000 added a mov_pre here, and no expectation cell of `cars` moved.
+-- vehicle_unavailability ties a window to its car by a COMPOSITE foreign key to
+-- cars (id, company_id) with no ON UPDATE action, so a car that holds a window
+-- cannot change company at all — the owner included, which made this probe
+-- report "the owner must answer Y" and stop measuring the cars policy. Deleting
+-- the window first restores the probe's premise, as the company_settings line
+-- above deletes the row a unique constraint would collide with; the
+-- subtransaction puts it back. For every real principal this cell was already a
+-- refusal, and no path in the product moves a car between companies.
+('cars',                                 $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM vehicle_unavailability WHERE car_id = {id}$q$, 'Y', NULL),
 ('car_driver_assignments',               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('cash_transactions',                    $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('income',                               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
