@@ -1501,7 +1501,7 @@ INSERT INTO _mx_move VALUES
 -- 20261023130000: a window belongs to one car of one company for its life, so
 -- vehicle_unavailability_guard pins both before any WITH CHECK is reached --
 -- the reason pin_billing_company_id exists on the billing tables.
-('vehicle_unavailability',                $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_unavailability_guard pins the company even for the owner');
+('vehicle_unavailability',                $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_unavailability_guard pins the company even for the owner',
 -- 20261023120000: an assignment stays with its company, month, driver, plan and
 -- the early-opening record it was written with, and a claimed window stays with
 -- its assignment, so both guards refuse the move before any WITH CHECK is
