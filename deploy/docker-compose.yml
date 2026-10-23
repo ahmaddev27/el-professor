@@ -18,10 +18,17 @@
 #   - ridy runs Laravel + MySQL + OSRM + Nominatim on network `ridy_default`
 #     (ridy_osrm_data 14.8 GB, ridy_nominatim_data 106 GB - THEIRS, and their
 #     server is off limits)
-#   - one root volume: /dev/vda4, 1007 GB with 773 GB free (21% used), plus a
-#     944 MB /boot. The 2026-09-10 note read '21 GB of 31 GB free, 792 GB of
-#     1 TB free'; there is no 31 GB volume on this host at all, and quoting the
-#     21 was enough on its own to argue against adding a routing container.
+#   - one root volume: /dev/vda4, 1007 GB with 770 GB free (21% used), plus a
+#     944 MB /boot
+#   - 31 GB of RAM, 19 GB available (free -g, 2026-10-23)
+#   The 2026-09-10 note read '21 GB of 31 GB free, 792 GB of 1 TB free', and
+#   both halves were right: the first pair is MEMORY and the second the disk.
+#   A 2026-10-22 edit to this block read the 31 as a volume, declared that no
+#   such volume exists and called the old note wrong. That was the error, and
+#   it dismissed the figure that actually binds here - a routing graph is built
+#   in RAM, not on disk (see the osrm service's own note below), so memory is
+#   the constraint to check before enabling that profile, and the disk never
+#   was.
 #   - nothing but 22/80/443 listens on 0.0.0.0 - no exposed databases
 #
 # So this stack publishes NO host ports at all. It joins ridy's network and the
@@ -579,6 +586,69 @@ services:
     deploy:
       resources:
         limits: { memory: '${OSRM_MEM_LIMIT:-12G}', pids: 64 }
+
+  # ── Geocoding: the gateway to ridy's Nominatim ────────────────────────────
+  # The address locator of the Fahrtenanalyse needs a geocoder, and the owner
+  # decided (22.10.2026) to use the Nominatim ridy already runs on this host
+  # (ridy-nominatim-1, THEIRS) rather than import one of our own. Nothing of
+  # theirs is touched: no restart, no change, no limit added. We reach it by its
+  # name on ridy_default, never by the port it publishes on the host and never over
+  # the internet, and only through this container.
+  #
+  # Why a container and not `functions` joining ridy_default. Measured on
+  # 22.10.2026: ridy_default holds BOTH ya-mobility-kong-1 and
+  # ya-mobility-staging-kong-1, so the name `kong` there means both gateways, and
+  # `functions` reaches its own through http://kong:8000; it also holds ridy-osrm-1
+  # under the name `osrm`, which travel-route calls. A functions container on that
+  # network could be answered by the other environment's Kong or by ridy's OSRM,
+  # and every ridy container could reach the container that holds the service-role
+  # key. So `functions` stays on this stack's network and asks only this gateway,
+  # which is on both.
+  #
+  # What it does is in deploy/geocoder-gateway.conf: GET /search and /status only,
+  # the query rebuilt rather than passed on, 5 requests a second with a queue of 10
+  # and 2 in flight for the whole stack, 5 s timeouts, no request logged, and their
+  # service looked up when a request arrives so that this container starts and stays
+  # up when theirs is down (the answer is then 502, which the function turns into
+  # "unreachable" and the screen into "nicht prüfbar", never a coordinate). Each
+  # stack (production, staging) has its own gateway and so its own budget.
+  #
+  # OFF UNLESS ASKED FOR, like `osrm`: COMPOSE_PROFILES names geocoder (staging:
+  # staging,geocoder). The nginx image is the one `web` already pulls. The
+  # config is a single-file bind mount read once at start, so its hash is a label
+  # here, like kong.yml's: an edited file recreates the container.
+  geocoder-gateway:
+    image: nginx:1.27-alpine
+    profiles: [geocoder]
+    restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
+    read_only: true
+    tmpfs:
+      - /run:size=1m
+      - /tmp:size=4m
+      - /var/cache/nginx:size=8m
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      el-professor.config-sha: ${GEOCODER_CONFIG_SHA:-unset}
+    volumes:
+      - ./geocoder-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - '8080'
+    networks:
+      - default
+      - ridy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { memory: 64M, pids: 64 }
 
   # ── Gateway — the single origin the browser talks to ──────────────────────
   kong:
