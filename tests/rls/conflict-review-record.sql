@@ -265,6 +265,20 @@ BEGIN
   RETURN v_out;
 END $$;
 
+/* Several DDL statements as one command. plpgsql's EXECUTE PREPARES its string
+   and refuses more than one command in it ("cannot insert multiple commands
+   into a prepared statement"), so a control that drops a policy and creates a
+   replacement cannot be written as one string. It goes through this instead,
+   the way the function mutations go through _cr_mutate_fn. */
+CREATE OR REPLACE FUNCTION _cr_ddl(p_sql text[]) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE s text;
+BEGIN
+  FOREACH s IN ARRAY p_sql LOOP
+    EXECUTE s;
+  END LOOP;
+END $$;
+
 CREATE OR REPLACE FUNCTION _cr_mutate_fn(p_sig text, p_from text, p_to text) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -410,7 +424,7 @@ BEGIN
 
   -- A reviewed finding is a record: nothing in the database removes one.
   PERFORM _cr_expect('1o no function deletes or truncates the table', '<null>',
-    (SELECT string_agg(p.oid::regprocedure::text, ', ')
+    (SELECT coalesce(string_agg(p.oid::regprocedure::text, ', '), '<null>')
        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname IN ('public', 'app_private')
         AND p.prosrc ~* '(delete\s+from|truncate)\s+(public\.)?conflict_reviews'));
@@ -628,7 +642,7 @@ BEGIN
   PERFORM _cr_reset();
 
   PERFORM _cr_expect('4b a re-run is one row, with the id it already had', '1|' || v_id::text,
-    (SELECT count(*)::text || '|' || min(id)::text FROM public.conflict_reviews
+    (SELECT count(*)::text || '|' || min(id::text) FROM public.conflict_reviews
       WHERE company_id = c_co_a AND finding_key = 'driver_overlap:i1+i2'));
 
   PERFORM _cr_expect('4c …the measurement moved and the first sighting did not',
@@ -695,7 +709,7 @@ BEGIN
   PERFORM _cr_reset();
   PERFORM _cr_expect('5b the reviewer and the time are the database''s, not the caller''s',
     'acknowledged|' || c_admin::text || '|true',
-    (SELECT status || '|' || reviewed_by::text || '|' || (reviewed_at > '2020-01-01Z')::text
+    (SELECT status || '|' || reviewed_by::text || '|' || (reviewed_at > '2020-01-01 00:00:00+00'::timestamptz)::text
        FROM public.conflict_reviews WHERE id = v_id));
 
   -- 5c the decision froze the measurement it was taken on, and a re-detection
@@ -763,7 +777,7 @@ BEGIN
    WHERE id = v_id;
   PERFORM _cr_reset();
   PERFORM _cr_expect('5l the first sighting is pinned, not accepted', 'true|cr/1.0.0',
-    (SELECT (first_detected_at > '2020-01-01Z')::text || '|' || first_detected_version
+    (SELECT (first_detected_at > '2020-01-01 00:00:00+00'::timestamptz)::text || '|' || first_detected_version
        FROM public.conflict_reviews WHERE id = v_id));
 
   -- 5m a decided finding cannot be left without a time by going round the
@@ -1160,10 +1174,11 @@ BEGIN
   --     not merely for the constraint.
   PERFORM _cr_expect('10e control: without the coalesce, an empty trip_ids array lands', 'rows 1',
     _cr_mutant(
-      'ALTER TABLE public.conflict_reviews DROP CONSTRAINT conflict_reviews_trip_ids_shape; '
-      || 'ALTER TABLE public.conflict_reviews ADD CONSTRAINT conflict_reviews_trip_ids_shape '
-      || 'CHECK (trip_ids IS NULL OR (array_length(trip_ids, 1) >= 1 '
-      || 'AND array_position(trip_ids, NULL) IS NULL))',
+      $m$SELECT _cr_ddl(ARRAY[
+           'ALTER TABLE public.conflict_reviews DROP CONSTRAINT conflict_reviews_trip_ids_shape',
+           'ALTER TABLE public.conflict_reviews ADD CONSTRAINT conflict_reviews_trip_ids_shape
+              CHECK (trip_ids IS NULL OR (array_length(trip_ids, 1) >= 1
+                     AND array_position(trip_ids, NULL) IS NULL))'])$m$,
       _cr_owner(), NULL, format(
       'INSERT INTO conflict_reviews %s, trip_ids) VALUES (%L, ''trip_analysis'', ''missing_end'', '
       || '''missing_end:ctl9'', 2031, 4, ''conflict'', ''warning'', ''high'', ''Zu pruefen.'', ''v'', ''v'', '
@@ -1248,10 +1263,11 @@ BEGIN
   --     finding -- so 7d and 7e measure the gate and not the tenant term.
   PERFORM _cr_expect('10k control: with the page gate dropped, a viewer files a finding', 'rows 1',
     _cr_mutant(
-      'DROP POLICY conflict_reviews_insert ON public.conflict_reviews; '
-      || 'CREATE POLICY conflict_reviews_insert ON public.conflict_reviews FOR INSERT '
-      || 'TO authenticated WITH CHECK (company_id = (SELECT public.get_active_company_id()) '
-      || 'AND status = ''open'')',
+      $m$SELECT _cr_ddl(ARRAY[
+           'DROP POLICY conflict_reviews_insert ON public.conflict_reviews',
+           'CREATE POLICY conflict_reviews_insert ON public.conflict_reviews FOR INSERT
+              TO authenticated WITH CHECK (company_id = (SELECT public.get_active_company_id())
+                                           AND status = ''open'')'])$m$,
       c_viewer, NULL, format(
       'INSERT INTO conflict_reviews %s) VALUES (%L, ''trip_analysis'', ''shift_overlap'', '
       || '''shift_overlap:ctl10'', 2031, 4, ''conflict'', ''warning'', ''high'', ''Zu pruefen.'', ''v'', ''v'')',
@@ -1263,10 +1279,11 @@ BEGIN
   PERFORM _cr_expect('10l control: without the open-only clause, a decided finding can be filed',
     'rows 1',
     _cr_mutant(
-      'DROP POLICY conflict_reviews_insert ON public.conflict_reviews; '
-      || 'CREATE POLICY conflict_reviews_insert ON public.conflict_reviews FOR INSERT '
-      || 'TO authenticated WITH CHECK (company_id = (SELECT public.get_active_company_id()) '
-      || 'AND (SELECT public.current_role_permits(''documents'', true)))',
+      $m$SELECT _cr_ddl(ARRAY[
+           'DROP POLICY conflict_reviews_insert ON public.conflict_reviews',
+           'CREATE POLICY conflict_reviews_insert ON public.conflict_reviews FOR INSERT
+              TO authenticated WITH CHECK (company_id = (SELECT public.get_active_company_id())
+                                           AND (SELECT public.current_role_permits(''documents'', true)))'])$m$,
       c_admin, NULL, format(
       'INSERT INTO conflict_reviews %s, status, review_note) VALUES (%L, ''trip_analysis'', '
       || '''shift_overlap'', ''shift_overlap:ctl11'', 2031, 4, ''conflict'', ''warning'', ''high'', '
@@ -1277,10 +1294,12 @@ BEGIN
   PERFORM _cr_expect('10m control: with the second copy of the predicate dropped, the move lands',
     'rows 1',
     _cr_mutant(
-      'DROP POLICY conflict_reviews_update ON public.conflict_reviews; '
-      || 'CREATE POLICY conflict_reviews_update ON public.conflict_reviews FOR UPDATE '
-      || 'TO authenticated USING (company_id = (SELECT public.get_active_company_id()) '
-      || 'AND (SELECT public.current_role_permits(''documents'', true))) WITH CHECK (true)',
+      $m$SELECT _cr_ddl(ARRAY[
+           'DROP POLICY conflict_reviews_update ON public.conflict_reviews',
+           'CREATE POLICY conflict_reviews_update ON public.conflict_reviews FOR UPDATE
+              TO authenticated USING (company_id = (SELECT public.get_active_company_id())
+                                      AND (SELECT public.current_role_permits(''documents'', true)))
+              WITH CHECK (true)'])$m$,
       c_admin, NULL, format(
       'UPDATE conflict_reviews SET company_id = %L WHERE id = %L', c_co_b, v_id)));
 END $$;
