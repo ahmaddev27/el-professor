@@ -1299,7 +1299,17 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'mx-{s} 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$, NULL,
   $q$INSERT INTO geocode_cache (company_id, address_key, lat, lon, geocoder_version)
      VALUES ({co}, 'mx-new 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$,
-  $q$lat = lat$q$);
+  $q$lat = lat$q$),
+-- 20261023130000: a hand-entered window in which one car may not be on the
+-- road. The car is tied to the company by a COMPOSITE foreign key to
+-- cars (id, company_id), so the fixture's car must be the side's own; the M row
+-- below is refused by the guard's pin before that key is reached.
+(78, 'vehicle_unavailability', $q$id = {id}$q$,
+  $q$INSERT INTO vehicle_unavailability (id, company_id, car_id, starts_local, ends_local, reason)
+     VALUES ({id}, {co}, {ref:cars}, '2026-10-05 06:00', '2026-10-07 18:00', 'workshop')$q$, NULL,
+  $q$INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, ends_local, reason)
+     VALUES ({co}, {ref:cars}, '2026-11-02 06:00', '2026-11-04 18:00', 'accident')$q$,
+  $q$reason = reason$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1327,7 +1337,17 @@ INSERT INTO _mx_move VALUES
 ('user_profiles',                        $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('user_sessions',                        $q$user_id = {other_admin}$q$, NULL, 'Y', 'through its user'),
 ('drivers',                              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
-('cars',                                 $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20261023130000 added a mov_pre here, and no expectation cell of `cars` moved.
+-- vehicle_unavailability ties a window to its car by a COMPOSITE foreign key to
+-- cars (id, company_id) with no ON UPDATE action, so a car that holds a window
+-- cannot change company at all — the owner included, which made this probe
+-- report "the owner must answer Y" and stop measuring the cars policy. Deleting
+-- the window first restores the probe's premise, as the company_settings line
+-- above deletes the row a unique constraint would collide with; the
+-- subtransaction puts it back. For every real principal this cell was already a
+-- refusal, and no path in the product moves a car between companies.
+('cars',                                 $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM vehicle_unavailability WHERE car_id = {id}$q$, 'Y', NULL),
 ('car_driver_assignments',               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('cash_transactions',                    $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('income',                               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
@@ -1434,7 +1454,11 @@ INSERT INTO _mx_move VALUES
 -- it, and a shift stays with its plan, so both guards refuse the move before
 -- any WITH CHECK is reached, for the owner too.
 ('vehicle_day_plans',                    $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_plan_guard refuses it even for the owner'),
-('vehicle_day_shifts',                   $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_shift_guard refuses it even for the owner');
+('vehicle_day_shifts',                   $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_shift_guard refuses it even for the owner'),
+-- 20261023130000: a window belongs to one car of one company for its life, so
+-- vehicle_unavailability_guard pins both before any WITH CHECK is reached --
+-- the reason pin_billing_company_id exists on the billing tables.
+('vehicle_unavailability',                $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_unavailability_guard pins the company even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1775,6 +1799,15 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('vehicle_day_shifts',                 'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('vehicle_day_shifts',                 'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('vehicle_day_shifts',                 'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023130000: page 'cars', so unlike the two plan tables above the EDITOR
+-- writes these as well -- an editor holds can_edit on that page and holds none
+-- on 'documents'. anon holds no GRANT at all. The M cells are T, not R: the
+-- guard's company pin raises P0001 before the WITH CHECK is reached.
+('vehicle_unavailability',             'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_unavailability',             'I', 'PP', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('vehicle_unavailability',             'U', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_unavailability',             'D', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_unavailability',             'M', 'PP', '..', 'T.', 'T.', 'T.', '.T', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -2160,7 +2193,9 @@ UPDATE _mx_expected x
      -- 20261022140000: the same shape and the same two triggers
      'vehicle_day_plans', 'vehicle_day_shifts',
      -- 20261023100000: the same shape and the same two triggers
-     'geocode_cache');
+     'geocode_cache',
+     -- 20261023130000: the same shape and the same two triggers
+     'vehicle_unavailability');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
