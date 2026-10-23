@@ -242,8 +242,11 @@ END $$;
 
 DO $$
 BEGIN
+  -- `contype::text` and not a bare `contype`: the column is `"char"`, and
+  -- `"char" || unknown` is ambiguous on this engine — measured, the kit
+  -- answered `operator is not unique: "char" || unknown` on the first run.
   PERFORM _rr_rec(1, 'fahrtenbuch_trips_review_check exists and is a VALIDATED check',
-    (SELECT contype || '/' || convalidated::text FROM pg_constraint
+    (SELECT contype::text || '/' || convalidated::text FROM pg_constraint
       WHERE conrelid = 'public.fahrtenbuch_trips'::regclass
         AND conname = 'fahrtenbuch_trips_review_check'),
     'c/true');
@@ -305,7 +308,11 @@ BEGIN
       v_bad := v_bad || r || ' ';
     END IF;
   END LOOP;
-  PERFORM _rr_rec(7, 'and every one of the eight older reasons still is', nullif(v_bad, ''), NULL);
+  -- `none` rather than NULL on both sides: `_rr_out.expected` is NOT NULL, so
+  -- a NULL expectation would make the probe raise instead of record, and a
+  -- probe that cannot record cannot fail.
+  PERFORM _rr_rec(7, 'and every one of the eight older reasons still is',
+    coalesce(nullif(btrim(v_bad), ''), 'none'), 'none');
 
   -- Alongside others, which is how it actually arrives: a row whose order time
   -- is unreadable usually has readable start and end times and may be missing
