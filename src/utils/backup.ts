@@ -156,6 +156,15 @@ export const BACKUP_TABLES: readonly string[] = [
   // table: one company's month can hold more shifts than a page.
   'vehicle_day_plans',
   'vehicle_day_shifts',
+
+  // The month-end driver assignment (20261023120000): one row per driver per
+  // month, and the vehicle windows it stands for. Both carry company_id, so
+  // both are read directly like the plan they hang off. They are NOT child
+  // tables of vehicle_day_plans for this list's purposes: a child here means a
+  // table with no company_id of its own, reached through its parent, and both
+  // of these have one.
+  'driver_month_assignments',
+  'driver_month_assignment_shifts',
 ];
 
 /** A table with no `company_id`, reached through the parent that gives it one. */
