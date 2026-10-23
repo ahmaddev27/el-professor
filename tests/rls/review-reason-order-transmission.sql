@@ -63,6 +63,11 @@
      principal and why rather than leaving it to be inferred.
 
   6. The mutation controls, which are what make sections 0 to 5 worth reading.
+     Four of them, on a six-probe battery, and section 4's stored rows are
+     deleted first: `_rr_set_admitted` replaces a VALIDATED constraint, so
+     narrowing the set scans the table, and a committed row carrying the ninth
+     reason makes that scan fail. Measured, not reasoned -- M1 died on exactly
+     that and took the whole block with it.
 
   ## What it does not claim
 
@@ -211,16 +216,26 @@ LANGUAGE sql STABLE AS $$
      AND c.conname = 'fahrtenbuch_trips_review_check'
 $$;
 
-/** Replace the constraint with an arbitrary admitted set, for the mutations. */
+/*
+  Replace the constraint with an arbitrary admitted set, for the mutations.
+
+  The set is written as `ARRAY['a','b',...]::text[]`, NOT as the array literal
+  `'{a,b}'::text[]` that `%L` on a text[] produces — because that is the shape
+  the migration writes and so the shape `pg_get_constraintdef` renders, and
+  `_rr_admitted()` reads the rendered text. MEASURED: the first version used
+  `%L`, every probe after the first mutation answered `<null>`, and the
+  battery's own control then counted a mismatch it could not explain. A probe
+  whose instrument stops reading is worse than one that fails.
+*/
 CREATE OR REPLACE FUNCTION _rr_set_admitted(p_values text[], p_pairing boolean DEFAULT true)
 RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
   EXECUTE format(
     'ALTER TABLE public.fahrtenbuch_trips '
     'DROP CONSTRAINT fahrtenbuch_trips_review_check, '
-    'ADD  CONSTRAINT fahrtenbuch_trips_review_check CHECK (%s review_reasons <@ %L::text[])',
+    'ADD  CONSTRAINT fahrtenbuch_trips_review_check CHECK (%s review_reasons <@ ARRAY[%s]::text[])',
     CASE WHEN p_pairing THEN 'needs_review = (cardinality(review_reasons) > 0) AND' ELSE '' END,
-    p_values);
+    (SELECT string_agg(quote_literal(v), ', ') FROM unnest(p_values) AS v));
 END $$;
 
 -- ─── fixtures ───────────────────────────────────────────────────────────────
@@ -400,12 +415,21 @@ END $$;
 -- does not care who the caller is — which is also why the 369 malformed rows
 -- on staging cannot be backfilled by accident.
 
+-- TWO rows, and the second one is not decoration. The trigger compares OLD
+-- with NEW, so an UPDATE that writes a row's CURRENT values changes nothing
+-- and is allowed — measured: the first version of probe 20 set the flagged
+-- row's own values back onto it and answered `rows 1`, which read as the
+-- trigger being absent when it was the probe being a no-op. So the "adding a
+-- reason" direction needs a row stored CLEAN.
 INSERT INTO fahrtenbuch_trips (id, company_id, import_id, trip_date,
                                original_driver_name, assigned_driver_name,
                                needs_review, review_reasons)
 VALUES ('f9000000-0000-4000-8000-0000000000a1', 'c0000000-0000-4000-8000-00000000000a',
         'f9000000-0000-4000-8000-000000000001', '2026-08-03', 'RR Fahrer', 'RR Fahrer',
-        true, ARRAY['unreadable_order_transmission']::text[]);
+        true, ARRAY['unreadable_order_transmission']::text[]),
+       ('f9000000-0000-4000-8000-0000000000a2', 'c0000000-0000-4000-8000-00000000000a',
+        'f9000000-0000-4000-8000-000000000001', '2026-08-04', 'RR Fahrer', 'RR Fahrer',
+        false, ARRAY[]::text[]);
 
 DO $$
 BEGIN
@@ -420,17 +444,20 @@ BEGIN
       'WHERE id = ''f9000000-0000-4000-8000-0000000000a1'''),
     'ERR P0001 -');
 
-  PERFORM _rr_rec(20, 'and so is adding one to a row that was stored clean',
+  PERFORM _rr_rec(20, 'and so is adding one to a row that was stored CLEAN',
     _rr_try(NULL,
       'UPDATE fahrtenbuch_trips SET needs_review = true, '
       'review_reasons = ARRAY[''unreadable_order_transmission'']::text[] '
-      'WHERE id = ''f9000000-0000-4000-8000-0000000000a1'''),
+      'WHERE id = ''f9000000-0000-4000-8000-0000000000a2'''),
     'ERR P0001 -');
 
-  PERFORM _rr_rec(21, 'so the row is exactly as it was stored',
-    (SELECT needs_review::text || '/' || array_to_string(review_reasons, ',')
-       FROM fahrtenbuch_trips WHERE id = 'f9000000-0000-4000-8000-0000000000a1'),
-    'true/unreadable_order_transmission');
+  PERFORM _rr_rec(21, 'so both rows are exactly as they were stored',
+    (SELECT needs_review::text || '/' || coalesce(nullif(array_to_string(review_reasons, ','), ''), '-')
+       FROM fahrtenbuch_trips WHERE id = 'f9000000-0000-4000-8000-0000000000a1')
+    || ' + ' ||
+    (SELECT needs_review::text || '/' || coalesce(nullif(array_to_string(review_reasons, ','), ''), '-')
+       FROM fahrtenbuch_trips WHERE id = 'f9000000-0000-4000-8000-0000000000a2'),
+    'true/unreadable_order_transmission + false/-');
 END $$;
 
 -- ─── 5. tenancy and the role gate, unchanged ────────────────────────────────
@@ -467,6 +494,29 @@ END $$;
 -- Each one breaks a rule, re-runs the probes that depend on it, counts the
 -- mismatches, and rolls the mutation back. Counting rather than eyeballing is
 -- what makes sections 0 to 5 evidence: a probe that cannot fail proves nothing.
+--
+-- Section 4's stored row has to go first, and the reason is worth keeping.
+-- `_rr_set_admitted` replaces a VALIDATED constraint, so narrowing the set
+-- SCANS the table — and section 4 deliberately left a committed row carrying
+-- the ninth reason, which the eight-value set cannot admit. MEASURED: M1 died
+-- with `check constraint "fahrtenbuch_trips_review_check" ... is violated by
+-- some row` and took the whole DO block with it. Section 2 narrowed the same
+-- way and worked only because that row did not exist yet.
+--
+-- Deleting it rather than adding the mutation's constraint `NOT VALID` is the
+-- deliberate choice: every `_rr_set_admitted` then builds exactly the shape
+-- the migration builds, which is what the probes read out of the catalogue.
+-- The trips are this file's own and the file is rolled back whole.
+
+DELETE FROM fahrtenbuch_trips
+ WHERE id IN ('f9000000-0000-4000-8000-0000000000a1', 'f9000000-0000-4000-8000-0000000000a2');
+
+DO $$
+BEGIN
+  PERFORM _rr_rec(31, 'section 4''s stored rows are gone, so a narrowed constraint can still scan',
+    (SELECT count(*)::text FROM fahrtenbuch_trips
+      WHERE import_id = 'f9000000-0000-4000-8000-000000000001'), '0');
+END $$;
 
 CREATE OR REPLACE FUNCTION _rr_battery() RETURNS integer
 LANGUAGE plpgsql AS $$
@@ -607,10 +657,10 @@ DECLARE
   v_msg text := '';
 BEGIN
   -- A probe that never recorded cannot fail, so the count is asserted first.
-  IF (SELECT count(*) FROM _rr_out) <> 30 THEN
-    RAISE EXCEPTION 'review reason: % of 30 probes recorded — missing: %',
+  IF (SELECT count(*) FROM _rr_out) <> 31 THEN
+    RAISE EXCEPTION 'review reason: % of 31 probes recorded — missing: %',
       (SELECT count(*) FROM _rr_out),
-      (SELECT string_agg(n::text, ', ' ORDER BY n) FROM generate_series(1, 30) AS g(n)
+      (SELECT string_agg(n::text, ', ' ORDER BY n) FROM generate_series(1, 31) AS g(n)
         WHERE NOT EXISTS (SELECT 1 FROM _rr_out o WHERE o.n = g.n));
   END IF;
 
