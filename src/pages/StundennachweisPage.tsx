@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom';
 import { exportStundennachweisAsPdf } from '../utils/stundennachweisPdfExport';
 import { resolveNoteBehavior } from '../utils/noteBehavior';
+import { absenceDays, findNoteConflicts, planNoteDays, type NoteConflict } from '../utils/stundennachweisNoteDays';
 import { ChevronLeft, ChevronRight, Download, RefreshCw, ArrowRight, Clock, StickyNote, Moon, Sun, Star, Save, FileSpreadsheet, AlertTriangle, CalendarRange, ChevronDown, Loader2 } from 'lucide-react';
 import { categorizeWarnings, formatDateDE, groupByDate, type WarningGroup } from '../utils/warningCategories';
 import { supabase } from '../lib/supabase';
@@ -240,7 +241,7 @@ interface DriverOption {
   allowed_weekdays?: number[] | null;
 }
 
-interface Note {
+export interface Note {
   id: string;
   driver_id: string;
   note_date: string;
@@ -248,10 +249,12 @@ interface Note {
   start_date?: string | null;
   end_date?: string | null;
   is_full_day?: boolean;
+  start_time?: string | null;
+  end_time?: string | null;
   note_planning_behavior?: string | null;
 }
 
-interface DayRow {
+export interface DayRow {
   dayIndex: number;
   date: Date;
   weekday: string;
@@ -404,7 +407,7 @@ function calcRow(row: DayRow): DayRow {
   };
 }
 
-function calcTotals(rows: DayRow[]): Totals {
+export function calcTotals(rows: DayRow[]): Totals {
   return {
     grundlohn:   rows.reduce((s, r) => s + toMins(r.grundlohn),    0),
     nachtarbeit: rows.reduce((s, r) => s + toMins(r.nachtarbeit),  0),
@@ -495,7 +498,11 @@ function minsToTime(m: number): string {
   return hhmm(Math.floor(clamped / 60), clamped % 60);
 }
 
-function applyMustIncludeNotesToRows(rows: DayRow[], notes: Note[]): DayRow[] {
+export function applyMustIncludeNotesToRows(
+  rows: DayRow[],
+  notes: Note[],
+  skipDays?: ReadonlySet<number>,
+): DayRow[] {
   const mustNotes = notes.filter(n => n.note_planning_behavior === 'must_include_in_plan');
   if (mustNotes.length === 0) return rows;
 
@@ -519,6 +526,10 @@ function applyMustIncludeNotesToRows(rows: DayRow[], notes: Note[]): DayRow[] {
       r.date.getDate()     === noteDay
     );
     if (idx < 0) continue;
+    // A day an absence note owns takes no mandatory window: the exclusion stays
+    // in force and the contradiction is reported on the screen. Only the passes
+    // that generate a plan name such days; opening a saved sheet does not.
+    if (skipDays?.has(result[idx].dayIndex)) continue;
 
     let row = result[idx];
     let { von1, bis1, von2, bis2, von3, bis3 } = row;
@@ -576,7 +587,7 @@ function applyMustIncludeNotesToRows(rows: DayRow[], notes: Note[]): DayRow[] {
 // Divide by 100 for euros. This is the canonical formula used by both the
 // generator and the live display — they must be identical.
 
-function salaryInCents(rows: DayRow[], hourlyRateCents: number): number {
+export function salaryInCents(rows: DayRow[], hourlyRateCents: number): number {
   // Premium-only model (Option B):
   // Every worked minute earns base × 1.00 (wage type 1000).
   // Applicable premiums are additive on top.
@@ -694,7 +705,7 @@ function enforceMandatorySplit(rows: DayRow[], rngSeed: number): void {
 // windowStartMins / windowEndMins: minutes since midnight (e.g. 6*60=360).
 // allowedWeekdays: JS getDay() values (0=Sun, 1=Mon, …, 6=Sat).
 // An empty allowedWeekdays array means "all weekdays allowed".
-interface WorkWindowConstraints {
+export interface WorkWindowConstraints {
   windowStartMins: number;   // earliest a shift may start (inclusive)
   windowEndMins:   number;   // latest a shift may end (inclusive)
   allowedWeekdays: number[]; // empty = no restriction
@@ -718,7 +729,7 @@ function prng(a: number, b: number): number {
   return x - Math.floor(x);
 }
 
-function generatePlan(params: PlanParams): DayRow[] {
+export function generatePlan(params: PlanParams): DayRow[] {
   const { year, month, targetSalary, hourlyRate, notes, seed, grundlohnRatio, bundesland, workWindow } = params;
 
   // Resolved work-window bounds (fallback to full-day if not set)
@@ -732,16 +743,9 @@ function generatePlan(params: PlanParams): DayRow[] {
   const hourlyRateCents = Math.round(hourlyRate * 100);
   const targetCents     = Math.round(targetSalary * 100);
 
-  // Notes map
-  const notesByDay: Record<number, Note[]> = {};
-  for (const n of notes) {
-    const nd = new Date(n.note_date);
-    if (nd.getFullYear() === year && nd.getMonth() === month - 1) {
-      const day = nd.getDate();
-      if (!notesByDay[day]) notesByDay[day] = [];
-      notesByDay[day].push(n);
-    }
-  }
+  // Notes map. Only a mandatory note puts a window into the plan, and an absence
+  // note empties every day it covers; see utils/stundennachweisNoteDays.ts.
+  const { windowNotesByDay: notesByDay, absence } = planNoteDays(notes, year, month);
 
   // Build skeleton rows
   const rows: DayRow[] = [];
@@ -763,6 +767,10 @@ function generatePlan(params: PlanParams): DayRow[] {
   // Pre-fill note rows
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    // An absence day carries no shift. The flag is what keeps it out of the
+    // allocator's pools (they skip every noteHighlight row) and what prints [N]
+    // beside it in the PDF, whose notes block lists the absence itself.
+    if (absence.has(row.dayIndex)) { row.noteHighlight = true; continue; }
     const dayNotes = notesByDay[row.dayIndex];
     if (!dayNotes) continue;
     row.noteHighlight = true;
@@ -1135,7 +1143,7 @@ function generatePlan(params: PlanParams): DayRow[] {
 // The result is a valid, editable DayRow[] that matches the targets as closely
 // as possible while keeping shifts realistic and non-overlapping.
 
-interface TotalsTarget {
+export interface TotalsTarget {
   grundlohn:   number; // total minutes
   nachtarbeit: number;
   nacht04:     number; // column exists but treated the same as nachtarbeit
@@ -1143,7 +1151,7 @@ interface TotalsTarget {
   feiertag:    number;
 }
 
-function generatePlanFromTotals(
+export function generatePlanFromTotals(
   year: number, month: number,
   targets: TotalsTarget,
   notes: Note[],
@@ -1158,16 +1166,9 @@ function generatePlanFromTotals(
     : null;
   const daysInMonth = getDaysInMonth(new Date(year, month - 1, 1));
 
-  // Notes map
-  const notesByDay: Record<number, Note[]> = {};
-  for (const n of notes) {
-    const nd = new Date(n.note_date);
-    if (nd.getFullYear() === year && nd.getMonth() === month - 1) {
-      const day = nd.getDate();
-      if (!notesByDay[day]) notesByDay[day] = [];
-      notesByDay[day].push(n);
-    }
-  }
+  // Notes map. Only a mandatory note puts a window into the plan, and an absence
+  // note empties every day it covers; see utils/stundennachweisNoteDays.ts.
+  const { windowNotesByDay: notesByDay, absence } = planNoteDays(notes, year, month);
 
   // Build skeleton rows
   const rows: DayRow[] = [];
@@ -1189,6 +1190,10 @@ function generatePlanFromTotals(
   // Pre-fill note rows
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    // An absence day carries no shift. The flag is what keeps it out of the
+    // allocator's pools (they skip every noteHighlight row) and what prints [N]
+    // beside it in the PDF, whose notes block lists the absence itself.
+    if (absence.has(row.dayIndex)) { row.noteHighlight = true; continue; }
     const dayNotes = notesByDay[row.dayIndex];
     if (!dayNotes) continue;
     row.noteHighlight = true;
@@ -2592,7 +2597,7 @@ const Step2: React.FC<Step2Props> = ({
 
 // ─── Timesheet document ─────────────────────────────────────────────────────
 
-const Timesheet: React.FC<{
+export const Timesheet: React.FC<{
   driver: DriverOption;
   month: number;
   year: number;
@@ -2603,7 +2608,10 @@ const Timesheet: React.FC<{
   hourlyRate: number;
   calcSalary: number;
   highlightDay?: number | null;
-}> = ({ driver, month, year, rows, onRowChange, totals, targetSalary, hourlyRate, calcSalary, highlightDay }) => {
+  /** Days an absence note owns: a blank one says why instead of looking forgotten. */
+  absentDays?: ReadonlySet<number>;
+}> = ({ driver, month, year, rows, onRowChange, totals, targetSalary, hourlyRate, calcSalary, highlightDay, absentDays }) => {
+  const { t } = useTranslation();
   const monthName = MONTH_NAMES_DE[month - 1];
 
   const FONT = 'Arial, Helvetica, sans-serif';
@@ -2747,6 +2755,9 @@ const Timesheet: React.FC<{
                   {row.weekday} {format(row.date, 'dd.MM.yyyy')}
                   {row.isHol && <span style={{ marginLeft: 3, fontSize: 7.5, color: '#92400e' }}>F</span>}
                   {isHighlighted && <span style={{ marginLeft: 4, fontSize: 7, color: '#b45309', fontWeight: 800 }}>◀ Notiz</span>}
+                  {absentDays?.has(row.dayIndex) && !row.grundlohn && (
+                    <span className="ml-1 text-[7px] font-extrabold text-fg-subtle">{t('stn.badge.absence')}</span>
+                  )}
                 </td>
                 <td style={{ ...TD, background: bg }}>
                   <TimeInput value={row.von1} onChange={v => onRowChange(i, 'von1', v)} />
@@ -3304,6 +3315,34 @@ function StructuredWarnings({ warnings }: { warnings: string[] }) {
   );
 }
 
+// ─── Contradicting notes ────────────────────────────────────────────────────
+//
+// A mandatory note on a day an absence covers cannot be both. A new plan enters
+// nothing for that day (utils/stundennachweisNoteDays.ts); this says so and asks
+// a person to correct one of the two notes instead of choosing between them.
+
+const noteLabel = (n: Note): string => n.note_text.trim().slice(0, 60) || '–';
+
+export function NoteConflictNotice({ conflicts }: { conflicts: NoteConflict<Note>[] }) {
+  const { t } = useTranslation();
+  if (conflicts.length === 0) return null;
+  return (
+    <Alert tone="caution" title={t('stn.noteConflict.title')}>
+      <ul className="grid gap-1">
+        {conflicts.map(c => (
+          <li key={c.mandatory.id}>
+            {t('stn.noteConflict.item', {
+              date: format(new Date(c.mandatory.note_date), 'dd.MM.yyyy'),
+              mandatory: noteLabel(c.mandatory),
+              absence: c.absences.map(noteLabel).join(', '),
+            })}
+          </li>
+        ))}
+      </ul>
+    </Alert>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 type StepType = 'step1' | 'step2' | 'sheet';
@@ -3456,7 +3495,7 @@ const StundennachweisPage: React.FC = () => {
     setStep('sheet');
     // Load notes for the restored driver/month
     if (driver.id && m && y && companyId) {
-      const notesCols = 'id, driver_id, note_date, note_text, start_date, end_date, is_full_day, note_planning_behavior';
+      const notesCols = 'id, driver_id, note_date, note_text, start_date, end_date, is_full_day, start_time, end_time, note_planning_behavior';
       const daysInM = getDaysInMonth(new Date(y, m - 1, 1));
       const mStart = `${y}-${String(m).padStart(2,'0')}-01`;
       const mEnd   = `${y}-${String(m).padStart(2,'0')}-${String(daysInM).padStart(2,'0')}`;
@@ -3491,7 +3530,7 @@ const StundennachweisPage: React.FC = () => {
     const monthEnd   = `${y}-${String(m).padStart(2,'0')}-${String(days).padStart(2,'0')}`;
     const { data } = await supabase
       .from('driver_notes')
-      .select('id, driver_id, note_date, note_text, start_date, end_date, is_full_day, note_planning_behavior')
+      .select('id, driver_id, note_date, note_text, start_date, end_date, is_full_day, start_time, end_time, note_planning_behavior')
       .eq('company_id', companyId)
       .eq('driver_id', dId)
       .order('note_date');
@@ -3518,7 +3557,7 @@ const StundennachweisPage: React.FC = () => {
     const n = await fetchNotes(selDriverId, selMonth, selYear);
     setNotes(n);
     const plan = generatePlan({ year: selYear, month: selMonth, targetSalary: salary, hourlyRate: rate, notes: n, seed: 0, grundlohnRatio: glRatio, bundesland, workWindow: ww });
-    setRows(applyMustIncludeNotesToRows(plan, n)); setSeed(0); setHighlightDay(null); setStep('sheet'); setGenerating(false); setNoSalaryMeta(false); setIsFromArchive(false); setSavedAt(null);
+    setRows(applyMustIncludeNotesToRows(plan, n, absenceDays(n, selYear, selMonth))); setSeed(0); setHighlightDay(null); setStep('sheet'); setGenerating(false); setNoSalaryMeta(false); setIsFromArchive(false); setSavedAt(null);
   };
 
   const handleStep2Totals = async (targets: TotalsTarget, ww: WorkWindowConstraints) => {
@@ -3527,7 +3566,7 @@ const StundennachweisPage: React.FC = () => {
     const n = await fetchNotes(selDriverId, selMonth, selYear);
     setNotes(n);
     const plan = generatePlanFromTotals(selYear, selMonth, targets, n, 0, bundesland, ww);
-    setRows(applyMustIncludeNotesToRows(plan, n)); setSeed(0); setHighlightDay(null); setStep('sheet'); setGenerating(false); setNoSalaryMeta(false); setIsFromArchive(false); setSavedAt(null);
+    setRows(applyMustIncludeNotesToRows(plan, n, absenceDays(n, selYear, selMonth))); setSeed(0); setHighlightDay(null); setStep('sheet'); setGenerating(false); setNoSalaryMeta(false); setIsFromArchive(false); setSavedAt(null);
   };
 
   useEffect(() => {
@@ -3546,9 +3585,9 @@ const StundennachweisPage: React.FC = () => {
     setSeed(next); setGenerating(true);
     setTimeout(() => {
       if (genMode === 'totals' && totalsTarget) {
-        setRows(applyMustIncludeNotesToRows(generatePlanFromTotals(selYear, selMonth, totalsTarget, notes, next, bundesland, workWindow), notes));
+        setRows(applyMustIncludeNotesToRows(generatePlanFromTotals(selYear, selMonth, totalsTarget, notes, next, bundesland, workWindow), notes, absenceDays(notes, selYear, selMonth)));
       } else {
-        setRows(applyMustIncludeNotesToRows(generatePlan({ year: selYear, month: selMonth, targetSalary, hourlyRate, notes, seed: next, grundlohnRatio, bundesland, workWindow }), notes));
+        setRows(applyMustIncludeNotesToRows(generatePlan({ year: selYear, month: selMonth, targetSalary, hourlyRate, notes, seed: next, grundlohnRatio, bundesland, workWindow }), notes, absenceDays(notes, selYear, selMonth)));
       }
       setGenerating(false);
     }, 30);
@@ -3566,6 +3605,10 @@ const StundennachweisPage: React.FC = () => {
   const calcSal  = salaryEuros(rows, hourlyRate);
 
   const durationViolations = useMemo(() => validateRowDurations(rows), [rows]);
+  // What the month's notes do to the plan, read from the same notes the carousel
+  // shows: the days an absence owns, and any mandatory note that falls on one.
+  const absentDays = useMemo(() => absenceDays(notes, selYear, selMonth), [notes, selYear, selMonth]);
+  const noteConflicts = useMemo(() => findNoteConflicts(notes, selYear, selMonth), [notes, selYear, selMonth]);
   const hasDurationViolations = durationViolations.length > 0;
 
   const handleExport = () => {
@@ -3898,7 +3941,7 @@ const StundennachweisPage: React.FC = () => {
                 {rows.filter(r => r.grundlohn).length}
               </span>
             </div>
-            {rows.some(r => r.noteHighlight) && (
+            {rows.some(r => r.noteHighlight && r.grundlohn) && (
               <div className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full"
                 style={{ background: '#fffde7', color: '#e65100', border: '1px solid #ffcc80' }}>
                 <span style={{ fontWeight: 'bold' }}>●</span>
@@ -3913,6 +3956,7 @@ const StundennachweisPage: React.FC = () => {
             rows={rows}
             onHighlightDay={setHighlightDay}
           />
+          <NoteConflictNotice conflicts={noteConflicts} />
 
           {/* ── Hard duration violations (blocks save / export) ── */}
           {hasDurationViolations && (
@@ -3981,6 +4025,7 @@ const StundennachweisPage: React.FC = () => {
                 hourlyRate={hourlyRate}
                 calcSalary={calcSal}
                 highlightDay={highlightDay}
+                absentDays={absentDays}
               />
             </div>
           </div>
