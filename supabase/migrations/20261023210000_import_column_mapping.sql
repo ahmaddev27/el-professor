@@ -420,6 +420,7 @@ DECLARE
   v_src   text;
   v_def   text;
   v_list  text;
+  v_names text[];
   v_wrong text;
   v_count int;
   v_one   text;
@@ -546,38 +547,51 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- The two key lists are read out EXACTLY, not searched for. PostgreSQL
-  -- constant-folds `ARRAY['a','b']::text[]` into the array literal `'{a,b}'`,
-  -- so the names are NOT individually quoted in the stored expression: the
-  -- list is taken from inside the braces of the one `::text[]` literal and
-  -- compared as a sorted set. A `strpos` per name would have passed on a
-  -- twelfth name, and a regex expecting quotes would have matched nothing at
-  -- all and reported a pass while testing nothing.
-  SELECT pg_get_constraintdef(oid) INTO v_def
-    FROM pg_constraint
-   WHERE conrelid = format('public.%I', c_tbl)::regclass
-     AND conname = 'import_column_mappings_field_map_known_keys';
-  v_list := substring(v_def FROM '''\{([a-z_,]*)\}''::text\[\]');
-  IF v_list IS NULL THEN
-    RAISE EXCEPTION 'import column mapping self-check 5: the known-key list cannot be read out of %', v_def;
-  END IF;
-  IF ARRAY(SELECT unnest(string_to_array(v_list, ',')) ORDER BY 1)
-       IS DISTINCT FROM ARRAY(SELECT unnest(c_fields) ORDER BY 1) THEN
-    RAISE EXCEPTION 'import column mapping self-check 5: the known-key list is not the eleven fields of ColMap: %', v_list;
-  END IF;
+  /*
+    The two key lists are read out EXACTLY and compared as sorted sets, not
+    searched for name by name: a `strpos` per name passes on a TWELFTH name
+    nobody listed, which is the half of this check that matters.
 
-  SELECT pg_get_constraintdef(oid) INTO v_def
-    FROM pg_constraint
-   WHERE conrelid = format('public.%I', c_tbl)::regclass
-     AND conname = 'import_column_mappings_field_map_required_keys';
-  v_list := substring(v_def FROM '''\{([a-z_,]*)\}''::text\[\]');
-  IF v_list IS NULL THEN
-    RAISE EXCEPTION 'import column mapping self-check 5: the required-key list cannot be read out of %', v_def;
-  END IF;
-  IF ARRAY(SELECT unnest(string_to_array(v_list, ',')) ORDER BY 1)
-       IS DISTINCT FROM ARRAY['driver_name', 'end_time', 'start_time', 'trip_date']::text[] THEN
-    RAISE EXCEPTION 'import column mapping self-check 5: the required-key list is not the four the wizard requires: %', v_list;
-  END IF;
+    Both forms PostgreSQL may have stored are read, and that is measured rather
+    than reasoned about. The first version of this check assumed 17.6 folds
+    `ARRAY['a','b']::text[]` into the array literal `'{a,b}'::text[]`; it does
+    not — `pg_get_constraintdef` on this very table returns
+    `ARRAY['trip_date'::text, 'start_time'::text, …]`, element by element. The
+    assumption cost one VPS kit round trip, and it was only visible because the
+    check raises on a list it cannot read instead of comparing against NULL,
+    which every `IS DISTINCT FROM` would have reported as a pass.
+  */
+  FOREACH v_one IN ARRAY ARRAY['import_column_mappings_field_map_known_keys',
+                               'import_column_mappings_field_map_required_keys'] LOOP
+    SELECT pg_get_constraintdef(oid) INTO v_def
+      FROM pg_constraint
+     WHERE conrelid = format('public.%I', c_tbl)::regclass AND conname = v_one;
+
+    -- A folded array literal, if a later PostgreSQL ever folds one.
+    v_list := substring(v_def FROM '''\{([a-z_,]*)\}''::text\[\]');
+    IF v_list IS NOT NULL THEN
+      v_names := string_to_array(v_list, ',');
+    ELSE
+      -- 17.6's form: one quoted, cast element per name. `'{}'::jsonb` in the
+      -- same expression does not match, because `::text` is required.
+      v_names := ARRAY(SELECT m[1] FROM regexp_matches(v_def, '''([a-z_]+)''::text', 'g') m);
+    END IF;
+    IF v_names IS NULL OR array_length(v_names, 1) IS NULL THEN
+      RAISE EXCEPTION 'import column mapping self-check 5: the key list of % cannot be read out of %', v_one, v_def;
+    END IF;
+
+    IF v_one = 'import_column_mappings_field_map_known_keys' THEN
+      IF ARRAY(SELECT unnest(v_names) ORDER BY 1)
+           IS DISTINCT FROM ARRAY(SELECT unnest(c_fields) ORDER BY 1) THEN
+        RAISE EXCEPTION 'import column mapping self-check 5: the known-key list is not the eleven fields of ColMap: %', v_names;
+      END IF;
+    ELSE
+      IF ARRAY(SELECT unnest(v_names) ORDER BY 1)
+           IS DISTINCT FROM ARRAY['driver_name', 'end_time', 'start_time', 'trip_date']::text[] THEN
+        RAISE EXCEPTION 'import column mapping self-check 5: the required-key list is not the four the wizard requires: %', v_names;
+      END IF;
+    END IF;
+  END LOOP;
 
   -- No CHECK constraint on this table names app_private or public: a CHECK is
   -- evaluated as the writing role, so one naming app_private would let the owner
