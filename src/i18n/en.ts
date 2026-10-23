@@ -7048,4 +7048,11 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'imp.reason.unreadableOrderTransmission': 'Order transmission time not readable',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'engine.repair.released.conflict': 'Not assigned ({kind}): {driver} · {vehicleA} and {vehicleB} overlap by {overlapMinutes} min. Block times are not moved; drivers are assigned at month end.',
+  'mp.repair.neverMovesBlocks':      'Block times are never moved. Planning is daily and per vehicle; drivers are assigned at month end.',
+  'mp.repair.releasedBlocks':        'Reported without a driver',
+  'mp.repair.releasedCount.one':     '{count} block reported without a driver',
+  'mp.repair.releasedCount.other':   '{count} blocks reported without a driver',
 };

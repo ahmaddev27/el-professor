@@ -7104,4 +7104,11 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'imp.reason.unreadableOrderTransmission': 'Uhrzeit der Auftragsübermittlung nicht lesbar',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'engine.repair.released.conflict': 'Nicht zugewiesen ({kind}): {driver} · {vehicleA} und {vehicleB} überlappen um {overlapMinutes} Min. Blockzeiten werden nicht verschoben; Fahrer werden am Monatsende zugewiesen.',
+  'mp.repair.neverMovesBlocks':      'Blockzeiten werden nie verschoben. Die Planung ist täglich und pro Fahrzeug; Fahrer werden am Monatsende zugewiesen.',
+  'mp.repair.releasedBlocks':        'Ohne Fahrer gemeldet',
+  'mp.repair.releasedCount.one':     '{count} Block ohne Fahrer gemeldet',
+  'mp.repair.releasedCount.other':   '{count} Blöcke ohne Fahrer gemeldet',
 } as const;
