@@ -1289,6 +1289,17 @@ INSERT INTO _mx_spec VALUES
      VALUES ({co}, {ref:vehicle_day_plans}, '2026-10-06', 'MX-CAR', 0, 24, 36,
              '2026-10-06 10:00', '2026-10-06 13:00', 180, 1, false, 100, 33, 'low', 1)$q$,
   $q$minutes = minutes$q$),
+-- The Fahrtenanalyse's address cache (20261023100000): the other two
+-- Fahrtenanalyse tables' shape, an administrator writes and every member reads,
+-- anon holding no privilege at all. The key is unique per company and the
+-- fixture's carries the side, so A's row moved into B collides with nothing of B's;
+-- the insert probe uses a key of its own.
+(76, 'geocode_cache', $q$id = {id}$q$,
+  $q$INSERT INTO geocode_cache (id, company_id, address_key, lat, lon, geocoder_version)
+     VALUES ({id}, {co}, 'mx-{s} 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$, NULL,
+  $q$INSERT INTO geocode_cache (company_id, address_key, lat, lon, geocoder_version)
+     VALUES ({co}, 'mx-new 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$,
+  $q$lat = lat$q$),
 -- 20261023130000: a hand-entered window in which one car may not be on the
 -- road. The car is tied to the company by a COMPOSITE foreign key to
 -- cars (id, company_id), so the fixture's car must be the side's own; the M row
@@ -1377,6 +1388,8 @@ INSERT INTO _mx_move VALUES
 ('notification_recipients',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 -- The side's own driver name differs, so A's row moved into B collides with nothing.
 ('abrechnung_handovers',                 $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- The side's own key differs, so A's row moved into B collides with nothing.
+('geocode_cache',                        $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
 ('partner_vehicle_links',                $q$company_id = {other_co}$q$,
@@ -2089,7 +2102,14 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('abrechnung_handovers',           'I', 'PP', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('abrechnung_handovers',           'U', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('abrechnung_handovers',           'D', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('abrechnung_handovers',           'M', 'PP', '..', 'R.', 'R.', 'R.', '.R', '..', NULL);
+('abrechnung_handovers',           'M', 'PP', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20261023100000. trip_analysis_settings' cells exactly: an administrator writes,
+-- every member reads, anon's column is a missing GRANT.
+('geocode_cache',                  'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('geocode_cache',                  'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('geocode_cache',                  'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('geocode_cache',                  'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('geocode_cache',                  'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -2172,6 +2192,8 @@ UPDATE _mx_expected x
      'abrechnung_handovers',
      -- 20261022140000: the same shape and the same two triggers
      'vehicle_day_plans', 'vehicle_day_shifts',
+     -- 20261023100000: the same shape and the same two triggers
+     'geocode_cache',
      -- 20261023130000: the same shape and the same two triggers
      'vehicle_unavailability');
 

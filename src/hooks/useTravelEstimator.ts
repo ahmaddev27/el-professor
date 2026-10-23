@@ -20,14 +20,13 @@
  *   of the requests and not on the identity of the arrays they came from.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { addressLocator } from '../lib/addressLocator';
 import { createTravelRouteClient } from '../lib/travelRouteClient';
 import { listTravelRequests } from '../utils/tripAnalysis';
 import type { AnalysisTrip, TravelEstimateRequest, TravelTimeEstimator, TripAnalysisSettings } from '../utils/tripAnalysis/types';
 import { prefetchTravelEstimates, type AddressLocator, type TravelRouter } from '../utils/travelRouting/prefetch';
 
 export interface TravelEstimatorDeps {
-  /** Defaults to the app's locator, which is none yet. Pass `null` to switch the whole thing off. */
+  /** The locator to ask (useAppAddressLocator in the app); none, the default, switches the whole thing off. */
   readonly locator?: AddressLocator | null;
   readonly router?: TravelRouter;
 }
@@ -54,7 +53,7 @@ export function useTravelEstimator(
   settings: TripAnalysisSettings | null,
   deps: TravelEstimatorDeps = {},
 ): TravelTimeEstimator | undefined {
-  const locator = deps.locator === undefined ? addressLocator : deps.locator;
+  const locator = deps.locator ?? null;
   const router = useMemo(() => deps.router ?? createTravelRouteClient(), [deps.router]);
   const requests = useMemo(() => requestsFor(trips, settings, locator !== null), [trips, settings, locator]);
   const signature = useMemo(() => signatureOf(requests), [requests]);
