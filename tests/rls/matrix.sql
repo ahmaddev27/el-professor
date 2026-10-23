@@ -1352,7 +1352,32 @@ INSERT INTO _mx_spec VALUES
   $q$DELETE FROM driver_month_assignment_shifts WHERE company_id = {co}$q$,
   $q$INSERT INTO driver_month_assignment_shifts (company_id, assignment_id, shift_id, minutes)
      VALUES ({co}, {ref:driver_month_assignments}, {ref:vehicle_day_shifts}, 180)$q$,
-  $q$minutes = minutes$q$);
+  $q$minutes = minutes$q$),
+-- 20261023200000: a detected conflict and the record of who reviewed it. The
+-- Dokumente page on every write, like the two /monatsplan tables above, because
+-- the rides it is about are fahrtenbuch_trips.
+--
+-- The INSERT probe names a DIFFERENT finding from the fixture's. The idempotency
+-- key is (company_id, detector, period_year, period_month, finding_key) and both
+-- statements carry the side's own company, so inserting the fixture's key again
+-- would be refused by the unique index for the owner too and the cell would
+-- measure the index instead of the policy.
+--
+-- `severity = severity` and not a review column: the guard refuses a status that
+-- returns to 'open' and pins the identity, so a U probe that touched either
+-- would print T for every principal and stop measuring the USING clause.
+(80, 'conflict_reviews', $q$id = {id}$q$,
+  $q$INSERT INTO conflict_reviews (id, company_id, detector, finding_type, finding_key,
+       period_year, period_month, detector_status, severity, confidence, explanation,
+       first_detected_version, last_detected_version)
+     VALUES ({id}, {co}, 'trip_analysis', 'driver_overlap', 'driver_overlap:mx-{s}1+mx-{s}2',
+             2026, 10, 'conflict', 'error', 'high', 'MX zu pruefen', 'mx', 'mx')$q$, NULL,
+  $q$INSERT INTO conflict_reviews (company_id, detector, finding_type, finding_key,
+       period_year, period_month, detector_status, severity, confidence, explanation,
+       first_detected_version, last_detected_version)
+     VALUES ({co}, 'trip_analysis', 'missing_end', 'missing_end:mx-new-{s}',
+             2026, 10, 'conflict', 'warning', 'high', 'MX zu pruefen', 'mx', 'mx')$q$,
+  $q$severity = severity$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1507,7 +1532,14 @@ INSERT INTO _mx_move VALUES
 -- its assignment, so both guards refuse the move before any WITH CHECK is
 -- reached, for the owner too.
 ('driver_month_assignments',             $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_guard refuses it even for the owner'),
-('driver_month_assignment_shifts',       $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_shift_guard refuses it even for the owner');
+('driver_month_assignment_shifts',       $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_shift_guard refuses it even for the owner'),
+-- 20261023200000: company_id is deliberately NOT pinned by
+-- app_private.conflict_review_guard, which pins the finding's identity instead.
+-- The four tenant policies already refuse the move for every principal, and a
+-- pin would make this cell T for the owner too -- which is the one probe in this
+-- file that reaches a WITH CHECK clause at all. The pin would buy nothing and
+-- cost the measurement.
+('conflict_reviews',                     $q$company_id = {other_co}$q$, NULL, 'Y', NULL);
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1873,6 +1905,23 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('driver_month_assignment_shifts',     'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_month_assignment_shifts',     'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_month_assignment_shifts',     'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023200000: the Dokumente page on every write, so S, I, U and M read like
+-- the two /monatsplan tables above. Two cells differ from them, each for its own
+-- reason.
+--
+--   D is 'PP' for everybody, the administrator included: there is no DELETE
+--   policy and no DELETE GRANT either. A reviewed finding is a record, and the
+--   partner submissions' shape -- no policy, the privilege still held -- removes
+--   nothing while PostgREST answers 200. Withholding the privilege makes it loud.
+--
+--   M is the policy's refusal (R) and not a guard's (T), because the guard pins
+--   the finding's identity and leaves company_id to the four policies. See the
+--   _mx_move line.
+('conflict_reviews',                   'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('conflict_reviews',                   'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('conflict_reviews',                   'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('conflict_reviews',                   'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('conflict_reviews',                   'M', 'PP', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -2262,7 +2311,11 @@ UPDATE _mx_expected x
      -- 20261023130000: the same shape and the same two triggers
      'vehicle_unavailability',
      -- 20261023120000: the same shape and the same two triggers
-     'driver_month_assignments', 'driver_month_assignment_shifts');
+     'driver_month_assignments', 'driver_month_assignment_shifts',
+     -- 20261023200000: the same shape and the same two triggers. Its write cells
+     -- are PP for D only, which the WHERE above skips, so what this adds there is
+     -- nothing and what it adds for S, I, U and M is the rule.
+     'conflict_reviews');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
