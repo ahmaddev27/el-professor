@@ -341,3 +341,27 @@ describe('the release path ships the gateway config', () => {
     expect(wrapper).toContain('if [ -f "$src/deploy/geocoder-gateway.conf" ]');
   });
 });
+
+// ── The gateway must not restrict what it will accept ────────────────────────
+// Measured against ridy's real Nominatim on 23.10.2026: `GET /search` with
+// `Accept: application/json` is answered **406 Not Acceptable**, because that
+// service is behind Apache, `/search` carries no extension, and mod_negotiation
+// cannot match a `search.php` variant against that type. The same request with
+// `*/*` answers 200. The CI job above drives a stand-in with no Apache and no
+// negotiation, so it stayed green while the real path was broken.
+describe('the gateway does not narrow the Accept header', () => {
+  it('asks for */*', () => {
+    expect(conf).toMatch(/proxy_set_header\s+Accept\s+"\*\/\*"\s*;/);
+  });
+
+  it('never sends a specific media type, which their Apache answers 406 to', () => {
+    const accepts = [...conf.matchAll(/proxy_set_header\s+Accept\s+"([^"]*)"/g)].map(m => m[1]);
+    expect(accepts.length).toBeGreaterThan(0);
+    for (const a of accepts) expect(a, `Accept: ${a}`).toBe('*/*');
+  });
+
+  it('still chooses the response format itself, so widening Accept gives nothing away', () => {
+    // The format comes from the query this gateway rebuilds, never from the client.
+    expect(folded(conf)).toMatch(/format=jsonv2/);
+  });
+});

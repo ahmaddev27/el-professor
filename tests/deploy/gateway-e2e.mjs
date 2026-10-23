@@ -62,7 +62,12 @@ async function allowList() {
   const forwarded = seen.requests.find((r) => r.url.startsWith('/search'));
   check('the query is REBUILT: the three arguments plus the fixed rest, in that order', forwarded?.url === REBUILT, forwarded?.url);
   check('the gateway says who is asking', forwarded?.headers['user-agent'] === 'el-professor-geocoder-gateway');
-  check('and asks for JSON by the host name of their service', forwarded?.headers.accept === 'application/json' && forwarded?.headers.host === 'nominatim');
+  // `*/*` and not a media type: their Apache answers 406 to a specific one on
+  // the extensionless /search (measured 23.10.2026). The stand-in refuses the
+  // same way now, so narrowing this header fails the run rather than passing
+  // here and failing against theirs.
+  check('and accepts anything, by the host name of their service', forwarded?.headers.accept === '*/*' && forwarded?.headers.host === 'nominatim',
+    forwarded?.headers.accept);
 }
 
 async function nothingElse() {

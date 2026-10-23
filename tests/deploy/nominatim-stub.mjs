@@ -53,6 +53,26 @@ const server = http.createServer((req, res) => {
 
   seen.requests.push({ at: Date.now(), method: req.method, url: req.url, headers: req.headers });
   if (url.pathname === '/status') return json(200, STATUS);
+
+  // Apache's content negotiation, which is the one thing this stand-in got
+  // wrong and the reason it stayed green while the real path was broken.
+  //
+  // Their Nominatim is served by Apache and `/search` carries no extension,
+  // so mod_negotiation looks for variants, finds `search.php`, and cannot
+  // match a PHP file against a specific media type. Measured against their
+  // service on 23.10.2026: `Accept: application/json` -> 406 with the variant
+  // list, `Accept: */*` -> 200. Until this stand-in did the same, the gateway
+  // could ask for a type no real server here would answer and every test
+  // passed.
+  //
+  // `/search.php` is served whatever the type is asked for, as it is there.
+  const accept = req.headers.accept;
+  if (url.pathname === '/search' && accept && !accept.split(',').some((a) => a.trim().startsWith('*/*'))) {
+    res.writeHead(406, { 'content-type': 'text/html; charset=iso-8859-1', server: 'Apache/2.4.52 (Ubuntu)' });
+    return res.end('<html><head><title>406 Not Acceptable</title></head><body><h1>Not Acceptable</h1>'
+      + '<p>An appropriate representation of the requested resource could not be found on this server.</p>'
+      + 'Available variants:<ul><li><a href="search.php">search.php</a></li></ul></body></html>');
+  }
   if (url.pathname !== '/search' || req.method !== 'GET') return json(404, { error: 'the stub answers /status and /search only' });
 
   seen.inFlight += 1;
