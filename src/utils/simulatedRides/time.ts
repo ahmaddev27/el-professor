@@ -30,10 +30,25 @@ export function isUniqueWallTime(ms: number): boolean {
   return back.kind === 'ok' && back.ms === Math.floor(ms / 1000) * 1000;
 }
 
-/** "2026-09-01 08:19:12.858" — the zone-less shape the export writes. */
+/**
+ * "2026-09-01 08:19:12.858" — the zone-less shape the export writes.
+ *
+ * A timestamp is a whole number of milliseconds, and this is the boundary that
+ * makes it so. Given a fractional `ms`, `String(ms % 1000)` printed
+ * "441.665771484375" where three digits belong and `padStart(3, '0')` left it,
+ * so the cell carried two decimal points and `DATETIME_RE` — which admits one
+ * fractional group — could not read it at all (FB-HIGH-001, 52 of 255 cells of
+ * one audited month). The producer no longer makes such a value; this floor is
+ * the second wall, so no future producer can make the shape malformed.
+ *
+ * Floored, never rounded: rounding 25.9997 s up would print second 26, an
+ * instant the value does not name, and would part the printed second from the
+ * printed milliseconds. `wallAt` truncates the same way, so the two agree.
+ */
 export function formatStamp(ms: number, withMillis: boolean): string {
-  const base = formatWall(wallAt(ms, SOURCE_TIME_ZONE));
-  const millis = String(((ms % 1000) + 1000) % 1000).padStart(3, '0');
+  const whole = Math.floor(ms);
+  const base = formatWall(wallAt(whole, SOURCE_TIME_ZONE));
+  const millis = String(((whole % 1000) + 1000) % 1000).padStart(3, '0');
   return `${base}.${withMillis ? millis : '000'}`;
 }
 

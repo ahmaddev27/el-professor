@@ -3764,6 +3764,7 @@ export const de = {
   'imp.notice.noStatusColumn':             '(die Datei hat keine Statusspalte)',
   'imp.notice.startDateDiffers':           '{count} Fahrten beginnen an einem anderen Tag als ihr „Datum der Fahrt“ (meist kurz nach Mitternacht). Der tatsächliche Beginn wird mit Datum und Sekunden gespeichert; das Datum der Fahrt bleibt wie in der Datei.',
   'imp.notice.unknownStatus':              '{count} Zeilen haben einen unbekannten Fahrtstatus. Sie werden gespeichert und zur Prüfung markiert, aber weder als abgeschlossen noch als storniert gezählt.',
+  'imp.notice.unreadableOrderTransmission': '{count} Zeilen enthalten in „{column}“ keine lesbare Zeitangabe. Die Zeilen werden gespeichert und es wird nichts erfunden, aber diese Uhrzeit ist nicht auswertbar. Bitte vor dem Import prüfen.',
   'imp.notice.withoutInstant':             '{count} Fahrten haben keinen eindeutigen Beginn- und Endzeitpunkt (fehlend, nicht lesbar oder in der Zeitumstellung). Sie werden ohne diesen Zeitpunkt gespeichert.',
   'imp.optionNoCar':                       '— Kein Fahrzeug zugeordnet —',
   'imp.optionNoDriver':                    '— Kein Fahrer zugeordnet —',

@@ -823,6 +823,14 @@ export interface BuildStats {
   sampleUnreadableStart: CellValue[];
   /** The first few held-back rows, as 1-based positions among the data rows. */
   heldBackRows: number[];
+  /**
+   * Rows whose order-transmission cell holds something that is not a zone-less
+   * timestamp. See the count's own comment in `buildTripRows`: the column is
+   * stored as text and parsed into no column of its own, so without this the
+   * row is taken in with nothing anywhere saying its order time is unreadable.
+   */
+  unreadableOrderTransmission: number;
+  sampleUnreadableOrderTransmission: CellValue[];
 }
 
 function reviewReasonsInOrder(reasons: ReadonlySet<ReviewReason>): ReviewReason[] {
@@ -839,6 +847,7 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
   const stats: BuildStats = {
     total: ctx.rows.length, heldBackNoDate: 0, startDateDiffers: 0,
     sampleUnreadableStart: [], heldBackRows: [],
+    unreadableOrderTransmission: 0, sampleUnreadableOrderTransmission: [],
   };
   const built: BuiltRow[] = [];
 
@@ -900,8 +909,29 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
     const driverMatch = ctx.driverMatches.get(driverName);
     const carMatch = plate ? ctx.carMatches.get(plate) : undefined;
     const reviewReasons = reviewReasonsInOrder(reasons);
+    const orderTransmission = cell(row, ctx.orderTransmissionCol);
+    // A malformed order time is counted and shown, never taken in silently.
+    //
+    // This column is the row's key (`sourceRowKeyMaterial` hashes its text) and
+    // it is parsed into no column of `fahrtenbuch_trips`: `time_source` is
+    // about start and end, and none of the eight `review_reasons` names this
+    // column. So a value that is not a timestamp — the two-decimal-point
+    // strings of FB-HIGH-001 — reached `raw_data_json` and the key with
+    // `needs_review` false and nothing anywhere saying it cannot be read.
+    //
+    // The row is still kept and no value is guessed, as the migration's rule
+    // requires. Flagging it ON THE ROW needs a ninth `review_reasons` value and
+    // so a migration widening `fahrtenbuch_trips_review_check`, which is the
+    // owner's call and is not taken here; until then this is the wizard's count
+    // and an operator decides before confirming the import.
+    if (classifyTimestampCell(orderTransmission).kind === 'other') {
+      stats.unreadableOrderTransmission++;
+      if (stats.sampleUnreadableOrderTransmission.length < 5) {
+        stats.sampleUnreadableOrderTransmission.push(orderTransmission);
+      }
+    }
     const key = sourceRowKeyMaterial({
-      orderTransmission: cell(row, ctx.orderTransmissionCol),
+      orderTransmission,
       driverName, startWallText: times.startWallText, plate,
     });
 

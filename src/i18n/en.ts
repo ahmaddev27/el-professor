@@ -3729,6 +3729,7 @@ export const en: PartialDictionary = {
   'imp.notice.noStatusColumn':             '(the file has no status column)',
   'imp.notice.startDateDiffers':           '{count} trips start on a different day than their "Datum der Fahrt" (mostly just after midnight). The actual start is stored with its date and seconds; the Datum der Fahrt stays as in the file.',
   'imp.notice.unknownStatus':              '{count} rows have an unknown trip status. They are stored and marked for review, but counted neither as completed nor as canceled.',
+  'imp.notice.unreadableOrderTransmission': '{count} rows hold no readable time in "{column}". The rows are stored and nothing is made up, but that time cannot be read. Please check before importing.',
   'imp.notice.withoutInstant':             '{count} trips have no unambiguous start and end time (missing, unreadable or in the clock change). They are stored without it.',
   'imp.optionNoCar':                       '— No vehicle assigned —',
   'imp.optionNoDriver':                    '— No driver assigned —',
