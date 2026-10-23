@@ -371,11 +371,15 @@ BEGIN
     _rr_insert(NULL, ARRAY['unreadable_order_transmission']),
     'ERR 23514 fahrtenbuch_trips_review_check');
 
-  PERFORM _rr_set_admitted(ARRAY['missing_trip_date', 'missing_start', 'unreadable_start',
-                                 'missing_end', 'unreadable_end', 'end_before_start',
-                                 'missing_driver', 'unknown_status',
-                                 'unreadable_order_transmission']);
-  PERFORM _rr_rec(13, 'and the nine values are back for the sections below', _rr_admitted(), v_was);
+  -- Restore what was SAVED, not a hard-coded nine. Measured in the negative
+  -- control: with the migration's widening skipped, a hard-coded restore put
+  -- the ninth value back that the migration never added, so probe 13 reported
+  -- a drift of the probe's own making alongside the three real failures. A
+  -- save/restore that does not round-trip is an instrument that edits its
+  -- subject.
+  PERFORM _rr_set_admitted(string_to_array(v_was, ','));
+  PERFORM _rr_rec(13, 'and whatever was admitted before is back for the sections below',
+    _rr_admitted(), v_was);
 END $$;
 
 -- ─── 3. what the widening did NOT loosen ────────────────────────────────────
