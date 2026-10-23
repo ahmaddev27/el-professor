@@ -1352,7 +1352,26 @@ INSERT INTO _mx_spec VALUES
   $q$DELETE FROM driver_month_assignment_shifts WHERE company_id = {co}$q$,
   $q$INSERT INTO driver_month_assignment_shifts (company_id, assignment_id, shift_id, minutes)
      VALUES ({co}, {ref:driver_month_assignments}, {ref:vehicle_day_shifts}, 180)$q$,
-  $q$minutes = minutes$q$);
+  $q$minutes = minutes$q$),
+-- 20261023210000: the Fahrtenbuch import's remembered column mapping. One row
+-- per company and header shape, so the two probes carry DIFFERENT shape keys
+-- (both sides may hold both: the key is unique per company, not globally) and
+-- no ins_pre is needed. The UPDATE probe sets source_shape_key to itself: the
+-- guard pins it with IS DISTINCT FROM, so a no-op assignment reaches the
+-- policy's USING without the guard speaking, and the M row below is refused by
+-- that same pin before any WITH CHECK. Every field_map value is one of
+-- source_headers, which the guard requires; the four fields are the ones the
+-- required-key CHECK demands.
+(80, 'import_column_mappings', $q$id = {id}$q$,
+  $q$INSERT INTO import_column_mappings (id, company_id, source_shape_key, source_headers, field_map)
+     VALUES ({id}, {co}, repeat('a', 64),
+             ARRAY['Datum der Fahrt','Uhrzeit des Fahrtbeginns','Uhrzeit des Fahrtendes','Fahrername'],
+             '{"trip_date":"Datum der Fahrt","start_time":"Uhrzeit des Fahrtbeginns","end_time":"Uhrzeit des Fahrtendes","driver_name":"Fahrername"}')$q$, NULL,
+  $q$INSERT INTO import_column_mappings (company_id, source_shape_key, source_headers, field_map)
+     VALUES ({co}, repeat('b', 64),
+             ARRAY['Fahrttag','Beginn','Ende','Fahrer'],
+             '{"trip_date":"Fahrttag","start_time":"Beginn","end_time":"Ende","driver_name":"Fahrer"}')$q$,
+  $q$source_shape_key = source_shape_key$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1507,7 +1526,13 @@ INSERT INTO _mx_move VALUES
 -- its assignment, so both guards refuse the move before any WITH CHECK is
 -- reached, for the owner too.
 ('driver_month_assignments',             $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_guard refuses it even for the owner'),
-('driver_month_assignment_shifts',       $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_shift_guard refuses it even for the owner');
+('driver_month_assignment_shifts',       $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_shift_guard refuses it even for the owner'),
+-- 20261023210000: a remembered column mapping belongs to one company and one
+-- header shape for its life, so import_column_mapping_guard pins both before
+-- any WITH CHECK is reached -- without the pin an UPDATE could point a mapping
+-- at another shape and the next import of THAT shape would open with columns
+-- nobody chose for it.
+('import_column_mappings',               $q$company_id = {other_co}$q$, NULL, 'T', 'import_column_mapping_guard pins the company even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1873,6 +1898,17 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('driver_month_assignment_shifts',     'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_month_assignment_shifts',     'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_month_assignment_shifts',     'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023210000: the same cells again, and for the same reason -- the memory of
+-- the Fahrtenbuch import's column mapping carries the Fahrtenbuch's own page,
+-- `documents` (20260923130000), on every write and no role term on SELECT, and
+-- its guard refuses the move before any WITH CHECK is reached. So a viewer and
+-- an editor read a remembered mapping and store none, which is the right they
+-- already have over the import itself.
+('import_column_mappings',            'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('import_column_mappings',            'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('import_column_mappings',            'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('import_column_mappings',            'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('import_column_mappings',            'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -2262,7 +2298,9 @@ UPDATE _mx_expected x
      -- 20261023130000: the same shape and the same two triggers
      'vehicle_unavailability',
      -- 20261023120000: the same shape and the same two triggers
-     'driver_month_assignments', 'driver_month_assignment_shifts');
+     'driver_month_assignments', 'driver_month_assignment_shifts',
+     -- 20261023210000: the same shape and the same two triggers
+     'import_column_mappings');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),

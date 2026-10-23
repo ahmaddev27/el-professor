@@ -165,6 +165,13 @@ export const BACKUP_TABLES: readonly string[] = [
   // of these have one.
   'driver_month_assignments',
   'driver_month_assignment_shifts',
+
+  // The remembered Fahrtenbuch import column mapping (20261023210000). Header
+  // names and system field names only, so it adds no personal data to the
+  // file — but a restore without it means a company whose export has
+  // non-standard headers redoes those overrides on the next import, which is
+  // the one thing the table exists to prevent.
+  'import_column_mappings',
 ];
 
 /** A table with no `company_id`, reached through the parent that gives it one. */

@@ -7048,4 +7048,14 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'imp.reason.unreadableOrderTransmission': 'Order transmission time not readable',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.mapping.lookupFailed':    'A saved column mapping could not be loaded. The automatic match applies; please check every mapping.',
+  'imp.mapping.otherShapeBody':  'No mapping has been saved for this column structure yet. {count} columns were pre-filled from the mapping last confirmed on {date}, which was built from different columns. Please check every mapping individually.',
+  'imp.mapping.otherShapeTitle': 'Mapping from a different column structure',
+  'imp.mapping.rememberedBody':  '{count} columns were pre-filled from the mapping saved for this column structure on {date}. Please check them and confirm with Next.',
+  'imp.mapping.rememberedTitle': 'Saved column mapping applied',
+  'imp.mapping.staleBody':       'This file does not contain {count} of the saved columns: {columns}. Those fields were deliberately left empty — no other column is used silently. Please map them again.',
+  'imp.mapping.staleColumn':     '{field} ({column})',
+  'imp.mapping.staleTitle':      'The saved mapping no longer matches the file',
 };

@@ -7104,4 +7104,14 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'imp.reason.unreadableOrderTransmission': 'Uhrzeit der Auftragsübermittlung nicht lesbar',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.mapping.lookupFailed':    'Eine gespeicherte Spaltenzuordnung konnte nicht geladen werden. Es gilt die automatische Erkennung; bitte die Zuordnung vollständig prüfen.',
+  'imp.mapping.otherShapeBody':  'Für diese Spaltenstruktur ist noch keine Zuordnung gespeichert. Vorbelegt wurden {count} Spalten aus der zuletzt bestätigten Zuordnung vom {date}, die aus anderen Spalten aufgebaut war. Bitte jede Zuordnung einzeln prüfen.',
+  'imp.mapping.otherShapeTitle': 'Zuordnung aus einer anderen Spaltenstruktur',
+  'imp.mapping.rememberedBody':  '{count} Spalten wurden aus der für diese Spaltenstruktur gespeicherten Zuordnung vom {date} vorbelegt. Bitte prüfen und mit „Weiter“ bestätigen.',
+  'imp.mapping.rememberedTitle': 'Gespeicherte Spaltenzuordnung übernommen',
+  'imp.mapping.staleBody':       'Diese Datei enthält {count} der gespeicherten Spalten nicht: {columns}. Diese Felder wurden absichtlich leer gelassen — es wird keine andere Spalte stillschweigend verwendet. Bitte neu zuordnen.',
+  'imp.mapping.staleColumn':     '{field} („{column}“)',
+  'imp.mapping.staleTitle':      'Gespeicherte Zuordnung passt nicht mehr zur Datei',
 } as const;
