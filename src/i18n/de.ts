@@ -4233,7 +4233,6 @@ export const de = {
   'mp.reason.wrongWeekday':                'Arbeitstag nicht erlaubt',
   'mp.reasonColumn':                       'Grund',
   'mp.rejections':                         'Ablehnungen',
-  'mp.repair.bufferUsed':                  'Puffer {minutes} Min.',
   // The pass detects and reports; it repairs nothing and moves no block, so
   // these three no longer say "Reparatur". `conflictsAfter` is what is left once
   // the released blocks are out: the pairs a person still has to answer.
@@ -4249,13 +4248,7 @@ export const de = {
   'mp.repair.diagOwnerOverlaps':           'Inhaberüberschneidungen',
   'mp.repair.diagVehicleOverlaps':         'Fahrzeugüberschneidungen',
   'mp.repair.driverWindows':               'Fahrer-Fenster',
-  'mp.repair.movedBlocks':                 'Verschobene Blöcke',
-  'mp.repair.movedConflictBlocks':         'Verschobene Konflikt-Blöcke',
-  'mp.repair.movedCount.one':              '{count} Block verschoben',
-  'mp.repair.movedCount.other':            '{count} Blöcke verschoben',
-  'mp.repair.new':                         'Neu',
   'mp.repair.noConflicts':                 'Keine Konflikte',
-  'mp.repair.old':                         'Alt',
   'mp.repair.sharedWindows':               'Gemeinsame Fenster',
   'mp.repair.title':                       'Konflikt-Prüfung',
   'mp.repair.unrepairable':                'Nicht reparierbar',
