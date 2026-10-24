@@ -5301,6 +5301,7 @@ export const de = {
   'engine.noteViolation.action.releasedForReassignment': 'Zur Neuverteilung freigegeben',
   'engine.phase1.issue.blockTooLong': 'Block {blockId} hat Dauer {minutes} Min. (> {maxMinutes})',
   'engine.phase1.issue.blockGapTooLarge': 'Block {blockId} hat internen Gap {minutes} Min. (> {maxMinutes})',
+  'engine.phase1.issue.blockOverlap': 'Fahrzeug {vehicle}: Block {blockId} und Block {otherBlockId} überlappen sich um {minutes} Min.',
   'engine.phase1.issue.duplicateTrip': 'Trip {tripId} ist in {count} Blöcken enthalten',
   'engine.phase1.issue.missingTrip': 'Trip {tripId} wurde keinem Block zugeordnet',
   'engine.phase4.issue.duplicateTrip': 'Trip {tripId} bereits einem anderen Block zugewiesen',

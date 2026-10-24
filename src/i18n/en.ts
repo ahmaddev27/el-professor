@@ -5246,6 +5246,7 @@ export const en: PartialDictionary = {
   'engine.noteViolation.action.releasedForReassignment': 'Released for reassignment',
   'engine.phase1.issue.blockTooLong': 'Block {blockId} lasts {minutes} min (> {maxMinutes})',
   'engine.phase1.issue.blockGapTooLarge': 'Block {blockId} has an internal gap of {minutes} min (> {maxMinutes})',
+  'engine.phase1.issue.blockOverlap': 'Vehicle {vehicle}: block {blockId} and block {otherBlockId} overlap by {minutes} min',
   'engine.phase1.issue.duplicateTrip': 'Trip {tripId} appears in {count} blocks',
   'engine.phase1.issue.missingTrip': 'Trip {tripId} was not assigned to any block',
   'engine.phase4.issue.duplicateTrip': 'Trip {tripId} is already assigned to another block',
