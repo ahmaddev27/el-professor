@@ -315,8 +315,17 @@ CREATE TABLE IF NOT EXISTS public.conflict_reviews (
 
   -- Three jsonb documents, each an object and bounded. record_support_write()
   -- copies a changed column into the audit log and omits anything over 1 KiB,
-  -- and app_private.audit_write refuses a value over 32768 bytes; a finding's
-  -- values are a dozen numbers, so 4096 leaves room without reaching either.
+  -- and app_private.audit_write refuses a value over 32768 bytes, so 4096
+  -- leaves room without reaching either.
+  --
+  -- Most findings' values ARE a dozen numbers, but two are not and they are
+  -- what the bound has to be judged against: `driver_name_mismatch` carries
+  -- `names`, every distinct spelling of one driver's name joined with ' | ',
+  -- and `budget_not_computable` carries `problems`, a joined list of codes.
+  -- Both are per driver rather than per row, so a real one is tens of bytes
+  -- and a pathological one is still hundreds -- but note what the bound IS:
+  -- a REFUSAL (23514), not a truncation. A client that can produce a longer
+  -- document has to shorten it rather than discover this at the insert.
   CONSTRAINT conflict_reviews_measured_values_shape CHECK (
     jsonb_typeof(measured_values) = 'object' AND length(measured_values::text) <= 4096
   ),
