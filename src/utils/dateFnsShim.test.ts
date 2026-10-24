@@ -79,12 +79,18 @@ describe('the date-fns test shims', () => {
   });
 
   it('hand tests the same function objects as the real barrels', async () => {
-    // `date-fns` here is the alias — the shim. The barrels are loaded by
-    // absolute file path, which no `find` regex in vitest.config.ts matches.
+    // `date-fns` here is the alias — the shim. The barrels are loaded as
+    // `file://` URLs, which no `find` regex in vitest.config.ts matches.
+    //
+    // A `file://` URL and not a bare absolute path: on Windows the path begins
+    // `C:/…` and either form resolves, but on Linux — which is what CI runs — it
+    // begins with a single `/`, and Vite reads a leading slash as root-relative
+    // and would look for `<project root>/home/runner/…`. The URL form has no such
+    // ambiguity on either platform.
     const shim = await import('date-fns');
     const localeShim = await import('date-fns/locale');
-    const barrel = await import(`${fsPath(new URL('node_modules/date-fns/index.js', root))}`);
-    const localeBarrel = await import(`${fsPath(new URL('node_modules/date-fns/locale.js', root))}`);
+    const barrel = await import(new URL('node_modules/date-fns/index.js', root).href);
+    const localeBarrel = await import(new URL('node_modules/date-fns/locale.js', root).href);
 
     const names = [...exported('tests/support/date-fns-shim.ts')].sort();
     expect(names.length).toBeGreaterThan(0);
@@ -94,15 +100,19 @@ describe('the date-fns test shims', () => {
     );
     expect(differing).toEqual([]);
     expect(localeShim.de).toBe(localeBarrel.de);
-    // The timeout is generous on purpose, and the number is measured rather than
-    // picked. This is the only test left in the suite that opens the barrels'
-    // 250 ESM files, so it is the one place their cost still lands — and it lands
-    // cold, precisely because nothing else in the run touches them any more. It
-    // has been seen at 12.5 s, 15.2 s, 19.9 s and 24.9 s inside full runs and at
-    // 49.1 s in a short run where the cache was cold for those files. Against
-    // vitest's 5 s default it failed as a timeout rather than on its assertion,
-    // which is how it first behaved; at 60 s the 49 s reading left too little
-    // headroom to be safe under load. Do not read a slow time here as a
-    // regression — it is this test paying, once, what the whole suite used to.
-  }, 180_000);
+    // An explicit timeout because this is the only test left that loads the real
+    // barrels at all, and against vitest's 5 s default it failed as a timeout
+    // rather than on its assertion — which is how it first behaved. 60 s is ~30x
+    // the 2.1 s it now costs, which is headroom for a loaded run, not a hint that
+    // it is slow.
+    //
+    // It was slow, at 12-25 s in full runs and 49 s in one short run, for a
+    // reason worth keeping written down: the barrels were imported as a bare
+    // absolute path, which Vite does NOT externalize, so all 250 of their modules
+    // went through the transform pipeline on every run. As `file://` URLs they are
+    // externalized and Node loads them natively, and the same assertions cost
+    // 2.1 s. The first reading of that was "a cold file cache", which was wrong
+    // and would have been published as a measurement; the instrument was
+    // transforming what it meant to time.
+  }, 60_000);
 });
