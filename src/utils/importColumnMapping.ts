@@ -39,9 +39,10 @@ import { normalise, sha256HexOfText, type ColMap } from './fahrtenbuchImportPars
  *
  * Typed as `keyof ColMap` and spelled out rather than taken from an object's
  * keys at runtime, so a twelfth field added to `ColMap` fails to compile here
- * until it is listed — and `app_private.import_column_mapping_fields()` in the
- * migration is the database's copy of the same list, which
- * `importColumnMapping.test.ts` compares against.
+ * until it is listed — and the `import_column_mappings_field_map_known_keys`
+ * CHECK in 20261023210000 is the database's copy of the same list, which
+ * `importColumnMapping.test.ts` compares against (rolePageKeys.test.ts's rule:
+ * the newest migration that defines the list is the one that is read).
  */
 export const MAPPING_FIELDS: readonly (keyof ColMap)[] = [
   'trip_date', 'start_time', 'end_time', 'driver_name',

@@ -322,10 +322,16 @@ describe('fieldMapOf', () => {
 // ── 5. the eleven fields are the eleven the database admits ──────────────────
 
 /*
-  PostgreSQL constant-folds `ARRAY['a','b']::text[]` into the array literal
-  `'{a,b}'::text[]`, so the migration's text is matched as it is WRITTEN (the
-  file, not the catalogue) — the self-check in the migration is what reads the
-  folded form out of `pg_get_constraintdef`.
+  The list is matched in the migration's text as it is WRITTEN — the file, not
+  the catalogue — so the two regexes below describe the source and nothing else.
+
+  Which is why the patterns are not the migration self-check's: that one reads
+  the same list back out of `pg_get_constraintdef`, where PostgreSQL 17.6 stores
+  it as `ARRAY['trip_date'::text, …]`, element by element, and NOT as the folded
+  array literal `'{trip_date,…}'::text[]` the first version of this branch
+  assumed. Measured on the VPS kit run, 23.10.2026. Nothing here depends on that
+  form, so this test passed while the self-check did not — read the two as the
+  separate statements they are.
 */
 const KNOWN_KEYS = /CONSTRAINT import_column_mappings_field_map_known_keys[\s\S]*?ARRAY\[([\s\S]*?)\]::text\[\]/;
 const REQUIRED_KEYS = /CONSTRAINT import_column_mappings_field_map_required_keys[\s\S]*?ARRAY\[([\s\S]*?)\]/;
