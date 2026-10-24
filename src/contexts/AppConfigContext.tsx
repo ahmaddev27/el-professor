@@ -171,7 +171,13 @@ export const useAppConfig = (): AppConfigContextValue => useContext(AppConfigCon
  *
  * A flag is a switch for rolling something out, not a permission: the server
  * checks every action again whatever a flag says, exactly as it does for plan
- * gates. It lives here rather than in a file of its own because nothing reads a
- * flag yet, and a module nothing imports is dead code by this repository's rule.
+ * gates.
+ *
+ * **Every flag this build reads is listed in `FLAG_DEFINITIONS`**
+ * (`src/lib/featureFlags.ts`), which is what the settings tab draws its
+ * switches from; `featureFlagCallSites.test.ts` fails a build where a call here
+ * names a flag that list does not. Today that is one flag,
+ * `travel_estimator`. (This comment said "nothing reads a flag yet" until
+ * 24.10.2026, having been written before PR #285.)
  */
 export const useFlag = (key: string): boolean => flagEnabled(useAppConfig().featureFlags, key);
