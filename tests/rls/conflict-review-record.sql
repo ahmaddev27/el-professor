@@ -1452,9 +1452,10 @@ BEGIN
     RAISE EXCEPTION E'conflict-review-record: % of % checks failed:\n  %', v_bad, v_all, v_list;
   END IF;
 
+  -- RAISE takes a string LITERAL for its format, never an expression, so this
+  -- sentence is one line rather than two concatenated ones.
   IF v_all <> c_probes THEN
-    RAISE EXCEPTION 'conflict-review-record: % probes ran, not the % this file contains '
-                 || '-- a probe was added, removed or skipped', v_all, c_probes;
+    RAISE EXCEPTION 'conflict-review-record: % probes ran, not the % this file contains -- one was added, removed or skipped', v_all, c_probes;
   END IF;
 
   RAISE NOTICE 'conflict-review-record: all % checks passed', v_all;
