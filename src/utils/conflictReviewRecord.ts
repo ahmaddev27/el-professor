@@ -40,10 +40,19 @@
  * keeps it from happening at all. `conflictReviewRecord.test.ts` reads the key
  * set and fails if one of the five appears.
  *
- * Nor does it carry `first_detected_at` / `first_detected_version`: the guard
- * pins both to their original values on every UPDATE, so sending them would be
- * silently ignored, and sending them is the kind of thing a later reader
- * mistakes for a feature.
+ * `first_detected_at` is **not** in the payload: the column defaults to
+ * `now()` on insert and the guard pins it to the first sighting on every
+ * update, so sending it could only ever be ignored.
+ *
+ * `first_detected_version` **is**, and the asymmetry is not an oversight -
+ * the column is `NOT NULL` with no default, so an insert has to supply it or
+ * it fails `23502`. On the update half of the same upsert the guard pins it
+ * back to the first sighting, which `tests/rls/conflict-review-record.sql`
+ * probe 4c measures: a re-run under `cr/2.0.0` leaves the row's
+ * `first_detected_version` at `cr/1.0.0`. So do not "tidy" it out of
+ * `DETECTION_PAYLOAD_KEYS` on the grounds that the guard overwrites it -
+ * the guard overwrites it only when there is an older row to pin it to, and
+ * on a first sighting there is not.
  *
  * ## A finding is a list to review, never a verdict
  *

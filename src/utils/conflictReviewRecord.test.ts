@@ -109,8 +109,21 @@ describe('a re-detection writes no review column', () => {
     );
   });
 
-  it('nor first_detected_at, which the guard pins to the first sighting anyway', () => {
+  it('nor first_detected_at, which defaults on insert and is pinned on update', () => {
     expect(DETECTION_PAYLOAD_KEYS as readonly string[]).not.toContain('first_detected_at');
+  });
+
+  // The asymmetry with first_detected_at above is load-bearing rather than an
+  // oversight, so it is pinned here: the column is NOT NULL with no default,
+  // so an insert that omits it fails 23502 and every first sighting of every
+  // finding is lost. The guard pins it back on the update half of the same
+  // upsert, which is what makes sending it harmless -- but it can only pin it
+  // to an older row, and on a first sighting there is none.
+  it('but DOES carry first_detected_version, because the column is NOT NULL with no default', () => {
+    expect(DETECTION_PAYLOAD_KEYS as readonly string[]).toContain('first_detected_version');
+    const row = tripAnalysisFindingRows(analysis([issue()]), PERIOD, AT)[0];
+    expect(detectionPayload(row)).toHaveProperty('first_detected_version');
+    expect(row.first_detected_version).toBe(row.last_detected_version);
   });
 
   it('upserts on the five columns the unique index is built on, in order', () => {
