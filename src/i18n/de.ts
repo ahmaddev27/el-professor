@@ -4234,8 +4234,11 @@ export const de = {
   'mp.reasonColumn':                       'Grund',
   'mp.rejections':                         'Ablehnungen',
   'mp.repair.bufferUsed':                  'Puffer {minutes} Min.',
-  'mp.repair.conflictsAfter':              'Konflikte nach Reparatur',
-  'mp.repair.conflictsBefore':             'Konflikte vor Reparatur',
+  // The pass detects and reports; it repairs nothing and moves no block, so
+  // these three no longer say "Reparatur". `conflictsAfter` is what is left once
+  // the released blocks are out: the pairs a person still has to answer.
+  'mp.repair.conflictsAfter':              'Konflikte offen',
+  'mp.repair.conflictsBefore':             'Konflikte erkannt',
   'mp.repair.conflictsRemaining.one':      '{count} Konflikt verbleibend',
   'mp.repair.conflictsRemaining.other':    '{count} Konflikte verbleibend',
   'mp.repair.diagBufferViolated':          'Puffer verletzt',
@@ -4254,7 +4257,7 @@ export const de = {
   'mp.repair.noConflicts':                 'Keine Konflikte',
   'mp.repair.old':                         'Alt',
   'mp.repair.sharedWindows':               'Gemeinsame Fenster',
-  'mp.repair.title':                       'Konflikt-Reparatur',
+  'mp.repair.title':                       'Konflikt-Prüfung',
   'mp.repair.unrepairable':                'Nicht reparierbar',
   'mp.repair.unrepairableWhy':             'Nicht reparierbar — Warum?',
   'mp.repair.vehicleWindows':              'Fahrzeug-Fenster',
