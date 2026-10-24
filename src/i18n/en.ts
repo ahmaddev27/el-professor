@@ -5121,15 +5121,18 @@ export const en: PartialDictionary = {
 
   // Settings — feature flags (plan 3.11)
   'admin.settings.tab.flags':   'Feature flags',
-  'admin.flags.hint':           'One switch per name. A flag missing here is off — so removing one switches it off. Open sessions pick a change up at the next sign-in, or at the latest five minutes after the window becomes active again. No page reads a flag yet.',
-  'admin.flags.none':           'No flags yet.',
+  'admin.flags.hint':           'One switch per flag this build knows. A flag switched off here is off — the same state as one that is not stored at all. Open sessions pick a change up at the next sign-in, or at the latest five minutes after the window becomes active again.',
+  'admin.flags.none':           'This build knows no flag.',
   'admin.flags.on':             'On',
   'admin.flags.off':            'Off',
   'admin.flags.remove':         'Remove the flag',
-  'admin.flags.newLabel':       'New flag',
-  'admin.flags.add':            'Add',
-  'admin.flags.keyRule':        'Lower-case letters, digits and underscores, starting with a letter; at most 60 characters. A new flag starts switched off.',
-  'admin.flags.duplicate':      'This flag already exists.',
+  'admin.flags.unknown':        'Unknown',
+  'admin.flags.unknownDesc':    'This build reads this flag nowhere. The switch changes nothing here; the stored value is only shown.',
+  'admin.flags.unknownNote':    'A flag marked “Unknown” is stored in the database but read nowhere by this build — it came from an older build, or was written directly by SQL. It can be removed; a new flag only ever comes from a build that reads it.',
+
+  // The flags themselves: one entry per flag in FLAG_DEFINITIONS (src/lib/featureFlags.ts).
+  'admin.flags.flag.travelEstimator':      'Travel-time check of the Fahrtenanalyse',
+  'admin.flags.flag.travelEstimator.desc': 'On: the Fahrtenanalyse turns addresses into points — the company’s own address store first, then this stack’s geocoder — and checks a ride’s distance and duration with them. Off: nothing is asked of anybody and every check stays “nicht prüfbar”, exactly as before this feature. The first real run is also the acceptance run: every address is asked once and kept for good. Roughly a third of the rides stay “nicht prüfbar” for good, because the sheet carries no house number for one of the two ends — that is not a defect but what the sheet contains. Needs the routing container, the geocoder gateway and the geocode_cache migration; without one of them it stays at “nicht prüfbar”.',
 
   // Team
   'admin.team.title':        'Team',
