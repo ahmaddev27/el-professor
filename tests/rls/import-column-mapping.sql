@@ -135,15 +135,52 @@ BEGIN
 END $$;
 
 /*
+  Why a refusal is named, and the one case where the hint must be ignored.
+
+  `_icm_reason` is `_vd_reason`'s rule (tests/rls/vehicle-day-plans.sql), and it
+  is here for the reason recorded there rather than by imitation.
+
+  The HINT is preferred in general: every refusal this file is about carries a
+  stable token (`import_mapping_value_not_a_header`, `support_session_required`)
+  while its sentence is German prose that a reword would break.
+
+  But a MISSING GRANT is named out of PostgreSQL's own message and never out of
+  the hint, because on this image that error has a hint and it is a sentence.
+  Measured in a throwaway supabase/postgres:17.6.1.170, 24.10.2026:
+
+    supautils.hint_roles = anon, authenticated, service_role
+
+  and `supautils` attaches
+  "Grant the required privileges to the current role with: GRANT SELECT ON
+  public.import_column_mappings TO anon;" to `permission denied for table …`
+  when, and only when, `current_user` is one of those three. The same statement
+  as a role that is NOT in that list gets the identical 42501 and NO hint — so
+  a probe built around an invented role name measures the wrong thing and says
+  the hint does not exist. That is how this was first mis-measured.
+
+  Row-level security refusals, CHECK violations and unique violations carry no
+  hint at all on this image (all three measured in the same run), so only the
+  privilege class was ever affected. The rule below is on the class and not on
+  that one line, so a line added later cannot walk into it.
+
+  A bare token is `^[a-z][a-z0-9_]*$`: a prose hint can never match it, and
+  every HINT this branch's guard raises does.
+*/
+CREATE OR REPLACE FUNCTION _icm_reason(p_state text, p_message text, p_hint text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN p_state = '42501' AND p_message ~ '^permission denied for (table|function|schema) '
+      THEN 'privilege ' || regexp_replace(p_message, '^permission denied for (table|function|schema) .*$', '\1')
+           || ' ' || regexp_replace(p_message, '^permission denied for (table|function|schema) ', '')
+    WHEN p_hint ~ '^[a-z][a-z0-9_]*$' THEN p_hint
+    ELSE p_message
+  END
+$$;
+
+/*
   Run p_sql as that caller in a subtransaction that is always rolled back, and
   return the scalar it answered, `rows N` for a statement without a result, or
-  `ERR <sqlstate> <hint, or the message when there is none>`.
-
-  The HINT and not the message: every refusal this file is about carries a
-  stable token (`import_mapping_value_not_a_header`, `support_session_required`)
-  while its sentence is German prose that a reword would break. PostgreSQL's own
-  refusals — row level security, a CHECK, a unique key — carry no hint, so those
-  fall through to the message, which names the constraint.
+  `ERR <sqlstate> <reason>` (see _icm_reason).
 
   Nothing it writes survives, audit rows included.
 */
@@ -172,7 +209,7 @@ BEGIN
       v_out := SQLERRM;
     WHEN OTHERS THEN
       GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT, v_hint = PG_EXCEPTION_HINT;
-      v_out := 'ERR ' || v_state || ' ' || coalesce(nullif(btrim(coalesce(v_hint, '')), ''), v_msg);
+      v_out := 'ERR ' || v_state || ' ' || _icm_reason(v_state, v_msg, btrim(coalesce(v_hint, '')));
   END;
   PERFORM _icm_reset();
   RETURN v_out;
@@ -317,8 +354,13 @@ BEGIN
     AND has_table_privilege('authenticated', 'public.import_column_mappings', 'DELETE')
     AND NOT has_table_privilege('authenticated', 'public.import_column_mappings', 'TRUNCATE,REFERENCES,TRIGGER'));
 
+  -- Named by WHAT was refused, not by the sentence: `privilege table <name>`
+  -- comes out of PostgreSQL's own message, so the check cannot pass on a
+  -- refusal of some other table and cannot fail on a hint this image happens
+  -- to add (see _icm_reason). An equality and not a LIKE, for the same reason.
   PERFORM _icm_ok('access: anon is refused outright, not filtered',
-    _icm_try(NULL, NULL, 'SELECT count(*)::text FROM import_column_mappings') LIKE 'ERR 42501 permission denied%');
+    _icm_try(NULL, NULL, 'SELECT count(*)::text FROM import_column_mappings')
+      = 'ERR 42501 privilege table import_column_mappings');
 
   PERFORM _icm_ok('access: no API role may execute the guard',
     NOT has_function_privilege('anon',          'app_private.import_column_mapping_guard()', 'EXECUTE')
@@ -568,8 +610,19 @@ BEGIN
     _icm_try(u, NULL, format(v_ins, co_a, _icm_key('empty'), '{}', _icm_min_map()::text))
       = 'ERR P0001 import_mapping_value_not_a_header');
 
+  /*
+    `' '::text` and not a bare `' '`, and the same below for `'Zielort'::text`.
+    Appending an UNTYPED literal to a text[] does not append an element: for
+    `anyarray || unknown` PostgreSQL resolves the unknown to text[] and picks
+    `anyarray || anyarray`, so the literal is handed to array_in and the
+    statement dies with `22P02 Array value must start with "{"` — raised while
+    the probe's ARGUMENTS are built, outside _icm_try's handler, so it ends the
+    file rather than being reported as a refusal. Measured: that is exactly how
+    this file first failed here. `repeat(...)` below is already typed text and
+    was never affected, which is why only two of the five appends change.
+  */
   PERFORM _icm_ok('bounds: a blank header is refused',
-    _icm_try(u, NULL, format(v_ins, co_a, _icm_key('blank'), (_icm_narrow() || ' ')::text, _icm_min_map()::text))
+    _icm_try(u, NULL, format(v_ins, co_a, _icm_key('blank'), (_icm_narrow() || ' '::text)::text, _icm_min_map()::text))
       = 'ERR P0001 import_mapping_header_blank');
 
   PERFORM _icm_ok('bounds: a header longer than 200 characters is refused',
@@ -581,7 +634,7 @@ BEGIN
       = 'rows 1');
 
   PERFORM _icm_ok('bounds: a repeated header is refused — a sheet cannot produce one',
-    _icm_try(u, NULL, format(v_ins, co_a, _icm_key('dup'), (_icm_narrow() || 'Zielort')::text, _icm_min_map()::text))
+    _icm_try(u, NULL, format(v_ins, co_a, _icm_key('dup'), (_icm_narrow() || 'Zielort'::text)::text, _icm_min_map()::text))
       = 'ERR P0001 import_mapping_headers_duplicated');
 
   -- 60 headers of 200 characters: inside the 200-element limit, far past the
@@ -627,6 +680,18 @@ DO $$
 DECLARE
   co_a constant uuid := 'c0000000-0000-4000-8000-00000000000a';
   u    constant uuid := _icm_u('admin-a');
+  /*
+    Resolved HERE, in the DECLARE block, and never inside a statement run as the
+    caller. `_icm_u` reads the TEMP TABLE `_icm_who`, and `authenticated` holds
+    no privilege on a temp table of this session, so a call to it from inside a
+    statement issued after `_icm_as(u)` dies
+    `42501 permission denied for table _icm_who` — which has nothing to do with
+    the rule being probed and ends the file. Every other call in this file is an
+    ARGUMENT to `_icm_try`, evaluated as the owner before the role changes; the
+    two statements below are the only ones issued directly, so they are the only
+    ones that need this. Measured: that is how the file first failed here.
+  */
+  v_other constant uuid := _icm_u('admin-b');
   v_row import_column_mappings%ROWTYPE;
 BEGIN
   PERFORM _icm_ok('pins: the shape a mapping belongs to is fixed once it exists',
@@ -644,7 +709,7 @@ BEGIN
   INSERT INTO import_column_mappings (company_id, source_shape_key, source_headers, field_map,
                                       created_by, created_at, updated_by, updated_at)
   VALUES (co_a, _icm_key('actor'), _icm_narrow(), _icm_min_map(),
-          _icm_u('admin-b'), '2001-01-01', _icm_u('admin-b'), '2001-01-01');
+          v_other, '2001-01-01', v_other, '2001-01-01');
   PERFORM _icm_reset();
 
   SELECT * INTO v_row FROM import_column_mappings WHERE company_id = co_a AND source_shape_key = _icm_key('actor');
@@ -653,7 +718,7 @@ BEGIN
     AND v_row.created_at > '2020-01-01'::timestamptz AND v_row.updated_at > '2020-01-01'::timestamptz);
 
   PERFORM _icm_as(u);
-  UPDATE import_column_mappings SET field_map = _icm_min_map(), created_by = _icm_u('admin-b')
+  UPDATE import_column_mappings SET field_map = _icm_min_map(), created_by = v_other
    WHERE id = v_row.id;
   PERFORM _icm_reset();
 
@@ -813,8 +878,13 @@ BEGIN
   -- A floor and not an equality: a check added to a section must not have to be
   -- counted here too. It still fails when a whole section is lost, and when the
   -- file is cut down to a handful of probes.
-  IF v_total < 45 THEN
-    RAISE EXCEPTION 'FAIL (ledger): only % checks ran; the file had 54 when it was written', v_total;
+  --
+  -- 77 is MEASURED on the first green run, not counted by hand from the source:
+  -- four of the sections call _icm_ok inside a FOREACH over principals, so the
+  -- number of calls written is not the number of checks that run. The first
+  -- version of this line said 54, which was the count of call SITES.
+  IF v_total < 70 THEN
+    RAISE EXCEPTION 'FAIL (ledger): only % checks ran; the file ran 77 on the run that first passed', v_total;
   END IF;
   RAISE NOTICE '── import column mapping: % checks across % sections passed ──',
     v_total, array_length(c_sections, 1);
