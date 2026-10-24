@@ -3579,8 +3579,6 @@ export const de = {
   'hwh.selStatusSelected':                 'Ausgewählt',
   'hwh.selectedPreviewPlacements':         'Ausgewählte Vorschau-Platzierungen',
   'hwh.sheetName':                         'Tabellenblatt',
-  'hwh.shiftPlanCreateAuto':               'Verschiebungsplan automatisch erstellen',
-  'hwh.shiftPlanCreating':                 'Verschiebungsplan wird erstellt…',
   'hwh.show':                              'Anzeigen',
   'hwh.skippedDueToExclusion':             'Übersprungen wegen Planungsausschluss ({count} Fahrer)',
   'hwh.sourceColumnsAvailable':            'source_columns_json verfügbar',

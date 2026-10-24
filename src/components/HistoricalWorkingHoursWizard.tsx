@@ -14,7 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowRight, Calculator, AlertTriangle,
   RefreshCw, Save, CheckCircle2, Layers,
-  Calendar, List, Play, Download,
+  Calendar, List, Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { deleteChecked } from '../lib/writeOutcome';
@@ -2937,9 +2937,6 @@ interface InhaberFreeWindowSearchViewProps {
   year: number;
   onBack: () => void;
   onRecompute: () => void;
-  onApplyAutoShiftPlan: () => void;
-  isCreatingPlan: boolean;
-  planError: string | null;
   originalTrips: FahrtenbuchTrip[] | null;
   inhaberName: string;
   sourceSheetName: string | null;
@@ -2975,7 +2972,7 @@ type FwsModalData = {
 };
 
 function InhaberFreeWindowSearchView({
-  fwsResult, month, year, onBack, onRecompute, onApplyAutoShiftPlan, isCreatingPlan, planError, originalTrips, inhaberName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, driverConfigs, allDrivers, driverNotesMap,
+  fwsResult, month, year, onBack, onRecompute, originalTrips, inhaberName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, driverConfigs, allDrivers, driverNotesMap,
   simplified = false, autoApply = false, onExportReadyCallback, onFinalAssignmentReady, onPlanDataReady, onDriverHourSummaryReady, onSalaryRangeSummaryReady, exportTriggerRef,
 }: InhaberFreeWindowSearchViewProps) {
   const { t, tPlural } = useTranslation();
@@ -5887,16 +5884,6 @@ function InhaberFreeWindowSearchView({
 
       {/* Bottom nav */}
       <div className="flex flex-wrap items-center gap-4 pt-2">
-        <button
-          type="button"
-          onClick={onApplyAutoShiftPlan}
-          disabled={isCreatingPlan}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-        >
-          <Play size={14} />
-          {isCreatingPlan ? t('hwh.shiftPlanCreating') : t('hwh.shiftPlanCreateAuto')}
-        </button>
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToOwnerConflictPick')}
         </button>
@@ -5904,13 +5891,6 @@ function InhaberFreeWindowSearchView({
           <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
       </div>
-
-      {/* Plan error */}
-      {planError && (
-        <div className="rounded-xl px-4 py-3 text-sm font-medium" style={{ background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.25)', color: '#b91c1c' }}>
-          {planError}
-        </div>
-      )}
 
       {/* Detail modal */}
       {modalData && (
@@ -6979,9 +6959,6 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
   const [applyingLcs, setApplyingLcs] = useState(false);
   // Inhaber free window search (Step 5 → wizard step 7)
   const [inhaberFwsResult, setInhaberFwsResult] = useState<InhaberFreeWindowSearchStepResult | null>(null);
-  // Auto-shift plan (Step 6 → wizard step 8)
-  const [isCreatingAutoShiftPlan, setIsCreatingAutoShiftPlan] = useState(false);
-  const [autoShiftPlanError, setAutoShiftPlanError] = useState<string | null>(null);
   // Phase 4 result
   const [shiftResult, setShiftResult] = useState<OwnerShiftResult | null>(null);
   // Phase 5 result
@@ -8709,9 +8686,6 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 year={year}
                 onBack={() => { setAutoRunPhase('idle'); setStep(1); }}
                 onRecompute={() => { setAutoRunPhase('idle'); setAutoRunExportReady(null); setInhaberFwsResult(null); setStep(1); }}
-                isCreatingPlan={false}
-                planError={null}
-                onApplyAutoShiftPlan={() => {}}
                 originalTrips={originalTrips}
                 inhaberName={driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber'}
                 sourceSheetName={imports.find(i => i.id === selectedImportId)?.source_sheet_name ?? null}
@@ -8799,11 +8773,6 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           onRecompute={() => {
             setInhaberFwsResult(null);
             setStep(6);
-          }}
-          isCreatingPlan={isCreatingAutoShiftPlan}
-          planError={autoShiftPlanError}
-          onApplyAutoShiftPlan={() => {
-            setAutoShiftPlanError(t('hwh.nextStepRebuilding'));
           }}
           originalTrips={originalTrips}
           inhaberName={driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber'}

@@ -3544,8 +3544,6 @@ export const en: PartialDictionary = {
   'hwh.selStatusSelected':                 'Selected',
   'hwh.selectedPreviewPlacements':         'Selected preview placements',
   'hwh.sheetName':                         'Sheet',
-  'hwh.shiftPlanCreateAuto':               'Create the shift plan automatically',
-  'hwh.shiftPlanCreating':                 'Creating the shift plan…',
   'hwh.show':                              'Show',
   'hwh.skippedDueToExclusion':             'Skipped because of a planning exclusion ({count} drivers)',
   'hwh.sourceColumnsAvailable':            'source_columns_json available',
