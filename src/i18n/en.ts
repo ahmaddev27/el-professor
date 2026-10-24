@@ -4195,8 +4195,9 @@ export const en: PartialDictionary = {
   'mp.reasonColumn':                       'Reason',
   'mp.rejections':                         'Rejections',
   'mp.repair.bufferUsed':                  'Buffer {minutes} min.',
-  'mp.repair.conflictsAfter':              'Conflicts after repair',
-  'mp.repair.conflictsBefore':             'Conflicts before repair',
+  // See the note beside these two in de.ts: the pass repairs nothing.
+  'mp.repair.conflictsAfter':              'Conflicts still open',
+  'mp.repair.conflictsBefore':             'Conflicts detected',
   'mp.repair.conflictsRemaining.one':      '{count} conflict remaining',
   'mp.repair.conflictsRemaining.other':    '{count} conflicts remaining',
   'mp.repair.diagBufferViolated':          'Buffer violated',
@@ -4215,7 +4216,7 @@ export const en: PartialDictionary = {
   'mp.repair.noConflicts':                 'No conflicts',
   'mp.repair.old':                         'Old',
   'mp.repair.sharedWindows':               'Shared windows',
-  'mp.repair.title':                       'Conflict repair',
+  'mp.repair.title':                       'Conflict check',
   'mp.repair.unrepairable':                'Not repairable',
   'mp.repair.unrepairableWhy':             'Not repairable — why?',
   'mp.repair.vehicleWindows':              'Vehicle windows',
@@ -7050,6 +7051,11 @@ export const en: PartialDictionary = {
   'imp.reason.unreadableOrderTransmission': 'Order transmission time not readable',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'engine.repair.released.conflict': 'Not assigned ({kind}): {driver} · {vehicleA} and {vehicleB} overlap by {overlapMinutes} min. Block times are not moved; drivers are assigned at month end.',
+  'mp.repair.neverMovesBlocks':      'Block times are never moved. Planning is daily and per vehicle; drivers are assigned at month end.',
+  'mp.repair.releasedBlocks':        'Reported without a driver',
+  'mp.repair.releasedCount.one':     '{count} block reported without a driver',
+  'mp.repair.releasedCount.other':   '{count} blocks reported without a driver',
   'imp.mapping.lookupFailed':    'A saved column mapping could not be loaded. The automatic match applies; please check every mapping.',
   'imp.mapping.otherShapeBody':  'No mapping has been saved for this column structure yet. {count} columns were pre-filled from the mapping last confirmed on {date}, which was built from different columns. Please check every mapping individually.',
   'imp.mapping.otherShapeTitle': 'Mapping from a different column structure',
