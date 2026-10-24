@@ -1,4 +1,4 @@
 {
-  "maxErrors": 170,
+  "maxErrors": 169,
   "note": "Lower this as errors are fixed. It must never rise."
 }
