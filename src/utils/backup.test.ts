@@ -264,6 +264,7 @@ describe('the table list is the set the migrations define', () => {
       'driver_month_assignments',
       'driver_month_assignment_shifts',
       'import_column_mappings',
+      'conflict_reviews',
       'notification_deliveries',
       'company_settings',
       'roles',
