@@ -166,6 +166,13 @@ export const BACKUP_TABLES: readonly string[] = [
   'driver_month_assignments',
   'driver_month_assignment_shifts',
 
+  // The remembered Fahrtenbuch import column mapping (20261023210000). Header
+  // names and system field names only, so it adds no personal data to the
+  // file — but a restore without it means a company whose export has
+  // non-standard headers redoes those overrides on the next import, which is
+  // the one thing the table exists to prevent.
+  'import_column_mappings',
+
   // The reviewed findings of the two detectors (20261023200000). It carries
   // company_id and is read directly like every other table here. A company's
   // review history is the company's own record — who looked at which conflict
