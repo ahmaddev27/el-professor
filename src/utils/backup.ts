@@ -172,6 +172,13 @@ export const BACKUP_TABLES: readonly string[] = [
   // non-standard headers redoes those overrides on the next import, which is
   // the one thing the table exists to prevent.
   'import_column_mappings',
+
+  // The reviewed findings of the two detectors (20261023200000). It carries
+  // company_id and is read directly like every other table here. A company's
+  // review history is the company's own record — who looked at which conflict
+  // and what they decided — so a backup without it is a backup of the data
+  // without the judgements made about it.
+  'conflict_reviews',
 ];
 
 /** A table with no `company_id`, reached through the parent that gives it one. */
