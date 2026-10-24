@@ -84,7 +84,7 @@ export interface Phase1VehicleBlock {
 }
 
 export interface Phase1CoverageIssue {
-  type: 'duplicate_trip' | 'missing_trip' | 'canceled_in_block' | 'block_too_long' | 'block_gap_too_large' | 'unsorted_blocks';
+  type: 'duplicate_trip' | 'missing_trip' | 'canceled_in_block' | 'block_too_long' | 'block_gap_too_large' | 'unsorted_blocks' | 'block_overlap';
   /** German, as the engine has always written it. The screen's fallback. */
   detail: string;
   messageKey?: EngineMessageKey;
@@ -150,6 +150,25 @@ function dateStrLocal(d: Date): string {
 
 function minutesBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 60000);
+}
+
+/**
+ * A block's start and end as absolute milliseconds.
+ *
+ * Phase 1 always sets `actual_start_ms` / `actual_end_ms`, so the parse is only
+ * a guard for a block handed in from elsewhere. Reading the ISO string is the
+ * fallback and not the rule, because `block_start_datetime` is minute-granular
+ * wall-clock text: comparing two of those as strings is right only while both
+ * sit on the same calendar day, and a vehicle block may run past midnight.
+ * Both accessors exist so that the chronological sort and the overlap scan
+ * below can never disagree about when a block begins.
+ */
+function blockStartMs(b: Phase1VehicleBlock): number {
+  return b.actual_start_ms ?? new Date(b.block_start_datetime).getTime();
+}
+
+function blockEndMs(b: Phase1VehicleBlock): number {
+  return b.actual_end_ms ?? new Date(b.block_end_datetime).getTime();
 }
 
 // ── internal parsed trip ─────────────────────────────────────────────────────
@@ -476,8 +495,8 @@ export function buildPhase1VehicleBlocks(trips: Phase1Trip[], options: Phase1Opt
 
   // 5. Sort all blocks chronologically by actual start timestamp.
   blocks.sort((a, b) => {
-    const msA = a.actual_start_ms ?? new Date(a.block_start_datetime).getTime();
-    const msB = b.actual_start_ms ?? new Date(b.block_start_datetime).getTime();
+    const msA = blockStartMs(a);
+    const msB = blockStartMs(b);
     if (msA !== msB) return msA - msB;
     return a.vehicle_identifier.localeCompare(b.vehicle_identifier);
   });
@@ -506,6 +525,62 @@ export function buildPhase1VehicleBlocks(trips: Phase1Trip[], options: Phase1Opt
       });
     }
   }
+
+  // 6b. Two blocks of one vehicle that overlap in time.
+  //
+  // Phase 1 can emit such a pair, and until now it did so silently. The
+  // max-duration split starts the next block at the next ride's start, and the
+  // walk sorts by start only, so a sheet holding a nested or overlapping ride
+  // for one vehicle — ride A 10:00-16:00 with ride B 10:30-11:00 inside it —
+  // flushes A as one block and opens a second block at 10:30, inside the first.
+  // Nothing downstream compares two blocks of one vehicle: Phase 3 checks a
+  // driver against himself, and the finalization checks a driver and a vehicle
+  // switch, so the pair travelled the whole pipeline unreported.
+  //
+  // This reports and changes nothing. No block is moved, split, merged, re-timed
+  // or dropped, and no trip leaves a block: planning is daily and per vehicle,
+  // and a vehicle's own day is corrected at the source, not by the planner.
+  //
+  // The intervals are absolute milliseconds, never a wall-clock time of day — a
+  // bare `HH:MM` compared as a number is 0 and would make every cross-midnight
+  // block look like it started the previous midnight.
+  const blocksByVehicle = new Map<string, Phase1VehicleBlock[]>();
+  for (const b of blocks) {
+    const arr = blocksByVehicle.get(b.vehicle_id);
+    if (arr) arr.push(b);
+    else blocksByVehicle.set(b.vehicle_id, [b]);
+  }
+  for (const vehicleBlocks of blocksByVehicle.values()) {
+    // `blocks` was sorted by start above, so each bucket is in start order.
+    for (let i = 0; i < vehicleBlocks.length; i++) {
+      const earlier = vehicleBlocks[i];
+      const earlierEnd = blockEndMs(earlier);
+      for (let j = i + 1; j < vehicleBlocks.length; j++) {
+        const later = vehicleBlocks[j];
+        const laterStart = blockStartMs(later);
+        // Start order again: once one later block begins at or after this
+        // block's end, every block after it does too. So the scan costs one
+        // comparison per block plus one per pair that really overlaps.
+        if (laterStart >= earlierEnd) break;
+        // Rounded like every other minute figure Phase 1 prints
+        // (`minutesBetween`), so an overlap under 30 seconds reads as 0 Min.
+        // exactly as a 20-second block already reports a duration of 0.
+        const minutes = Math.round((Math.min(earlierEnd, blockEndMs(later)) - laterStart) / 60000);
+        coverageIssues.push({
+          type: 'block_overlap',
+          detail: `Fahrzeug ${earlier.vehicle_identifier}: Block ${earlier.block_id} und Block ${later.block_id} überlappen sich um ${minutes} Min.`,
+          messageKey: 'engine.phase1.issue.blockOverlap',
+          messageVars: {
+            vehicle: earlier.vehicle_identifier,
+            blockId: earlier.block_id,
+            otherBlockId: later.block_id,
+            minutes,
+          },
+        });
+      }
+    }
+  }
+
   for (const [tid, count] of seen) {
     if (count > 1) {
       coverageIssues.push({
