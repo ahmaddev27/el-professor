@@ -94,9 +94,15 @@ describe('the date-fns test shims', () => {
     );
     expect(differing).toEqual([]);
     expect(localeShim.de).toBe(localeBarrel.de);
-    // Explicit timeout, not decoration: this is the one test in the suite that
-    // deliberately loads both real barrels, which is 2-7 s on its own — the very
-    // cost the alias exists to avoid. Against vitest's 5 s default it fails as a
-    // timeout rather than on its assertion, which is how it first behaved.
-  }, 60_000);
+    // The timeout is generous on purpose, and the number is measured rather than
+    // picked. This is the only test left in the suite that opens the barrels'
+    // 250 ESM files, so it is the one place their cost still lands — and it lands
+    // cold, precisely because nothing else in the run touches them any more. It
+    // has been seen at 12.5 s, 15.2 s, 19.9 s and 24.9 s inside full runs and at
+    // 49.1 s in a short run where the cache was cold for those files. Against
+    // vitest's 5 s default it failed as a timeout rather than on its assertion,
+    // which is how it first behaved; at 60 s the 49 s reading left too little
+    // headroom to be safe under load. Do not read a slow time here as a
+    // regression — it is this test paying, once, what the whole suite used to.
+  }, 180_000);
 });
