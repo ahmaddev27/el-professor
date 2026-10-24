@@ -74,7 +74,12 @@
                      sighting is pinned
      6. tenancy      company B's administrator reads none of A's findings,
                      writes none, and cannot move one; the owner can, which is
-                     what makes the refusal a policy's and not a trigger's
+                     what keeps the refusal from being a malformed move. The
+                     move goes through a CURSOR and WHERE CURRENT OF, as
+                     tests/rls/matrix.sql's M probe does and for the reason
+                     _cr_move_try's header measures: written the plain way it
+                     is refused by the SELECT policy as well, with the same
+                     message, and measures nothing about the WITH CHECK
      7. the gate     a viewer and an editor are refused all three writes and
                      still read; the administrator writes; nobody deletes
      8. contexts     a view context writes nothing; a support session writes the
@@ -82,9 +87,14 @@
      9. the words    'passed' is refused, the three status words are exactly
                      three, and no column, constraint or guard of this table
                      names a verdict
-    10. controls     twelve mutation controls: every assertion above that could
-                     pass for the wrong reason is re-run with the rule broken,
-                     and must fail
+    10. controls     fourteen mutation controls: every assertion above that
+                     could pass for the wrong reason is re-run with the rule
+                     broken, and must fail. 10n is a control for a probe's FORM
+                     rather than for a rule, and it is the one that caught 6f
+                     measuring nothing
+    11. the count    the number of probes that ran, asserted before the verdict,
+                     because "no row failed" is not the same claim as "every
+                     probe ran"
 */
 
 \set ON_ERROR_STOP on
@@ -288,6 +298,91 @@ BEGIN
     RAISE EXCEPTION 'mutation control: % does not contain [%], so the mutation would change nothing', p_sig, p_from;
   END IF;
   EXECUTE replace(v_old, p_from, p_to);
+END $$;
+
+/* Move a finding into the other company, and report it the way _cr_try does.
+
+   It goes through a cursor -- SELECT … FOR UPDATE, then UPDATE … WHERE CURRENT
+   OF -- for the reason tests/rls/matrix.sql's M probe does, and that reason is
+   measured rather than quoted. With the plain form, `UPDATE … SET company_id =
+   <other> WHERE id = <id>`, the WHERE reads a column, so PostgreSQL checks the
+   NEW row against the SELECT policies as well as against the UPDATE policy's
+   WITH CHECK -- and a tenant-scoped SELECT policy hides the row wherever the
+   WITH CHECK would have let it go. Both refusals are the same message,
+   `42501 new row violates row-level security policy`, so a probe written the
+   plain way stays green with the WITH CHECK removed entirely and measures
+   nothing about it. Measured on PostgreSQL 17.6, as this file's own controls
+   10m and 10n:
+
+     plain  WHERE, WITH CHECK as shipped  -> refused
+     plain  WHERE, WITH CHECK = true      -> STILL refused   (10n)
+     cursor WHERE CURRENT OF, as shipped  -> refused         (6f)
+     cursor WHERE CURRENT OF, = true      -> the move lands  (10m)
+
+   A refcursor's text value is the portal NAME, which WHERE CURRENT OF takes as
+   an identifier, and an unnamed portal is called "<unnamed portal N>" -- so it
+   has to be quoted as one. `rows 0` is the cursor seeing nothing, which is the
+   SELECT policy hiding the row rather than a refusal. Like _cr_try, the move
+   is always rolled back. */
+CREATE OR REPLACE FUNCTION _cr_move_try(p_user uuid, p_id uuid, p_to uuid) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out   text;
+  v_rows  bigint;
+  v_state text;
+  v_msg   text;
+  v_hint  text;
+  v_con   text;
+  cur     refcursor;
+  v_seen  uuid;
+BEGIN
+  BEGIN
+    PERFORM _cr_as(p_user, NULL);
+    OPEN cur FOR EXECUTE format(
+      'SELECT id FROM public.conflict_reviews WHERE id = %L FOR UPDATE', p_id);
+    FETCH cur INTO v_seen;
+    IF v_seen IS NULL THEN
+      CLOSE cur;
+      RAISE EXCEPTION USING ERRCODE = 'ZZ043', MESSAGE = 'rows 0';
+    END IF;
+    EXECUTE format('UPDATE public.conflict_reviews SET company_id = %L WHERE CURRENT OF %I',
+                   p_to, cur::text);
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    CLOSE cur;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ043', MESSAGE = 'rows ' || v_rows;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ043' THEN
+      v_out := SQLERRM;
+    WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT,
+                              v_hint = PG_EXCEPTION_HINT, v_con = CONSTRAINT_NAME;
+      v_out := 'ERR ' || v_state || ' ' || _cr_reason(v_state, v_msg, v_hint, v_con);
+  END;
+  PERFORM _cr_reset();
+  RETURN v_out;
+END $$;
+
+/* _cr_mutant for the cursor move. The move is three statements and a cursor
+   rather than one string, so it cannot go through _cr_mutant's p_sql. */
+CREATE OR REPLACE FUNCTION _cr_move_mutant(p_mutation text, p_user uuid, p_id uuid, p_to uuid)
+RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out text;
+BEGIN
+  BEGIN
+    PERFORM _cr_reset();
+    EXECUTE p_mutation;
+    v_out := _cr_move_try(p_user, p_id, p_to);
+    RAISE EXCEPTION USING ERRCODE = 'ZZ044', MESSAGE = v_out;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ044' THEN
+      v_out := SQLERRM;
+    WHEN OTHERS THEN
+      v_out := 'MUTATION FAILED: ' || SQLERRM;
+  END;
+  PERFORM _cr_reset();
+  RETURN v_out;
 END $$;
 
 /* The audit log's high-water mark, and the support-write rows since it. */
@@ -828,18 +923,23 @@ BEGIN
     _cr_try(c_admin_b, NULL, format(
       'UPDATE conflict_reviews SET status = ''dismissed'', review_note = ''x'' WHERE id = %L', v_a)));
 
-  -- 6f the move: refused by the policy's WITH CHECK, which is why company_id is
-  --    deliberately NOT pinned by the guard -- a pin would refuse the owner too
-  --    and tests/rls/matrix.sql's M probe would stop measuring the clause.
+  -- 6f the move: refused by the UPDATE policy's WITH CHECK, which is why
+  --    company_id is deliberately NOT pinned by the guard -- a pin would refuse
+  --    the owner too and tests/rls/matrix.sql's M probe would stop measuring
+  --    the clause at all.
+  --
+  --    It goes through _cr_move_try, which moves the row with a cursor and
+  --    WHERE CURRENT OF. That is not style: with the plain `WHERE id` form the
+  --    SELECT policy refuses the new row as well, with the same message, so the
+  --    probe would stay green with the WITH CHECK removed. 10n is that
+  --    measurement and _cr_move_try's header carries the table.
   PERFORM _cr_expect('6f A''s administrator cannot move a finding into company B',
     'ERR 42501 new row violates row-level security policy for table "conflict_reviews"',
-    _cr_try(c_admin, NULL, format(
-      'UPDATE conflict_reviews SET company_id = %L WHERE id = %L', c_co_b, v_a)));
+    _cr_move_try(c_admin, v_a, c_co_b));
 
-  PERFORM _cr_expect('6g …and the owner can, so 6f is the policy''s refusal and not a trigger''s',
+  PERFORM _cr_expect('6g …and the owner can, so 6f is a policy''s refusal and not a malformed move',
     'rows 1',
-    _cr_try(_cr_owner(), NULL, format(
-      'UPDATE conflict_reviews SET company_id = %L WHERE id = %L', c_co_b, v_a)));
+    _cr_move_try(_cr_owner(), v_a, c_co_b));
 END $$;
 
 -- ─── 7. the gate: writes ask the Dokumente page, reads ask no role ──────────
@@ -1122,6 +1222,16 @@ DECLARE
   c_cols   CONSTANT text :=
     '(company_id, detector, finding_type, finding_key, period_year, period_month, '
     || 'detector_status, severity, confidence, explanation, first_detected_version, last_detected_version';
+  -- The UPDATE policy with its WITH CHECK emptied to `true`: the second copy of
+  -- the predicate gone, the USING half left exactly as it ships. Shared by 10m
+  -- and 10n, which differ only in how the move is written.
+  c_wc_true CONSTANT text :=
+    $m$SELECT _cr_ddl(ARRAY[
+         'DROP POLICY conflict_reviews_update ON public.conflict_reviews',
+         'CREATE POLICY conflict_reviews_update ON public.conflict_reviews FOR UPDATE
+            TO authenticated USING (company_id = (SELECT public.get_active_company_id())
+                                    AND (SELECT public.current_role_permits(''documents'', true)))
+            WITH CHECK (true)'])$m$;
   v_id     uuid;
 BEGIN
   v_id := _cr_put(c_co_a, 'end_before_start', 'm1');
@@ -1295,14 +1405,22 @@ BEGIN
   --     move of 6f is allowed -- which is why the predicate is written twice.
   PERFORM _cr_expect('10m control: with the second copy of the predicate dropped, the move lands',
     'rows 1',
-    _cr_mutant(
-      $m$SELECT _cr_ddl(ARRAY[
-           'DROP POLICY conflict_reviews_update ON public.conflict_reviews',
-           'CREATE POLICY conflict_reviews_update ON public.conflict_reviews FOR UPDATE
-              TO authenticated USING (company_id = (SELECT public.get_active_company_id())
-                                      AND (SELECT public.current_role_permits(''documents'', true)))
-              WITH CHECK (true)'])$m$,
-      c_admin, NULL, format(
+    _cr_move_mutant(c_wc_true, c_admin, v_id, c_co_b));
+
+  -- 10n …and the same mutation with the move written the OBVIOUS way is still
+  --     refused. This is the control for 6f's FORM rather than for a rule, and
+  --     it is the one this file got wrong: an UPDATE whose WHERE reads a column
+  --     has its new row checked against the SELECT policies too, and a
+  --     tenant-scoped SELECT policy refuses it with the same
+  --     `42501 new row violates row-level security policy` the WITH CHECK
+  --     raises. So the plain form passes 6f whether or not the predicate is
+  --     written twice, which is a probe measuring nothing. Recorded here as a
+  --     measurement, so a later reader who finds the cursor fussy and
+  --     "simplifies" 6f has to delete this line and say why.
+  PERFORM _cr_expect('10n control: the same mutation with a plain WHERE is still refused, '
+    || 'so the cursor in 6f is load-bearing',
+    'ERR 42501 new row violates row-level security policy for table "conflict_reviews"',
+    _cr_mutant(c_wc_true, c_admin, NULL, format(
       'UPDATE conflict_reviews SET company_id = %L WHERE id = %L', c_co_b, v_id)));
 END $$;
 
@@ -1310,6 +1428,18 @@ END $$;
 
 DO $$
 DECLARE
+  -- Every probe above records a row in _cr_results, so the COUNT is asserted
+  -- before the verdict. "No row failed" is not the same claim as "every probe
+  -- ran": a section that returns early, or a DO block whose last probes are
+  -- skipped by a branch, leaves a shorter table and a passing verdict. A
+  -- sibling kit file reported "all 34 probes matched" with three rows missing,
+  -- and the three missing were exactly its mutation controls.
+  --
+  -- Adding or removing a probe moves this number, deliberately and in the same
+  -- commit. It is not a floor: a number that only ever grew would not catch a
+  -- probe that was replaced by a weaker one.
+  c_probes CONSTANT int := 102;
+
   v_bad  int;
   v_all  int;
   v_list text;
@@ -1320,6 +1450,11 @@ BEGIN
     SELECT string_agg(format('%s: expected [%s] got [%s]', label, expected, actual), E'\n  ' ORDER BY n)
       INTO v_list FROM _cr_results WHERE NOT ok;
     RAISE EXCEPTION E'conflict-review-record: % of % checks failed:\n  %', v_bad, v_all, v_list;
+  END IF;
+
+  IF v_all <> c_probes THEN
+    RAISE EXCEPTION 'conflict-review-record: % probes ran, not the % this file contains '
+                 || '-- a probe was added, removed or skipped', v_all, c_probes;
   END IF;
 
   RAISE NOTICE 'conflict-review-record: all % checks passed', v_all;
