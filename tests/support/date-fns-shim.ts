@@ -19,18 +19,27 @@
  * names are 20 and not 19, and the timings could NOT be reproduced: repeated
  * runs put the barrel at about a second, not tens of seconds.
  *
- * One reading did come in at 49 s, and it is recorded here because the obvious
- * explanation for it was wrong. It was not a cold file cache. It was
- * dateFnsShim.test.ts importing the real barrel by a bare absolute path, which
- * Vite does not externalize, so all 250 of its modules went through the
- * transform pipeline; as a `file://` URL the same assertions cost 2.1 s. So that
- * figure measured the instrument, not the package — and "the first measurement
- * was 24x too high because the harness was transforming what it meant to time"
- * is the more useful thing for the next person to know than any reconciliation
- * of the original numbers, which stand unexplained.
+ * One reading did come in at 49 s, in dateFnsShim.test.ts, and it is recorded
+ * here for the reason the plan-cache note in CLAUDE.md gives: **a reading of it
+ * has now been wrong twice, and the pattern is more useful than a third guess.**
+ * It was first written up as a cold file cache, which was wrong. It was then
+ * written up as Vite transforming a bare absolute path instead of externalizing
+ * it, together with the prediction that the bare path would fail on Linux — and
+ * CI then ran the bare path green twice, at 2433 ms, so that was wrong too.
+ * What is measured, and all that is measured:
  *
- * See vitest.config.ts for what the alias is worth on a full run, which is where
- * the claim actually rests.
+ *   Windows (dev box)   bare path 12-25 s, once 49 s   file:// 2.0-2.5 s
+ *   Linux (CI)          bare path 2433 ms              file:// 2470 ms
+ *
+ * So the slowness is real, Windows-only, and **unexplained**; the `file://` form
+ * is kept because it is portable and fast everywhere, not because the mechanism
+ * is understood. Do not write a third confident paragraph here. What the episode
+ * does establish is the repository's own standing lesson: the first attempt at
+ * this number measured the instrument rather than the package, twice over.
+ *
+ * None of it touches the claim the alias rests on, which is two full runs of the
+ * same suite in the same window; neither side ever imports a barrel by path. See
+ * vitest.config.ts.
  */
 export { addDays } from 'date-fns/addDays';
 export { addMonths } from 'date-fns/addMonths';
