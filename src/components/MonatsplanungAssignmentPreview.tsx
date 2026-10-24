@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Play, AlertTriangle, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, UserCheck, ListChecks, XCircle, Info, Wrench, Hand, X, ShieldAlert, RotateCcw, FileDiff, Lock, Database, Download, Loader2, Sparkles, Clipboard, ClipboardCheck, Shield, ArrowRight } from 'lucide-react';
+import { Play, AlertTriangle, CalendarClock, CheckCircle2, ChevronDown, ChevronUp, UserCheck, ListChecks, XCircle, Info, Wrench, Hand, X, ShieldAlert, RotateCcw, FileDiff, Lock, Database, Download, Loader2, Sparkles, Clipboard, ClipboardCheck, Shield } from 'lucide-react';
 import type { Phase1VehicleBlock } from '../utils/monatsplanungPhase1';
 import type { PlanningDriver } from './MonatsplanungDriverPool';
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
@@ -29,7 +29,7 @@ import {
   MIN_VEHICLE_SWITCH_BUFFER_MINUTES,
 } from '../utils/monatsplanungPhase3';
 import { buildChangeSet, type Phase4Result } from '../utils/monatsplanungPhase4';
-import { repairFinalOverlaps, fmtRepairMs, type RepairPassResult } from '../utils/monatsplanungRepairPass';
+import { applyRepairPass, type RepairPassResult } from '../utils/monatsplanungRepairPass';
 import { type AppliedRunSummary } from '../utils/monatsplanungXlsxExport';
 import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisPreview';
 import FinalizePlanningModal from './FinalizePlanningModal';
@@ -737,13 +737,16 @@ export default function MonatsplanungAssignmentPreview({
       const inhaberDriverName = inhaberState?.driver_name ?? '';
       const inhaberDriverId = inhaberState?.driver_id ?? '';
 
-      // Run final overlap repair pass
-      const repair = repairFinalOverlaps(r.assigned, year, month, inhaberDriverName, vehicleSwitchBufferMinutes, inhaberDriverId);
+      // Run the final overlap pass. It moves no block: planning is daily and per
+      // vehicle, and drivers are assigned at month end, so a block whose
+      // assignment cannot hold loses its DRIVER and is reported unassigned —
+      // never relocated in time. `applyRepairPass` carries each release into the
+      // result through Phase 3's own `unassignBlock`.
+      const { result: passedResult, repair } = applyRepairPass(
+        r, selectedDrivers, year, month, inhaberDriverName, vehicleSwitchBufferMinutes, inhaberDriverId,
+      );
       setRepairResult(repair);
-
-      // Apply repaired blocks back into the result
-      const repairedResult: Phase3Result = { ...r, assigned: repair.assignedBlocks };
-      setResult(repairedResult);
+      setResult(passedResult);
     } catch (e) {
       setRunError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1955,9 +1958,9 @@ export default function MonatsplanungAssignmentPreview({
                   <Shield size={16} /> {t('mp.repair.title')}
                 </h3>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {repairResult.movedBlocks.length > 0 && (
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>
-                      {tPlural({ one: 'mp.repair.movedCount.one', other: 'mp.repair.movedCount.other' }, repairResult.movedBlocks.length)}
+                  {repairResult.releases.length > 0 && (
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}>
+                      {tPlural({ one: 'mp.repair.releasedCount.one', other: 'mp.repair.releasedCount.other' }, repairResult.releases.length)}
                     </span>
                   )}
                   {repairResult.diagnostics.fahrerUeberschneidungen === 0 && repairResult.diagnostics.fahrzeugUeberschneidungen === 0 && repairResult.diagnostics.inhaberUeberschneidungen === 0 ? (
@@ -1986,9 +1989,12 @@ export default function MonatsplanungAssignmentPreview({
                   <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.repair.conflictsBefore')}</div>
                   <div className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{repairResult.conflictsBefore}</div>
                 </div>
-                <div className="rounded-lg px-3 py-2" style={{ background: repairResult.movedBlocks.length > 0 ? 'rgba(37,99,235,0.06)' : 'var(--bg-subtle)', border: repairResult.movedBlocks.length > 0 ? '1px solid rgba(37,99,235,0.2)' : '1px solid transparent' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.movedBlocks.length > 0 ? '#1d4ed8' : 'var(--text-tertiary)' }}>{t('mp.repair.movedBlocks')}</div>
-                  <div className="text-xl font-bold" style={{ color: repairResult.movedBlocks.length > 0 ? '#1d4ed8' : 'var(--text-primary)' }}>{repairResult.movedBlocks.length}</div>
+                {/* Where "Verschobene Blöcke" used to be. The pass moves nothing,
+                    so the figure that matters is how many blocks were reported
+                    without a driver for the operator to assign at month end. */}
+                <div className="rounded-lg px-3 py-2" style={{ background: repairResult.releases.length > 0 ? 'rgba(234,88,12,0.06)' : 'var(--bg-subtle)', border: repairResult.releases.length > 0 ? '1px solid rgba(234,88,12,0.2)' : '1px solid transparent' }}>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.releases.length > 0 ? '#c2410c' : 'var(--text-tertiary)' }}>{t('mp.repair.releasedBlocks')}</div>
+                  <div className="text-xl font-bold" style={{ color: repairResult.releases.length > 0 ? '#c2410c' : 'var(--text-primary)' }}>{repairResult.releases.length}</div>
                 </div>
                 <div className="rounded-lg px-3 py-2" style={{ background: repairResult.conflictsAfter > 0 ? 'rgba(220,38,38,0.06)' : 'rgba(21,128,61,0.06)', border: repairResult.conflictsAfter > 0 ? '1px solid rgba(220,38,38,0.2)' : '1px solid rgba(21,128,61,0.2)' }}>
                   <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.conflictsAfter > 0 ? '#dc2626' : '#15803d' }}>{t('mp.repair.conflictsAfter')}</div>
@@ -2021,25 +2027,26 @@ export default function MonatsplanungAssignmentPreview({
 
               {showRepairDetails && (
                 <div className="space-y-4">
-                  {/* Moved blocks */}
-                  {repairResult.movedBlocks.length > 0 && (
+                  {/* The rule, stated where an operator looking for the old
+                      "Verschobene Blöcke" list will look for it. */}
+                  <div className="text-xs rounded-lg px-3 py-2 flex items-start gap-2" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                    <Shield size={12} className="mt-0.5 shrink-0" />
+                    <span>{t('mp.repair.neverMovesBlocks')}</span>
+                  </div>
+
+                  {/* Blocks released from their driver and reported unassigned.
+                      Each also appears in the Unassigned list below with this
+                      same reason, where the operator can resolve it. */}
+                  {repairResult.releases.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold mb-2" style={{ color: '#1d4ed8' }}>{t('mp.repair.movedConflictBlocks')}</div>
+                      <div className="text-xs font-semibold mb-2" style={{ color: '#c2410c' }}>{t('mp.repair.releasedBlocks')}</div>
                       <div className="space-y-1.5">
-                        {repairResult.movedBlocks.map((m, i) => (
-                          <div key={i} className="text-xs rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1" style={{ background: 'rgba(37,99,235,0.04)', border: '1px solid rgba(37,99,235,0.15)', color: '#1e3a8a' }}>
-                            <span className="font-mono font-semibold opacity-60">{m.blockId.slice(0, 8)}</span>
-                            <span className="font-semibold">{m.vehicle}</span>
-                            <span>{m.driverName}</span>
-                            <span className="flex items-center gap-1">
-                              <span className="opacity-70">{t('mp.repair.old')}:</span> {fmtRepairMs(m.oldStartMs)}–{fmtRepairMs(m.oldEndMs)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <ArrowRight size={10} />
-                              <span className="opacity-70">{t('mp.repair.new')}:</span> {fmtRepairMs(m.newStartMs)}–{fmtRepairMs(m.newEndMs)}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }}>{eng(m.reason, m.reasonKey)}</span>
-                            <span className="opacity-60">{t('mp.repair.bufferUsed', { minutes: m.bufferUsedMin })}</span>
+                        {repairResult.releases.map((r, i) => (
+                          <div key={i} className="text-xs rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1" style={{ background: 'rgba(234,88,12,0.04)', border: '1px solid rgba(234,88,12,0.15)', color: '#7c2d12' }}>
+                            <span className="font-mono font-semibold opacity-60">{r.blockId.slice(0, 8)}</span>
+                            <span className="font-semibold">{r.vehicle}</span>
+                            <span>{r.driverName}</span>
+                            <span>{eng(r.reason, r.reasonKey, r.reasonVars)}</span>
                           </div>
                         ))}
                       </div>
