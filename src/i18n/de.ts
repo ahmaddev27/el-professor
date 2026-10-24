@@ -5168,15 +5168,18 @@ export const de = {
 
   // Einstellungen — Feature-Flags (Plan 3.11)
   'admin.settings.tab.flags':   'Feature-Flags',
-  'admin.flags.hint':           'Ein Schalter je Name. Ein Flag, das hier fehlt, ist aus — Entfernen schaltet es also ab. Offene Sitzungen übernehmen eine Änderung bei der nächsten Anmeldung oder spätestens fünf Minuten nachdem das Fenster wieder aktiv wird. Noch liest keine Seite ein Flag.',
-  'admin.flags.none':           'Noch keine Flags.',
+  'admin.flags.hint':           'Ein Schalter je Flag, das diese Programmversion kennt. Ein Flag, das hier aus ist, ist aus — das ist derselbe Zustand, als wäre es nicht gespeichert. Offene Sitzungen übernehmen eine Änderung bei der nächsten Anmeldung oder spätestens fünf Minuten nachdem das Fenster wieder aktiv wird.',
+  'admin.flags.none':           'Diese Programmversion kennt kein Flag.',
   'admin.flags.on':             'An',
   'admin.flags.off':            'Aus',
   'admin.flags.remove':         'Flag entfernen',
-  'admin.flags.newLabel':       'Neues Flag',
-  'admin.flags.add':            'Hinzufügen',
-  'admin.flags.keyRule':        'Kleinbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben; höchstens 60 Zeichen. Ein neues Flag beginnt ausgeschaltet.',
-  'admin.flags.duplicate':      'Dieses Flag gibt es schon.',
+  'admin.flags.unknown':        'Unbekannt',
+  'admin.flags.unknownDesc':    'Diese Programmversion liest dieses Flag nirgends. Der Schalter ändert hier nichts; der gespeicherte Wert wird nur angezeigt.',
+  'admin.flags.unknownNote':    'Ein als „Unbekannt“ markiertes Flag steht in der Datenbank, wird von dieser Programmversion aber nirgends gelesen — etwa aus einer älteren Version oder direkt per SQL eingetragen. Es lässt sich entfernen; neue Flags entstehen ausschließlich durch eine Programmversion, die sie liest.',
+
+  // Die Flags selbst: ein Eintrag je Flag in FLAG_DEFINITIONS (src/lib/featureFlags.ts).
+  'admin.flags.flag.travelEstimator':      'Reisezeit-Prüfung der Fahrtenanalyse',
+  'admin.flags.flag.travelEstimator.desc': 'An: die Fahrtenanalyse löst Adressen zu Punkten auf — zuerst der Adressspeicher der Firma, dann der Geocoder dieses Stacks — und prüft damit Strecke und Dauer einer Fahrt. Aus: es wird nichts angefragt und jede Prüfung bleibt „nicht prüfbar“, wie vor dieser Funktion. Der erste echte Lauf ist zugleich der Abnahmelauf: jede Adresse wird einmal angefragt und dauerhaft gespeichert. Rund ein Drittel der Fahrten bleibt dauerhaft „nicht prüfbar“, weil das Blatt für eines der beiden Enden keine Hausnummer enthält — das ist kein Fehler, sondern der Inhalt des Blattes. Benötigt den Routing-Container, das Geocoder-Gateway und die geocode_cache-Migration; fehlt eines davon, bleibt es bei „nicht prüfbar“.',
 
   // Team
   'admin.team.title':        'Team',
