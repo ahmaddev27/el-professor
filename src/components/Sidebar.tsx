@@ -11,6 +11,7 @@ import BrandLogo from './BrandLogo';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { usePlan, FeatureKey } from '../contexts/PlanContext';
 import { monthlyPlanInNav } from './navVisibility';
+import { moduleEnabledForRoute } from '../lib/companyModules';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -72,7 +73,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
   const { signOut, isSuperAdmin } = useAuth();
   const { settings } = useCompanySettings();
   const { isViewingAsCompany, activeCompany, exitCompany } = useSuperAdmin();
-  const { can } = usePlan();
+  const { can, companyModules } = usePlan();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -98,9 +99,31 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
 
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
-    const allowed = can(item.feature);
+    /*
+      Two gates, as a plain AND — the plan, and the per-company module a
+      platform operator may have switched off (`public.company_modules`,
+      migration 20261025120000). There is no precedence and no override: the
+      toggle may only narrow, so a module the plan forbids stays hidden however
+      the toggle is set, and `plan_features` never becomes advisory. A module
+      with no stored decision is on, and so is every module when the read failed
+      (`src/lib/companyModules.ts` says why fail-open).
 
-    // Hidden items are not shown at all — access is also blocked at the route level
+      The module term applies to a support session too. `can()` answers true for
+      a platform account whatever the plan says — deliberately, so reading the
+      customer's real plan cannot lock support out of a screen — but a switched-
+      off module is a configuration the operator made themselves and can undo in
+      the panel in one click, and a support session that showed a module the
+      customer cannot see would have the operator describing a screen that is
+      not there. The map is the opened company's, because this provider keys on
+      `effectiveCompanyId`.
+    */
+    const allowed = can(item.feature) && moduleEnabledForRoute(companyModules, item.path);
+
+    // Slice 1 hides the link only. The plan half of this condition is also
+    // enforced at the route by `PlanGate`; the module half is not yet — slice 2
+    // adds a `ModuleGate` and a page of its own, so until then a switched-off
+    // module's route is still reachable by address, exactly as `/monatsplan` is
+    // when `navVisibility` hides it.
     if (!allowed) return null;
 
     return (

@@ -1396,7 +1396,25 @@ INSERT INTO _mx_spec VALUES
        first_detected_version, last_detected_version)
      VALUES ({co}, 'trip_analysis', 'missing_end', 'missing_end:mx-new-{s}',
              2026, 10, 'conflict', 'warning', 'high', 'MX zu pruefen', 'mx', 'mx')$q$,
-  $q$severity = severity$q$);
+  $q$severity = severity$q$),
+-- 20261025120000: which sidebar modules a platform operator has switched off
+-- for one company. subscription_coverage's shape — SELECT is the only privilege
+-- a client role holds and there is no write policy at all, so every write cell
+-- below is PP and the only thing this line really measures is the read.
+--
+-- The key is (company_id, module_key) and the fixture carries the SAME key on
+-- both sides, which is what every other per-company-singleton row here does
+-- (company_settings, trip_analysis_settings): so the move needs a mov_pre to
+-- clear the target tenant's row, and the INSERT probe names a different module
+-- so it collides with nothing.
+--
+-- Both statements name a module that `app_private.company_module_keys()` has.
+-- An invented key would be refused by the column's CHECK for the owner too and
+-- the cell would measure the constraint instead of the policy.
+(82, 'company_modules', $q$company_id = {co} AND module_key = 'werkstatt'$q$,
+  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'werkstatt', false)$q$, NULL,
+  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'notes', false)$q$,
+  $q$enabled = enabled$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1564,7 +1582,14 @@ INSERT INTO _mx_move VALUES
 -- pin would make this cell T for the owner too -- which is the one probe in this
 -- file that reaches a WITH CHECK clause at all. The pin would buy nothing and
 -- cost the measurement.
-('conflict_reviews',                     $q$company_id = {other_co}$q$, NULL, 'Y', NULL);
+('conflict_reviews',                     $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20261025120000: the key is (company_id, module_key) and the fixture holds the
+-- same module on both sides, so the target tenant's row is cleared first, the
+-- way company_settings' is. No pin trigger and no write policy, so for the
+-- owner the move is an ordinary UPDATE that succeeds.
+('company_modules',                      $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM company_modules WHERE company_id = {other_co} AND module_key = 'werkstatt'$q$,
+                                         'Y', 'one decision per company and module');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -2259,7 +2284,25 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('geocode_cache',                  'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('geocode_cache',                  'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('geocode_cache',                  'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
-('geocode_cache',                  'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
+('geocode_cache',                  'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+-- 20261025120000: the per-company sidebar modules. subscription_coverage's
+-- cells, with one difference that is the whole point of the line — `super`
+-- reads BOTH companies' rows, because the policy keeps a
+-- platform_can('companies.read') branch, the same capability that reads the
+-- `companies` table a context is opened on. Writing is nobody's: there is no
+-- INSERT, UPDATE or DELETE policy and no grant, so all four write rows are PP
+-- for every principal, the platform owner included — its only writer is
+-- platform_company_set_module, which runs as its owner and never through these
+-- policies (its own line is in the rpc section).
+--
+-- The staff columns are deliberately NOT listed below: both principals are
+-- owners holding companies.read, so the default copy of `super` is already the
+-- answer, and the context has nothing to do with it.
+('company_modules',               'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+('company_modules',               'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('company_modules',               'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('company_modules',               'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('company_modules',               'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -3465,6 +3508,20 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNNNY', NULL),
     ('platform_company_set_plan(company A, premium)',
      $q$SELECT platform_company_set_plan('c0000000-0000-4000-8000-00000000000a', 'premium')::text$q$,
+     'PNNNNNY', NULL),
+    -- 20261025120000: one sidebar module off for one company, on
+    -- companies.lifecycle — no new capability, because a 33rd pair would move
+    -- platform_capability_matrix()'s counts and fail 20261015150000's own
+    -- self-checks 1 and 3. `super` is an owner and holds it; no company
+    -- principal holds any capability. tests/rls/company-modules.sql takes the
+    -- other three staff roles through it (support writes, billing and read_only
+    -- are refused) and walks every refusal the function can answer.
+    --
+    -- The module named here is a TOGGLEABLE one. A locked key would answer
+    -- module_locked for the owner too, so the cell would read N for every
+    -- principal and stop measuring the capability.
+    ('platform_company_set_module(company A, werkstatt off)',
+     $q$SELECT platform_company_set_module('c0000000-0000-4000-8000-00000000000a', 'werkstatt', false)::text$q$,
      'PNNNNNY', NULL),
     ('platform_subscription_assign(company A)',
      $q$SELECT platform_subscription_assign('c0000000-0000-4000-8000-00000000000a', {ref:rpc_plan})::text$q$,
