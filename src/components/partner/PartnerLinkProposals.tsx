@@ -39,6 +39,7 @@ import { useTranslation } from '../../contexts/LanguageContext';
 import { useCompanyScope } from '../../hooks/useCompanyScope';
 import type { Driver } from '../../types/receipt';
 import type { TranslationKey } from '../../i18n';
+import { selectableDrivers } from '../../utils/driverStatus';
 import {
   Alert,
   Badge,
@@ -280,7 +281,7 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
   // Only the drivers an operator could sensibly pick, and the list the page is
   // already showing beside this one.
   const pickable = useMemo(
-    () => drivers.filter(driver => driver.status !== 'inactive'),
+    () => selectableDrivers(drivers),
     [drivers],
   );
 

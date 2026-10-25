@@ -13,6 +13,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { engineText } from '../i18n/engineMessage';
+import { ACTIVE_DRIVER_STATUS, isDeactivatedDriver } from '../utils/driverStatus';
 import {
   Alert,
   Badge,
@@ -3408,7 +3409,8 @@ const StundennachweisPage: React.FC = () => {
       .from('drivers')
       .select('id, name, personalnummer, work_window_start, work_window_end, allowed_weekdays')
       .eq('company_id', companyId)
-      .eq('status', 'active')
+      // A chooser: the driver a NEW Stundennachweis is generated for.
+      .eq('status', ACTIVE_DRIVER_STATUS)
       .order('name')
       .then(({ data }) => { setDrivers((data as DriverOption[]) || []); setLoadingD(false); });
   }, [companyId]);
@@ -3699,17 +3701,36 @@ const StundennachweisPage: React.FC = () => {
     setGeneratingExcel(true);
     try {
       const [{ data: driversData }, { data: savedData }] = await Promise.all([
-        supabase.from('drivers').select('id, name, personalnummer').eq('company_id', companyId).eq('status', 'active').order('name'),
+        supabase.from('drivers').select('id, name, personalnummer, status').eq('company_id', companyId).order('name'),
         supabase.from('saved_stundennachweise').select('*').eq('company_id', companyId).eq('month', fueMonth).eq('year', fueYear),
       ]);
       const savedMap = new Map<string, SavedStundennachweis>();
       for (const s of (savedData || [])) savedMap.set(s.driver_id, s as SavedStundennachweis);
-      const driverSummaries: DriverSummary[] = (driversData || []).map(d => ({
-        driver_id:      d.id,
-        driver_name:    d.name,
-        personalnummer: d.personalnummer ?? null,
-        saved:          savedMap.get(d.id) ?? null,
-      }));
+      // The Fahrerübersicht is a RECORD of one past month, so its predicate is
+      // the month's own drivers, not today's roster: active, plus anyone with a
+      // saved Stundennachweis for exactly this month and year. The read used to
+      // ask the database for active drivers only, which dropped a driver who had
+      // been deactivated since from the overview of a month they worked, while
+      // `saved_stundennachweise` still held their hour record. Filtering here
+      // rather than in the query is what keeps it month-scoped: a former driver
+      // with no saved record for this month still adds no empty row.
+      //
+      // BE EXACT ABOUT WHAT THIS FIXES: `handleGenerateFahreruebersicht` is
+      // referenced nowhere — it, `generatingExcel`, `setFueMonth` and
+      // `setFueYear` are all in the typecheck baseline as unused, so the UI that
+      // once called it is gone and this export cannot currently be reached. It is
+      // dead code inside a live file, the hazard CLAUDE.md records for
+      // `AutoShiftPlanView`. So no operator has produced a wrong sheet from it;
+      // the correction is to the rule, against the day it is rewired, and it is
+      // not evidence that a statutory document went out short a driver.
+      const driverSummaries: DriverSummary[] = (driversData || [])
+        .filter(d => !isDeactivatedDriver(d) || savedMap.has(d.id))
+        .map(d => ({
+          driver_id:      d.id,
+          driver_name:    d.name,
+          personalnummer: d.personalnummer ?? null,
+          saved:          savedMap.get(d.id) ?? null,
+        }));
       exportFahreruebersichtToExcel({
         month:       fueMonth,
         year:        fueYear,

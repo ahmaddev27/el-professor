@@ -20,6 +20,14 @@ export interface CarWithDrivers extends Car {
   drivers: Array<{
     id: string;
     name: string;
+    /**
+     * `drivers.status`. A deactivated driver keeps an assignment they already
+     * hold — hiding the row would make the vehicle read as unassigned, which is
+     * the one state the operator has to see in order to fix it — so the name is
+     * marked instead. Carried here because the read used to ask for
+     * `id, name` only and so could not tell.
+     */
+    status?: string | null;
   }>;
 }
 

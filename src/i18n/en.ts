@@ -6948,7 +6948,8 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fahrer.updateRefused':      'The database refused the change: your role lacks the permission. Nothing was changed.',
-  'fleet.deactivateNotDelete': 'Drivers are deactivated, not deleted: salaries, receipts and the ride history refer to them.',
+  'fleet.deactivateNotDelete': 'Drivers are deactivated, not deleted: salaries, signed Gehaltsquittungen and Stundennachweise refer to them and are kept.',
+  'fleet.deactivateHidesFromLists': 'A deactivated driver no longer appears in any selection list – not in the Monatsplanung and not in the Fahrtenbuch. In months already settled they stay visible, marked inactive.',
   'sa.subs.actionDelete':              'Delete',
   'sa.subs.confirmDelete.description': 'The invoice is deleted for good. The access period it granted is voided; the customer may lose access. Paid invoices cannot be deleted, only cancelled.',
   'sa.subs.deleteRefused.paid':        'A paid invoice cannot be deleted. It is the record of a payment received; cancel it instead.',

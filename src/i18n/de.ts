@@ -7006,7 +7006,8 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fahrer.updateRefused':      'Die Änderung wurde von der Datenbank abgelehnt: Ihrer Rolle fehlt die Berechtigung. Es wurde nichts geändert.',
-  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, Belege und die Fahrtenhistorie verweisen auf sie.',
+  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, unterschriebene Gehaltsquittungen und Stundennachweise verweisen auf sie und bleiben erhalten.',
+  'fleet.deactivateHidesFromLists': 'Ein deaktivierter Fahrer erscheint in keiner Auswahlliste mehr – auch nicht in der Monatsplanung oder im Fahrtenbuch. In bereits abgerechneten Monaten bleibt er sichtbar und ist als inaktiv gekennzeichnet.',
   'sa.subs.actionDelete':              'Löschen',
   'sa.subs.confirmDelete.description': 'Die Rechnung wird endgültig gelöscht. Der durch sie gewährte Zugangszeitraum wird ungültig; der Kunde kann dadurch den Zugang verlieren. Bezahlte Rechnungen lassen sich nicht löschen, nur stornieren.',
   'sa.subs.deleteRefused.paid':        'Eine bezahlte Rechnung kann nicht gelöscht werden. Sie belegt den Zahlungseingang; bitte stattdessen stornieren.',
