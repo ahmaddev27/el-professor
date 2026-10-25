@@ -186,9 +186,14 @@ try {
     }
   }
 
-  // --schema-only means the four system roles and their 16x4 permission matrix
-  // came across as empty tables. Without them current_role_permits() denies
+  // --schema-only means the system roles and their permission matrix came
+  // across as empty tables. Without them current_role_permits() denies
   // everything and every assertion would pass for the wrong reason.
+  //
+  // Three roles, not four: `viewer` is seeded by migration 20261025130000,
+  // which is newer than the fixture epoch and so has already applied by here.
+  // roles-seed.sql deliberately does not repeat it — see its header and
+  // section 9 of company-roles.sql.
   step('seeding the system roles and permission matrix…');
   psqlFile(path.join(TESTS, 'roles-seed.sql'));
 

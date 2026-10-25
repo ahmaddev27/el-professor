@@ -62,6 +62,18 @@
   7. The shape and the grants, including the two helpers the trigger reads as
      the caller — the defect this file's first run found.
 
+  8. The `viewer` system role itself (section 9), which `20261025130000` seeds
+     and which no migration created before it: the row in every column that
+     file sets, its sixteen permission rows in both directions against
+     `role_page_keys()`, and its idempotency *executed* — the migration's two
+     statements run again here and must touch zero rows.
+
+     That section is a measurement only because `roles-seed.sql` no longer
+     seeds the row. It used to, with production's id, so an assertion about it
+     would have passed with the migration reverted — which is how the drift
+     survived from April to October. Sections 2a, 2b, 2d and 8a lean on the
+     role existing and therefore now lean on that migration too.
+
   ## What it does not claim
 
   Tenancy in general (matrix.sql and tenant-state.sql own that), the support
@@ -1096,5 +1108,203 @@ BEGIN
   got := _cr_reason(_cr_try('00000000-0000-0000-0000-000000000000', $sql$SELECT count(*)::text FROM role_permissions$sql$));
   PERFORM _cr_ok(format('8d: …nor any permission row (%s)', got), got IN ('0', 'ERR 42501 -'));
 END $section8$;
+
+-- ─── 9. the `viewer` system role, which version control once did not create ──
+--
+-- 20261025130000 seeds it. Until that file, `viewer` existed on production and
+-- staging — hand-created through the Rollen screen on 26.04.2026, `is_system`,
+-- with five production accounts on it — and in no migration, so a database
+-- rebuilt from the chain had three system roles where the live ones have four.
+--
+-- ## What makes this section a measurement and not a tautology
+--
+-- `roles-seed.sql` used to insert the row itself, with production's id and the
+-- description `Betrachter`. Every assertion below would have passed against it
+-- with the migration reverted, which is precisely how the drift survived this
+-- long. That seed's `viewer` row is gone, and `viewer` is excluded by name from
+-- its permission insert, so inside this kit the migration is the only thing
+-- that can produce either. Revert the migration and 9a fails first.
+--
+-- Sections 2a, 2b, 2d and 8a already lean on the role existing; they lean on
+-- the migration now too.
+
+DO $section9$
+DECLARE
+  co_a    constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_id    constant uuid := 'fdb2798f-08a7-481c-8bbb-67e15540926e';
+  v_role  record;
+  v_rows  bigint;
+  v_keys  constant int := cardinality(public.role_page_keys());
+BEGIN
+  -- 9a. The row, in every column the migration sets.
+  PERFORM _cr_is('9a: exactly one system role is named viewer',
+    (SELECT count(*)::text FROM roles WHERE company_id IS NULL AND lower(btrim(name)) = 'viewer'),
+    '1');
+
+  SELECT * INTO v_role
+    FROM roles WHERE company_id IS NULL AND lower(btrim(name)) = 'viewer';
+
+  PERFORM _cr_ok('9a: …it is a system row (roles_update and roles_delete both require is_system = false, so a company could neither edit nor delete it)',
+    v_role.is_system IS NOT DISTINCT FROM true);
+  PERFORM _cr_ok('9a: …and belongs to no company',
+    v_role.company_id IS NULL);
+
+  /*
+    The name byte for byte, not merely `lower(btrim(...))`-equal.
+
+    `initialRoleId()` in src/lib/companyRoles.ts picks the fallback role with
+    `role.is_system && role.name === 'viewer'` — an exact comparison, where the
+    database's own uniqueness is on the folded expression. So `Viewer` or
+    ` viewer ` would satisfy every index and every trigger in this file and the
+    browser's fallback would still miss it, silently landing an account with no
+    resolvable role on whatever `systemRoles()` sorts first, which is `admin`.
+  */
+  PERFORM _cr_is('9a: …and its name is exactly "viewer", which is what initialRoleId() compares against',
+    v_role.name, 'viewer');
+
+  /*
+    The id by literal, because tests/rls/oauth-signup.sql names this value
+    twice (lines 246 and 1152) and roles-seed.sql's remaining three rows were
+    captured from production with their ids. A different id here does not break
+    the product, but it does leave oauth-signup.sql asserting about a row that
+    no longer exists, which is a test passing for the wrong reason.
+  */
+  PERFORM _cr_is('9a: …and its id is the one oauth-signup.sql names by literal',
+    v_role.id::text, v_id::text);
+
+  -- Production's and staging's description, both measured 25.10.2026. The word
+  -- is an accident of a role created in a form; matching it is what makes a
+  -- rebuilt database equal to the live ones in every column the migration can
+  -- set. Changing it is the owner's call and means changing the migration, its
+  -- self-check and this line together.
+  PERFORM _cr_is('9a: …and its description is the literal production holds',
+    v_role.description, 'test');
+
+  -- 9b. Read everywhere, write nowhere — one row per page key, both directions
+  -- against role_page_keys() so neither a key without a row nor a row without a
+  -- key can hide.
+  PERFORM _cr_is('9b: the viewer role holds one permission row per page key',
+    (SELECT count(*)::text FROM role_permissions WHERE role_id = v_role.id),
+    v_keys::text);
+
+  PERFORM _cr_is('9b: …no page key is missing a row',
+    (SELECT coalesce(string_agg(k, ', ' ORDER BY k), 'none')
+       FROM unnest(public.role_page_keys()) AS k
+      WHERE NOT EXISTS (SELECT 1 FROM role_permissions rp
+                         WHERE rp.role_id = v_role.id AND rp.page_key = k)),
+    'none');
+
+  PERFORM _cr_is('9b: …and no row names a key role_page_keys() does not list',
+    (SELECT coalesce(string_agg(rp.page_key, ', ' ORDER BY rp.page_key), 'none')
+       FROM role_permissions rp
+      WHERE rp.role_id = v_role.id
+        AND NOT (rp.page_key = ANY (public.role_page_keys()))),
+    'none');
+
+  -- IS NOT DISTINCT FROM, not `=`: both columns are nullable, and a NULL under
+  -- `=` falls through as neither true nor false, so a row with can_edit NULL
+  -- would count as compliant.
+  PERFORM _cr_is('9b: …every row is (can_view, can_edit) = (true, false)',
+    (SELECT count(*)::text FROM role_permissions
+      WHERE role_id = v_role.id
+        AND NOT (can_view IS NOT DISTINCT FROM true AND can_edit IS NOT DISTINCT FROM false)),
+    '0');
+
+  /*
+    9c. Idempotency, executed rather than argued.
+
+    These are the migration's two statements verbatim. Against a database that
+    already holds the row — which is every database that has applied the
+    migration, and which is what production and staging looked like before it —
+    both must touch zero rows. That is the proof the file is a no-op there.
+
+    The first statement matters most. `enforce_company_role_shape` is a BEFORE
+    INSERT trigger, and a BEFORE trigger runs ahead of the conflict arbiter, so
+    an exception it raised would not be absorbed by ON CONFLICT DO NOTHING — the
+    release would fail. The WHERE NOT EXISTS is what makes the statement produce
+    no row at all, so the trigger never fires. Zero rows here is that property,
+    measured.
+  */
+  INSERT INTO public.roles (id, name, description, is_system, company_id)
+  SELECT 'fdb2798f-08a7-481c-8bbb-67e15540926e'::uuid, 'viewer', 'test', true, NULL
+   WHERE NOT EXISTS (
+     SELECT 1 FROM public.roles
+      WHERE company_id IS NULL
+        AND lower(btrim(name)) = 'viewer'
+   )
+  ON CONFLICT DO NOTHING;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _cr_is('9c: re-running the migration''s role insert writes nothing (its guard yields no row, so the BEFORE INSERT trigger never fires)',
+    'rows ' || v_rows, 'rows 0');
+
+  INSERT INTO public.role_permissions (role_id, page_key, can_view, can_edit)
+  SELECT r.id, k, true, false
+    FROM public.roles r
+   CROSS JOIN unnest(public.role_page_keys()) AS k
+   WHERE r.company_id IS NULL
+     AND lower(btrim(r.name)) = 'viewer'
+  ON CONFLICT (role_id, page_key) DO NOTHING;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _cr_is('9c: …and so does re-running its permission insert',
+    'rows ' || v_rows, 'rows 0');
+
+  /*
+    9d. The conflict target the migration could NOT have used.
+
+    Slice B replaced `roles_name_key` with two partial unique indexes, and
+    neither is a constraint — so `ON CONFLICT ON CONSTRAINT roles_system_name_key`
+    raises 42704 and could never have applied, which is why the migration uses a
+    bare ON CONFLICT with the guard above. Asserted here so the next person
+    reaching for the constraint form is told why it is not there.
+  */
+  PERFORM _cr_ok('9d: roles_system_name_key is a partial unique index, not a constraint',
+    EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+             WHERE i.indrelid = 'public.roles'::regclass
+               AND c.relname = 'roles_system_name_key'
+               AND i.indisunique AND i.indpred IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM pg_constraint
+                     WHERE conrelid = 'public.roles'::regclass
+                       AND conname = 'roles_system_name_key'));
+
+  -- …and the refusal itself, executed rather than inferred from the catalogue.
+  -- The line above establishes the shape; this one runs the statement the audit
+  -- proposed and shows PostgreSQL rejecting it, so "it could never have
+  -- applied" is a measurement and not a reading of the documentation.
+  PERFORM _cr_is('9d: …so ON CONFLICT ON CONSTRAINT roles_system_name_key is itself refused (42704)',
+    _cr_owner_try($sql$
+      INSERT INTO public.roles (name, description, is_system, company_id)
+      VALUES ('viewer', 'test', true, NULL)
+      ON CONFLICT ON CONSTRAINT roles_system_name_key DO NOTHING
+    $sql$),
+    '42704 -');
+
+  -- The inference form does resolve that index, so the statement above fails
+  -- for the reason claimed (no such constraint) and not because the clause is
+  -- unusable in general. The migration still does not use it: it supplies an
+  -- explicit id, so the primary key is a second way to conflict that an
+  -- inference clause naming one index would let raise.
+  PERFORM _cr_is('9d: …while the inference form on the same index is accepted, so 42704 is about the constraint and not the clause',
+    _cr_owner_try($sql$
+      INSERT INTO public.roles (name, description, is_system, company_id)
+      VALUES ('viewer', 'test', true, NULL)
+      ON CONFLICT (lower(btrim(name))) WHERE company_id IS NULL DO NOTHING
+    $sql$),
+    'accepted');
+
+  -- 9e. Seeding a system role reserves its name, so no company may take
+  -- `viewer` any more. Section 2b makes this claim for every system role the
+  -- table happens to hold; pinning the name here is what states that the
+  -- reservation is a consequence of this migration.
+  PERFORM _cr_is('9e: a company role named viewer is refused now that a system role carries the name',
+    _cr_owner_try(format('INSERT INTO roles (name, company_id, is_system) VALUES (%L, %L, false)', 'viewer', co_a)),
+    'P0001 role_name_reserved');
+
+  -- 9f. And the shape the five production accounts are in works: a profile of
+  -- any company may point at a system role. enforce_user_profile_role_scope
+  -- admits `company_id IS NULL` roles for everyone, and seed.sql's viewer of A
+  -- is such a profile, so the role is reachable and not merely present.
+  PERFORM _cr_ok('9f: at least one seeded profile holds the viewer role, so the row is reachable and not only present',
+    EXISTS (SELECT 1 FROM user_profiles WHERE role_id = v_role.id));
+END $section9$;
 
 ROLLBACK;

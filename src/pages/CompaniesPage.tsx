@@ -28,6 +28,7 @@ import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import CompanyModulesCard from '../components/admin/CompanyModulesCard';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildCompaniesExport } from '../lib/panelExports';
 import { useExportChrome } from '../hooks/useExportChrome';
@@ -988,6 +989,13 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
           </div>
         </div>
       </div>
+
+      {/* Modules (per-company sidebar modules, slice 1). Its own component and
+          on the design system's tokens rather than this file's inline style
+          objects — the reason is in that file's header. `canLifecycle` is the
+          capability its RPC asks, so the checkboxes are drawn read-only for a
+          role that would be refused; the database refuses regardless. */}
+      <CompanyModulesCard companyId={company.id} canEdit={canLifecycle} />
 
       {/* Users table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
