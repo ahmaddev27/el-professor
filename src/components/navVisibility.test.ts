@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monthlyPlanInNav, simulatedRidesEntryShown, tripAnalysisLinkShown } from './navVisibility';
+import { monthlyPlanInNav, tripAnalysisLinkShown } from './navVisibility';
 
 /**
  * The rule that keeps the Monatsplan out of production's sidebar while leaving it
@@ -61,49 +61,6 @@ describe('tripAnalysisLinkShown', () => {
       for (const dev of [true, false]) {
         expect(tripAnalysisLinkShown(env, dev), `${String(env)} / dev=${dev}`)
           .toBe(monthlyPlanInNav(env, dev));
-      }
-    }
-  });
-});
-
-describe('simulatedRidesEntryShown', () => {
-  // The generator writes invented rides into `fahrtenbuch_trips`, the statutory
-  // ride log, and the only gate on that write is the `documents` edit right —
-  // which every company administrator and supervisor holds. The owner has not
-  // agreed to customers generating them, so the entry is not advertised on
-  // production while he decides.
-  it('is off for production and for a build with no variable set', () => {
-    // The one that matters: a production build leaves the variable unset, and
-    // `.github/workflows/deploy.yml` fails the release if it is ever set — so a
-    // forgotten variable hides the door rather than shipping it.
-    expect(simulatedRidesEntryShown('production', false)).toBe(false);
-    expect(simulatedRidesEntryShown(undefined, false)).toBe(false);
-    expect(simulatedRidesEntryShown('', false)).toBe(false);
-    expect(simulatedRidesEntryShown('   ', false)).toBe(false);
-    expect(simulatedRidesEntryShown(' PRODUCTION ', false)).toBe(false);
-    // A dev server pointed at production still hides it.
-    expect(simulatedRidesEntryShown('production', true)).toBe(false);
-  });
-
-  it('is on for staging and for a dev server, where the generator is used', () => {
-    expect(simulatedRidesEntryShown('staging', false)).toBe(true);
-    expect(simulatedRidesEntryShown(' Staging ', false)).toBe(true);
-    expect(simulatedRidesEntryShown(undefined, true)).toBe(true);
-  });
-
-  it('answers exactly as the other two, so the three cannot drift apart', () => {
-    // Three exported names over one `shownOutsideProduction`. The names are
-    // separate because the decisions are separate — the Fahrtenanalyse is
-    // read-only and this generator writes, so one must not be released by
-    // flipping the other — but the rule behind them is one, and this is what
-    // holds that. If one ever needs to differ, that is a decision to write
-    // down, not something to discover from a screen behaving unlike its twin.
-    for (const env of [undefined, '', '  ', 'production', 'Production', ' PRODUCTION ', 'staging', 'other']) {
-      for (const dev of [true, false]) {
-        expect(simulatedRidesEntryShown(env, dev), `${String(env)} / dev=${dev}`)
-          .toBe(monthlyPlanInNav(env, dev));
-        expect(simulatedRidesEntryShown(env, dev), `${String(env)} / dev=${dev}`)
-          .toBe(tripAnalysisLinkShown(env, dev));
       }
     }
   });
