@@ -502,6 +502,15 @@ services:
   # month must never land on that. The two cannot meet: this service is on our
   # network only, and ridy's `osrm` is a name on ridy's.
   #
+  # NOT THE CHOSEN PATH SINCE 25.10.2026, and kept rather than deleted. The
+  # owner decided that day to use ridy's OSRM through the osrm-gateway service
+  # below, because it serves all of Germany where this one can only ever serve
+  # one Land (Germany does not fit this host's memory) and the two agree to
+  # 0.2 %. This service remains the way back: one profile instead of the other,
+  # and the function's address does not change. The two profiles are mutually
+  # exclusive and deploy.sh refuses a release that names both - with both on,
+  # the name `osrm` on this network would mean two containers.
+  #
   # OFF UNLESS ASKED FOR. The `osrm` profile keeps it out of every release that
   # does not turn it on, so merging the change that added it starts nothing and
   # pulls nothing. Turning it on is two steps and a person does both:
@@ -586,6 +595,89 @@ services:
     deploy:
       resources:
         limits: { memory: '${OSRM_MEM_LIMIT:-12G}', pids: 64 }
+
+  # ── Routing, shared: the gateway to ridy's OSRM ───────────────────────────
+  # The owner decided on 25.10.2026 not to build a routing dataset of our own:
+  # use the OSRM ridy already runs on this host (ridy-osrm-1, THEIRS) and
+  # connect to it, but without stopping it, bringing it down or putting pressure
+  # on their server. Measured that day, one request each for the same route
+  # (7.0845,51.1652;6.7735,51.2277): theirs 30066.4 m / 2050.9 s off
+  # germany-latest.osrm, ours 30131 m / 2025.3 s off nordrhein-westfalen-261020.
+  # 0.2 % apart, and theirs covers all of Germany where ours can only ever cover
+  # one Land, because Germany does not fit this host's memory.
+  #
+  # Nothing of theirs is touched: no restart, no change, no limit added. We
+  # reach it by its own name on ridy_default, never by the port it publishes on
+  # the host (it publishes none) and never over the internet, and only through
+  # this container, which carries every restraint - the allow-list of one path,
+  # the rebuilt query, 40 requests a second with a queue of 40 and 12 in flight,
+  # 3 s timeouts, and no request logged. All of it, and why each number is what
+  # it is, is in deploy/osrm-gateway.conf.
+  #
+  # IT TAKES THE NETWORK ALIAS `osrm` on this stack's network, so
+  # OSRM_ORIGIN (http://osrm:5000, a constant in
+  # supabase/functions/_shared/travel-route-core.ts) keeps resolving and no
+  # code changed. Two consequences, and both are guarded:
+  #
+  #   1. The `osrm` profile and this one are MUTUALLY EXCLUSIVE. Our own osrm
+  #      service answers to the name `osrm` as its service name, this one by
+  #      alias, and with both on the one name means two containers: the function
+  #      would reach ours or theirs at random, per request, with nothing saying
+  #      so. deploy.sh refuses a release that names both.
+  #   2. This container must NOT dial the name `osrm` either, because the name
+  #      now matches on both of its networks. It dials ridy-osrm-1.
+  #
+  # Why a container and not `functions` joining ridy_default: the same reason as
+  # the geocoder gateway below, measured on 22.10.2026. ridy_default holds both
+  # stacks' Kongs under the name `kong`, so a functions container there could be
+  # answered by the other environment's gateway, and every ridy container would
+  # reach the container that holds the service-role key.
+  #
+  # Same safety argument as the geocoder gateway: it holds no credential, no
+  # database connection and no volume but its own config, read-only, and it
+  # publishes no host port. tests/deploy/osrm-gateway.test.ts fails the build if
+  # it gains a variable, a secret, a host port or a second volume.
+  #
+  # OFF UNLESS ASKED FOR, like `osrm` and `geocoder`: COMPOSE_PROFILES names
+  # osrm-shared (staging: staging,osrm-shared,geocoder). The nginx image is the
+  # one `web` already pulls. The config is a single-file bind mount read once at
+  # start, so its hash is a label here, like kong.yml's: an edited file
+  # recreates exactly this container.
+  osrm-gateway:
+    image: nginx:1.27-alpine
+    profiles: [osrm-shared]
+    restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
+    read_only: true
+    tmpfs:
+      - /run:size=1m
+      - /tmp:size=4m
+      - /var/cache/nginx:size=8m
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      el-professor.config-sha: ${OSRM_GATEWAY_CONFIG_SHA:-unset}
+    volumes:
+      - ./osrm-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    # 5000, because that is the port in OSRM_ORIGIN and the port our own
+    # routing container serves: the function must not know which is behind it.
+    expose:
+      - '5000'
+    networks:
+      default:
+        aliases: [osrm]
+      ridy: {}
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:5000/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { memory: 64M, pids: 64 }
 
   # ── Geocoding: the gateway to ridy's Nominatim ────────────────────────────
   # The address locator of the Fahrtenanalyse needs a geocoder, and the owner
