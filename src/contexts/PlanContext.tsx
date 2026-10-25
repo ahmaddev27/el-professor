@@ -6,6 +6,7 @@ import { useAppConfig } from './AppConfigContext';
 import { calcPricing, PriceBreakdown, BillingCycle } from '../utils/pricing';
 import { minPlanForFeature } from '../utils/planFeatures';
 import { buildPlanState, effectivePlanOf, planAllows } from '../utils/planState';
+import { CompanyModules, NO_MODULE_DECISIONS, parseCompanyModules } from '../lib/companyModules';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,19 @@ interface PlanContextType {
   effectivePlan: Plan;
   /** Calculated pricing breakdown based on stored plan + carLimit + billingCycle */
   pricing: PriceBreakdown;
+  /**
+   * The modules a platform operator has switched off for this company
+   * (`public.company_modules`). A module with no row is ON, and so is every
+   * module when the read failed — see `src/lib/companyModules.ts` for why
+   * fail-open rather than `plan_features`' fail-closed.
+   *
+   * It is read here, beside the company row, and **not** through
+   * `AppConfigContext`: that context keys on the signed-in ACCOUNT, so inside a
+   * support session it would serve the staff account's modules instead of the
+   * customer's. This provider already keys on `effectiveCompanyId`, which is
+   * the company whose data the screen must query.
+   */
+  companyModules: CompanyModules;
   refresh: () => Promise<void>;
 }
 
@@ -87,10 +101,15 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // the values it was seeded with, so a screen never prices from nothing.
   const { priceBook, planFeatures } = useAppConfig();
   const [planState, setPlanState] = useState<PlanState>(buildPlanState(null));
+  const [companyModules, setCompanyModules] = useState<CompanyModules>(NO_MODULE_DECISIONS);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!companyId) {
+      // No company to subtract a module from. A platform account outside a
+      // context lands here and keeps every module, which is what makes the
+      // panel's own screens unaffected by a customer's configuration.
+      setCompanyModules(NO_MODULE_DECISIONS);
       if (isSuperAdmin) {
         setPlanState({
           plan: 'premium',
@@ -111,15 +130,28 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // the two contexts would spend that window calling a paying customer
     // unsubscribed. The rule itself is not copied: `subscriptionIsActive()` is
     // the one place it is written, and AuthContext asks the same function.
-    const { data } = await supabase
-      .from('companies')
-      // One literal, not a concatenation: supabase-js parses the column list at
-      // the type level, and a `+` leaves it with `GenericStringError`.
-      .select('plan, status, subscription_status, subscription_expires_at, subscription_car_limit, billing_cycle')
-      .eq('id', companyId)
-      .maybeSingle();
+    // In parallel, because the sidebar needs both answers before it can draw a
+    // single entry and two round trips in series would show it twice.
+    const [company, modules] = await Promise.all([
+      supabase
+        .from('companies')
+        // One literal, not a concatenation: supabase-js parses the column list at
+        // the type level, and a `+` leaves it with `GenericStringError`.
+        .select('plan, status, subscription_status, subscription_expires_at, subscription_car_limit, billing_cycle')
+        .eq('id', companyId)
+        .maybeSingle(),
+      supabase
+        .from('company_modules')
+        .select('module_key, enabled')
+        .eq('company_id', companyId),
+    ]);
 
-    setPlanState(buildPlanState(data));
+    setPlanState(buildPlanState(company.data));
+    // Fail-open on a refused or failed read: an empty map is every module on.
+    // A restrictive placeholder would blank the sidebar on every page load, and
+    // the browser is not the boundary — slice 3 puts the write wall in
+    // `current_role_permits()`.
+    setCompanyModules(modules.error ? NO_MODULE_DECISIONS : parseCompanyModules(modules.data));
     setLoading(false);
   }, [companyId, isSuperAdmin]);
 
@@ -138,7 +170,7 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const pricing = calcPricing(priceBook, planState.plan, planState.carLimit, planState.billingCycle);
 
   return (
-    <PlanContext.Provider value={{ planState, loading, can, minPlanFor, effectivePlan, pricing, refresh: load }}>
+    <PlanContext.Provider value={{ planState, loading, can, minPlanFor, effectivePlan, pricing, companyModules, refresh: load }}>
       {children}
     </PlanContext.Provider>
   );
