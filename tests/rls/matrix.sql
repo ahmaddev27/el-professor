@@ -1252,7 +1252,151 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'manager_summary', 'mx-{s}@firma.example')$q$, NULL,
   $q$INSERT INTO notification_recipients (company_id, notification_type, email)
      VALUES ({co}, 'manager_summary', 'mx-new@firma.example')$q$,
-  $q$email = email$q$);
+  $q$email = email$q$),
+-- Who handed the cash back (20261019110000): the business shape with the income
+-- page on every write -- cash_transactions' cells, with anon holding no
+-- privilege at all. The key is (company, year, month, week, driver name), so
+-- the fixture's name carries the side and the insert probe uses another week;
+-- moving A's row into B then collides with nothing of B's.
+(73, 'abrechnung_handovers', $q$id = {id}$q$,
+  $q$INSERT INTO abrechnung_handovers (id, company_id, year, month, week_number, driver_name, amount)
+     VALUES ({id}, {co}, 2099, 1, 1, 'MX Fahrer {s}', 10.00)$q$, NULL,
+  $q$INSERT INTO abrechnung_handovers (company_id, year, month, week_number, driver_name, amount)
+     VALUES ({co}, 2099, 1, 2, 'MX Fahrer neu', 5.00)$q$,
+  $q$amount = amount$q$),
+-- The forward plan per vehicle and operating day (20261022140000): the monthly
+-- plan's shape with the same Dokumente page on every write, so a viewer and an
+-- editor read it and write none of it. Each probe row is a *draft*, because a
+-- confirmed plan is frozen and its U and D cells would be T for everybody, the
+-- owner included. The shift's moments follow from the plan's stored hour: hour 4
+-- and positions 24 to 36 are 10:00 to 13:00, and 5 and 6 October 2026 are a
+-- Monday and a Tuesday, which is what day_type 0 and 1 say.
+(74, 'vehicle_day_plans', $q$id = {id}$q$,
+  $q$INSERT INTO vehicle_day_plans (id, company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version)
+     VALUES ({id}, {co}, 2026, 10, 4, 15, 'mx')$q$, NULL,
+  $q$INSERT INTO vehicle_day_plans (company_id, year, month, operating_day_start_hour, slot_minutes, algorithm_version)
+     VALUES ({co}, 2026, 11, 4, 15, 'mx')$q$,
+  $q$summary = summary$q$),
+(75, 'vehicle_day_shifts', $q$id = {id}$q$,
+  $q$INSERT INTO vehicle_day_shifts (id, company_id, plan_id, operating_date, vehicle, shift_index, start_position, end_position,
+                                     starts_local, ends_local, minutes, day_type, is_holiday, expected_revenue_cents,
+                                     expected_revenue_per_hour_cents, confidence, evidence_days)
+     VALUES ({id}, {co}, {ref:vehicle_day_plans}, '2026-10-05', 'MX-CAR', 0, 24, 36,
+             '2026-10-05 10:00', '2026-10-05 13:00', 180, 0, false, 100, 33, 'low', 1)$q$, NULL,
+  $q$INSERT INTO vehicle_day_shifts (company_id, plan_id, operating_date, vehicle, shift_index, start_position, end_position,
+                                     starts_local, ends_local, minutes, day_type, is_holiday, expected_revenue_cents,
+                                     expected_revenue_per_hour_cents, confidence, evidence_days)
+     VALUES ({co}, {ref:vehicle_day_plans}, '2026-10-06', 'MX-CAR', 0, 24, 36,
+             '2026-10-06 10:00', '2026-10-06 13:00', 180, 1, false, 100, 33, 'low', 1)$q$,
+  $q$minutes = minutes$q$),
+-- The Fahrtenanalyse's address cache (20261023100000): the other two
+-- Fahrtenanalyse tables' shape, an administrator writes and every member reads,
+-- anon holding no privilege at all. The key is unique per company and the
+-- fixture's carries the side, so A's row moved into B collides with nothing of B's;
+-- the insert probe uses a key of its own.
+(76, 'geocode_cache', $q$id = {id}$q$,
+  $q$INSERT INTO geocode_cache (id, company_id, address_key, lat, lon, geocoder_version)
+     VALUES ({id}, {co}, 'mx-{s} 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$, NULL,
+  $q$INSERT INTO geocode_cache (company_id, address_key, lat, lon, geocoder_version)
+     VALUES ({co}, 'mx-new 1, 42651 solingen', 51.1, 7.1, 'nominatim')$q$,
+  $q$lat = lat$q$),
+-- 20261023130000: a hand-entered window in which one car may not be on the
+-- road. The car is tied to the company by a COMPOSITE foreign key to
+-- cars (id, company_id), so the fixture's car must be the side's own; the M row
+-- below is refused by the guard's pin before that key is reached.
+(78, 'vehicle_unavailability', $q$id = {id}$q$,
+  $q$INSERT INTO vehicle_unavailability (id, company_id, car_id, starts_local, ends_local, reason)
+     VALUES ({id}, {co}, {ref:cars}, '2026-10-05 06:00', '2026-10-07 18:00', 'workshop')$q$, NULL,
+  $q$INSERT INTO vehicle_unavailability (company_id, car_id, starts_local, ends_local, reason)
+     VALUES ({co}, {ref:cars}, '2026-11-02 06:00', '2026-11-04 18:00', 'accident')$q$,
+  $q$reason = reason$q$),
+-- The month-end driver assignment (20261023120000): the vehicle day plan's shape
+-- with the same Dokumente page on every write, and the second half of the same
+-- /monatsplan workflow. Three things about these two rows are deliberate.
+--
+-- EVERY ROW CARRIES early_reason, and that is what makes the fixture independent
+-- of the day it runs on. The month-end gate refuses an assignment for a month
+-- that has not ended unless a reason stands in it; with one, the insert succeeds
+-- whether the month is over (the guard then clears the reason, because nothing
+-- was early about it) or not (the guard records it and stamps the days it
+-- measured). October 2026 is ord 74's month and so has to be this one's, and
+-- both answers are a stored row.
+--
+-- The INSERT probe names the SECOND driver of the side ({ref:drivers2}, which
+-- ord 7's fixture creates), because driver_month_assignments_one_live_per_driver
+-- admits one live assignment per driver and month: the fixture driver's row is
+-- already there, so inserting another for HIM would be refused for the owner too
+-- and the cell would measure the index instead of the policy.
+--
+-- Each probe row is a DRAFT, because a committed or released assignment is
+-- frozen and its U and D cells would be T for everybody, the owner included.
+(77, 'driver_month_assignments', $q$id = {id}$q$,
+  $q$INSERT INTO driver_month_assignments (id, company_id, year, month, driver_id, plan_id, early_reason)
+     VALUES ({id}, {co}, 2026, 10, {ref:drivers}, {ref:vehicle_day_plans}, 'MX Matrix')$q$, NULL,
+  $q$INSERT INTO driver_month_assignments (company_id, year, month, driver_id, plan_id, early_reason)
+     VALUES ({co}, 2026, 10, {ref:drivers2}, {ref:vehicle_day_plans}, 'MX Matrix')$q$,
+  $q$assigned_minutes = assigned_minutes$q$),
+-- 79 and not 78: origin/feat/vehicle-availability already takes 76 (geocode_cache,
+-- from the branch it is built on) and 78 (vehicle_unavailability), measured on
+-- 23.10.2026 against every remote branch. ord is ORDER BY only, but a duplicate
+-- scrambles the probe order, so the free numbers are taken rather than the
+-- contiguous ones.
+-- One live claim per window (driver_month_assignment_shifts_one_claim_per_shift),
+-- so the INSERT probe needs the fixture's own claim out of the way first: ins_pre
+-- deletes it as the owner and the rollback puts it back, as it does for
+-- company_settings. minutes must be the window's own 180, which the child guard
+-- re-reads from ord 75's row.
+(79, 'driver_month_assignment_shifts', $q$id = {id}$q$,
+  $q$INSERT INTO driver_month_assignment_shifts (id, company_id, assignment_id, shift_id, minutes)
+     VALUES ({id}, {co}, {ref:driver_month_assignments}, {ref:vehicle_day_shifts}, 180)$q$,
+  $q$DELETE FROM driver_month_assignment_shifts WHERE company_id = {co}$q$,
+  $q$INSERT INTO driver_month_assignment_shifts (company_id, assignment_id, shift_id, minutes)
+     VALUES ({co}, {ref:driver_month_assignments}, {ref:vehicle_day_shifts}, 180)$q$,
+  $q$minutes = minutes$q$),
+-- 20261023210000: the Fahrtenbuch import's remembered column mapping. One row
+-- per company and header shape, so the two probes carry DIFFERENT shape keys
+-- (both sides may hold both: the key is unique per company, not globally) and
+-- no ins_pre is needed. The UPDATE probe sets source_shape_key to itself: the
+-- guard pins it with IS DISTINCT FROM, so a no-op assignment reaches the
+-- policy's USING without the guard speaking, and the M row below is refused by
+-- that same pin before any WITH CHECK. Every field_map value is one of
+-- source_headers, which the guard requires; the four fields are the ones the
+-- required-key CHECK demands.
+(80, 'import_column_mappings', $q$id = {id}$q$,
+  $q$INSERT INTO import_column_mappings (id, company_id, source_shape_key, source_headers, field_map)
+     VALUES ({id}, {co}, repeat('a', 64),
+             ARRAY['Datum der Fahrt','Uhrzeit des Fahrtbeginns','Uhrzeit des Fahrtendes','Fahrername'],
+             '{"trip_date":"Datum der Fahrt","start_time":"Uhrzeit des Fahrtbeginns","end_time":"Uhrzeit des Fahrtendes","driver_name":"Fahrername"}')$q$, NULL,
+  $q$INSERT INTO import_column_mappings (company_id, source_shape_key, source_headers, field_map)
+     VALUES ({co}, repeat('b', 64),
+             ARRAY['Fahrttag','Beginn','Ende','Fahrer'],
+             '{"trip_date":"Fahrttag","start_time":"Beginn","end_time":"Ende","driver_name":"Fahrer"}')$q$,
+  $q$source_shape_key = source_shape_key$q$),
+-- 20261023200000: a detected conflict and the record of who reviewed it. The
+-- Dokumente page on every write, like the two /monatsplan tables above, because
+-- the rides it is about are fahrtenbuch_trips.
+--
+-- The INSERT probe names a DIFFERENT finding from the fixture's. The idempotency
+-- key is (company_id, detector, period_year, period_month, finding_key) and both
+-- statements carry the side's own company, so inserting the fixture's key again
+-- would be refused by the unique index for the owner too and the cell would
+-- measure the index instead of the policy.
+--
+-- `severity = severity` and not a review column: the guard refuses a status that
+-- returns to 'open' and pins the identity, so a U probe that touched either
+-- would print T for every principal and stop measuring the USING clause.
+(81, 'conflict_reviews', $q$id = {id}$q$,
+  $q$INSERT INTO conflict_reviews (id, company_id, detector, finding_type, finding_key,
+       period_year, period_month, detector_status, severity, confidence, explanation,
+       first_detected_version, last_detected_version)
+     VALUES ({id}, {co}, 'trip_analysis', 'driver_overlap', 'driver_overlap:mx-{s}1+mx-{s}2',
+             2026, 10, 'conflict', 'error', 'high', 'MX zu pruefen', 'mx', 'mx')$q$, NULL,
+  $q$INSERT INTO conflict_reviews (company_id, detector, finding_type, finding_key,
+       period_year, period_month, detector_status, severity, confidence, explanation,
+       first_detected_version, last_detected_version)
+     VALUES ({co}, 'trip_analysis', 'missing_end', 'missing_end:mx-new-{s}',
+             2026, 10, 'conflict', 'warning', 'high', 'MX zu pruefen', 'mx', 'mx')$q$,
+  $q$severity = severity$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1280,7 +1424,17 @@ INSERT INTO _mx_move VALUES
 ('user_profiles',                        $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('user_sessions',                        $q$user_id = {other_admin}$q$, NULL, 'Y', 'through its user'),
 ('drivers',                              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
-('cars',                                 $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20261023130000 added a mov_pre here, and no expectation cell of `cars` moved.
+-- vehicle_unavailability ties a window to its car by a COMPOSITE foreign key to
+-- cars (id, company_id) with no ON UPDATE action, so a car that holds a window
+-- cannot change company at all — the owner included, which made this probe
+-- report "the owner must answer Y" and stop measuring the cars policy. Deleting
+-- the window first restores the probe's premise, as the company_settings line
+-- above deletes the row a unique constraint would collide with; the
+-- subtransaction puts it back. For every real principal this cell was already a
+-- refusal, and no path in the product moves a car between companies.
+('cars',                                 $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM vehicle_unavailability WHERE car_id = {id}$q$, 'Y', NULL),
 ('car_driver_assignments',               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('cash_transactions',                    $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('income',                               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
@@ -1319,6 +1473,10 @@ INSERT INTO _mx_move VALUES
 ('uber_pull_runs',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 -- The side's own address differs, so A's row moved into B collides with nothing.
 ('notification_recipients',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- The side's own driver name differs, so A's row moved into B collides with nothing.
+('abrechnung_handovers',                 $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- The side's own key differs, so A's row moved into B collides with nothing.
+('geocode_cache',                        $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
 ('partner_vehicle_links',                $q$company_id = {other_co}$q$,
@@ -1378,7 +1536,35 @@ INSERT INTO _mx_move VALUES
 ('monthly_plans',                        $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_guard refuses it even for the owner'),
 ('monthly_plan_drivers',                 $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_driver_guard refuses it even for the owner'),
 ('monthly_plan_blocks',                  $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner'),
-('monthly_plan_block_trips',             $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner');
+('monthly_plan_block_trips',             $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner'),
+-- 20261022140000: a plan stays with its company, month and the hour that built
+-- it, and a shift stays with its plan, so both guards refuse the move before
+-- any WITH CHECK is reached, for the owner too.
+('vehicle_day_plans',                    $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_plan_guard refuses it even for the owner'),
+('vehicle_day_shifts',                   $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_day_shift_guard refuses it even for the owner'),
+-- 20261023130000: a window belongs to one car of one company for its life, so
+-- vehicle_unavailability_guard pins both before any WITH CHECK is reached --
+-- the reason pin_billing_company_id exists on the billing tables.
+('vehicle_unavailability',                $q$company_id = {other_co}$q$, NULL, 'T', 'vehicle_unavailability_guard pins the company even for the owner'),
+-- 20261023120000: an assignment stays with its company, month, driver, plan and
+-- the early-opening record it was written with, and a claimed window stays with
+-- its assignment, so both guards refuse the move before any WITH CHECK is
+-- reached, for the owner too.
+('driver_month_assignments',             $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_guard refuses it even for the owner'),
+('driver_month_assignment_shifts',       $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_assignment_shift_guard refuses it even for the owner'),
+-- 20261023210000: a remembered column mapping belongs to one company and one
+-- header shape for its life, so import_column_mapping_guard pins both before
+-- any WITH CHECK is reached -- without the pin an UPDATE could point a mapping
+-- at another shape and the next import of THAT shape would open with columns
+-- nobody chose for it.
+('import_column_mappings',               $q$company_id = {other_co}$q$, NULL, 'T', 'import_column_mapping_guard pins the company even for the owner'),
+-- 20261023200000: company_id is deliberately NOT pinned by
+-- app_private.conflict_review_guard, which pins the finding's identity instead.
+-- The four tenant policies already refuse the move for every principal, and a
+-- pin would make this cell T for the owner too -- which is the one probe in this
+-- file that reaches a WITH CHECK clause at all. The pin would buy nothing and
+-- cost the measurement.
+('conflict_reviews',                     $q$company_id = {other_co}$q$, NULL, 'Y', NULL);
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1705,6 +1891,73 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('monthly_plans',                      'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_plans',                      'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_plans',                      'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261022140000: the monthly plan's cells, because the shape is the monthly
+-- plan's. Insert is YR for the supervisor and the administrator (the other
+-- company's row is the policy's), RR for the viewer and the editor (no
+-- can_edit on the Dokumente page), and the guard answers every move with T.
+('vehicle_day_plans',                  'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_plans',                  'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('vehicle_day_plans',                  'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_plans',                  'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_plans',                  'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('vehicle_day_shifts',                 'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_shifts',                 'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('vehicle_day_shifts',                 'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_shifts',                 'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_day_shifts',                 'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023130000: page 'cars', so unlike the two plan tables above the EDITOR
+-- writes these as well -- an editor holds can_edit on that page and holds none
+-- on 'documents'. anon holds no GRANT at all. The M cells are T, not R: the
+-- guard's company pin raises P0001 before the WITH CHECK is reached.
+('vehicle_unavailability',             'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_unavailability',             'I', 'PP', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('vehicle_unavailability',             'U', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_unavailability',             'D', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('vehicle_unavailability',             'M', 'PP', '..', 'T.', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023120000: the vehicle day plan's cells, line for line, because the shape
+-- is the same one -- the Dokumente page on every write, no role term on SELECT,
+-- and a guard that refuses the move before any WITH CHECK is reached. The gate
+-- does not move a cell: the probes carry early_reason, so the INSERT is a stored
+-- row whether or not October 2026 has ended, and the refusals that do decide a
+-- cell are the policy's (R) and the guard's (T), which print differently.
+('driver_month_assignments',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_assignments',           'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('driver_month_assignments',           'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_assignments',           'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_assignments',           'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('driver_month_assignment_shifts',     'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_assignment_shifts',     'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('driver_month_assignment_shifts',     'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_assignment_shifts',     'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_assignment_shifts',     'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023210000: the same cells again, and for the same reason -- the memory of
+-- the Fahrtenbuch import's column mapping carries the Fahrtenbuch's own page,
+-- `documents` (20260923130000), on every write and no role term on SELECT, and
+-- its guard refuses the move before any WITH CHECK is reached. So a viewer and
+-- an editor read a remembered mapping and store none, which is the right they
+-- already have over the import itself.
+('import_column_mappings',            'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('import_column_mappings',            'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('import_column_mappings',            'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('import_column_mappings',            'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('import_column_mappings',            'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+-- 20261023200000: the Dokumente page on every write, so S, I, U and M read like
+-- the two /monatsplan tables above. Two cells differ from them, each for its own
+-- reason.
+--
+--   D is 'PP' for everybody, the administrator included: there is no DELETE
+--   policy and no DELETE GRANT either. A reviewed finding is a record, and the
+--   partner submissions' shape -- no policy, the privilege still held -- removes
+--   nothing while PostgREST answers 200. Withholding the privilege makes it loud.
+--
+--   M is the policy's refusal (R) and not a guard's (T), because the guard pins
+--   the finding's identity and leaves company_id to the four policies. See the
+--   _mx_move line.
+('conflict_reviews',                   'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('conflict_reviews',                   'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('conflict_reviews',                   'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('conflict_reviews',                   'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('conflict_reviews',                   'M', 'PP', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -1992,7 +2245,21 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('notification_recipients',        'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('notification_recipients',        'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('notification_recipients',        'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
-('notification_recipients',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
+('notification_recipients',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+-- 20261019110000: cash_transactions' cells (the income page gates every write),
+-- anon holding no privilege at all.
+('abrechnung_handovers',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_handovers',           'I', 'PP', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('abrechnung_handovers',           'U', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_handovers',           'D', 'PP', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_handovers',           'M', 'PP', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20261023100000. trip_analysis_settings' cells exactly: an administrator writes,
+-- every member reads, anon's column is a missing GRANT.
+('geocode_cache',                  'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('geocode_cache',                  'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('geocode_cache',                  'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('geocode_cache',                  'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('geocode_cache',                  'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -2070,7 +2337,23 @@ UPDATE _mx_expected x
      -- 20261015100000: the same shape and the same two triggers
      'uber_pull_schedules', 'uber_pull_runs',
      -- 20261015140000: the same shape and the same two triggers
-     'notification_recipients');
+     'notification_recipients',
+     -- 20261019110000: the same shape and the same two triggers
+     'abrechnung_handovers',
+     -- 20261022140000: the same shape and the same two triggers
+     'vehicle_day_plans', 'vehicle_day_shifts',
+     -- 20261023100000: the same shape and the same two triggers
+     'geocode_cache',
+     -- 20261023130000: the same shape and the same two triggers
+     'vehicle_unavailability',
+     -- 20261023120000: the same shape and the same two triggers
+     'driver_month_assignments', 'driver_month_assignment_shifts',
+     -- 20261023210000: the same shape and the same two triggers
+     'import_column_mappings',
+     -- 20261023200000: the same shape and the same two triggers. Its write cells
+     -- are PP for D only, which the WHERE above skips, so what this adds there is
+     -- nothing and what it adds for S, I, U and M is the rule.
+     'conflict_reviews');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
@@ -3195,6 +3478,9 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_invoice_cancel(invoice of A)',
      $q$SELECT platform_invoice_cancel({ref:subscription_invoices})::text$q$,
      'PNNNNNY', NULL),
+    ('platform_invoice_delete(unpaid invoice of A)',
+     $q$SELECT platform_invoice_delete({ref:subscription_invoices})::text$q$,
+     'PNNNNNY', NULL),
     ('platform_discount_code_save(create)',
      $q$SELECT platform_discount_code_save(NULL, '{"code":"MX-RPC","discount_type":"percentage","discount_value":5,"usage_mode":"once","audience_type":"multiple"}'::jsonb)::text$q$,
      'PNNNNNY', NULL),
@@ -3338,6 +3624,43 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'NYYYYYY', NULL),
     ('monthly_plan_confirm(execute grant only)',
      $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+
+    -- The vehicle day plan's two RPCs (20261022140000), probed the same way and for
+    -- the same reason: both CHANGE STATE (a save takes the month's advisory lock and
+    -- discards the month's draft), and this harness runs one probe per principal
+    -- against one fixture. Their authorization is probed per principal, each call
+    -- in its own transaction, in tests/rls/vehicle-day-plans.sql: the viewer and
+    -- the editor print not_authorized, a suspended company and a platform owner
+    -- with no context print no_company, anon prints a missing GRANT, a view context
+    -- prints not_authorized and a support session saves.
+    ('vehicle_day_plan_save(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.vehicle_day_plan_save(jsonb)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+    ('vehicle_day_plan_confirm(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.vehicle_day_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+
+    -- The month-end driver assignment's three RPCs (20261023120000), probed the
+    -- same way and for the same reason: all three CHANGE STATE (the save takes
+    -- the month's advisory lock and discards the month's draft, the commit and
+    -- the release move a status), and this harness runs one probe per principal
+    -- against one fixture. Their authorization is probed per principal, each call
+    -- in its own transaction, in tests/rls/driver-month-assignments.sql, where
+    -- the viewer and the editor print not_authorized, a suspended company and a
+    -- platform owner with no context print no_company, anon prints a missing
+    -- GRANT, a view context prints not_authorized and a support session saves --
+    -- and where the month-end gate is probed on a month that ended long ago and
+    -- one that will not end this century, so the file means the same thing in
+    -- every year it runs.
+    ('driver_month_assignment_save(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.driver_month_assignment_save(jsonb)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+    ('driver_month_assignment_commit(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.driver_month_assignment_commit(uuid)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+    ('driver_month_assignment_release(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.driver_month_assignment_release(uuid,text,text)', 'EXECUTE')::text$q$,
      'NYYYYYY', NULL),
 
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
@@ -3883,6 +4206,14 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- probed per principal in tests/rls/monthly-plan.sql.
     ('monthly_plan_save(execute grant only)',                        'YY'),
     ('monthly_plan_confirm(execute grant only)',                     'YY'),
+    -- 20261022140000: the same two grants, read as boolean answers like the monthly plan's.
+    ('vehicle_day_plan_save(execute grant only)',                    'YY'),
+    ('vehicle_day_plan_confirm(execute grant only)',                 'YY'),
+    -- 20261023120000: the same three grants, read as boolean answers like the
+    -- vehicle day plan's and the monthly plan's.
+    ('driver_month_assignment_save(execute grant only)',             'YY'),
+    ('driver_month_assignment_commit(execute grant only)',           'YY'),
+    ('driver_month_assignment_release(execute grant only)',          'YY'),
     -- The partner and receipt prerequisites. Measured, and two of the three
     -- corrected a guess of mine: a support session DRAWS a Belegnummer and
     -- PASSES the OCR gate, because current_role_permits() has a platform branch
@@ -3950,6 +4281,11 @@ BEGIN
       ('company_role_delete(company role of A)'),
       ('monthly_plan_save(execute grant only)'),
       ('monthly_plan_confirm(execute grant only)'),
+      ('vehicle_day_plan_save(execute grant only)'),
+      ('vehicle_day_plan_confirm(execute grant only)'),
+      ('driver_month_assignment_save(execute grant only)'),
+      ('driver_month_assignment_commit(execute grant only)'),
+      ('driver_month_assignment_release(execute grant only)'),
       ('partner_submission_claim_driver(confirmed link of A)'),
       ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
       ('partner_driver_link_confirm(pending link of A)'),

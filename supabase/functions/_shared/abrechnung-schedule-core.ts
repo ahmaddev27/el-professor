@@ -33,10 +33,18 @@ import type { AbrechnungFigures } from './abrechnung-mail.ts';
 /** How long after its moment an occurrence may still be sent. */
 export const GRACE_MINUTES = 12 * 60;
 
-/** The reminder's lead, in minutes before the driver mail. The column's CHECK is the same range. */
+/**
+ * The reminder's lead, in minutes before the driver mail. The column's CHECK is the same range.
+ *
+ * The ceiling is 24 hours and not more, because of `dueReminder`'s offsets: it
+ * looks at today and tomorrow as the driver mail's day, which finds a reminder
+ * moment on the mail's day or the one before it. A lead over 1440 can put the
+ * moment two days earlier, which that loop cannot see, so it would never fire.
+ * Raise this only together with that loop and a test that proves it.
+ */
 export const REMINDER_LEAD_DEFAULT_MINUTES = 60;
 export const REMINDER_LEAD_MIN_MINUTES = 15;
-export const REMINDER_LEAD_MAX_MINUTES = 720;
+export const REMINDER_LEAD_MAX_MINUTES = 1440;
 
 /**
  * How long after its own moment a reminder may still go out. A reminder that is
@@ -233,6 +241,78 @@ export function dueReminder(
     return { due: { mainDay, weekMonday: addDays(mondayOfMain, -7) } };
   }
   return { due: null, reason: armedOut ? 'before_armed' : 'not_in_window' };
+}
+
+/** A Berlin wall-clock moment, split for display. */
+export interface Moment {
+  /** `YYYY-MM-DD`, the moment's own Berlin day. */
+  day: string;
+  /** `HH:MM` */
+  time: string;
+  /** 0 = Sunday. */
+  weekday: number;
+}
+
+export interface NextMoments {
+  /** The next driver mail that will actually go out. */
+  send: Moment;
+  /** The next reminder that will actually go out; null when reminders are off. */
+  reminder: Moment | null;
+}
+
+function momentOf(wallMinutes: number): Moment {
+  const dayIndex = Math.floor(wallMinutes / 1440);
+  const minutes = wallMinutes - dayIndex * 1440;
+  const day = formatDay(dayIndex * 86_400_000);
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const mm = String(minutes % 60).padStart(2, '0');
+  return { day, time: `${hh}:${mm}`, weekday: new Date(dayIndex * 86_400_000).getUTCDay() };
+}
+
+/**
+ * The next moments this schedule really produces, for the settings card, or null
+ * when the schedule is invalid. It applies the same rules as `dueOccurrence` and
+ * `dueReminder`, including rule 3: a moment at or before `armed_at` never fires,
+ * so it is skipped and the answer is the week after. The reminder is reported
+ * only when it and the driver mail are both on, as `planReminder` requires; a
+ * reminder still inside its window counts as next, because it will go out.
+ */
+export function nextMoments(
+  schedule: Pick<ScheduleCompany, 'weekday' | 'send_time' | 'armed_at' | 'reminder_lead_minutes'
+    | 'reminder_enabled' | 'driver_mail_enabled'>,
+  now: Date,
+): NextMoments | null {
+  const sendMinutes = parseSendTime(schedule.send_time);
+  const armed = Date.parse(schedule.armed_at);
+  const lead = schedule.reminder_lead_minutes;
+  if (sendMinutes === null || !Number.isInteger(schedule.weekday)
+      || schedule.weekday < 0 || schedule.weekday > 6 || Number.isNaN(armed)) return null;
+
+  const today = berlinParts(now);
+  const nowWall = wall(today.day, today.minutes);
+  const armedParts = berlinParts(new Date(armed));
+  const armedWall = wall(armedParts.day, armedParts.minutes);
+  const wantReminder = schedule.reminder_enabled && schedule.driver_mail_enabled
+    && Number.isInteger(lead) && lead >= REMINDER_LEAD_MIN_MINUTES && lead <= REMINDER_LEAD_MAX_MINUTES;
+
+  // From yesterday: a reminder before a mail just after midnight belongs to the day before it.
+  const first = addDays(today.day, -1);
+  const firstDow = (today.dow + 6) % 7;
+  let mainDay = addDays(first, (schedule.weekday - firstDow + 7) % 7);
+
+  let send: Moment | null = null;
+  let reminder: Moment | null = null;
+  for (let week = 0; week < 4 && (send === null || (wantReminder && reminder === null)); week++) {
+    const mainWall = wall(mainDay, sendMinutes);
+    if (send === null && mainWall > nowWall && mainWall > armedWall) send = momentOf(mainWall);
+    if (wantReminder && reminder === null) {
+      const reminderWall = mainWall - lead;
+      const windowEnd = Math.min(reminderWall + REMINDER_WINDOW_MINUTES, mainWall);
+      if (windowEnd > nowWall && reminderWall > armedWall) reminder = momentOf(reminderWall);
+    }
+    mainDay = addDays(mainDay, 7);
+  }
+  return send === null ? null : { send, reminder };
 }
 
 const MONTH_NAMES = [

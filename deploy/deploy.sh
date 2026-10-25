@@ -267,6 +267,63 @@ sys.stdout.write(text)
 
 # <<< google-signin checks
 
+# ── Compose profile and routing-data checks ──────────────────────────────────
+# Everything between the markers is also sourced on its own by
+# tests/deploy/osrm.test.ts, so it may use only its arguments and docker.
+# >>> compose profile checks
+
+# What COMPOSE_PROFILES may name. `staging` is the mail catcher and belongs to
+# staging alone: on production it would swallow real mail, and staging without
+# it has nowhere to send. `osrm` is the routing container (deploy/osrm-build-data.sh
+# builds what it serves) and `geocoder` the gateway to ridy's Nominatim
+# (deploy/geocoder-gateway.conf); either stack may opt in to either. Anything else is a typo or
+# a profile this release has never heard of, and a typo that reads as "none" is
+# how a service silently does not start.
+# $1 = production|staging, $2 = the list as .env writes it. Prints nothing when
+# it is acceptable, otherwise one sentence.
+compose_profiles_problem() {
+  local environment="$1" list="$2" name has_staging=no
+  local -a names=()
+  case "$list" in ,*|*,|*,,*) echo "COMPOSE_PROFILES '$list' has an empty name in it"; return ;; esac
+  IFS=, read -ra names <<<"$list"
+  for name in ${names[@]+"${names[@]}"}; do
+    case "$name" in
+      staging) has_staging=yes ;;
+      osrm|geocoder) ;;
+      *) echo "COMPOSE_PROFILES names '$name', which this release does not know (it knows staging, osrm and geocoder)"; return ;;
+    esac
+  done
+  if [ "$environment" = staging ] && [ "$has_staging" != yes ]; then
+    echo "staging needs COMPOSE_PROFILES to name staging, or the mailpit service it sends to never starts (found '$list')"
+  elif [ "$environment" != staging ] && [ "$has_staging" = yes ]; then
+    echo "production must not enable the staging profile (found COMPOSE_PROFILES=$list)"
+  fi
+}
+
+# <<< compose profile checks
+
+# >>> osrm data checks
+
+# Whether the routing container has a finished build to serve, made by the
+# image this release runs. $1 = the osrm image, $2 = the volume. A release cannot
+# make this build (a long job and a great deal of memory on a host that
+# carries another live product), so when the profile is on and the volume holds
+# none, the release is refused before it changes anything. ready.json is the
+# last thing the build script writes, read through the link the service reads,
+# and it names the image that wrote the build: the data format belongs to the
+# OSRM version, so moving the image's pin without building again would start a
+# container that cannot read its map. Prints nothing when all of it is right.
+osrm_data_problem() {
+  docker volume inspect "$2" > /dev/null 2>&1 \
+    || { echo "the volume $2 does not exist"; return; }
+  docker run --rm --network none -v "$2":/data:ro --entrypoint test "$1" -f /data/current/ready.json < /dev/null > /dev/null 2>&1 \
+    || { echo "the volume $2 holds no finished build (no /data/current/ready.json)"; return; }
+  docker run --rm --network none -v "$2":/data:ro --entrypoint grep "$1" -qF "\"image\":\"$1\"" /data/current/ready.json < /dev/null > /dev/null 2>&1 \
+    || echo "the build in $2 was made by another OSRM image than the one this release runs ($1)"
+}
+
+# <<< osrm data checks
+
 # ── Guards ───────────────────────────────────────────────────────────────────
 
 step "guard: $ENVIRONMENT"
@@ -305,7 +362,6 @@ if [ "$ENVIRONMENT" = staging ]; then
     grep -qE "^blocked-recipients: '@example" mailpit-relay.yml \
       || fail "staging relays all mail but deploy/mailpit-relay.yml does not block example.com; rerun deploy/set-staging-mail-relay.sh"
   fi
-  [ "$PROFILES" = staging ] || fail "staging needs COMPOSE_PROFILES=staging, or the mailpit service it sends to never starts"
   # Fail closed on the mailbox login. If this file is missing, Docker creates an
   # empty *directory* at the bind-mount path and Mailpit may start with no UI
   # authentication — publishing live reset links for real accounts. Every line
@@ -315,8 +371,10 @@ if [ "$ENVIRONMENT" = staging ]; then
     || fail "deploy/mailpit-ui-auth is missing or malformed; set a login with deploy/set-mailpit-password.sh"
 else
   [ "$SMTP_HOST" != mailpit ] || fail "production SMTP_HOST is mailpit; production mail would be silently swallowed"
-  [ -z "$PROFILES" ] || fail "production must not enable compose profiles (found COMPOSE_PROFILES=$PROFILES)"
 fi
+
+profiles_problem="$(compose_profiles_problem "$ENVIRONMENT" "$PROFILES")"
+[ -z "$profiles_problem" ] || fail "$profiles_problem"
 
 # One-time codes are stored as HMAC-SHA256(OTP_PEPPER, "<challenge>:<code>").
 # Without the pepper the functions cannot issue a code, and nobody could sign
@@ -382,6 +440,20 @@ fi
 
 docker compose config -q || fail "docker compose config is invalid"
 
+# The routing container serves a build that nobody can make during a release, so
+# when the osrm profile is on the release does not start without one. The service
+# only exists in the rendered config while COMPOSE_PROFILES names it.
+osrm_image="$(docker compose config --format json < /dev/null | python3 -c '
+import json, sys
+print(((json.load(sys.stdin).get("services") or {}).get("osrm") or {}).get("image", ""))
+')" || fail "could not render docker-compose.yml to look for the osrm service"
+if [ -n "$osrm_image" ]; then
+  osrm_problem="$(osrm_data_problem "$osrm_image" "${PROJECT_NAME}_osrm-data")"
+  [ -z "$osrm_problem" ] \
+    || fail "the osrm profile is on but $osrm_problem. Build it first with deploy/osrm-build-data.sh (a long job for Germany, and not something a release should wait for; again after any change of the image). Nothing has been changed."
+  echo "  osrm data present in ${PROJECT_NAME}_osrm-data"
+fi
+
 # The sign-in settings as compose renders them, before anything starts: Google
 # follows the switch, signup and autoconfirm are the literals the auth
 # entrypoint starts from, every other way to create or attach an account is
@@ -438,7 +510,26 @@ echo "  deploy/kong.yml parses in $kong_image with this release's KONG_PLUGINS"
 echo "  project $PROJECT_NAME in $ROOT${MANIFEST:+, release $(basename "$RELEASE_DIR")}"
 
 dc() { docker compose "$@"; }
-psql_db() { dc exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 -q "$@"; }
+
+# ── The export service image ─────────────────────────────────────────────────
+# Every other service pulls an upstream image; this one is built here, from the
+# release archive, and a release whose image cannot be built is refused before
+# the database or the gateway is touched. Skipped only when this release's
+# compose file does not declare the service at all: --activate can bring back
+# an earlier release that predates it, and compose then removes the orphan.
+EXPORT_DECLARED=no
+declared_services="$(dc config --services < /dev/null)" || fail "docker compose could not list its services"
+if grep -qx export-service <<<"$declared_services"; then EXPORT_DECLARED=yes; fi
+if [ "$EXPORT_DECLARED" = yes ]; then
+  step "export service image"
+  [ -f "$HERE/export-service/Dockerfile" ] \
+    || fail "deploy/export-service is missing on this host. The release wrapper (deploy/ci-release.sh, installed by hand as /usr/local/sbin/el-professor-release) predates the export service and has to be reinstalled before this release can be built. Nothing has been changed."
+  dc build export-service < /dev/null \
+    || fail "the export service image could not be built (see the build output above). It needs the host to reach Docker Hub and PyPI. Nothing has been changed; the running stack is as it was."
+  echo "  export-service image built"
+fi
+
+psql_db(){ dc exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 -q "$@"; }
 
 # ── Migrations ───────────────────────────────────────────────────────────────
 
@@ -524,7 +615,24 @@ step "release"
 # service definition, and compose recreates exactly the containers affected.
 KONG_CONFIG_SHA="$(sha256sum kong.yml | cut -c1-16)"
 NGINX_CONFIG_SHA="$(sha256sum nginx-spa.conf | cut -c1-16)"
-export KONG_CONFIG_SHA NGINX_CONFIG_SHA
+# >>> geocoder config hash
+# The geocoder gateway's config reached the host only from the release that
+# introduced it, so a rollback onto an older one leaves none - and a rollback
+# keeps THIS deploy.sh, which would then die on a missing file with the
+# gateway switched off and nothing depending on it. It is therefore hashed
+# when present and refused only when the profile actually names it. That
+# refusal is the real guard: a gateway started against a config this release
+# never shipped is a proxy whose rules nobody has read.
+if [ -f geocoder-gateway.conf ]; then
+  GEOCODER_CONFIG_SHA="$(sha256sum geocoder-gateway.conf | cut -c1-16)"
+else
+  case ",$PROFILES," in
+    *,geocoder,*) fail "COMPOSE_PROFILES names geocoder but deploy/geocoder-gateway.conf is not in this release" ;;
+  esac
+  GEOCODER_CONFIG_SHA=absent
+fi
+# <<< geocoder config hash
+export KONG_CONFIG_SHA NGINX_CONFIG_SHA GEOCODER_CONFIG_SHA
 
 # The routes GoTrue would create an account on once its signup is open. Only
 # Kong's request-termination plugin answers them with this message: the
@@ -802,6 +910,71 @@ else
     *)        fn_next="Kong was not reloaded: no answer here was a 502, 503 or 504, so the gateway's DNS cache is not what is wrong. If nothing answered at all, look at Caddy and Kong before the functions service." ;;
   esac
   [ -z "$fn_problem" ] || fail "the edge functions do not answer through $PUBLIC_URL: $fn_problem. $fn_context $fn_next"
+fi
+
+# ── The export service, end to end ───────────────────────────────────────────
+# Same trap as the edge functions above, same remedy: Kong resolves
+# `export-service` once and keeps that address until the record expires, and a
+# release that recreates the container can hand its address to another one, so
+# the first export after every release would be a 502.
+#
+# The probe sends the ANON key as a bearer token to POST /export/v1/workbook.
+# That proves three things in one request: Kong reaches the container, the
+# service reached GoTrue to ask who the caller is, and it REFUSED a token that
+# is valid for the stack but belongs to no user. Only its own 401 answer, with
+# the code `unauthorized` in the body, counts; a status alone cannot tell the
+# service from a gateway that dislikes the request.
+# >>> export service health checks
+
+export_probe_is_stale_upstream() {
+  case "$1" in 502|503|504) return 0 ;; *) return 1 ;; esac
+}
+
+export_probe_problem() {
+  local status="$1" body="$2"
+  case "$status" in
+    401)
+      case "$body" in
+        *'"code":"unauthorized"'*) ;;
+        *) echo "HTTP 401, but not the export service's own unauthorized answer" ;;
+      esac ;;
+    502|503|504) echo "HTTP $status from the gateway or the service, Kong did not reach a working export service" ;;
+    404) echo "HTTP 404, Kong has no /export/v1/ route" ;;
+    000|'') echo "no answer at all" ;;
+    *) echo "HTTP $status, not the export service's own refusal of the anon key" ;;
+  esac
+}
+# <<< export service health checks
+
+if [ "$EXPORT_DECLARED" = yes ]; then
+  export_anon_key="$(env_value .env ANON_KEY)"
+  [ -n "$export_anon_key" ] || fail "ANON_KEY is missing from .env, so the export service cannot be probed"
+  export_nl=$'\n'
+  export_problem="no answer at all"
+  export_reload=""
+  export_pause=0
+  export_deadline=$(( SECONDS + 120 ))
+  while :; do
+    export_answer="$(curl -s --max-time 20 -X POST "$PUBLIC_URL/export/v1/workbook" \
+      -H "Authorization: Bearer $export_anon_key" -H 'Content-Type: application/json' \
+      -d '{}' -w '\n%{http_code}')" || true
+    export_status="${export_answer##*"$export_nl"}"
+    export_problem="$(export_probe_problem "$export_status" "${export_answer%"$export_nl"*}")"
+    if [ -z "$export_problem" ]; then break; fi
+    if [ "$SECONDS" -ge "$export_deadline" ]; then break; fi
+    if [ -z "$export_reload" ] && export_probe_is_stale_upstream "$export_status"; then
+      if dc exec -T kong kong reload < /dev/null > /dev/null 2>&1; then export_reload=reloaded; else export_reload=refused; fi
+      echo "  kong reload after $export_problem: $export_reload"
+    fi
+    export_pause=$(( export_pause < 10 ? export_pause + 2 : 10 ))
+    sleep "$export_pause"
+  done
+  unset export_anon_key
+
+  export_served="refused the anon key itself"
+  echo "  $PUBLIC_URL/export/v1/workbook -> ${export_problem:-$export_served}${export_reload:+ (kong reload: $export_reload)}"
+  [ -z "$export_problem" ] \
+    || fail "the export service does not answer through $PUBLIC_URL: $export_problem. The bundle is live and every other service answered, so this is the export service alone: 'docker compose logs export-service' says whether it started, and 'docker compose exec kong kong reload' clears a stale address."
 fi
 
 if [ -n "$MANIFEST" ]; then

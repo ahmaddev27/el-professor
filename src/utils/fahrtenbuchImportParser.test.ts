@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ACTUAL_END_TOKENS, ACTUAL_START_TOKENS } from './planningQualityChecks';
@@ -23,8 +24,10 @@ import {
   normalise,
   normaliseDriverName,
   normalisePlate,
+  durationMinutes,
   parseDate,
   parseTime,
+  rideDurationMinutes,
   sha256HexOfBytes,
   sha256HexOfText,
   sourceRowKeyMaterial,
@@ -207,8 +210,31 @@ describe('absolute times', () => {
       expect(row.start_at).toBe('2026-03-29T00:50:00.000Z');
       expect(row.end_at).toBe('2026-03-29T01:10:00.000Z');
       expect(Date.parse(row.end_at as string) - Date.parse(row.start_at as string)).toBe(20 * 60 * 1000);
-      // duration_minutes keeps its old rule (HH:MM arithmetic); start_at/end_at are the real length.
-      expect(row.duration_minutes).toBe(80);
+      // `duration_minutes` is the ride, not the clock face. The HH:MM pair says
+      // 03:10 − 01:50 = 80; the hour 02:00–03:00 did not happen, so the ride
+      // lasted 20 minutes. This assertion read 80 before the derivation moved
+      // onto the instants.
+      expect(row.duration_minutes).toBe(20);
+      // The stored HH:MM columns are untouched: they are what the file said.
+      expect(row.start_time).toBe('01:50');
+      expect(row.end_time).toBe('03:10');
+    });
+
+    it('reproduces the one production row this corrects, to the second', () => {
+      // Production row 0ba35175-1c75-4ad0-884a-36e65dfb30b1 (read-only, 23.10.2026):
+      // vehicle SG-YA14, assigned driver Mhmoud Zedya, trip_date 2026-03-29,
+      // start_at 00:42:40Z, end_at 01:01:46Z, duration_minutes 79 stored
+      // against 19.10 minutes elapsed. Both wall times fall inside 00:00–04:00
+      // on a Sunday. The stored row is NOT changed by this fix — the column is
+      // immutable by trigger — and this test is a statement about what the
+      // importer computes from the same input from now on.
+      const { row } = buildOne({ date: '2026-03-29', start: '2026-03-29 01:42:40.000', end: '2026-03-29 03:01:46.000' });
+      expect(row.start_at).toBe('2026-03-29T00:42:40.000Z');
+      expect(row.end_at).toBe('2026-03-29T01:01:46.000Z');
+      expect(row.start_time).toBe('01:42');
+      expect(row.end_time).toBe('03:01');
+      expect(durationMinutes('01:42', '03:01')).toBe(79);   // what was stored
+      expect(row.duration_minutes).toBe(19);                // what is computed now
     });
   });
 
@@ -231,6 +257,18 @@ describe('absolute times', () => {
       const t = deriveTripTimes({ startCell: '02:30', endCell: '02:50', tripDate: '2026-10-25', startTime: '02:30', endTime: '02:50' });
       expect(t.timeSource).toBe('ambiguous');
       expect(t.startAt).toBeNull();
+    });
+
+    it('counts the repeated hour once for each time it happened', () => {
+      // The mirror of the March case, and the one the wall clock under-states:
+      // 01:30 is still CEST and 03:30 already CET, so the ride spans three
+      // hours while the clock face shows two. Staging holds one real row of
+      // this shape, stored 60 minutes short (measured 23.10.2026).
+      const { row } = buildOne({ date: '2026-10-25', start: '2026-10-25 01:30:00.000', end: '2026-10-25 03:30:00.000' });
+      expect(row.start_at).toBe('2026-10-24T23:30:00.000Z');
+      expect(row.end_at).toBe('2026-10-25T02:30:00.000Z');
+      expect(durationMinutes('01:30', '03:30')).toBe(120);  // the clock face
+      expect(row.duration_minutes).toBe(180);               // the ride
     });
   });
 
@@ -321,6 +359,80 @@ describe('statuses', () => {
     const { built } = buildTripRows(context([uberRow({})], { statusCol: '' }));
     expect(built[0].row.trip_status).toBe('unknown');
     expect(built[0].row.source_status).toBeNull();
+  });
+});
+
+describe('duration_minutes is the ride, measured from the instants', () => {
+  it('agrees with the old HH:MM rule on every ride length of an ordinary day', () => {
+    // This is the safety claim behind correcting the writer and leaving the
+    // stored rows alone: off a DST transition the new figure is not merely
+    // close to the old one, it is the same number. Each instant is truncated
+    // to its own minute before subtracting, which is exactly what reading the
+    // HH:MM pair did — the seconds were never part of the old figure, so they
+    // must not round it now.
+    const hhmm = (m: number) =>
+      `${String(Math.floor((m % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    let compared = 0;
+    for (let startMin = 0; startMin < 24 * 60; startMin += 7) {
+      for (const lengthMin of [1, 14, 59, 60, 137, 480, 1439]) {
+        const startTime = hhmm(startMin);
+        const endTime = hhmm(startMin + lengthMin);
+        const t = deriveTripTimes({
+          startCell: startTime, endCell: endTime,
+          tripDate: '2026-08-12', startTime, endTime,   // an ordinary Wednesday
+        });
+        expect(t.startAt).not.toBeNull();
+        expect(rideDurationMinutes(t.startAt, t.endAt, startTime, endTime))
+          .toBe(durationMinutes(startTime, endTime));
+        compared += 1;
+      }
+    }
+    expect(compared).toBeGreaterThan(1400);
+  });
+
+  it('keeps the seconds out of the figure, as the HH:MM rule did', () => {
+    // 23:50:10 → 00:09:45 is 19 minutes 35 seconds. The old figure was 19,
+    // and it stays 19: rounding the elapsed time would have made it 20 and
+    // moved a column on every ordinary row in the database.
+    const { row } = buildOne({ date: '2026-08-14', start: '2026-08-14 23:50:10.000', end: '2026-08-15 00:09:45.000' });
+    expect(row.duration_minutes).toBe(19);
+    expect(row.duration_minutes).toBe(durationMinutes('23:50', '00:09'));
+  });
+
+  it('keeps the HH:MM figure when the row carries no instants', () => {
+    // A wall time inside the spring gap names no instant at all, and none is
+    // invented. The old rule is what is left to read, so it stands.
+    expect(rideDurationMinutes(null, null, '02:30', '03:10')).toBe(40);
+    const { row } = buildOne({ date: '2026-03-29', start: '2026-03-29 02:30:00.000', end: '2026-03-29 03:10:00.000' });
+    expect(row.time_source).toBe('ambiguous');
+    expect(row.start_at).toBeNull();
+    expect(row.duration_minutes).toBe(40);
+  });
+
+  it('keeps the HH:MM figure when the instants run backwards, so the row still inserts', () => {
+    // The column is CHECK (duration_minutes >= 0). A negative figure would
+    // refuse the insert and lose a ride that the importer otherwise keeps and
+    // flags `end_before_start`.
+    const back = rideDurationMinutes('2026-08-12T10:00:00.000Z', '2026-08-12T09:00:00.000Z', '12:00', '11:00');
+    expect(back).toBe(durationMinutes('12:00', '11:00'));
+    expect(back).toBeGreaterThanOrEqual(0);
+  });
+
+  it('never returns a non-number, whatever it is handed', () => {
+    expect(rideDurationMinutes('not a timestamp', 'nor this', '10:00', '10:30')).toBe(30);
+    expect(rideDurationMinutes(null, '2026-08-12T10:00:00.000Z', '10:00', '10:30')).toBe(30);
+    expect(rideDurationMinutes('2026-08-12T10:00:00.000Z', null, '10:00', '10:30')).toBe(30);
+  });
+
+  it('leaves a cancelled ride without a figure, instants or not', () => {
+    // The gate at the call site is unchanged. This row is cancelled, so it has
+    // no clock times — but its cells do parse, so it does have instants, and
+    // the figure must still be NULL. Staging holds one such row.
+    const { row } = buildOne({ status: 'storniert' });
+    expect(row.is_canceled).toBe(true);
+    expect(row.start_at).not.toBeNull();
+    expect(row.start_time).toBeNull();
+    expect(row.duration_minutes).toBeNull();
   });
 });
 
@@ -484,6 +596,26 @@ describe('the migration derives what the browser derives', () => {
   const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
   const migration = read('../../supabase/migrations/20260922100000_fahrtenbuch_import_reliability.sql');
   const quoted = (list: string) => [...list.matchAll(/'([^']*)'/g)].map(m => m[1]);
+
+  /*
+    `review_reasons` is the one list here that a LATER migration redefines:
+    `20261023170000` widened the CHECK to admit a ninth reason, and the next
+    one will widen it again. So that assertion must read the NEWEST migration
+    that defines the set, not the one that introduced it -- the rule
+    `rolePageKeys.test.ts` and `planFeatures.test.ts` already follow for the
+    two other lists this codebase holds in both a migration and TypeScript.
+    Everything else in this block still reads 20260922100000, which is where it
+    lives and where it has not moved.
+  */
+  const migrationsDir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
+  const newestDefining = (needle: string) => {
+    const hits = readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .filter(f => readFileSync(join(migrationsDir, f), 'utf8').includes(needle))
+      .sort();
+    if (hits.length === 0) throw new Error(`no migration defines ${needle}`);
+    return { file: hits[hits.length - 1], text: readFileSync(join(migrationsDir, hits[hits.length - 1]), 'utf8') };
+  };
   const sqlConstant = (name: string) => {
     const m = migration.match(new RegExp(`${name} CONSTANT text\\[\\] := ARRAY\\[([^\\]]*)\\]`));
     if (!m) throw new Error(`${name} not found in the migration`);
@@ -519,9 +651,23 @@ describe('the migration derives what the browser derives', () => {
     expect(migration).toContain(`'${TIME_RE.source}'`);
   });
 
-  it('allows exactly the review reasons, time sources and statuses the parser writes', () => {
-    const reasons = migration.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
+  it('allows exactly the review reasons the parser writes, in the newest migration that says so', () => {
+    const newest = newestDefining('review_reasons <@ ARRAY[');
+    // Named, so a failure says which file was read rather than leaving the
+    // next reader to guess whether the list moved or the parser did.
+    expect(newest.file).toBe('20261023170000_review_reason_order_transmission.sql');
+    const reasons = newest.text.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
     expect(quoted((reasons as RegExpMatchArray)[1])).toEqual([...REVIEW_REASONS]);
+    // And the migration that INTRODUCED the set still names the eight it knew,
+    // so this assertion moving is always a deliberate widening and never a
+    // rewrite of history: 20260922100000 ran once on every live database.
+    const first = migration.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
+    expect(quoted((first as RegExpMatchArray)[1])).toEqual(
+      REVIEW_REASONS.filter(r => r !== 'unreadable_order_transmission'),
+    );
+  });
+
+  it('allows exactly the time sources and statuses the parser writes', () => {
     const sources = migration.match(/CHECK \(time_source IN \(([^)]*)\)\)/);
     expect(quoted((sources as RegExpMatchArray)[1])).toEqual([...TIME_SOURCES]);
     const statuses = migration.match(/trip_status IN \(([^)]*)\)/);
@@ -677,5 +823,135 @@ describe('matching an imported driver name', () => {
     const one: TestDriver[] = [{ id: 'm', name: 'Max Muller' }];
     expect(matchDriverName('Max Müller', one)).toEqual({ kind: 'none' });
     expect(legacyFirstHit('Max Müller', one)).toEqual({ matchedDriverId: null, confirmed: false });
+  });
+});
+
+describe('an order-transmission cell that is not a timestamp (FB-HIGH-001)', () => {
+  /*
+    The audited month carried 52 cells of "Uhrzeit der Auftragsuebermittlung"
+    with two decimal points. DATETIME_RE admits one fractional group, so such a
+    value does not parse — and this column is parsed into no column of the
+    trip: it is hashed as text into source_row_key and copied into
+    raw_data_json. Before this count nothing anywhere said that a row holds an
+    order time which cannot be read.
+
+    The row is still kept and no value is invented. Since 20261023170000 it is
+    also FLAGGED: that migration widened fahrtenbuch_trips_review_check to
+    admit a ninth value, 'unreadable_order_transmission', and these tests pin
+    both halves -- the count the wizard shows before the operator confirms, and
+    the reason written onto the row.
+
+    The flag keys on classifyTimestampCell answering 'other', never on "fails
+    the timestamp patterns": an empty cell and the null marker both answer
+    'empty', and nothing to read is not the same as something unreadable.
+    Measured on staging, that distinction is worth exactly three rows -- a SQL
+    regex over the stored text counts 372 where the parser counts 369, and the
+    extra three hold the null marker and are real customer rows, not simulated.
+
+    The name is not unreadable_start, because the ride's start IS readable;
+    saying otherwise would put a false statement on a row that feeds the
+    Stundennachweis.
+  */
+  const MALFORMED = '2026-10-01 18:49:25.441.665771484375';
+  const ALSO_MALFORMED = '2026-10-01 18:55:41.929.50390625';
+
+  it('counts the row and keeps an example of what the cell held', () => {
+    const { stats } = buildTripRows(context([
+      uberRow({ order: MALFORMED }),
+      uberRow({ order: '2026-10-01 18:30:00.146' }),
+      uberRow({ order: ALSO_MALFORMED }),
+    ]));
+    expect(stats.unreadableOrderTransmission).toBe(2);
+    expect(stats.sampleUnreadableOrderTransmission).toEqual([MALFORMED, ALSO_MALFORMED]);
+  });
+
+  it('keeps the row, invents no time, and still gives it its key', () => {
+    const { built, stats } = buildTripRows(context([uberRow({ order: MALFORMED })]));
+    expect(built.length).toBe(1);
+    expect(stats.unreadableOrderTransmission).toBe(1);
+    expect(built[0].row.source_row_key_basis).toBe('derived_order_transmission');
+    expect(built[0].keyMaterial).toContain(MALFORMED);
+    // Start and end are untouched: those columns were readable.
+    expect(built[0].row.time_source).toBe('source_start_end');
+    expect(built[0].row.start_at).not.toBeNull();
+  });
+
+  it('flags the row, and names only the cell that could not be read', () => {
+    const { built } = buildTripRows(context([uberRow({ order: MALFORMED })]));
+    expect(built[0].row.review_reasons).toEqual(['unreadable_order_transmission']);
+    expect(built[0].row.needs_review).toBe(true);
+    // NOT unreadable_start: the ride's own start parsed, and claiming it did
+    // not would be a false statement on the row.
+    expect(built[0].row.start_time).not.toBeNull();
+    expect(built[0].row.end_time).not.toBeNull();
+  });
+
+  it('does not change how the row is keyed or deduped', () => {
+    // Measured on staging: all 369 rows whose order cell the parser cannot
+    // read are keyed, all with basis derived_order_transmission, and all 369
+    // keys are distinct. The key hashes the cell as TEXT, so a malformed value
+    // hashes like any other and the per-company dedupe is unaffected -- the
+    // flag is a statement about the row, not about its key.
+    const flagged = buildTripRows(context([uberRow({ order: MALFORMED })]));
+    const clean = buildTripRows(context([uberRow({ order: '2026-10-01 18:30:00.146' })]));
+    expect(flagged.built[0].row.source_row_key_basis)
+      .toBe(clean.built[0].row.source_row_key_basis);
+    expect(flagged.built[0].keyMaterial).not.toBe(clean.built[0].keyMaterial);
+    expect(flagged.built[0].keyMaterial).toBeTruthy();
+  });
+
+  it('takes its place last in the canonical order, beside the other reasons', () => {
+    const { built } = buildTripRows(context([
+      uberRow({ order: MALFORMED, driver: '', status: 'wer weiss' }),
+    ]));
+    expect(built[0].row.review_reasons).toEqual([
+      'missing_driver', 'unknown_status', 'unreadable_order_transmission',
+    ]);
+    expect(built[0].row.needs_review).toBe(true);
+  });
+
+  it('reports nothing for a value the published format accepts, a longer fraction included', () => {
+    const { stats } = buildTripRows(context([
+      uberRow({ order: '2026-10-01 18:30:00.146' }),
+      uberRow({ order: '2026-10-01 18:30:01.146789' }),
+      uberRow({ order: '2026-10-01 18:30:02' }),
+      uberRow({ order: '01.10.2026 18:30:03' }),
+    ]));
+    expect(stats.unreadableOrderTransmission).toBe(0);
+    expect(stats.sampleUnreadableOrderTransmission).toEqual([]);
+  });
+
+  it('flags no row for a value the published format accepts', () => {
+    const { built } = buildTripRows(context([
+      uberRow({ order: '2026-10-01 18:30:00.146' }),
+      uberRow({ order: '01.10.2026 18:30:03' }),
+    ]));
+    expect(built.map(b => b.row.review_reasons)).toEqual([[], []]);
+    expect(built.map(b => b.row.needs_review)).toEqual([false, false]);
+  });
+
+  it('reports nothing for an empty cell, for the null marker, or for a file with no such column', () => {
+    const empty = buildTripRows(context([uberRow({ order: '\\N' }), uberRow({ order: '' })]));
+    expect(empty.stats.unreadableOrderTransmission).toBe(0);
+    const noColumn = buildTripRows(context([uberRow({ order: MALFORMED })], { orderTransmissionCol: '' }));
+    expect(noColumn.stats.unreadableOrderTransmission).toBe(0);
+    expect(noColumn.built[0].row.source_row_key_basis).toBe('derived_driver_start_plate');
+  });
+
+  it('FLAGS no row for an empty cell or the null marker either, which is the three-row difference', () => {
+    // isMissingCell recognises the two-character null marker, so
+    // classifyTimestampCell answers 'empty' and not 'other'. Three REAL
+    // (non-simulated) staging rows hold it, and a SQL regex over the stored
+    // text counts them as malformed where the parser does not -- which is why
+    // the flag keys on the classification and not on a pattern match.
+    const { built } = buildTripRows(context([
+      uberRow({ order: '\\N' }), uberRow({ order: '' }),
+    ]));
+    expect(built.map(b => b.row.review_reasons)).toEqual([[], []]);
+    expect(built.map(b => b.row.needs_review)).toEqual([false, false]);
+    // A file with no such column at all flags nothing either: there is no cell.
+    const noColumn = buildTripRows(context([uberRow({ order: MALFORMED })], { orderTransmissionCol: '' }));
+    expect(noColumn.built[0].row.review_reasons).toEqual([]);
+    expect(noColumn.built[0].row.needs_review).toBe(false);
   });
 });

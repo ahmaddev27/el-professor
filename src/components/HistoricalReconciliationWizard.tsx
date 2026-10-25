@@ -16,6 +16,7 @@
  *   when no saved value exists. The driver profile is NEVER overwritten.
  */
 
+import { importsAreSimulated } from '../utils/simulatedRides/importMarker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, Calculator, CheckCircle2, AlertTriangle,
@@ -1247,6 +1248,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           isHistorical: true,
           historicalCorrections: r.corrections,
           historicalGrossReconciliation: r.historicalGrossReconciliation ?? undefined,
+          simulated: await importsAreSimulated([selectedImportId]),
         }, filename);
         // Small delay between downloads so browsers don't block them
         await new Promise(res => setTimeout(res, 200));
@@ -1326,6 +1328,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           isHistorical: true,
           historicalCorrections: r.corrections,
           historicalGrossReconciliation: r.historicalGrossReconciliation ?? undefined,
+          simulated: await importsAreSimulated([selectedImportId]),
         }, filename);
         await new Promise(res => setTimeout(res, 200));
       } catch {
@@ -1354,6 +1357,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
         isHistorical: true,
         historicalCorrections: r.corrections,
         historicalGrossReconciliation: r.historicalGrossReconciliation ?? undefined,
+        simulated: await importsAreSimulated([selectedImportId]),
       }, filename);
     } catch (e) {
       const msg = e instanceof Error ? e.message : t('rec2.errUnknown');

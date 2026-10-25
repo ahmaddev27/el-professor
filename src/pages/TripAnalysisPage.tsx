@@ -1,3 +1,4 @@
+import { SimulatedNotice } from '../components/simulatedRides/SimulatedBadge';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Download, FileSearch, Info, RotateCcw } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -19,6 +20,8 @@ import {
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { useAppAddressLocator } from '../hooks/useAppAddressLocator';
+import { useTravelEstimator } from '../hooks/useTravelEstimator';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { analysisTripFromRow, analyzeTrips } from '../utils/tripAnalysis';
@@ -267,6 +270,14 @@ export default function TripAnalysisPage() {
     if (savedReturnBase) setReturnBase(current => (current.edited ? current : baseFormFromSaved(savedReturnBase)));
   }, [savedReturnBase]);
 
+  // Undefined until there is something to measure with: the engine then uses
+  // noRoutingEstimator and every travel check stays unverifiable. That is the case
+  // while the travel_estimator flag is off (lib/addressLocator.ts says what turning
+  // it on needs and costs), and it is the case for every ride whose addresses cannot
+  // be placed at house level.
+  const addressLocator = useAppAddressLocator();
+  const travelEstimator = useTravelEstimator(analysisTrips, effective.settings, { locator: addressLocator });
+
   const analysis = useMemo<{ result: TripAnalysisResult | null; failed: boolean }>(() => {
     if (!effective.settings || tripRows.length === 0) return { result: null, failed: false };
     try {
@@ -276,6 +287,7 @@ export default function TripAnalysisPage() {
           shifts: conversion.shifts,
           settings: effective.settings,
           budgets: budgetInputs(drivers, budgetRows),
+          travelEstimator,
         }),
         failed: false,
       };
@@ -283,7 +295,7 @@ export default function TripAnalysisPage() {
       console.error('Fahrtenanalyse: the analysis failed', error);
       return { result: null, failed: true };
     }
-  }, [analysisTrips, conversion.shifts, effective.settings, drivers, budgetRows, tripRows.length]);
+  }, [analysisTrips, conversion.shifts, effective.settings, drivers, budgetRows, tripRows.length, travelEstimator]);
 
   const result = analysis.result;
 
@@ -402,6 +414,7 @@ export default function TripAnalysisPage() {
       year: period.year,
       fileName: selectedImport.file_name,
       generatedAtMs: Date.now(),
+      simulated: selectedImport.is_simulated === true,
     });
     showToast('success', t('ta.exported'));
   }, [result, period, selectedImport, effective, driverRows, showToast, t]);
@@ -448,7 +461,7 @@ export default function TripAnalysisPage() {
         description={t('ta.noImports.body')}
         action={
           <Button variant="secondary" asChild>
-            <Link to="/dokumente">{t('ta.noImports.action')}</Link>
+            <Link to="/fahrtenbuch">{t('ta.noImports.action')}</Link>
           </Button>
         }
       />
@@ -545,6 +558,7 @@ export default function TripAnalysisPage() {
           {t('ta.boundary')}
         </Alert>
         {scope.readOnly ? <Alert tone="caution">{t('ta.readOnly')}</Alert> : null}
+        {selectedImport?.is_simulated ? <SimulatedNotice /> : null}
 
         {/* Which file the figures come from is part of the claim, so it is
             named whether or not there is a second one to choose from. */}

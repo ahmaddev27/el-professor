@@ -6,6 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import type { CarWithDrivers } from '../types/car';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { updateChecked } from '../lib/writeOutcome';
 import {
   Button,
   cn,
@@ -104,8 +105,15 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
       };
 
       if (car) {
-        const { error: updateError } = await supabase.from('cars').update(carData).eq('id', car.id);
-        if (updateError) throw updateError;
+        // An UPDATE the policy hides changes nothing and raises nothing, so the
+        // result is read (lib/writeOutcome.ts). Stopping here also keeps the
+        // driver assignments below from being rewritten for a refused edit.
+        const outcome = await updateChecked(supabase, 'cars', carData, q => q.eq('id', car.id));
+        if (outcome !== 'done') {
+          showToast('error', t(outcome === 'refused' ? 'common.writeRefused' : 'common.writeAlreadyGone'));
+          if (outcome === 'gone') onSuccess();
+          return;
+        }
 
         const { error: deleteError } = await supabase.from('car_driver_assignments').delete().eq('car_id', car.id);
         if (deleteError) throw deleteError;

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Receipt, Driver, DriverContact } from '../types/receipt';
+import { DEFAULT_DRIVER_LANGUAGE } from '../lib/driverLanguage';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -9,6 +10,8 @@ import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 import { numberOrUndefined } from '../utils/receiptDisplay';
+import { deleteChecked, updateChecked } from '../lib/writeOutcome';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
@@ -97,8 +100,8 @@ export const useDatabase = () => {
    * The read branches below fall back to `localStorage`, which CLAUDE.md records
    * as a legacy quirk of this hook. The *write* half of that fallback was never
    * built: every use of it in this file is a `getItem`. Six write branches
-   * nevertheless resolved — `updateDriver`, `deleteDriver`, `updateReceipt` and
-   * `deleteReceipt` with a bare `return`, and `addDriver` and `addReceipt` by
+   * nevertheless resolved — `updateDriver`, `updateReceipt` and
+   * `deleteReceipt` with a bare `return` (a sixth, the driver delete, is gone since 21.10.2026), and `addDriver` and `addReceipt` by
    * handing the caller a fabricated row with a `Date.now()` id. Every one of the
    * six call sites then showed its success toast and reloaded a list that could
    * not contain the row.
@@ -204,6 +207,8 @@ export const useDatabase = () => {
           // reads to mean "skip this driver and name them".
           email: contact?.email ?? null,
           phone: contact?.phone ?? null,
+          // Absent means the owner's default; the column also defaults to it.
+          preferred_language: contact?.preferred_language ?? DEFAULT_DRIVER_LANGUAGE,
           user_id: user?.id || null,
           created_by: user?.id || null,
           company_id: companyId,
@@ -252,40 +257,17 @@ export const useDatabase = () => {
       if (contact !== undefined) {
         updateData.email = contact.email;
         updateData.phone = contact.phone;
+        updateData.preferred_language = contact.preferred_language;
       }
 
-      const { error } = await supabase
-        .from('drivers')
-        .update(updateData)
-        .eq('id', id);
-
-      if (error) {
-        console.error('Error updating driver:', error);
-        throw error;
-      }
+      // Deactivating a driver is this UPDATE, and a policy that refuses it
+      // answers 200 with no row: without this the screen toasted success.
+      // `gone` is not a permission problem and must not be reported as one.
+      const outcome = await updateChecked(supabase, 'drivers', updateData, q => q.eq('id', id));
+      if (outcome === 'refused') throw new Error(t('fahrer.updateRefused'));
+      if (outcome === 'gone') throw new Error(t('common.writeAlreadyGone'));
     } catch (error) {
       console.error('Failed to update driver in database:', error);
-      throw error;
-    }
-  };
-
-  const deleteDriver = async (id: string): Promise<void> => {
-    if (!isConnected) {
-      refuseOfflineWrite();
-    }
-
-    try {
-      const { error } = await supabase
-        .from('drivers')
-        .delete()
-        .eq('id', id);
-      
-      if (error) {
-        console.error('Error deleting driver:', error);
-        throw error;
-      }
-    } catch (error) {
-      console.error('Failed to delete driver from database:', error);
       throw error;
     }
   };
@@ -311,22 +293,32 @@ export const useDatabase = () => {
       addDebugInfo('🔍 Executing query: SELECT * FROM receipts ORDER BY date');
       addDebugInfo(`🔓 Using authenticated access: ${user ? 'Authenticated' : 'Anonymous'}`);
 
-      const { data, error } = await withTimeout(
-        supabase
-          .from('receipts')
-          .select('*')
-          .eq('company_id', companyId)
-          .order('date'),
-        8000
+      // Paged, because PostgREST caps a response at 1000 rows and reports no
+      // error when it truncates. Measured on production 23.10.2026: Y&A
+      // Mobility held 1025 receipts and this read returned the oldest 1000, so
+      // every Beleg from 17.10.2026 on was missing — from this list, from
+      // Gesamtausgaben and the MwSt total, from Abrechnung's cash expenses and
+      // from the Bargeldbestand, which the till was overstated by. Nothing
+      // anywhere said so.
+      //
+      // `id` is the tiebreaker and is not decoration: `date` is a day and is
+      // not unique, and PostgreSQL may break a tie differently on each request,
+      // so paging on `date` alone can repeat a row on one page and drop it from
+      // the next. fetchAllPaginated's own header states the same rule.
+      const data = await fetchAllPaginated<any>(
+        (from, to) => withTimeout(
+          supabase
+            .from('receipts')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('date')
+            .order('id', { ascending: true })
+            .range(from, to),
+          8000
+        ),
+        // Domain vocabulary: 'Beleg' stays German in both languages.
+        { label: 'Belege' },
       );
-      
-      if (error) {
-        addDebugInfo(`❌ Error fetching receipts: ${error.message}`);
-        addDebugInfo(`❌ Error code: ${error.code}`);
-        addDebugInfo(`❌ Error hint: ${error.hint}`);
-        addDebugInfo(`❌ Error details: ${JSON.stringify(error.details)}`);
-        throw error;
-      }
       
       addDebugInfo(`📊 Database receipts raw data: ${JSON.stringify(data?.slice(0, 2))}... (showing first 2)`);
       addDebugInfo(`📊 Total receipts found: ${data?.length || 0}`);
@@ -393,6 +385,12 @@ export const useDatabase = () => {
           user_id: user?.id || null,
           created_by: user?.id || null,
           payment_method: receipt.paymentMethod || 'bar',
+          merchant_name: receipt.merchantName ?? null,
+          receipt_time: receipt.receiptTime ?? null,
+          litres: receipt.litres ?? null,
+          price_per_litre: receipt.pricePerLitre ?? null,
+          odometer_km: receipt.odometerKm ?? null,
+          range_km: receipt.rangeKm ?? null,
           company_id: companyId
         })
         .select()
@@ -441,7 +439,13 @@ export const useDatabase = () => {
           expense: receipt.expense,
           postal_code: receipt.postalCode || null,
           city: receipt.city || null,
-          payment_method: receipt.paymentMethod || 'bar'
+          payment_method: receipt.paymentMethod || 'bar',
+          merchant_name: receipt.merchantName ?? null,
+          receipt_time: receipt.receiptTime ?? null,
+          litres: receipt.litres ?? null,
+          price_per_litre: receipt.pricePerLitre ?? null,
+          odometer_km: receipt.odometerKm ?? null,
+          range_km: receipt.rangeKm ?? null,
         })
         .eq('id', id);
       
@@ -461,15 +465,10 @@ export const useDatabase = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('receipts')
-        .delete()
-        .eq('id', id);
-      
-      if (error) {
-        console.error('Error deleting receipt:', error);
-        throw error;
-      }
+      // A plain Error with the sentence, as refuseOfflineWrite does: the screens
+      // show it through handleDatabaseError, which passes an unrecognised message on.
+      const outcome = await deleteChecked(supabase, 'receipts', q => q.eq('id', id));
+      if (outcome === 'refused') throw new Error(t('common.writeRefused'));
     } catch (error) {
       console.error('Failed to delete receipt from database:', error);
       throw error;
@@ -485,8 +484,7 @@ export const useDatabase = () => {
     drivers: {
       get: getDrivers,
       add: addDriver,
-      update: updateDriver,
-      delete: deleteDriver
+      update: updateDriver
     },
     receipts: {
       get: getReceipts,

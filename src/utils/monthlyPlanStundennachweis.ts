@@ -205,6 +205,8 @@ export interface StoredMonthlyPlan {
   /** 1–12, as the column stores it. */
   month: number;
   status: 'draft' | 'confirmed' | 'superseded';
+  /** True when any ride behind the plan is simulated; the document says so. */
+  simulated: boolean;
   drivers: readonly StoredPlanDriver[];
   blocks: readonly StoredPlanBlock[];
 }
@@ -743,6 +745,7 @@ function buildOneDriver(
       totals: pdfTotals,
       notes: buildNotes(days, carryOver),
       planningNotice: noticeLine,
+      simulated: plan.simulated,
     },
     filename: monthlyPlanStundennachweisFilename(work.driverName, plan.month, plan.year),
   };

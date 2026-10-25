@@ -256,6 +256,8 @@ interface PlanTripRow {
   is_canceled: boolean | null;
   original_driver_name: string | null;
   original_driver_id: string | null;
+  /** Copied from the import by the database. */
+  is_simulated?: boolean;
 }
 
 /** The two planning columns `mapDriverRow` in the pool does not carry. */
@@ -613,7 +615,7 @@ export default function MonthlyPlanPage() {
         await supabase
           .from('fahrtenbuch_trips')
           .select(
-            'id, car_id, car_identifier, start_at, end_at, trip_date, start_time, end_time, is_canceled, original_driver_name, original_driver_id',
+            'id, car_id, car_identifier, start_at, end_at, trip_date, start_time, end_time, is_canceled, original_driver_name, original_driver_id, is_simulated',
           )
           .eq('company_id', companyId)
           .eq('import_id', importId)
@@ -1155,6 +1157,8 @@ export default function MonthlyPlanPage() {
       result: plan.result,
       warnings: plan.validation.warnings,
       selectedDriverIds,
+      // The rides decide: any simulated ride puts the marker on every document.
+      simulated: (trips ?? []).some(r => r.is_simulated === true),
       originalDriverIdByTrip,
     });
     // Saved and confirmed, or not yet — and the documents must be told which.
@@ -1163,7 +1167,7 @@ export default function MonthlyPlanPage() {
       ? { ...projected, id: savedPlanId, status: 'confirmed' as const }
       : projected;
   }, [plan, selectedMonth, companyId, importId, selectedDriverIds, originalDriverIdByTrip,
-      savedPlanId]);
+      savedPlanId, trips]);
 
   /**
    * Writes the plan and confirms it, then moves to the documents.

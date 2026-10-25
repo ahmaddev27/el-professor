@@ -17,6 +17,7 @@
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 // Type-only: the engine names a dictionary key beside its German text.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+import { nextLocalMidnightMs } from './localDayWindow';
 import {
   buildVehicleBlocksForHistoricalWorkingHours,
   assignRegularDriversToVehicleBlocks,
@@ -453,7 +454,17 @@ function shiftInhaberBlocks(
     const durationMs = block.blockEndMs - block.blockStartMs;
     const origDate   = new Date(block.blockStartMs);
     const origDayStart = new Date(origDate.getFullYear(), origDate.getMonth(), origDate.getDate(), 0, 0, 0, 0).getTime();
-    const origDayEnd   = origDayStart + 86_400_000;
+    // The end of that calendar day, not midnight plus a fixed day length — the
+    // same defect and the same reasoning as `origDayEnd` in
+    // `shiftOverlappingInhaberBlocks`, which this function mirrors slot for
+    // slot. A fixed 86 400 000 ms named local 23:00 on the 25-hour day of
+    // 25.10.2026 and local 01:00 of the NEXT day on the 23-hour day of
+    // 29.03.2026, so the same-day pass was an hour short in autumn and reached
+    // into Monday in spring. The selection below prefers a same-day slot over
+    // any other before it compares offsets (`isSameDay && !bestIsSameDay`), so
+    // a mislabelled slot changes which slot wins and therefore the block's
+    // final time. See src/utils/localDayWindow.ts.
+    const origDayEnd   = nextLocalMidnightMs(origDayStart);
     // Preserve seconds/ms within the slot
     const subMinuteMs = origDate.getSeconds() * 1000 + origDate.getMilliseconds();
 

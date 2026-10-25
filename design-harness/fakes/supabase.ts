@@ -71,6 +71,7 @@ let nextId = 1;
 function scenarioFailure(table: string, dateFrom: string | null): QueryError | null {
   const analysis = analysisFailure(table);
   if (analysis) return analysis;
+  if (scenario.data === 'handovers-fail' && table === 'abrechnung_handovers') return { message: 'TypeError: Failed to fetch', code: '' };
   if (batch1bFailsEveryTable(scenario)) return { message: 'TypeError: Failed to fetch', code: '' };
   if (table !== PRIMARY_TABLE) return null;
   if (scenario.data === 'next-month-fails') {

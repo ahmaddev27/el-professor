@@ -201,7 +201,7 @@ describe('the exporter still has no failure channel, so the guard belongs at the
    * could say "this read failed". If that ever changes, the three guards above
    * should move into the exporter and this test is where you will be told.
    *
-   * The write is `downloadStyledWorkbook` since the ExcelJS swap, and not
+   * The write is `deliverWorkbook` (the export service), and not
    * `XLSX.writeFile`: xlsx 0.20.3 discards every fill, font, border and
    * alignment `buildTableWorkbook` describes (`get_cell_style` reads only
    * `cell.z`), so the styling drew nothing. What this test is about is unchanged
@@ -211,8 +211,8 @@ describe('the exporter still has no failure channel, so the guard belongs at the
    */
   it('writes a workbook for whatever rows it is handed', () => {
     const body = between(source, 'export function exportTableToExcel(opts: ExportOptions): void {', '\n}');
-    expect(body).toContain('buildTableWorkbook(opts)');
-    expect(body).toContain('downloadStyledWorkbook(wb, safeFilename)');
+    expect(body).toContain('buildPlainWorkbook([opts])');
+    expect(body).toContain('deliverWorkbook(wb, safeFilename, { headerRow: true })');
     expect(body).not.toMatch(/\breturn\b/);
   });
 

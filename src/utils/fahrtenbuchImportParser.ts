@@ -6,9 +6,12 @@
  * ## What a row records (migration 20260922100000)
  *
  * The columns planning has always read keep the meaning they had: `trip_date`
- * is the file's "Datum der Fahrt", `start_time` / `end_time` are HH:MM, and
- * `duration_minutes` is computed from those. Everything below is added beside
- * them, and the database refuses to change any of it after the insert.
+ * is the file's "Datum der Fahrt", and `start_time` / `end_time` are HH:MM.
+ * `duration_minutes` is derived from `start_at` / `end_at` — see
+ * `rideDurationMinutes`, which states why the HH:MM pair cannot measure a ride
+ * and what it still measures when a row has no instants. Everything below is
+ * added beside them, and the database refuses to change any of it after the
+ * insert.
  *
  * - **start_at / end_at**: the instants the ride began and ended, read from the
  *   source's own start and end timestamps as wall-clock time in Europe/Berlin
@@ -88,9 +91,17 @@ export type ReviewReason =
   | 'unreadable_end'
   | 'end_before_start'
   | 'missing_driver'
-  | 'unknown_status';
+  | 'unknown_status'
+  | 'unreadable_order_transmission';
 
-/** Canonical order: review_reasons is always written in this order. */
+/**
+ * Canonical order: review_reasons is always written in this order.
+ *
+ * `fahrtenbuch_trips_review_check` admits exactly this set, and
+ * `20261023170000` is the newest migration that defines it — the test that
+ * compares the two reads whichever migration is newest, so a tenth reason
+ * means widening the CHECK in the same release or the build fails.
+ */
 export const REVIEW_REASONS: readonly ReviewReason[] = [
   'missing_trip_date',
   'missing_start',
@@ -100,6 +111,7 @@ export const REVIEW_REASONS: readonly ReviewReason[] = [
   'end_before_start',
   'missing_driver',
   'unknown_status',
+  'unreadable_order_transmission',
 ];
 
 export type SourceRowKeyBasis = 'derived_order_transmission' | 'derived_driver_start_plate';
@@ -337,6 +349,60 @@ export function durationMinutes(start: string, end: string): number {
   let diff = (eh * 60 + em) - (sh * 60 + sm);
   if (diff < 0) diff += 24 * 60;
   return diff;
+}
+
+/**
+ * `duration_minutes`: the minutes the ride actually lasted.
+ *
+ * **The rule being corrected.** A wall clock is not a measure of elapsed time.
+ * On the two days a year the clocks move, the difference between two local
+ * times is not the time between them: 29.03.2026 01:42 → 03:01 is 79 minutes
+ * of clock face and 19 of ride, because 02:00–03:00 did not happen, and on
+ * 25.10.2026 the same arithmetic is 60 minutes short, because that hour
+ * happened twice. `durationMinutes` reads the HH:MM pair, so it cannot tell
+ * the difference, and the measured error is exactly ±60 minutes.
+ *
+ * `start_at` and `end_at` carry the UTC instants, each resolved under the
+ * offset in force at its own end by `wallTimeToInstant`. Subtracting them
+ * measures the ride. **No day arithmetic is added here and none is wanted** —
+ * the offset is already inside the instants, so this introduces no second copy
+ * of the DST rule that `localDayWindow`/`driverNoteValidation` own.
+ *
+ * **Each instant is truncated to its own minute before subtracting**, which is
+ * what makes every non-transition row come out byte-identical to the old
+ * value: the HH:MM pair the old rule read was itself the instant truncated to
+ * the minute, so `floor(end) − floor(start)` reproduces it exactly, instead of
+ * rounding the seconds the old rule never saw. Measured over all 13 683
+ * production rows that carry both instants, this formula differs from the
+ * stored value on exactly one row — the 29.03.2026 ride above.
+ *
+ * **Two cases keep the HH:MM rule, and neither invents an instant:**
+ *  - A row with no pair of instants. `time_source` `missing`, `unparsed` or
+ *    `ambiguous` leaves both NULL — including a wall time inside a DST change,
+ *    which names no instant at all — and the HH:MM figure stands there as it
+ *    always has, since there is nothing better to read.
+ *  - A row whose instants run backwards. That row is already flagged
+ *    `end_before_start` and kept; the column is `CHECK (duration_minutes >= 0)`,
+ *    so a negative figure would refuse the insert and lose the ride over a
+ *    number. Production and staging hold no such row today.
+ *
+ * Nothing stored is rewritten: `duration_minutes` is immutable by trigger, and
+ * this is the writer only. The caller keeps the gate that decides *whether* a
+ * row gets a figure at all, so a cancelled ride still gets NULL.
+ */
+export function rideDurationMinutes(
+  startAt: string | null,
+  endAt: string | null,
+  startTime: string,
+  endTime: string,
+): number {
+  if (startAt !== null && endAt !== null) {
+    const startMinute = Math.floor(Date.parse(startAt) / 60_000);
+    const endMinute = Math.floor(Date.parse(endAt) / 60_000);
+    const elapsed = endMinute - startMinute;
+    if (Number.isFinite(elapsed) && elapsed >= 0) return elapsed;
+  }
+  return durationMinutes(startTime, endTime);
 }
 
 /** Rejects GPS coordinates, `\N`, empty values and numbers: a plate has a letter. */
@@ -823,6 +889,14 @@ export interface BuildStats {
   sampleUnreadableStart: CellValue[];
   /** The first few held-back rows, as 1-based positions among the data rows. */
   heldBackRows: number[];
+  /**
+   * Rows whose order-transmission cell holds something that is not a zone-less
+   * timestamp. See the count's own comment in `buildTripRows`: the column is
+   * stored as text and parsed into no column of its own, so without this the
+   * row is taken in with nothing anywhere saying its order time is unreadable.
+   */
+  unreadableOrderTransmission: number;
+  sampleUnreadableOrderTransmission: CellValue[];
 }
 
 function reviewReasonsInOrder(reasons: ReadonlySet<ReviewReason>): ReviewReason[] {
@@ -839,6 +913,7 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
   const stats: BuildStats = {
     total: ctx.rows.length, heldBackNoDate: 0, startDateDiffers: 0,
     sampleUnreadableStart: [], heldBackRows: [],
+    unreadableOrderTransmission: 0, sampleUnreadableOrderTransmission: [],
   };
   const built: BuiltRow[] = [];
 
@@ -899,9 +974,40 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
 
     const driverMatch = ctx.driverMatches.get(driverName);
     const carMatch = plate ? ctx.carMatches.get(plate) : undefined;
+    const orderTransmission = cell(row, ctx.orderTransmissionCol);
+    // A malformed order time is flagged ON THE ROW, counted, and shown — never
+    // taken in silently.
+    //
+    // This column is the row's key (`sourceRowKeyMaterial` hashes its text) and
+    // it is parsed into no column of `fahrtenbuch_trips`: `time_source` is
+    // about start and end, and until `20261023170000` none of the review
+    // reasons named this column. So a value that is not a timestamp — the
+    // two-decimal-point strings of FB-HIGH-001 — reached `raw_data_json` and
+    // the key with `needs_review` false and nothing anywhere saying it cannot
+    // be read. 369 such rows on staging, every one of them `is_simulated`.
+    //
+    // The row is still kept and no value is guessed, as the migration's rule
+    // requires. The flag says only which cell could not be read.
+    //
+    // `'other'` and NOT "fails the timestamp patterns": an empty cell, and the
+    // two-character null marker `isMissingCell` recognises, both answer
+    // `empty`, and nothing to read is not the same as something unreadable.
+    // Three real (non-simulated) staging rows hold that marker, and a regular
+    // expression over the stored text counts them as malformed where the parser
+    // does not.
+    //
+    // The order matters: `reviewReasonsInOrder` is read below, so this must add
+    // its reason first. `REVIEW_REASONS` puts it last, after `unknown_status`.
+    if (classifyTimestampCell(orderTransmission).kind === 'other') {
+      reasons.add('unreadable_order_transmission');
+      stats.unreadableOrderTransmission++;
+      if (stats.sampleUnreadableOrderTransmission.length < 5) {
+        stats.sampleUnreadableOrderTransmission.push(orderTransmission);
+      }
+    }
     const reviewReasons = reviewReasonsInOrder(reasons);
     const key = sourceRowKeyMaterial({
-      orderTransmission: cell(row, ctx.orderTransmissionCol),
+      orderTransmission,
       driverName, startWallText: times.startWallText, plate,
     });
 
@@ -913,7 +1019,11 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
         trip_date: tripDate,
         start_time: startTime,
         end_time: endTime,
-        duration_minutes: startTime && endTime ? durationMinutes(startTime, endTime) : null,
+        // The gate is unchanged — a cancelled ride has no clock times and so no
+        // figure. What changed is how the figure is measured once there is one.
+        duration_minutes: startTime && endTime
+          ? rideDurationMinutes(times.startAt, times.endAt, startTime, endTime)
+          : null,
         original_driver_id: driverMatch?.matchedDriverId ?? null,
         original_driver_name: driverName,
         assigned_driver_id: driverMatch?.matchedDriverId ?? null,

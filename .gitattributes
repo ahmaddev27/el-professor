@@ -4,7 +4,16 @@
 # endings here instead of losing an afternoon to it later.
 *.sh            text eol=lf
 deploy/**       text eol=lf
-supabase/**.sql text eol=lf
+# `supabase/**.sql` stood here and matched NOTHING: in gitattributes a bare
+# `**` does not cross directory boundaries, so it never reached
+# supabase/migrations/*.sql — `git check-attr text eol` answered `unspecified`
+# for every migration. Measured 22.10.2026: with core.autocrlf on, the blob
+# holds LF while `git archive HEAD` exported 2603 CR bytes, so the RLS kit on
+# the VPS has been reading CRLF SQL all along. PostgreSQL does not care, but a
+# probe that pins a fragment of a stored function body does: one aborted the
+# whole kit run, and the kit stops at the first failure, so every file after it
+# went unrun and read as passing.
+*.sql           text eol=lf
 
 # vitest rewrites a snapshot with the platform's line endings, so on a fresh
 # Windows checkout the golden masters appear modified with **no content change** —

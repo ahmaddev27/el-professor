@@ -178,6 +178,13 @@ export interface StoredMonthlyPlan {
   warnings: readonly PlanWarning[];
   drivers: readonly StoredPlanDriver[];
   blocks: readonly StoredPlanBlock[];
+  /**
+   * Whether any ride this plan was built from is simulated. REQUIRED: every
+   * document the plan feeds carries it (hours and Lohnart figures come from ride
+   * times, and a simulated ride's times are invented). The rides decide, not a
+   * company flag.
+   */
+  simulated: boolean;
 }
 
 // ── The document contract ───────────────────────────────────────────────────
@@ -334,6 +341,8 @@ export interface StoredPlanProjection {
    * fallback of §7 rule 8, which the table's `unselected_is_owner` CHECK admits.
    */
   selectedDriverIds: ReadonlySet<string>;
+  /** True when any ride the blocks were built from is simulated (`fahrtenbuch_trips.is_simulated`). */
+  simulated: boolean;
   /**
    * `fahrtenbuch_trips.original_driver_id` by ride id. `PlanBlockTrip` carries
    * the original driver's **name** but not the id, so the id cannot be recovered
@@ -423,6 +432,7 @@ export function storedPlanFromGenerated(input: StoredPlanProjection): StoredMont
     warnings: input.warnings,
     drivers,
     blocks,
+    simulated: input.simulated,
   };
 }
 

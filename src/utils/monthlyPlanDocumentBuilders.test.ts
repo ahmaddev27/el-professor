@@ -106,6 +106,7 @@ function project(trips: PlanTripInput[], drivers: PlanDriverInput[]): StoredMont
     result,
     warnings: validation.warnings,
     selectedDriverIds: pool,
+    simulated: false,
   };
   return { ...storedPlanFromGenerated(projection), id: 'plan-1' };
 }
@@ -178,7 +179,7 @@ describe('the Stundennachweis adapter', () => {
     const set = buildMonthlyPlanStundennachweise(
       // The adapter's projection is internal, so the comparison is made on the
       // one thing both sides agree on: the ids and names in the plan.
-      { year: plan.year, month: plan.month, status: plan.status,
+      { year: plan.year, month: plan.month, status: plan.status, simulated: plan.simulated,
         drivers: plan.drivers.map(d => ({
           driverId: d.driver_id, driverName: d.driver_name, isOwner: d.is_owner,
           selected: d.selected,
@@ -303,7 +304,7 @@ describe('the Stundennachweis adapter', () => {
 /** The Stundennachweis as its own module builds it, for comparison. */
 function directStundennachweis(plan: StoredMonthlyPlan) {
   const set = buildMonthlyPlanStundennachweise(
-    { year: plan.year, month: plan.month, status: plan.status,
+    { year: plan.year, month: plan.month, status: plan.status, simulated: plan.simulated,
       drivers: plan.drivers.map(d => ({
         driverId: d.driver_id, driverName: d.driver_name, isOwner: d.is_owner,
         selected: d.selected,
@@ -498,5 +499,52 @@ describe('the planned Fahrtenbuch adapter', () => {
   it('refuses a plan that was never saved, because the import\'s rows hang off its id', async () => {
     const plan = { ...simplePlan(), id: null };
     await expect(builder.load!({ plan, generatedAt: STAMP })).rejects.toThrow(/gespeichert/);
+  });
+});
+
+// ── 9. a document built from simulated rides says so ────────────────────────
+//
+// The rule is the rides', not a company flag (simulatedRides/importMarker.ts).
+// Each builder is run on the same plan twice, simulated and real; the real one
+// is the control that proves the marker is not simply always there.
+
+describe('simulated rides reach no document unmarked', () => {
+  const real = simplePlan();
+  const fake: StoredMonthlyPlan = { ...simplePlan(), simulated: true };
+  const request = (plan: StoredMonthlyPlan) => ({ plan, generatedAt: new Date('2026-10-20T10:00:00Z') });
+  const words = (wb: import('xlsx').WorkBook) => Object.values(wb.Sheets).flatMap(ws =>
+    Object.values(ws).map(cell => String((cell as { v?: unknown }).v ?? ''))).join('\n');
+
+  it('the Stundennachweis PDF is stamped and its file name carries SIMULIERT_', async () => {
+    const builder = MONTHLY_PLAN_DOCUMENT_BUILDERS.stundennachweis!;
+    const marked = await builder.file(request(fake));
+    const plain = await builder.file(request(real));
+    expect(marked.filename.startsWith('SIMULIERT_')).toBe(true);
+    expect(await marked.blob.text()).toContain('SIMULIERT');
+    expect(plain.filename.startsWith('SIMULIERT_')).toBe(false);
+    expect(await plain.blob.text()).not.toContain('SIMULIERT');
+  }, 30_000);
+
+  it('the payroll summary carries the notice line and the file name', async () => {
+    const builder = MONTHLY_PLAN_DOCUMENT_BUILDERS.payroll_summary!;
+    const XLSX = await import('xlsx');
+    const marked = await builder.file(request(fake));
+    const plain = await builder.file(request(real));
+    expect(marked.filename.startsWith('SIMULIERT_')).toBe(true);
+    expect(words(XLSX.read(await marked.blob.arrayBuffer()))).toContain('SIMULIERT');
+    expect(plain.filename.startsWith('SIMULIERT_')).toBe(false);
+    expect(words(XLSX.read(await plain.blob.arrayBuffer()))).not.toContain('SIMULIERT');
+  }, 30_000);
+
+  it('every preview opens with the notice', () => {
+    for (const kind of ['stundennachweis', 'payroll_summary'] as const) {
+      const builder = MONTHLY_PLAN_DOCUMENT_BUILDERS[kind]!;
+      expect(builder.preview(request(fake)).footnotes?.[0], kind).toContain('SIMULIERT');
+      expect((builder.preview(request(real)).footnotes ?? []).join(' '), kind).not.toContain('SIMULIERT');
+    }
+  });
+
+  it('no builder is left unwrapped: the map is exactly the three marked builders', () => {
+    expect(Object.keys(MONTHLY_PLAN_DOCUMENT_BUILDERS).sort()).toEqual(['fahrtenbuch', 'payroll_summary', 'stundennachweis']);
   });
 });

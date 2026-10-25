@@ -253,6 +253,7 @@ BEGIN
       'public.platform_invoice_mark_paid(uuid,bigint,timestamptz,text)',
       'public.platform_invoice_mark_unpaid(uuid)',
       'public.platform_invoice_cancel(uuid)',
+      'public.platform_invoice_delete(uuid)',
       'public.platform_discount_code_save(uuid,jsonb)',
       'public.platform_discount_code_set_active(uuid,boolean)',
       'public.platform_discount_code_delete(uuid)',
@@ -321,6 +322,8 @@ BEGIN
      $q$SELECT platform_invoice_mark_paid('3b300000-0000-4000-8000-000000000001', 4900)::text$q$, 'YNYNN'),
     ('platform_invoice_cancel',
      $q$SELECT platform_invoice_cancel('3b300000-0000-4000-8000-000000000001')::text$q$, 'YNYNN'),
+    ('platform_invoice_delete',
+     $q$SELECT platform_invoice_delete('3b300000-0000-4000-8000-000000000001')::text$q$, 'YNYNN'),
     ('update_company_subscription_manual',
      $q$SELECT update_company_subscription_manual('c0000000-0000-4000-8000-00000000000b', 'active')::text$q$, 'YNYNN'),
     -- codes.manage: owners and billing

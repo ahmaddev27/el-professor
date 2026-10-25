@@ -145,6 +145,20 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // sealed token), and it writes nothing. The rows are written by the database's
   // income_import_uber with the caller's own session.
   ['uber-earnings-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // Road time between coordinate pairs, asked of our own OSRM container for the
+  // Fahrtenanalyse. Needs a session, so it is deliberately not in PUBLIC_FUNCTIONS:
+  // the router's check admits the anon key too, and the function asks GoTrue for a
+  // person and the database for an active company itself. It reads and writes
+  // nothing, so it holds neither the service key nor SMTP, and the container it
+  // calls is a constant in _shared/travel-route-core.ts, not a variable.
+  ['travel-route', [...BASE_ENV]],
+  // Puts the addresses of the Fahrtenbuch on the map, through the geocoder gateway
+  // of this stack (deploy/geocoder-gateway.conf) to the Nominatim ridy runs. Needs a
+  // session and is not in PUBLIC_FUNCTIONS, for the reason travel-route is not. It
+  // receives passengers' addresses and writes none down; it reads and writes no
+  // table, so it holds neither the service key nor SMTP, and the gateway it calls is
+  // a constant in _shared/geocode-core.ts.
+  ['geocode-address', [...BASE_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

@@ -140,7 +140,7 @@ export function buildIncomeSheets(
     columns: [
       { key: 'type',   label: 'Typ',    width: 20 },
       { key: 'amount', label: 'Betrag', width: 16, align: 'right', type: 'money' },
-      { key: 'quota',  label: 'Anteil', width: 12, align: 'right', type: 'percent' },
+      { key: 'quota',  label: 'Anteil (%)', width: 12, align: 'right', type: 'percent' },
     ],
     rows: INCOME_TYPES.map((type): ExportRow => {
       const sum = sumOf(incomes.filter(income => income.type === type));
@@ -282,7 +282,7 @@ export function buildSalarySheets(
     columns: [
       { key: 'driver',  label: 'Fahrer',          width: 26 },
       { key: 'revenue', label: 'Umsatz',          width: 16, align: 'right', type: 'money' },
-      { key: 'ratio',   label: 'Anteil',          width: 11, align: 'right', type: 'percent' },
+      { key: 'ratio',   label: 'Anteil (%)',      width: 11, align: 'right', type: 'percent' },
       { key: 'share',   label: 'Umsatzanteil',    width: 17, align: 'right', type: 'money' },
       { key: 'tips',    label: 'Trinkgeld',       width: 15, align: 'right', type: 'money' },
       { key: 'due',     label: 'Fälliger Betrag', width: 18, align: 'right', type: 'money' },

@@ -35,6 +35,7 @@
  * documents: that is what criterion 22 asks for.
  */
 
+import { SIMULATED_NOTICE, simulatedFileName } from './simulatedRides/marker';
 import {
   PROPOSAL_NOTICE,
   type DocumentPreview,
@@ -130,6 +131,7 @@ function toStundennachweisPlan(plan: StoredMonthlyPlan): SnPlan {
     year: plan.year,
     month: plan.month,
     status: plan.status,
+    simulated: plan.simulated,
     drivers: plan.drivers.map(d => ({
       driverId: d.driver_id,
       driverName: d.driver_name,
@@ -662,7 +664,10 @@ const payrollBuilder: MonthlyPlanDocumentBuilder = {
       moduleName: 'Lohn-Stundenübersicht (Planung)',
       columns,
       rows,
-      filterSummary: [summary.planungNotice, summary.periodLabel, summary.companyLine],
+      filterSummary: [
+        ...(request.plan.simulated ? [SIMULATED_NOTICE] : []),
+        summary.planungNotice, summary.periodLabel, summary.companyLine,
+      ],
       labels: {
         activeFilters: `${PROPOSAL_NOTICE} ·`,
         footer: summary.footerNote,
@@ -674,8 +679,28 @@ const payrollBuilder: MonthlyPlanDocumentBuilder = {
   },
 };
 
+/**
+ * Every builder goes through here, so a document built from a simulated plan
+ * says so in its preview and in its file name whatever the builder itself does
+ * (the content marker is each builder's own: the PDF stamp, the notice line, the
+ * notice sheet). The rule is the plan's rides', not a flag.
+ */
+export function markSimulated(builder: MonthlyPlanDocumentBuilder): MonthlyPlanDocumentBuilder {
+  return {
+    ...builder,
+    preview(request, loaded) {
+      const preview = builder.preview(request, loaded);
+      return request.plan.simulated ? { ...preview, footnotes: [SIMULATED_NOTICE, ...(preview.footnotes ?? [])] } : preview;
+    },
+    async file(request, loaded) {
+      const file = await builder.file(request, loaded);
+      return request.plan.simulated ? { ...file, filename: simulatedFileName(file.filename) } : file;
+    },
+  };
+}
+
 export const MONTHLY_PLAN_DOCUMENT_BUILDERS: MonthlyPlanDocumentBuilders = {
-  stundennachweis: stundennachweisBuilder,
-  fahrtenbuch: fahrtenbuchBuilder,
-  payroll_summary: payrollBuilder,
+  stundennachweis: markSimulated(stundennachweisBuilder),
+  fahrtenbuch: markSimulated(fahrtenbuchBuilder),
+  payroll_summary: markSimulated(payrollBuilder),
 };

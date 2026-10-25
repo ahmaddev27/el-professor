@@ -43,6 +43,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsFor } from "../_shared/http.ts";
 import { sendMail } from "../_shared/mail.ts";
+import { resolveMailLanguage } from "../_shared/mail-language.ts";
 import {
   attachmentName,
   renderAbrechnungMail,
@@ -163,7 +164,7 @@ Deno.serve(async (req: Request) => {
   //    same answer as "no such driver" — it tells a prober nothing.
   const { data: driver, error: driverError } = await admin
     .from("drivers")
-    .select("id, name, email")
+    .select("id, name, email, preferred_language")
     .eq("id", body.driver_id)
     .eq("company_id", profile.company_id)
     .maybeSingle();
@@ -184,6 +185,9 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   const mail = renderAbrechnungMail({
+    // The driver's own setting; English when it is missing or unknown. The
+    // browser's `period_label` stays German and is translated inside the builder.
+    language: resolveMailLanguage(driver.preferred_language),
     driverName: driver.name,
     companyName: (company?.name ?? "").trim() || "—",
     periodLabel,

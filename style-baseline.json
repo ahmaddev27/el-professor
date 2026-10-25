@@ -62,8 +62,8 @@
       "color": 106
     },
     "src/components/HistoricalWorkingHoursWizard.tsx": {
-      "style": 1154,
-      "color": 834
+      "style": 985,
+      "color": 682
     },
     "src/components/InvoiceDetailModal.tsx": {
       "style": 17,
@@ -95,7 +95,7 @@
     },
     "src/components/MonatsplanungAssignmentPreview.tsx": {
       "style": 331,
-      "color": 346
+      "color": 344
     },
     "src/components/MonatsplanungStundennachweisPreview.tsx": {
       "style": 207,
@@ -154,7 +154,7 @@
       "color": 1
     },
     "src/components/settings/FeatureFlagsEditor.tsx": {
-      "style": 11,
+      "style": 9,
       "color": 0
     },
     "src/components/settings/MailSettingsEditor.tsx": {

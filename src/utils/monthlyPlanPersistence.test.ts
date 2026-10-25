@@ -36,6 +36,7 @@ function plan(over: Partial<StoredMonthlyPlan> = {}): StoredMonthlyPlan {
     switch_minutes: 30,
     generation: 2,
     warnings: [{ kind: 'unassigned_block', detail: 'no selected driver was available' }],
+    simulated: false,
     drivers: [
       {
         driver_id: 'd0000000-0000-4000-8000-000000000001',

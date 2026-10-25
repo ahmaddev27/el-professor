@@ -6,7 +6,14 @@ import { getBusinessMonthRange, getBusinessWeeksForMonth, WeekOfMonth } from '..
 import type { ReceiptExportFilters } from '../utils/belegeExport';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { receiptAuthor, receiptFuelParts, receiptSourceParts } from '../utils/receiptDisplay';
+import {
+  clockTime,
+  receiptAuthor,
+  receiptFuelFigures,
+  receiptFuelParts,
+  receiptSourceParts,
+  textOrNull,
+} from '../utils/receiptDisplay';
 import {
   Badge,
   Button,
@@ -347,6 +354,9 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     // on-screen label is resolved here instead.
     t(receipt.paymentMethod === 'uberweisung' ? 'rec.payment.uberweisung' : 'rec.payment.bar');
 
+  // The header carries no unit for a distance, so the cell does; an absent reading stays empty.
+  const withKm = (figure: string | null) => (figure === null ? null : `${figure} km`);
+
   const columns: DataTableColumn<Receipt>[] = [
     {
       id: 'date',
@@ -375,17 +385,75 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
             <span className="tabular-nums sm:hidden">{formatDate(receipt.date)} · </span>
             {receipt.driverName}
           </span>
+          {/* Below lg the merchant, place, time and fuel columns are hidden;
+              their values move here, as the date and driver do. */}
           {sourceParts(receipt).length > 0 ? (
-            <span className="text-[13px] text-fg-muted">{sourceParts(receipt).join(' · ')}</span>
+            <span className="text-[13px] text-fg-muted lg:hidden">{sourceParts(receipt).join(' · ')}</span>
           ) : null}
           {fuelParts(receipt).length > 0 ? (
-            <span className="text-[13px] tabular-nums text-fg-muted">{fuelParts(receipt).join(' · ')}</span>
+            <span className="text-[13px] tabular-nums text-fg-muted lg:hidden">{fuelParts(receipt).join(' · ')}</span>
           ) : null}
         </span>
       ),
       // At 375 px the Beleg, the amount and both row actions share the width;
       // 10rem left the table 12 px wider than the phone.
       className: 'min-w-[8rem] pl-3 pr-1 sm:min-w-[10rem] sm:px-3',
+    },
+    // One column per datum a Beleg from the driver app carries. Always defined,
+    // so the table's shape does not change with the filter; an absent value is an
+    // empty cell, never a zero.
+    {
+      id: 'merchantName',
+      header: t('rec.merchant'),
+      cell: receipt => textOrNull(receipt.merchantName),
+      hideBelow: 'lg',
+      className: 'px-3',
+    },
+    {
+      id: 'city',
+      header: t('rec.place'),
+      cell: receipt => textOrNull(receipt.city),
+      hideBelow: 'lg',
+      className: 'px-3',
+    },
+    {
+      id: 'receiptTime',
+      header: t('common.time'),
+      cell: receipt => clockTime(receipt.receiptTime),
+      hideBelow: 'lg',
+      className: 'px-3',
+    },
+    {
+      id: 'litres',
+      header: t('rec.litres'),
+      kind: 'number',
+      cell: receipt => receiptFuelFigures(receipt).litres,
+      hideBelow: 'lg',
+      className: 'px-3',
+    },
+    {
+      id: 'pricePerLitre',
+      header: t('rec.pricePerLitre'),
+      kind: 'number',
+      cell: receipt => receiptFuelFigures(receipt).pricePerLitre,
+      hideBelow: 'lg',
+      className: 'px-3',
+    },
+    {
+      id: 'odometerKm',
+      header: t('rec.odometer'),
+      kind: 'number',
+      cell: receipt => withKm(receiptFuelFigures(receipt).odometerKm),
+      hideBelow: 'lg',
+      className: 'px-3',
+    },
+    {
+      id: 'rangeKm',
+      header: t('rec.rangeLeft'),
+      kind: 'number',
+      cell: receipt => withKm(receiptFuelFigures(receipt).rangeKm),
+      hideBelow: 'lg',
+      className: 'px-3',
     },
     {
       id: 'driverName',

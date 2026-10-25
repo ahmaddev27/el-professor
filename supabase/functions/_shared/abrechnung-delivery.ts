@@ -34,6 +34,7 @@ import { sendMail } from './mail.ts';
 import { loadMailDeliverySettings } from './mail-template.ts';
 import { logFailure } from './otp-core.ts';
 import { loadRecipients } from './notification-delivery.ts';
+import { resolveMailLanguage, type MailLanguage } from './mail-language.ts';
 import { renderAbrechnungMail, renderAbrechnungSummaryMail, renderReminderMail } from './abrechnung-mail.ts';
 import {
   MAX_REMINDERS_PER_RUN,
@@ -194,11 +195,17 @@ async function runReminders(ctx: Context, plan: ReminderPlan): Promise<void> {
   };
   ctx.report.reminder_items.push(item);
 
+  // Read before anything is claimed. A failed read throws, and the company's
+  // run is retried whole on the next pass: guessing English for a driver whose
+  // language could not be read would send an irreversible mail in the wrong one.
+  const languages = await loadDriverLanguages(ctx.admin, plan.companyId, decided.sendable.map((t) => t.driverId));
+
   // Rendered for every target in both modes, as the driver mails are, so a
   // mail that cannot be built is a dry-run failure and never a half delivery.
   const mails = decided.sendable.map((target) => ({
     target,
     mail: renderReminderMail({
+      language: resolveMailLanguage(languages.get(target.driverId)),
       driverName: target.driverName,
       companyName: plan.companyName,
       periodLabel: period.label,
@@ -287,11 +294,15 @@ async function runDriverMails(
   counts.ambiguous = decided.ambiguous.length;
   counts.planned = decided.sendable.length;
 
+  // Same rule as the reminders: read before claiming, throw rather than guess.
+  const languages = await loadDriverLanguages(ctx.admin, plan.companyId, decided.sendable.map((t) => t.driverId));
+
   // Rendered for every target in both modes, so a mail that cannot be built is
   // a dry-run failure and never a half-finished delivery.
   const mails = decided.sendable.map((target) => ({
     target,
     mail: renderAbrechnungMail({
+      language: resolveMailLanguage(languages.get(target.driverId)),
       driverName: target.driverName,
       companyName: plan.companyName,
       periodLabel: period.label,
@@ -389,6 +400,32 @@ async function runManagerSummary(
     item.manager_summary = 'send_failed';
     ctx.report.manager_summaries_failed += 1;
   }
+}
+
+/**
+ * The language each driver's mail is written in, one query for the whole
+ * company's batch (never one per driver).
+ *
+ * Scoped to the company as well as the ids, like every read of `drivers` on this
+ * path. A driver absent from the answer simply has no entry, and the caller's
+ * `resolveMailLanguage` turns that into English. A failed read is different and
+ * throws: see the comment at the call sites.
+ */
+async function loadDriverLanguages(
+  admin: SupabaseClient,
+  companyId: string,
+  driverIds: readonly string[],
+): Promise<Map<string, MailLanguage>> {
+  const languages = new Map<string, MailLanguage>();
+  if (driverIds.length === 0) return languages;
+  const { data, error } = await admin
+    .from('drivers')
+    .select('id, preferred_language')
+    .eq('company_id', companyId)
+    .in('id', [...driverIds]);
+  if (error) throw new Error(`drivers.preferred_language failed (${error.code ?? 'unknown'})`);
+  for (const row of data ?? []) languages.set(row.id as string, resolveMailLanguage(row.preferred_language));
+  return languages;
 }
 
 async function loadCandidates(admin: SupabaseClient, after: string | null): Promise<ScheduleCompany[]> {

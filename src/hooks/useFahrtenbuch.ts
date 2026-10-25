@@ -2,13 +2,43 @@ import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { inGroups, sourceRowKeyChunks } from '../utils/postgrestLookup';
 import { useAuth } from '../contexts/AuthContext';
+import { deleteChecked } from '../lib/writeOutcome';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type {
   ReviewReason, SourceRowKeyBasis, TimeSource, TripStatus,
 } from '../utils/fahrtenbuchImportParser';
+import {
+  parseFieldMap, parseSourceHeaders, type StoredColumnMapping,
+} from '../utils/importColumnMapping';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+/** Which tier of `findColumnMapping` answered. */
+export type ColumnMappingMatch = 'exact' | 'other_shape' | 'none';
+
+export interface ColumnMappingLookup {
+  mapping: StoredColumnMapping | null;
+  match: ColumnMappingMatch;
+}
+
+/**
+ * A row of `import_column_mappings` as the browser may use it.
+ *
+ * `field_map` is `jsonb` and `source_headers` is `text[]`, so what comes back
+ * is data and never a contract — a row can also arrive through a restored
+ * backup, written by a build with other rules. Both are parsed down to what is
+ * usable before anything reaches a <select>.
+ */
+function asStoredMapping(row: Record<string, unknown>): StoredColumnMapping {
+  return {
+    id: String(row.id ?? ''),
+    source_shape_key: String(row.source_shape_key ?? ''),
+    source_headers: parseSourceHeaders(row.source_headers),
+    field_map: parseFieldMap(row.field_map),
+    updated_at: String(row.updated_at ?? ''),
+  };
+}
 
 export interface FahrtenbuchImport {
   id: string;
@@ -26,6 +56,8 @@ export interface FahrtenbuchImport {
   storage_path: string | null;
   /** SHA-256 of the uploaded file; NULL for imports older than 20260922100000. */
   file_sha256: string | null;
+  /** True for an import made by the simulated-ride generator (20261020110000). Never changes. */
+  is_simulated?: boolean;
 }
 
 /**
@@ -86,6 +118,8 @@ export interface FahrtenbuchTrip extends Omit<TripImportFacts, 'time_source' | '
   source_row_index: number | null;
   created_at: string;
   updated_at: string;
+  /** Copied from the import by trigger; a simulated ride says so wherever it is shown. */
+  is_simulated?: boolean;
 }
 
 export interface TripInsertRow extends TripImportFacts {
@@ -293,6 +327,8 @@ export function useFahrtenbuch() {
     sourceSheetName?: string;
     sourceColumns?: string[];
     xlsxBytes?: Uint8Array | null;
+    /** Only the simulated-ride generator sets this; the database keeps it for good. */
+    isSimulated?: boolean;
   }): Promise<CreateImportResult> => {
     if (!companyId || !user) throw new Error('Not authenticated');
 
@@ -375,6 +411,7 @@ export function useFahrtenbuch() {
         source_columns_json: params.sourceColumns || null,
         storage_path: storagePath,
         file_sha256: params.fileSha256,
+        is_simulated: params.isSimulated === true,
       })
       .select('id, storage_path, imported_at')
       .single();
@@ -397,7 +434,10 @@ export function useFahrtenbuch() {
     // Verify storage_path was persisted
     if (!importRow.storage_path) {
       await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
-      await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
+      // Rollback: the throw below happens either way. A refused delete (the
+      // import's DELETE is admin-only) leaves a row with no file, so say so.
+      const rollback = await deleteChecked(supabase, 'fahrtenbuch_imports', q => q.eq('id', importId)).catch(() => 'refused');
+      if (rollback === 'refused') console.error('[FahrtenbuchImport] rollback refused, import row left without file:', importId);
       throw new Error(t('imp.blockedFileMissing'));
     }
 
@@ -547,6 +587,94 @@ export function useFahrtenbuch() {
     setTrips(prev => prev.filter(t => t.import_id !== importId));
   }, [companyId, fetchImports, t]);
 
+  /*
+    ── The remembered column mapping (20261023210000) ─────────────────────────
+
+    Two calls, both scoped to `companyId` like every other read here, and
+    neither of them on the import's write path: the wizard asks on entering its
+    mapping step and writes when the operator leaves it.
+  */
+
+  /**
+   * The mapping remembered for this company, for this file's shape if there is
+   * one and otherwise the most recently confirmed one of any shape.
+   *
+   * Two queries rather than one ordered by `source_shape_key = key`: PostgREST
+   * cannot express that order, and both reads are a single row.
+   *
+   * The second tier exists because a company's formats drift rather than being
+   * replaced — measured on staging, one company holds an 11-column shape whose
+   * headers are a strict subset of its 18-column one — and it is only safe
+   * because `applyRememberedMapping` checks every remembered header against
+   * the file actually uploaded. `match` says which tier answered so the wizard
+   * can say so too; a proposal from another shape is never presented as this
+   * file's own.
+   */
+  const findColumnMapping = useCallback(async (
+    sourceShapeKey: string,
+  ): Promise<ColumnMappingLookup> => {
+    if (!companyId) return { mapping: null, match: 'none' };
+    const columns = 'id, source_shape_key, source_headers, field_map, updated_at';
+
+    const exact = await supabase
+      .from('import_column_mappings')
+      .select(columns)
+      .eq('company_id', companyId)
+      .eq('source_shape_key', sourceShapeKey)
+      .maybeSingle();
+    if (exact.error) throw exact.error;
+    if (exact.data) return { mapping: asStoredMapping(exact.data), match: 'exact' };
+
+    const recent = await supabase
+      .from('import_column_mappings')
+      .select(columns)
+      .eq('company_id', companyId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recent.error) throw recent.error;
+    if (recent.data) return { mapping: asStoredMapping(recent.data), match: 'other_shape' };
+
+    return { mapping: null, match: 'none' };
+  }, [companyId]);
+
+  /**
+   * Remember the mapping the operator just confirmed, for this file's shape.
+   *
+   * An upsert on `(company_id, source_shape_key)`, which is the key: a second
+   * import of the same shape re-stamps one row rather than adding another.
+   *
+   * It answers false instead of raising, for every reason a caller would have
+   * to swallow anyway — there is no company, the session is a platform
+   * read-only one (the `refuse_read_only_context_write` trigger would raise
+   * P0001), the role does not hold `can_edit` on Dokumente (RLS raises 42501),
+   * or the guard refused the payload. A remembered mapping is a convenience and
+   * must never be able to stop an import: the caller reports that nothing was
+   * remembered and goes on.
+   */
+  const rememberColumnMapping = useCallback(async (params: {
+    sourceShapeKey: string;
+    sourceHeaders: string[];
+    fieldMap: Record<string, string>;
+  }): Promise<boolean> => {
+    if (!companyId || isReadOnlyPlatformSession) return false;
+    const { error } = await supabase
+      .from('import_column_mappings')
+      .upsert({
+        company_id: companyId,
+        source_shape_key: params.sourceShapeKey,
+        source_headers: params.sourceHeaders,
+        field_map: params.fieldMap,
+      }, { onConflict: 'company_id,source_shape_key' });
+    if (error) {
+      if (import.meta.env.DEV) {
+        console.warn('[Fahrtenbuch] the column mapping was not remembered:', error.message);
+      }
+      return false;
+    }
+    return true;
+  }, [companyId, isReadOnlyPlatformSession]);
+
   return {
     imports,
     trips,
@@ -558,5 +686,7 @@ export function useFahrtenbuch() {
     findStoredSourceRowKeys,
     createImport,
     deleteImport,
+    findColumnMapping,
+    rememberColumnMapping,
   };
 }

@@ -1,35 +1,40 @@
 /**
- * TWO LIBRARIES LIVE HERE, AND THAT SPLIT IS THE DESIGN — NOT AN ACCIDENT.
+ * WHO WRITES THE FILE, AND WHO ONLY DESCRIBES IT.
  *
- * `xlsx@0.20.3` (the community build) discards every cell style on write:
- * `get_cell_style` reads exactly one property, `cell.z`, and writes `fontId:0,
- * fillId:0, borderId:0`, while `write_sty_xml` emits one hard-coded font, two
- * fills and one empty border for the whole file. `ws['!freeze']` is not a key
- * the library reads at all — its `write_ws_xml_sheetviews` emits no `<pane>`.
- * So the design the generic table exporter below describes drew NOTHING: those
- * files came out plain, however many fills and borders were named.
+ * Every Excel file this module produces is WRITTEN BY THE EXPORT SERVICE
+ * (deploy/export-service, Python's openpyxl), because the companies that receive
+ * these files check the writer. `exportTableToExcel` and `exportSheetsToExcel`
+ * build the sheet here, as they always did, and hand it to `deliverWorkbook`,
+ * which posts the values to the service and downloads what comes back. If the
+ * service cannot be reached the user is told so and NO file is written: there is
+ * no fallback to a JavaScript writer, because that file would carry the wrong
+ * signature and nobody would know.
  *
- * `exportTableToExcel` and `exportSheetsToExcel` therefore write through
- * `exceljs`, from `./styledWorkbookDownload` — every operational list a person
- * reads, sorts and filters, Umsätze and Gehälter included since 01.10.2026.
+ * The file has the SHAPE of the files these customers already get from other
+ * tools (Uber's): headers in row 1, data from row 2, nothing else. No title
+ * band, filter line or totals row is built at all (`buildPlainWorkbook`; its
+ * comment says what that removes). `buildTableWorkbook` and its seven-band
+ * drawing (`buildTableSheet`) are UNCHANGED: the monthly plan documents still
+ * use them and are not on the service yet. No fonts, fills, borders,
+ * alignment, widths, freeze pane, filter or merges are sent; the contract has
+ * nowhere to put them (`src/lib/workbookContract.ts`) apart from the one bold,
+ * bordered header row Uber's own files have. A number stays a number so an
+ * accountant can sum a column. This reverses the look the owner asked for on
+ * 01.10.2026; `buildTableSheet`'s drawing is dead weight for the lists until a
+ * follow-up removes it.
  *
- * What STAYS on `xlsx` is the prescribed sheets, deliberately:
+ * `xlsx@0.20.3` is used HERE only as a data structure (`XLSX.WorkBook` is what
+ * `buildTableWorkbook` returns and the tests read cell by cell) and never as a
+ * writer for these lists. What STAYS on `xlsx` and on `exceljs` is the other
+ * exports, deliberately, until their own change moves them:
  * `fahrtenbuchExport.ts` / `historicalWorkingHoursFahrtenbuchExport.ts` /
  * `monatsplanungXlsxExport.ts` / `monthlyPlanFahrtenbuchExport.ts`, whose
- * `'original'` mode must reproduce an imported sheet's headers byte for byte and
- * whose output is a statutory record an accountant reconciles against.
- *
- * Do not "unify" them. One library reproduces a prescribed sheet exactly; the
- * other paints a readable one.
- *
- * `buildTableWorkbook` is unchanged by that swap and still returns an
- * `XLSX.WorkBook`: it is the description of the file — values, `z` formats, `s`
- * styles and the `!` sheet settings — which the new writer translates. Keeping
- * it is what keeps the number formats, the `asFiniteNumber` rule and the
- * column-0 totals guard the exact code they were, still asserted cell by cell.
+ * `'original'` mode must reproduce an imported sheet's headers byte for byte,
+ * and the Fahrerübersicht and the monthly plan's documents. See
+ * `styledWorkbookDownload.ts`.
  */
 import * as XLSX from 'xlsx';
-import { downloadStyledWorkbook } from './styledWorkbookDownload';
+import { deliverWorkbook } from './serviceWorkbookDownload';
 import { Income, SalaryCalculation } from '../types/receipt';
 import {
   buildIncomeSheets,
@@ -75,7 +80,7 @@ export const exportSalariesToExcel = (
 
 // ─── Generic reusable table export ────────────────────────────────────────────
 
-export type ExportColumnType = 'text' | 'number' | 'integer' | 'money' | 'percent' | 'kilometres';
+export type ExportColumnType = 'text' | 'number' | 'number3' | 'integer' | 'money' | 'percent' | 'kilometres';
 
 export interface ExportColumn {
   key: string;
@@ -197,6 +202,8 @@ const T = {
 // English, so it carries no language and stays out of the dictionaries.
 const NUMBER_FORMATS: Record<Exclude<ExportColumnType, 'text'>, string> = {
   number:     '#,##0.00',
+  // A unit price at a pump has three decimals; 'number' would show 2,05 for 2,049.
+  number3:    '#,##0.000',
   integer:    '#,##0',
   money:      '#,##0.00\\ "€"',
   percent:    '0.0%',
@@ -269,6 +276,21 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 
 // ─── Main export function ─────────────────────────────────────────────────────
 
+/**
+ * The totals contract, checked by both builders even though the plain one never
+ * writes a totals row: a caller that names the first column here is a wrong
+ * program, and it should fail the first click whichever shape the file has.
+ */
+function assertTotalsContract(columns: ExportColumn[], totals: ExportOptions['totals']): void {
+  if (totals && columns.length > 0 && Object.prototype.hasOwnProperty.call(totals, columns[0].key)) {
+    throw new Error(
+      `exportTableToExcel: totals['${columns[0].key}'] can never be rendered — the first ` +
+      `column of the totals row is that row's label. Pass wording as labels.totalsRow, ` +
+      `and put a figure in any column but the first.`,
+    );
+  }
+}
+
 /** A drawn sheet and the name it goes into the workbook under. */
 interface BuiltSheet {
   name: string;
@@ -305,13 +327,7 @@ function buildTableSheet(opts: ExportOptions): BuiltSheet {
   // Loud, not a console warning: every call site is in this repository, so this
   // is a wrong program rather than wrong data, and it is meant to fail the first
   // click and the test rather than reach a customer's file.
-  if (totals && columns.length > 0 && Object.prototype.hasOwnProperty.call(totals, columns[0].key)) {
-    throw new Error(
-      `exportTableToExcel: totals['${columns[0].key}'] can never be rendered — the first ` +
-      `column of the totals row is that row's label. Pass wording as labels.totalsRow, ` +
-      `and put a figure in any column but the first.`,
-    );
-  }
+  assertTotalsContract(columns, totals);
 
   const N = columns.length;
   const exportedDate = new Date().toLocaleDateString('de-DE');
@@ -707,32 +723,116 @@ export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
   return wb;
 }
 
+// ─── The plain shape: what is actually sent to the export service ─────────────
+
 /**
- * Writes a multi-sheet styled workbook.
+ * One sheet in the shape of the files these customers already receive from other
+ * tools: the column headers in row 1, the data from row 2, and NOTHING else.
  *
- * Same contract as `exportTableToExcel`, including the `void` signature and the
- * logged rejection: ExcelJS writes asynchronously and no call site has anywhere
- * to show a failure.
+ * No title, no module name, no timestamp, no filter line, no totals row, no
+ * empty-state sentence, no footer note. That is information removed, on the
+ * owner's instruction ("literally the same as Uber's file"), not decoration:
+ * the file no longer records which filter produced it, no longer carries a sum,
+ * and an empty list is a header with no rows below it. `filterSummary`,
+ * `totals` and the chrome labels are accepted and ignored, so no caller changes.
+ *
+ * What stays is what is data: a numeric column is a number, a value that cannot
+ * be read as a number is never turned into 0 (it takes the text path, empty when
+ * there is nothing), and header text is whatever the screen passed, in the UI
+ * language.
+ *
+ * **A data cell carries no style at all, not even a number format**, because
+ * Uber's data cells do not (uber.xlsx: zero `<numFmt>` entries, no `s` attribute
+ * on any data cell). So a kilometre reading is the bare number, not "25,880 km";
+ * money is the bare number, not "55.11 €"; the column's `width` and `align` are
+ * not sent either, so there is no `<cols>`.
+ *
+ * **A percent column is the one whose VALUE changes, not only its look.** A
+ * `'percent'` column holds the fraction (0.42), which Excel's `0.0%` format used
+ * to display as 42,0 %. With no format that fraction would read as a different
+ * quantity, so the plain sheet writes the number a reader expects, 42, scaled
+ * HERE and not at the three call sites (Umsätze `Anteil`, Gehälter `Anteil`, the
+ * Fahrer `Gehaltsanteil`), so a fourth caller cannot get it wrong. There is no %
+ * sign: like Uber's money, the unit lives in the header, if anywhere.
+ * The stored value is exact and still sums. What the file no longer shows is the
+ * unit, the currency symbol, forced decimals (55.1 shows as 55.1, not 55,10) and
+ * the % sign. That is the owner's decision, so do not "fix" it back by passing a
+ * `z` below or drop the scaling. Dates are untouched: they stay the formatted text the screens pass.
+ */
+/**
+ * 0.42 -> 42. Multiplying a float by 100 leaves noise (0.29 * 100 is
+ * 28.999999999999996), and the stored fractions have at most four decimals
+ * (`drivers.salary_ratio` is numeric(5,4)), so twelve significant digits keep
+ * every real digit and drop only the noise.
+ */
+export function fractionToPercent(fraction: number): number {
+  return Number((fraction * 100).toPrecision(12));
+}
+
+function buildPlainSheet(opts: ExportOptions): BuiltSheet {
+  const { moduleName, columns, rows, totals } = opts;
+  assertTotalsContract(columns, totals);
+  const ws: XLSX.WorkSheet = {};
+  columns.forEach((col, c) => {
+    ws[XLSX.utils.encode_cell({ r: 0, c })] = { t: 's', v: col.label };
+  });
+  rows.forEach((dataRow, i) => {
+    columns.forEach((col, c) => {
+      const rawVal = dataRow[col.key];
+      const numeric = numericCell(col, rawVal);
+      const addr = XLSX.utils.encode_cell({ r: i + 1, c });
+      if (numeric) {
+        ws[addr] = { t: 'n', v: col.type === 'percent' ? fractionToPercent(numeric.value) : numeric.value };
+        return;
+      }
+      const text = col.format ? col.format(rawVal) : rawVal == null ? '' : String(rawVal);
+      ws[addr] = { t: 's', v: text };
+    });
+  });
+  const lastColumn = Math.max(columns.length - 1, 0);
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: lastColumn } });
+  return { name: moduleName.slice(0, 31), sheet: ws };
+}
+
+/** Several plain sheets in one workbook; a repeated sheet name gets a numeric suffix. */
+export function buildPlainWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
+  if (sheets.length === 0) {
+    throw new Error('buildPlainWorkbook: a workbook needs at least one sheet');
+  }
+  const wb = XLSX.utils.book_new();
+  const used = new Set<string>();
+  for (const opts of sheets) {
+    const built = buildPlainSheet(opts);
+    let name = built.name;
+    for (let n = 2; used.has(name); n++) {
+      const suffix = ` (${n})`;
+      name = `${built.name.slice(0, 31 - suffix.length)}${suffix}`;
+    }
+    used.add(name);
+    XLSX.utils.book_append_sheet(wb, built.sheet, name);
+  }
+  return wb;
+}
+
+/**
+ * Writes a multi-sheet workbook through the export service.
+ *
+ * Same contract as `exportTableToExcel`, including the `void` signature: the
+ * service answers asynchronously, and a failure is reported to the user through
+ * `deliverWorkbook` (a toast with a retry) rather than thrown at a caller that
+ * has nowhere to show it.
  */
 export function exportSheetsToExcel(filename: string, sheets: ExportOptions[]): void {
-  const wb = buildSheetsWorkbook(sheets);
+  const wb = buildPlainWorkbook(sheets);
   const safeFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
-    console.error('exportSheetsToExcel: writing the workbook failed', error);
-  });
+  deliverWorkbook(wb, safeFilename, { headerRow: true });
 }
 
 export function exportTableToExcel(opts: ExportOptions): void {
-  const wb = buildTableWorkbook(opts);
+  const wb = buildPlainWorkbook([opts]);
   const safeFilename = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`;
-  // ExcelJS produces a buffer, so writing is asynchronous where `XLSX.writeFile`
-  // was synchronous — and this function's `void` signature, which every call
-  // site is written against, has nowhere to hand a failure. A rejection is
-  // logged rather than left unhandled; a real message on the button would mean
-  // changing that signature, which is a change of its own. The guard against a
-  // file that claims nought after a failed read stays at the call site either
-  // way: this still writes a workbook for whatever rows it is handed.
-  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
-    console.error('exportTableToExcel: writing the workbook failed', error);
-  });
+  // The guard against a file that claims nought after a failed read stays at the
+  // call site either way: this still builds a workbook for whatever rows it is
+  // handed.
+  deliverWorkbook(wb, safeFilename, { headerRow: true });
 }

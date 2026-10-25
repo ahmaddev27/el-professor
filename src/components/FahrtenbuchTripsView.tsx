@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Filter, X, Upload, Trash2, Lock, User, Calendar, Eye, ChevronLeft, ChevronRight, Download, FileSpreadsheet } from 'lucide-react';
+import { Search, Filter, X, Upload, Trash2, Lock, User, Calendar, Eye, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useFahrtenbuch, FahrtenbuchImport, FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
@@ -12,6 +13,7 @@ import { buildFahrtenlisteExport } from '../utils/tableExportRows';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { SimulatedBadge, SimulatedNotice } from './simulatedRides/SimulatedBadge';
 import {
   Alert,
   Badge,
@@ -67,22 +69,9 @@ const STATUS_TONE: Record<string, 'neutral' | 'positive' | 'caution' | 'critical
   canceled:  'critical',
 };
 
-// The keys are `time_source` values stored on the trip (20260922100000) — data,
-// so they stay as they are; only the labels follow the UI language. The column
-// they name is load-bearing rather than noise: `fallback_trip_date` means
-// `start_at` was built from `trip_date` plus a clock time, so it inherits the
-// day-early date the Uber export writes for a ride starting just after midnight.
-// A value this map does not know is written verbatim, as an unmapped status is.
-const TIME_SOURCE_LABEL_KEYS: Record<string, TranslationKey> = {
-  source_start_end:   'imp.export.timeSource.sourceStartEnd',
-  fallback_trip_date: 'imp.export.timeSource.fallbackTripDate',
-  missing:            'imp.export.timeSource.missing',
-  unparsed:           'imp.export.timeSource.unparsed',
-  ambiguous:          'imp.export.timeSource.ambiguous',
-};
-
 const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const { isAdmin, isSuperAdmin } = useAuth();
+  const navigate = useNavigate();
   const { success, error: showError } = useToast();
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
@@ -220,23 +209,12 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       : imports.find(i => i.month === filterMonth && i.year === filterYear);
 
   /**
-   * The Fahrtenliste: the rides as a working list, for "which rides did this
-   * driver do in that plate in this month" in a form anyone can open.
-   *
-   * **It is not the Fahrtenbuch.** The button beside it builds the statutory
-   * corrected Fahrtenbuch, whose headers reproduce the imported sheet's and may
-   * never be translated; this is a plain table dump, so its headers follow the UI
-   * language. Different noun, different filename slug, different sheet title.
-   *
-   * **The rules being preserved.** `start_at` is the ride's real start, while
-   * `trip_date` is the file's "Datum der Fahrt", which the Uber export dates a day
-   * early for a ride starting just after midnight — so both are columns, and so is
-   * `time_source`, which says whether `start_at` was read from the source or built
-   * from that same date. And a trip with `is_canceled = true` is never counted:
-   * it is listed with a column saying so and enters no sum, which is why the file
-   * carries **no money totals row** (the screen's own Gesamtpreis reduces over
-   * every filtered trip with no `is_canceled` term, and the importer keeps a
-   * cancelled ride's fare).
+   * The Fahrtenliste: the ride log in the 18 columns of the Uber Fahrtenbuch,
+   * as a quick read. **It is not the Fahrtenbuch export.** That button beside it
+   * stays behind the Finalization checks; this one is the same shape with the
+   * assigned driver (else the original) in `Fahrername`, and no gate. It carries
+   * no Zeitquelle, Status or Storniert, and no SIMULIERT marker (a known open
+   * gap, left for a separate pass).
    *
    * It exports `filteredTrips`, never `pageTrips`: the hook loads every trip of
    * the month through its batched `while (true)` loop, and the paging below is
@@ -246,49 +224,14 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
     const imp = selectedImport();
     const month = imp?.month ?? filterMonth;
     const year = imp?.year ?? filterYear;
-    const filterLine = (label: string, value: string) => t('ui.export.filterLine', { label, value });
-    const filterSummary = [filterLine(t('common.period'), `${t(MONTH_KEYS[month - 1])} ${year}`)];
-    if (selectedImportId !== 'all' && imp) filterSummary.push(filterLine(t('imp.trips.importSelectLabel'), imp.file_name));
-    if (searchTerm) filterSummary.push(filterLine(t('common.search'), searchTerm));
-    if (filterDriver) filterSummary.push(filterLine(t('common.driver'), filterDriver));
-    if (filterPlate) filterSummary.push(filterLine(t('imp.trips.plate'), filterPlate));
-    if (filterStatus) {
-      filterSummary.push(filterLine(
-        t('common.status'),
-        filterStatus === 'active' ? t('imp.trips.onlyActive') : statusLabel(filterStatus),
-      ));
-    }
-    // The screen's own counts, so the file says how many of its rows are cancelled
-    // in place of the money total it deliberately does not write.
-    filterSummary.push(t('imp.trips.activeAndCanceled', { active: activeCount, canceled: canceledCount }));
 
     try {
       exportPicker.table('fahrtenliste', buildFahrtenlisteExport({
         trips: filteredTrips,
-        filterSummary,
         year,
         month,
         labels: {
           sheetTitle: t('imp.export.sheetTitle'),
-          date: t('common.date'),
-          startAt: t('imp.export.startAt'),
-          endAt: t('imp.export.endAt'),
-          timeSource: t('imp.export.timeSource'),
-          start: t('imp.th.start'),
-          end: t('imp.th.end'),
-          plate: t('imp.th.plate'),
-          originalDriver: t('imp.th.originalDriver'),
-          assignedDriver: t('imp.trips.th.assignedDriver'),
-          pickup: t('imp.trips.th.pickup'),
-          destination: t('imp.trips.th.destination'),
-          fare: t('imp.trips.th.fare'),
-          tip: t('imp.th.tip'),
-          status: t('common.status'),
-          canceled: t('imp.export.canceled'),
-          yes: t('common.yes'),
-          no: t('common.no'),
-          statusNames: Object.fromEntries(Object.entries(STATUS_LABEL_KEYS).map(([status, key]): [string, string] => [status, t(key)])),
-          timeSourceNames: Object.fromEntries(Object.entries(TIME_SOURCE_LABEL_KEYS).map(([source, key]): [string, string] => [source, t(key)])),
           chrome: exportChrome,
         },
       }));
@@ -320,7 +263,12 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       id: 'date',
       header: t('common.date'),
       className: 'whitespace-nowrap font-medium tabular-nums',
-      cell: trip => format(new Date(trip.trip_date), 'dd.MM.yyyy'),
+      cell: trip => (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          {format(new Date(trip.trip_date), 'dd.MM.yyyy')}
+          {trip.is_simulated ? <SimulatedBadge /> : null}
+        </span>
+      ),
     },
     {
       id: 'start',
@@ -447,7 +395,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           <option value="all">{t('imp.trips.allImports')}</option>
           {imports.map(imp => (
             <option key={imp.id} value={imp.id}>
-              {t(MONTH_KEYS[imp.month - 1])} {imp.year} — {imp.file_name.slice(0, 20)}
+              {imp.is_simulated ? `${t('simrides.badge')} · ` : ''}{t(MONTH_KEYS[imp.month - 1])} {imp.year} — {imp.file_name.slice(0, 20)}
             </option>
           ))}
         </NativeSelect>
@@ -505,6 +453,13 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         )}
 
         {importButton(t('imp.trips.import'))}
+
+        {/* The generator's only output is an import in this book, so it is
+            offered beside Import. The page it opens gates itself on the
+            documents page right, exactly as the import does in the database. */}
+        <Button variant="secondary" onClick={() => navigate('/monatsplan?art=simuliert&from=fahrtenbuch')}>
+          <Sparkles aria-hidden /> {t('simrides.entry.link')}
+        </Button>
       </div>
 
       {loadFailed && (
@@ -556,8 +511,9 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
               <div className="flex min-w-0 items-start gap-3">
                 <Calendar aria-hidden className="mt-0.5 size-4 shrink-0 text-brand-text" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-fg">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
                     {t(MONTH_KEYS[imp.month - 1])} {imp.year}
+                    {imp.is_simulated ? <SimulatedBadge /> : null}
                   </p>
                   <p className="break-words text-xs tabular-nums text-fg-muted">
                     {imp.file_name} · {t('imp.trips.tripCount', { count: imp.row_count })} ·{' '}
@@ -619,6 +575,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         </Card>
       ) : (
         <>
+          {filteredTrips.some(trip => trip.is_simulated) ? <SimulatedNotice /> : null}
           {/* Desktop table */}
           <DataTable
             className="hidden md:block"
@@ -644,7 +601,10 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                         <User aria-hidden className="size-3 shrink-0" /> {trip.original_driver_name}
                       </p>
                     </div>
-                    <Badge tone={STATUS_TONE[trip.plausibility_status] ?? 'neutral'}>{statusLabel(trip.plausibility_status)}</Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge tone={STATUS_TONE[trip.plausibility_status] ?? 'neutral'}>{statusLabel(trip.plausibility_status)}</Badge>
+                      {trip.is_simulated ? <SimulatedBadge /> : null}
+                    </div>
                   </div>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                     <div><dt className="inline text-fg-muted">{t('imp.trips.plate')}: </dt><dd className="inline text-fg">{trip.car_identifier || '—'}</dd></div>

@@ -1,7 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Upload, X, ChevronRight, ChevronLeft, Check, AlertTriangle, User, Car as CarIcon, FileSpreadsheet, Eye, RefreshCw, Plus, Info, ExternalLink } from 'lucide-react';
-import { useFahrtenbuch, TripInsertRow, FahrtenbuchImport, DuplicateImportFileError } from '../hooks/useFahrtenbuch';
+import {
+  useFahrtenbuch, TripInsertRow, FahrtenbuchImport, DuplicateImportFileError,
+  type ColumnMappingMatch,
+} from '../hooks/useFahrtenbuch';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -30,6 +33,13 @@ import {
   type ReviewReason,
   type TripStatus,
 } from '../utils/fahrtenbuchImportParser';
+import {
+  applyRememberedMapping,
+  fieldMapOf,
+  isStorableMapping,
+  sourceShapeKey,
+  type MissingMappedColumn,
+} from '../utils/importColumnMapping';
 import { formatEuro } from './ui/format';
 
 // ── Driver / Car types passed in from parent ──────────────────────────────────
@@ -149,6 +159,10 @@ const REASON_LABEL_KEYS: Record<ReviewReason, TranslationKey> = {
   end_before_start:  'imp.reason.endBeforeStart',
   missing_driver:    'imp.reason.missingDriver',
   unknown_status:    'imp.reason.unknownStatus',
+  // 20261023170000's ninth reason. The Record is typed on ReviewReason, so a
+  // tenth reason fails to compile until it has a label here and in both
+  // dictionaries — the same fail-closed shape SEED_PLAN_FEATURES has.
+  unreadable_order_transmission: 'imp.reason.unreadableOrderTransmission',
 };
 
 /** DD.MM.YYYY HH:MM:SS of an instant, on the clock the file was written in. */
@@ -157,6 +171,20 @@ function formatSourceWall(iso: string | null): string {
   const w = wallAt(Date.parse(iso), SOURCE_TIME_ZONE);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${p(w.day)}.${p(w.month)}.${w.year} ${p(w.hour)}:${p(w.minute)}:${p(w.second)}`;
+}
+
+/**
+ * DD.MM.YYYY of the moment a mapping was last confirmed.
+ *
+ * German formatting in both languages, like every other date in the product. An
+ * empty or unparseable timestamp prints the em dash rather than `Invalid Date`:
+ * the value comes out of a jsonb-adjacent row that a restored backup may have
+ * written, so it is data and not a contract.
+ */
+function formatSavedAt(iso: string): string {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '—';
+  return format(new Date(ms), 'dd.MM.yyyy');
 }
 
 /** DD.MM.YYYY of a stored YYYY-MM-DD. */
@@ -268,7 +296,10 @@ const MONTH_KEYS: readonly TranslationKey[] = [
 const FahrtenbuchImportModal: React.FC<Props> = ({
   isOpen, onClose, onImported, onOpenExistingImport, drivers, cars, existingImports, onDeleteImport,
 }) => {
-  const { createImport, findImportByFileHash, findStoredSourceRowKeys } = useFahrtenbuch();
+  const {
+    createImport, findImportByFileHash, findStoredSourceRowKeys,
+    findColumnMapping, rememberColumnMapping,
+  } = useFahrtenbuch();
   const { success, error: showError } = useToast();
   const { t } = useTranslation();
 
@@ -315,6 +346,21 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // ── The remembered column mapping (20261023210000) ──────────────────────────
+  // The fingerprint of this file's headers, what was remembered for it, and the
+  // columns that mapping names which this file has not got. `mappingMissing` is
+  // the whole point of the feature: those fields are left EMPTY rather than
+  // falling back to the automatic match, and named below, so a stored mapping
+  // can never quietly resolve to a different column.
+  const [mappingShapeKey, setMappingShapeKey] = useState('');
+  const [mappingMatch, setMappingMatch] = useState<ColumnMappingMatch>('none');
+  const [mappingAppliedCount, setMappingAppliedCount] = useState(0);
+  const [mappingMissing, setMappingMissing] = useState<MissingMappedColumn[]>([]);
+  const [mappingSavedAt, setMappingSavedAt] = useState('');
+  const [mappingLookupFailed, setMappingLookupFailed] = useState(false);
+  // Only the answer for the file chosen last may land (`latestHash`'s rule).
+  const fileToken = useRef(0);
+
   const reset = () => {
     setStep(0); setFileName(''); setRawRows([]); setHeaders([]); setParseError('');
     setColMap({
@@ -328,6 +374,9 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
     setRawXlsxBytes(null);
     setFileSha256(''); setHashChecking(false); setExistingForFile(null); latestHash.current = '';
     setPreview(null); setPreviewLoading(false);
+    setMappingShapeKey(''); setMappingMatch('none'); setMappingAppliedCount(0);
+    setMappingMissing([]); setMappingSavedAt(''); setMappingLookupFailed(false);
+    fileToken.current += 1;
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -357,9 +406,60 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
     }
   }, [findImportByFileHash, t]);
 
+  /*
+    What step 1 opens with: the automatic match, with whatever this company
+    remembered laid over it.
+
+    The order is `applyRememberedMapping`'s and lives there, not here: a
+    remembered header the file actually has wins over the automatic match, one
+    the file has NOT got leaves its field empty and is reported, and a field
+    nobody remembered keeps the automatic match. A failed lookup leaves the
+    automatic match alone and says so — silently falling back would leave an
+    operator who has a saved mapping looking at columns they did not choose and
+    no reason to look twice.
+
+    `token` is the file this answer belongs to; a second file chosen while this
+    is in flight makes the answer stale and it is dropped.
+  */
+  const loadRememberedMapping = useCallback(async (
+    token: number, hdrs: string[], autoMatched: ColMap,
+  ) => {
+    let shape = '';
+    try {
+      shape = await sourceShapeKey(hdrs);
+      const { mapping, match } = await findColumnMapping(shape);
+      if (fileToken.current !== token) return;
+      const outcome = applyRememberedMapping({ headers: hdrs, autoMatched, stored: mapping });
+      setMappingShapeKey(shape);
+      setMappingMatch(mapping ? match : 'none');
+      setMappingAppliedCount(outcome.applied.length);
+      setMappingMissing(outcome.missing);
+      setMappingSavedAt(mapping?.updated_at ?? '');
+      setColMap(outcome.colMap);
+    } catch (err) {
+      if (fileToken.current !== token) return;
+      // The shape key is kept when it was computed: the mapping could not be
+      // read, but the operator's confirmed choice can still be remembered.
+      setMappingShapeKey(shape);
+      setMappingMatch('none');
+      setMappingAppliedCount(0);
+      setMappingMissing([]);
+      setMappingSavedAt('');
+      setMappingLookupFailed(true);
+      if (import.meta.env.DEV) {
+        console.warn('[Fahrtenbuch] the remembered column mapping was not read:', err);
+      }
+    }
+  }, [findColumnMapping]);
+
   const handleFile = useCallback((file: File) => {
     setParseError('');
     setFileName(file.name);
+    // A new file: every answer still in flight for the previous one is stale.
+    fileToken.current += 1;
+    const token = fileToken.current;
+    setMappingShapeKey(''); setMappingMatch('none'); setMappingAppliedCount(0);
+    setMappingMissing([]); setMappingSavedAt(''); setMappingLookupFailed(false);
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -415,13 +515,17 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         setColMap(auto);
         setStatusColName(detectedStatusCol);
         setOrderTransmissionCol(findOrderTransmissionColumn(hdrs));
+        // Then whatever this company remembered for a file of this shape, laid
+        // over that automatic match. Asynchronous, so the automatic match is
+        // what is on screen until the answer arrives.
+        void loadRememberedMapping(token, hdrs, auto);
       } catch (err: any) {
         console.error('[Fahrtenbuch] Parse error:', err);
         setParseError(t('imp.error.readFile', { message: err.message || String(err) }));
       }
     };
     reader.readAsArrayBuffer(file);
-  }, [t, checkFileFingerprint]);
+  }, [t, checkFileFingerprint, loadRememberedMapping]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -438,8 +542,32 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
     return true; // step 3 (cars) is always optional
   };
 
+  /*
+    Remember the mapping the operator has just confirmed.
+
+    Called when step 1 is LEFT, not when the import is written: leaving the
+    mapping step is the operator's confirmation of these eleven choices, and it
+    is the only moment this feature touches. The import's write path is
+    unchanged, which also means an import abandoned later — at the duplicate-file
+    wall, say — still leaves the mapping remembered, and that is wanted: the
+    next attempt opens with the columns the operator already chose.
+
+    `canGoNext` has already required the four mandatory fields, so
+    `isStorableMapping` is the second wall rather than the gate; it is the
+    browser's copy of the table's constraints and its guard, so a payload the
+    database would refuse is not sent. The write itself never raises.
+  */
+  const saveColumnMapping = useCallback(async () => {
+    if (mappingShapeKey === '') return;
+    const fieldMap = fieldMapOf(colMap);
+    if (!isStorableMapping(headers, fieldMap)) return;
+    await rememberColumnMapping({
+      sourceShapeKey: mappingShapeKey, sourceHeaders: headers, fieldMap,
+    });
+  }, [mappingShapeKey, colMap, headers, rememberColumnMapping]);
+
   const goNext = () => {
-    if (step === 1) buildDriverMatches();
+    if (step === 1) { buildDriverMatches(); void saveColumnMapping(); }
     if (step === 2) buildCarMatches();
     setStep(s => s + 1);
   };
@@ -773,6 +901,49 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                 {t('imp.mappingIntro')}
               </p>
+
+              {/* What was remembered for this company, and what of it no longer
+                  fits this file. The second notice is the feature's point: a
+                  stored column the file has not got leaves its field empty and
+                  is named here, never resolved to a different column. */}
+              {mappingLookupFailed && (
+                <Notice tone="warning">
+                  <p>{t('imp.mapping.lookupFailed')}</p>
+                </Notice>
+              )}
+
+              {mappingMatch === 'exact' && mappingAppliedCount > 0 && (
+                <Notice tone="info">
+                  <p className="font-medium">{t('imp.mapping.rememberedTitle')}</p>
+                  <p>{t('imp.mapping.rememberedBody', {
+                    count: mappingAppliedCount, date: formatSavedAt(mappingSavedAt),
+                  })}</p>
+                </Notice>
+              )}
+
+              {mappingMatch === 'other_shape' && (
+                <Notice tone="warning">
+                  <p className="font-medium">{t('imp.mapping.otherShapeTitle')}</p>
+                  <p>{t('imp.mapping.otherShapeBody', {
+                    count: mappingAppliedCount, date: formatSavedAt(mappingSavedAt),
+                  })}</p>
+                </Notice>
+              )}
+
+              {mappingMissing.length > 0 && (
+                <Notice tone="danger">
+                  <p className="font-medium">{t('imp.mapping.staleTitle')}</p>
+                  <p>{t('imp.mapping.staleBody', {
+                    count: mappingMissing.length,
+                    columns: mappingMissing
+                      .map(m => t('imp.mapping.staleColumn', {
+                        field: t(COL_LABEL_KEYS[m.field]), column: m.header,
+                      }))
+                      .join(', '),
+                  })}</p>
+                </Notice>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {(Object.keys(COL_LABEL_KEYS) as (keyof ColMap)[]).map(key => (
                   <div key={key}>
@@ -1153,6 +1324,33 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
                     {preview.withoutInstant > 0 && (
                       <Notice tone="info">{t('imp.notice.withoutInstant', { count: preview.withoutInstant })}</Notice>
+                    )}
+
+                    {/*
+                      An order time that is not a timestamp. The column is the
+                      row's duplicate key and is stored as text, parsed into no
+                      column of its own, so nothing on the row says it cannot
+                      be read — see the count's comment in buildTripRows. The
+                      rows are still imported and no value is guessed; this is
+                      what stops a malformed file from being taken in silently.
+                    */}
+                    {build.unreadableOrderTransmission > 0 && (
+                      <Notice tone="warning">
+                        <p>
+                          {t('imp.notice.unreadableOrderTransmission', {
+                            count: build.unreadableOrderTransmission,
+                            column: orderTransmissionCol,
+                          })}
+                        </p>
+                        {build.sampleUnreadableOrderTransmission.length > 0 && (
+                          <p className="text-xs text-[color:var(--text-secondary)]">
+                            {t('imp.examples')}:{' '}
+                            <span className="font-mono">
+                              {build.sampleUnreadableOrderTransmission.map(v => `"${String(v)}"`).join(', ')}
+                            </span>
+                          </p>
+                        )}
+                      </Notice>
                     )}
 
                     <Notice tone="info">

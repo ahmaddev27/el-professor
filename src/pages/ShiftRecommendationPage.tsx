@@ -179,7 +179,9 @@ export default function ShiftRecommendationPage() {
     setDataError(null);
     try {
       const gap = await loadGap(companyId);
-      const perMonth = await Promise.all(chosen.map(o => loadTripRows(companyId, o.importId)));
+      // A simulated ride's time and place are invented; a recommendation learnt from them would be fiction.
+      const perMonth = (await Promise.all(chosen.map(o => loadTripRows(companyId, o.importId))))
+        .map(rows => rows.filter(row => row.is_simulated !== true));
       if (request !== requestRef.current) return;
       const trips = perMonth.flat().map(analysisTripFromRow);
       const months = chosen.map(o => ({ year: o.year, month: o.month }));

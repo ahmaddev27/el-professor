@@ -15,13 +15,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
   The write is mocked at the module boundary, because the real one is a DOM
   download and this suite runs in node. Since the ExcelJS swap that write is
-  `downloadStyledWorkbook`, not `XLSX.writeFile`: xlsx 0.20.3 discards every
-  fill, font, border and alignment the exporter describes (`get_cell_style` reads
-  only `cell.z`), so a styled table written through it came out plain. The
-  assertion is the same one — the exporter reaches its write with real rows —
-  against the writer that now performs it, and `XLSX.writeFile` stays mocked as
-  the negative control: a regression back onto the styleless writer fails here
-  rather than silently producing an unstyled file.
+  `deliverWorkbook`, which posts the rows to the export service (openpyxl), not
+  `XLSX.writeFile`. The assertion is that the exporter reaches its write with
+  real rows, and `XLSX.writeFile` stays mocked as the negative control: a
+  regression back onto a browser-side writer fails here rather than silently
+  producing a file with the wrong signature.
 */
 // vi.mock is hoisted above every other statement, so the spy has to be created
 // inside vi.hoisted or the factory closes over a variable that does not exist yet.
@@ -31,16 +29,16 @@ vi.mock('xlsx', async (importOriginal) => {
   return { ...real, writeFile, default: { ...real, writeFile } }
 })
 
-// Resolves, because `exportTableToExcel` attaches a `.catch` to what it returns.
-// A bare factory rather than one spreading the real module: that module lazily
-// imports exceljs, and nothing here needs it loaded.
-const { downloadStyledWorkbook } = vi.hoisted(() => ({
-  downloadStyledWorkbook: vi.fn(() => Promise.resolve()),
+// A bare factory rather than one spreading the real module: that module reaches
+// the network, and nothing here needs it loaded.
+const { deliverWorkbook } = vi.hoisted(() => ({
+  deliverWorkbook: vi.fn(),
 }))
-vi.mock('./styledWorkbookDownload', () => ({ downloadStyledWorkbook }))
+vi.mock('./serviceWorkbookDownload', () => ({ deliverWorkbook }))
 
 import * as excelExport from './excelExport'
 import { exportTableToExcel } from './excelExport'
+import { buildBelegeExportOptions, NO_RECEIPT_FILTERS } from './belegeExport'
 import type { Receipt } from '../types/receipt'
 
 const ONE: Receipt[] = [{
@@ -51,7 +49,7 @@ const ONE: Receipt[] = [{
 
 beforeEach(() => {
   writeFile.mockClear()
-  downloadStyledWorkbook.mockClear()
+  deliverWorkbook.mockClear()
 })
 
 describe('the Belege Excel export', () => {
@@ -65,16 +63,18 @@ describe('the Belege Excel export', () => {
       rows: ONE.map(r => ({ receiptNumber: r.receiptNumber, expense: r.expense })),
       totals: { expense: '42,50 EUR' },
     })).not.toThrow()
-    expect(downloadStyledWorkbook).toHaveBeenCalledTimes(1)
-    // The workbook that reached the write is a real one with the row in it, not
-    // an empty object the exporter happened to hand over. A6 is the first data
-    // row: rows 0-4 are accent, title, meta, spacer and the column header.
-    const [workbook, filename] = downloadStyledWorkbook.mock.calls[0] as unknown as [
+    expect(deliverWorkbook).toHaveBeenCalledTimes(1)
+    // The workbook that reached the write is a real one with the row in it, in
+    // the plain shape: headers in row 1, the first data row is A2, nothing above.
+    const [workbook, filename, options] = deliverWorkbook.mock.calls[0] as unknown as [
       { Sheets: Record<string, Record<string, { v?: unknown } | undefined>> },
       string,
+      unknown,
     ]
     expect(filename).toBe('belege_test.xlsx')
-    expect(workbook.Sheets.Belege.A6?.v).toBe('BEL-1')
+    expect(workbook.Sheets.Belege.A1?.v).toBe('Belegnummer')
+    expect(workbook.Sheets.Belege.A2?.v).toBe('BEL-1')
+    expect(options).toEqual({ headerRow: true })
     // Negative control: not through the writer that would have dropped every
     // fill, font and border on the way out.
     expect(writeFile).not.toHaveBeenCalled()
@@ -87,5 +87,20 @@ describe('the Belege Excel export', () => {
     // the two fields to a row and the report would still be built on a model the
     // database does not have.
     expect(Object.keys(excelExport)).not.toContain('exportToExcel')
+  })
+
+  it('gives each Beleg detail its own column; an absent figure is empty, not 0', () => {
+    const t = ((key: string) => key) as never
+    const fuel: Receipt = { ...ONE[0], merchantName: 'Star', city: 'Solingen', receiptTime: '03:15:00',
+      litres: 25.87, pricePerLitre: 2.049, odometerKm: 20140, rangeKm: 793 }
+    const options = buildBelegeExportOptions([fuel, ONE[0]], NO_RECEIPT_FILTERS, t)
+    const keys = options.columns.map(c => c.key)
+    expect(keys).toEqual(expect.arrayContaining(
+      ['merchantName', 'city', 'receiptTime', 'litres', 'pricePerLitre', 'odometerKm', 'rangeKm']))
+    expect(options.rows[0]).toMatchObject({ merchantName: 'Star', city: 'Solingen', receiptTime: '03:15',
+      litres: 25.87, pricePerLitre: 2.049, odometerKm: 20140, rangeKm: 793 })
+    expect(options.rows[1]).toMatchObject({ merchantName: null, city: null, receiptTime: null,
+      litres: null, pricePerLitre: null, odometerKm: null, rangeKm: null })
+    expect(options.columns.find(c => c.key === 'pricePerLitre')?.type).toBe('number3')
   })
 })

@@ -1,3 +1,4 @@
+import type { DriverLanguage } from '../lib/driverLanguage';
 export interface Receipt {
   id: string;
   receiptNumber: string;
@@ -37,6 +38,18 @@ export interface ReceiptFormData {
   postalCode?: string;
   city?: string;
   paymentMethod?: 'bar' | 'uberweisung';
+  /**
+   * What the Beleg itself says, as the driver app captures it. An absent figure
+   * is `undefined` and reaches the column as NULL, never 0. The fuel figures
+   * exist only for the refuel category (see utils/receiptFormRules.ts).
+   */
+  merchantName?: string;
+  /** `HH:MM`, the time printed on the Beleg - not when it was entered. */
+  receiptTime?: string;
+  litres?: number;
+  pricePerLitre?: number;
+  odometerKm?: number;
+  rangeKm?: number;
 }
 
 export interface Income {
@@ -77,6 +90,8 @@ export interface Driver {
   email?: string | null;
   /** E.164 (`+4917012345678`), so a wa.me link can be built without reprocessing. */
   phone?: string | null;
+  /** The language this driver's e-mails are written in. Default English. */
+  preferred_language?: DriverLanguage;
   // Planning fields
   driver_usage_type?: 'regular' | 'coverage_only';
   target_monthly_hours?: number | null;
@@ -108,6 +123,12 @@ export interface Driver {
 export interface DriverContact {
   email: string | null;
   phone: string | null;
+  /**
+   * Where the mail goes belongs with what language it is written in, so the
+   * language travels in this object rather than as a tenth positional argument.
+   * Always a language we write: the form cannot produce another.
+   */
+  preferred_language: DriverLanguage;
 }
 
 export interface Salary {

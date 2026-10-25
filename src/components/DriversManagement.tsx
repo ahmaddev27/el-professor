@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
-import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
+import { Download, Pencil, Plus, Power, PowerOff, UserCheck, UserX, Users } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
+import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
-import { usePlan } from '../contexts/PlanContext';
-import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { pageWriteRights } from '../lib/pageWriteRights';
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -26,18 +25,14 @@ interface DriversManagementProps {
   // `contact` is optional on purpose: the status toggle calls this with four
   // arguments and must not rewrite an address nobody touched.
   onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
-  onDeleteDriver: (id: string) => void;
   canEdit: (driver: Driver) => boolean;
-  canDelete: (driver: Driver) => boolean;
 }
 
 const DriversManagement: React.FC<DriversManagementProps> = ({
   drivers,
   onAddDriver,
   onEditDriver,
-  onDeleteDriver,
-  canEdit,
-  canDelete
+  canEdit
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | undefined>();
@@ -45,13 +40,14 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const activeDrivers = drivers.filter(d => d.status === 'active');
   const inactiveDrivers = drivers.filter(d => d.status === 'inactive');
 
-  const { planState } = usePlan();
-  const { settings: companySettings } = useCompanySettings();
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
-  const driversPerCar = companySettings?.drivers_per_car_limit ?? 4;
-  const driverLimit = planState.carLimit * driversPerCar;
-  const driverLimitReached = activeDrivers.length >= driverLimit;
+  // No cap on how many drivers a company may have (owner, 21.10.2026). The cap
+  // was `planState.carLimit * company_settings.drivers_per_car_limit` and lived
+  // ONLY here, in the browser: no policy, trigger or constraint enforced it, so
+  // removing it takes nothing else with it. `drivers_per_car_limit` is still
+  // stored and still shown on the plan in AssignSubscriptionModal; it no longer
+  // stops anyone. A company decides its own number of drivers.
 
   const handleSave = (
     name: string,
@@ -73,10 +69,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const handleEdit = (driver: Driver) => {
     setEditingDriver(driver);
     setIsModalOpen(true);
-  };
-
-  const handleDelete = (id: string) => {
-    onDeleteDriver(id);
   };
 
   const handleToggleStatus = (driver: Driver) => {
@@ -104,9 +96,12 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'status',                        label: t('common.status'),                width: 12, format: v => v === 'active' ? t('overview.status.active') : t('overview.status.inactive') },
         { key: 'gender',                        label: t('fleet.salutation'),             width: 10, format: v => v === 'male' ? t('fleet.salutationMr') : v === 'female' ? t('fleet.salutationMrs') : '' },
         { key: 'employment_type',               label: t('fleet.employmentType'),         width: 22, format: v => v === 'company_owner' ? t('fleet.companyOwner') : v === 'employee' ? t('fleet.employed') : '' },
-        // drivers.salary_ratio is numeric(5,4) between 0 and 1 — the fraction
-        // Excel's percent format expects, since it multiplies by 100 itself.
-        { key: 'salaryRatio',                   label: t('fleet.salaryShare'),            width: 16, align: 'right' as const, type: 'percent' },
+        // drivers.salary_ratio is numeric(5,4) between 0 and 1. Since 19.10.2026
+        // the file carries no number format at all, so `fractionToPercent` in
+        // excelExport.ts scales it and the cell holds 42, not 0.42 — which is
+        // why the unit belongs in the header. It is appended here and not in
+        // the dictionary, because the screen uses the same key for its label.
+        { key: 'salaryRatio',                   label: `${t('fleet.salaryShare')} (%)`,   width: 16, align: 'right' as const, type: 'percent' },
         { key: 'planning_enabled',              label: t('fleet.planningActive'),         width: 14, format: yesNo },
         // Euros, not cents: planning_hourly_rate is numeric and both salary
         // bounds are numeric(10,2), all of them stored as euro amounts.
@@ -154,16 +149,14 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   // handleAddDriver refuses such a caller as before. There is no confirmation in
   // front of the bin: it deletes at once, as it always has.
 
-  const { canCreate } = useCompanyScope();
-  const limitAlertId = 'fahrer-driver-limit';
+  const scope = useCompanyScope();
+  const { canCreate } = pageWriteRights('drivers', scope);
 
   const addButton = (size?: 'sm') =>
     canCreate ? (
       <Button
         size={size}
-        onClick={() => !driverLimitReached && setIsModalOpen(true)}
-        disabled={driverLimitReached}
-        aria-describedby={driverLimitReached ? limitAlertId : undefined}
+        onClick={() => setIsModalOpen(true)}
       >
         <Plus aria-hidden />
         {t('fleet.newDriver')}
@@ -219,6 +212,19 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       hideBelow: 'sm',
     },
     {
+      id: 'mailLanguage',
+      header: t('fleet.mailLanguage'),
+      value: driver => toDriverLanguage(driver.preferred_language),
+      sortable: true,
+      cell: driver => (
+        // The language's own name, so `dir="auto"` keeps Arabic reading right.
+        <span dir="auto" className="text-fg-muted">
+          {DRIVER_LANGUAGE_NAMES[toDriverLanguage(driver.preferred_language)]}
+        </span>
+      ),
+      hideBelow: 'lg',
+    },
+    {
       id: 'createdBy',
       header: t('fleet.createdBy'),
       cell: driver => (
@@ -230,7 +236,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
     },
   ];
 
-  const anyRowWritable = drivers.some(driver => canEdit(driver) || canDelete(driver));
+  const anyRowWritable = drivers.some(driver => canEdit(driver));
 
   const rowActions = (driver: Driver) => (
     <>
@@ -262,19 +268,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           </Button>
         </Tooltip>
       ) : null}
-      {canDelete(driver) ? (
-        <Tooltip content={t('common.delete')}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="hover:text-critical"
-            aria-label={t('fleet.deleteDriverAria', { name: driver.name })}
-            onClick={() => canDelete(driver) && handleDelete(driver.id)}
-          >
-            <Trash2 aria-hidden />
-          </Button>
-        </Tooltip>
-      ) : null}
     </>
   );
 
@@ -286,8 +279,8 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           <>
             {t('fleet.driversDescription')}
             <span aria-hidden className="mx-1.5 text-fg-subtle">·</span>
-            <span className={driverLimitReached ? 'whitespace-nowrap font-medium text-critical' : 'whitespace-nowrap'}>
-              {t('fleet.activeDriversOfLimit', { active: activeDrivers.length, limit: driverLimit })}
+            <span className="whitespace-nowrap">
+              {t('fleet.activeDriversCount', { active: activeDrivers.length })}
             </span>
           </>
         }
@@ -306,12 +299,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           widest child's content, and the table alone would push the page past
           375 px. */}
       <div className="grid grid-cols-1 gap-4">
-        {driverLimitReached && (
-          <Alert id={limitAlertId} tone="critical" icon={Users} title={t('fleet.driverLimitReachedHeading')}>
-            {t('fleet.driverLimitBanner', { limit: driverLimit, cars: planState.carLimit, perCar: driversPerCar })}
-          </Alert>
-        )}
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <KpiCard label={t('fleet.activeDrivers')} value={activeDrivers.length} icon={UserCheck} />
           <KpiCard label={t('fleet.inactiveDrivers')} value={inactiveDrivers.length} icon={UserX} />
@@ -332,6 +319,10 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
             rowActionsLabel={t('fleet.actions')}
           />
         )}
+
+        {/* Where "delete" used to be. A driver who leaves is deactivated, never
+            removed: salaries, receipts and the ride history reference them. */}
+        <p className="text-sm text-fg-muted">{t('fleet.deactivateNotDelete')}</p>
       </div>
 
       <DriverModal

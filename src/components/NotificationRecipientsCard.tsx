@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Mails, Plus, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { deleteChecked, type WriteOutcome } from '../lib/writeOutcome';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -105,10 +106,20 @@ const NotificationRecipientsCard: React.FC<{ readOnly: boolean }> = ({ readOnly 
 
   const remove = async (row: StoredRow) => {
     setBusy(true);
-    const { error } = await supabase.from('notification_recipients').delete().eq('id', row.id);
+    let outcome: WriteOutcome | 'error' = 'error';
+    try {
+      outcome = await deleteChecked(supabase, 'notification_recipients', q => q.eq('id', row.id));
+    } catch {
+      outcome = 'error';
+    }
     setBusy(false);
-    if (error) {
+    if (outcome === 'error') {
       showError(t('settings.notifyRecipients.removeFailed'), t('settings.notifyRecipients.saveFailedBody'));
+      return;
+    }
+    if (outcome !== 'done') {
+      if (outcome === 'gone') await load();
+      showError(t('settings.notifyRecipients.removeFailed'), t(outcome === 'gone' ? 'common.writeAlreadyGone' : 'common.writeRefused'));
       return;
     }
     success(t('settings.notifyRecipients.removed'), t('settings.notifyRecipients.removedBody', { address: row.email }));

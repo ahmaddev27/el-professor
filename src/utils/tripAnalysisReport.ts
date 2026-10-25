@@ -19,8 +19,9 @@
  * findings, the findings with their trips (one row per finding and trip), and
  * every trip of the file by id.
  */
+import { addSimulatedNotice, simulatedFileName } from './simulatedRides/marker';
 import * as XLSX from 'xlsx';
-import { downloadStyledWorkbook } from './styledWorkbookDownload';
+import { deliverWorkbook } from './serviceWorkbookDownload';
 import { formatCentsForNumeric } from './money';
 import {
   EXCLUSION_KEYS,
@@ -51,6 +52,8 @@ export interface TripAnalysisReportInput {
   fileName: string;
   /** When the report was made; passed in so the builder has no clock. */
   generatedAtMs: number;
+  /** Required: the figures come from ride times. True when any ride behind them is simulated. */
+  simulated: boolean;
 }
 
 type Cell = string | number | boolean | null;
@@ -366,11 +369,11 @@ export function tripAnalysisReportFileName(year: number, month: number, sourceFi
 
 /** Builds and downloads the report. */
 export function downloadTripAnalysisReport(input: TripAnalysisReportInput): void {
-  // ExcelJS, like every other table in the product since 01.10.2026. `writeFile`
-  // would discard the drawing `sheet()` now describes.
+  // Through the export service, like every other table in the product: see the
+  // header of excelExport.ts. A failure is reported to the user by
+  // `deliverWorkbook`, and no file is written.
   const filename = tripAnalysisReportFileName(input.year, input.month, input.fileName);
-  void downloadStyledWorkbook(buildTripAnalysisReport(input), filename)
-    .catch((error: unknown) => {
-      console.error('downloadTripAnalysisReport: writing the workbook failed', error);
-    });
+  const workbook = buildTripAnalysisReport(input);
+  if (input.simulated) addSimulatedNotice(workbook, 'first');
+  deliverWorkbook(workbook, input.simulated ? simulatedFileName(filename) : filename);
 }

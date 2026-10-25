@@ -150,6 +150,35 @@ export const BACKUP_TABLES: readonly string[] = [
   'notification_deliveries',
   'trip_analysis_settings',
   'driver_month_budget',
+
+  // The forward plan per vehicle and operating day (20261022140000). Both carry
+  // company_id, so both are read directly, in pages of 1000 like every other
+  // table: one company's month can hold more shifts than a page.
+  'vehicle_day_plans',
+  'vehicle_day_shifts',
+
+  // The month-end driver assignment (20261023120000): one row per driver per
+  // month, and the vehicle windows it stands for. Both carry company_id, so
+  // both are read directly like the plan they hang off. They are NOT child
+  // tables of vehicle_day_plans for this list's purposes: a child here means a
+  // table with no company_id of its own, reached through its parent, and both
+  // of these have one.
+  'driver_month_assignments',
+  'driver_month_assignment_shifts',
+
+  // The remembered Fahrtenbuch import column mapping (20261023210000). Header
+  // names and system field names only, so it adds no personal data to the
+  // file — but a restore without it means a company whose export has
+  // non-standard headers redoes those overrides on the next import, which is
+  // the one thing the table exists to prevent.
+  'import_column_mappings',
+
+  // The reviewed findings of the two detectors (20261023200000). It carries
+  // company_id and is read directly like every other table here. A company's
+  // review history is the company's own record — who looked at which conflict
+  // and what they decided — so a backup without it is a backup of the data
+  // without the judgements made about it.
+  'conflict_reviews',
 ];
 
 /** A table with no `company_id`, reached through the parent that gives it one. */

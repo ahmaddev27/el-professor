@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
-import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, FileSearch, FileSpreadsheet, RotateCw, Download, type LucideIcon } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, Receipt, Car, Trash2, ExternalLink, FileDown, FileSpreadsheet, RotateCw, Download, type LucideIcon } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
-import FahrtenbuchTripsView from '../components/FahrtenbuchTripsView';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
 // minsToDecimal and totalMins were declared in this file. They moved into the
 // export module so that the spreadsheet's hours and the screen's hours are one
@@ -19,8 +17,9 @@ import {
 } from '../utils/stundennachweisArchiveExport';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
-import { tripAnalysisLinkShown } from '../components/navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
+import { deleteChecked, type WriteOutcome } from '../lib/writeOutcome';
 import type { TranslationKey } from '../i18n';
 import {
   Alert,
@@ -71,6 +70,8 @@ interface SavedRecord {
   calculated_salary?: number | null;
   pdf_storage_path?: string | null;
   snapshot_hash?: string | null;
+  /** Set by the database from the run the record was saved from; never cleared. */
+  is_simulated?: boolean;
 }
 
 interface MonthGroup {
@@ -106,8 +107,6 @@ function fmtDec(v: number): string {
   return v.toFixed(2).replace('.', ',');
 }
 
-type SubView = 'main' | 'fahrtenbuch';
-
 // ── PDF export — uses the shared renderer (Schicht 3, no Samstag column) ─────
 
 function exportSavedPDF(rec: SavedRecord): void {
@@ -125,7 +124,7 @@ function exportSavedPDF(rec: SavedRecord): void {
   };
   const warnings = Array.isArray(rec.warnings_json) ? rec.warnings_json : [];
   exportStundennachweisAsPdf(
-    { driver: { name: driver_name, personalnummer }, month, year, rows, totals, warnings },
+    { driver: { name: driver_name, personalnummer }, month, year, rows, totals, warnings, simulated: rec.is_simulated === true },
     `Stundennachweis_${driver_name.replace(/\s+/g, '_')}_${MONTH_NAMES_DE[month - 1]}_${year}`,
   );
 }
@@ -135,18 +134,16 @@ function exportSavedPDF(rec: SavedRecord): void {
 const DocumentsPage: React.FC = () => {
   const navigate = useNavigate();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // `saved_stundennachweise` is gated by the Dokumente page right (an editor does
+  // not hold it); a refused DELETE is silent (lib/writeOutcome.ts).
+  const mayEdit = useCompanyScope().can('documents', 'edit');
   const { t, tPlural } = useTranslation();
   const exportPicker = useColumnPickerExport();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
   // Bumped when the dialog issues a receipt or attaches a signed copy, so the list reloads.
-  const [subView, setSubView] = useState<SubView>('main');
 
   // SalaryDetailsModal links a locked payment to its receipt through router state.
-
-  // Drivers and cars for Fahrtenbuch matching
-  const [drivers, setDrivers] = useState<DriverOption[]>([]);
-  const [cars, setCars] = useState<CarOption[]>([]);
 
   // Saved Stundennachweise archive
   const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
@@ -171,29 +168,6 @@ const DocumentsPage: React.FC = () => {
   const [deleteGroupKey, setDeleteGroupKey] = useState<string | null>(null);
   const [deletingGroup, setDeletingGroup] = useState(false);
   const [groupDeleteError, setGroupDeleteError] = useState('');
-
-  useEffect(() => {
-    if (!companyId) return;
-    supabase
-      .from('drivers')
-      .select('id, name')
-      .eq('company_id', companyId)
-      .eq('status', 'active')
-      .order('name')
-      .then(({ data }) => setDrivers((data || []) as DriverOption[]));
-
-    supabase
-      .from('cars')
-      .select('id, kennzeichen')
-      .eq('company_id', companyId)
-      .order('kennzeichen')
-      .then(({ data }) => setCars(
-        (data || []).map((c: { id: string; kennzeichen: string }) => ({
-          id: c.id,
-          plate: c.kennzeichen,
-        }))
-      ));
-  }, [companyId]);
 
   const loadArchive = useCallback(async () => {
     if (!companyId) return;
@@ -303,14 +277,18 @@ const DocumentsPage: React.FC = () => {
     setDeleting(true);
     // Scope by company as well as id: deleting a statutory record by primary key
     // alone leaves the tenant boundary entirely to RLS.
-    const { error } = await supabase
-      .from('saved_stundennachweise')
-      .delete()
-      .eq('id', deleteConfirmId)
-      .eq('company_id', companyId);
+    let outcome: WriteOutcome;
+    try {
+      outcome = await deleteChecked(supabase, 'saved_stundennachweise', q =>
+        q.eq('id', deleteConfirmId).eq('company_id', companyId));
+    } catch (error) {
+      setDeleting(false);
+      setDeleteError(t('doc.deleteFailed', { message: (error as { message?: string }).message ?? '' }));
+      return;
+    }
     setDeleting(false);
-    if (error) {
-      setDeleteError(t('doc.deleteFailed', { message: error.message }));
+    if (outcome === 'refused') {
+      setDeleteError(t('common.writeRefused'));
       return;
     }
     setDeleteConfirmId(null);
@@ -331,18 +309,24 @@ const DocumentsPage: React.FC = () => {
     setGroupDeleteError('');
     const ids = group.records.map(r => r.id);
     if (!companyId) return;
-    const { error } = await supabase
-      .from('saved_stundennachweise')
-      .delete()
-      .in('id', ids)
-      .eq('company_id', companyId);
-    if (error) {
-      setGroupDeleteError(error.message);
+    let outcome: WriteOutcome;
+    try {
+      outcome = await deleteChecked(supabase, 'saved_stundennachweise', q =>
+        q.in('id', ids).eq('company_id', companyId), ids.length);
+    } catch (error) {
+      setGroupDeleteError((error as { message?: string }).message ?? '');
       setDeletingGroup(false);
       return;
     }
-    setDeleteGroupKey(null);
     setDeletingGroup(false);
+    if (outcome === 'refused') {
+      // Some of the month may have gone before the rest was refused: show what
+      // is really there rather than the list from before.
+      setGroupDeleteError(t('common.writeRefused'));
+      loadArchive();
+      return;
+    }
+    setDeleteGroupKey(null);
     loadArchive();
   };
 
@@ -415,34 +399,6 @@ const DocumentsPage: React.FC = () => {
     if (amount == null) return '—';
     return Number.isFinite(amount) ? formatEuro(amount) : String(amount);
   };
-
-  // ── Fahrtenbuch sub-view ───────────────────────────────────────────────────
-  if (subView === 'fahrtenbuch') {
-    return (
-      <div>
-        {/* No font-ui here: the trips view below is still the legacy screen. */}
-        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={() => setSubView('main')}>
-          <ArrowLeft aria-hidden />
-          {t('nav.documents')}
-        </Button>
-        <PageHeader
-          title={t('doc.fahrtenbuch')}
-          description={t('doc.fahrtenbuchSubtitle')}
-          actions={
-            // Offered only where the Fahrtenanalyse is meant to be seen. The route
-            // stays registered everywhere, so the screen is reachable by address.
-            tripAnalysisLinkShown(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV) ? (
-              <Button variant="secondary" onClick={() => navigate('/fahrtenanalyse')}>
-                <FileSearch aria-hidden />
-                {t('ta.link.open')}
-              </Button>
-            ) : undefined
-          }
-        />
-        <FahrtenbuchTripsView drivers={drivers} cars={cars} />
-      </div>
-    );
-  }
 
   // ── Confirmation modal for group delete ───────────────────────────────────
   const groupForDelete = deleteGroupKey ? monthGroups.find(g => g.key === deleteGroupKey) : null;
@@ -541,17 +497,19 @@ const DocumentsPage: React.FC = () => {
           <FileDown aria-hidden />
         </Button>
       </Tooltip>
-      <Tooltip content={t('common.delete')}>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="hover:text-critical"
-          aria-label={t('doc.deleteRecordAria', { driver: rec.driver_name })}
-          onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
-        >
-          <Trash2 aria-hidden />
-        </Button>
-      </Tooltip>
+      {mayEdit && (
+        <Tooltip content={t('common.delete')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hover:text-critical"
+            aria-label={t('doc.deleteRecordAria', { driver: rec.driver_name })}
+            onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        </Tooltip>
+      )}
     </>
   );
 
@@ -648,18 +606,20 @@ const DocumentsPage: React.FC = () => {
                       <span className="sr-only"> – {group.label}</span>
                     </Button>
                   </Tooltip>
-                  <Tooltip content={t('doc.deleteAllTitle', { label: group.label })}>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="text-critical hover:text-critical"
-                      onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
-                    >
-                      <Trash2 aria-hidden />
-                      {t('doc.deleteAll')}
-                      <span className="sr-only"> – {group.label}</span>
-                    </Button>
-                  </Tooltip>
+                  {mayEdit && (
+                    <Tooltip content={t('doc.deleteAllTitle', { label: group.label })}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="text-critical hover:text-critical"
+                        onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
+                      >
+                        <Trash2 aria-hidden />
+                        {t('doc.deleteAll')}
+                        <span className="sr-only"> – {group.label}</span>
+                      </Button>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
               {isExpanded && (
@@ -713,13 +673,6 @@ const DocumentsPage: React.FC = () => {
               description={t('doc.mietwagenauftragDesc')}
               badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
               onClick={() => setIsMietwagenModalOpen(true)}
-            />
-            <ToolCard
-              icon={MapPin}
-              title={t('doc.fahrtenbuch')}
-              description={t('doc.fahrtenbuchDesc')}
-              badges={[t('doc.badgeImport'), 'Excel / CSV']}
-              onClick={() => setSubView('fahrtenbuch')}
             />
           </div>
         </section>

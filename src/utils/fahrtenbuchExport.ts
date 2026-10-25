@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 import { validateDriverNotesForPlanStep, type NoteViolation } from './driverNoteValidation';
 import type { StructuredNote } from './monatsplanungPhase3';
+import { addSimulatedNotice, appendSimulatedNoticeRows, hasSimulatedRides, simulatedFileName } from './simulatedRides/marker';
 
 export type { NoteViolation };
 
@@ -53,6 +54,15 @@ function parseLocalDate(date: string, time: string | null | undefined): number {
 const DRIVER_COL_CANDIDATES = [
   'fahrername', 'fahrer name', 'fahrer', 'driver name', 'driver',
 ];
+
+/**
+ * The single `Fahrername` of a ride: the assigned driver, falling back to the
+ * original. One rule for the corrected book and for the quick trip list, so the
+ * two cannot name a different person for the same ride.
+ */
+export function tripDriverName(trip: { assigned_driver_name?: string | null; original_driver_name?: string | null }): string {
+  return trip.assigned_driver_name || trip.original_driver_name || '';
+}
 
 export const FAHRTENBUCH_ORIGINAL_COLUMNS = [
   'Datum/Uhrzeit Auftragseingang',
@@ -366,7 +376,7 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
     const raw = (trip.raw_data_json ?? {}) as Record<string, unknown>;
     return columns.map(col => {
       if (col === driverCol) {
-        return trip.assigned_driver_name || trip.original_driver_name || '';
+        return tripDriverName(trip);
       }
       const val = raw[col];
       if (val === null || val === undefined) return '';
@@ -374,7 +384,12 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
     });
   });
 
-  const data = [headers, ...rows];
+  const data: unknown[][] = [headers, ...rows];
+  // A file built from simulated rides says so: a sheet in front of the rides (an
+  // importer reads the first sheet and finds no ride columns), a line under them,
+  // and the file name. Not optional; see simulatedRides/marker.ts.
+  const simulated = hasSimulatedRides(trips);
+  if (simulated) appendSimulatedNoticeRows(data);
   const ws = XLSX.utils.aoa_to_sheet(data);
   applySourceCellFormats(ws, columns, rows);
 
@@ -388,8 +403,10 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  if (simulated) addSimulatedNotice(wb, 'first');
 
-  const filename = importFileName || `Fahrtenbuch_${year}-${String(month).padStart(2, '0')}.xlsx`;
+  const plainName = importFileName || `Fahrtenbuch_${year}-${String(month).padStart(2, '0')}.xlsx`;
+  const filename = simulated ? simulatedFileName(plainName) : plainName;
   XLSX.writeFile(wb, filename);
 }
 
@@ -464,7 +481,9 @@ export function exportFahrtenbuchAudit({ trips, month, year, importFileName, isA
     (t.assignment_reason || t.assignment_note || ''),
   ]);
 
-  const data = [headers, ...rows];
+  const data: unknown[][] = [headers, ...rows];
+  const simulated = hasSimulatedRides(trips);
+  if (simulated) appendSimulatedNoticeRows(data);
   const ws = XLSX.utils.aoa_to_sheet(data);
 
   ws['!cols'] = [
@@ -558,6 +577,7 @@ export function exportFahrtenbuchAudit({ trips, month, year, importFileName, isA
 
   const prefix = isApplied ? 'Audit_angewendet' : 'Audit_Vorschau';
   const monthStr = String(month).padStart(2, '0');
-  const filename = `${prefix}_${year}-${monthStr}_${MONTHS[month - 1]}.xlsx`;
-  XLSX.writeFile(wb, filename);
+  const plainName = `${prefix}_${year}-${monthStr}_${MONTHS[month - 1]}.xlsx`;
+  if (simulated) addSimulatedNotice(wb, 'first');
+  XLSX.writeFile(wb, simulated ? simulatedFileName(plainName) : plainName);
 }

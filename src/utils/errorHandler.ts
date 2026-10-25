@@ -27,7 +27,7 @@ export const describeDatabaseError = (error: any): DatabaseErrorMessage => {
   const errorCode = error.code || '';
 
   if (errorCode === '42501' || errorMessage.includes('permission denied') || errorMessage.includes('policy')) {
-    return { text: 'Keine Berechtigung: Nur Admin oder Ersteller', messageKey: 'engine.dbError.notAuthorized' };
+    return { text: 'Keine Berechtigung: Dafür braucht Ihre Rolle das Bearbeiten-Recht auf dieser Seite', messageKey: 'engine.dbError.notAuthorized' };
   }
 
   if (errorCode === '23503' || errorMessage.includes('foreign key')) {
