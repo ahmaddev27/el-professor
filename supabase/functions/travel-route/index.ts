@@ -81,6 +81,9 @@ const REQUEST_TIMEOUT_MS = 3_000
  * the one thing it costs, and the stricter of the two modes is the one that has
  * to bind. tests/deploy/osrm-gateway.test.ts reads all three numbers from their
  * own sources and fails the build when they stop multiplying out.
+ *
+ * Raising it is therefore not a local decision: it is the gateway's budget, and
+ * what that budget costs another product's server is unmeasured.
  */
 const CONCURRENCY = 4
 /** Inside the router's 60 s worker limit, with room to answer what was routed. */
