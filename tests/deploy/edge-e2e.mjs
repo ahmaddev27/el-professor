@@ -12,7 +12,9 @@
 // the name `osrm` instead of a container of our own (deploy/osrm-gateway.conf, standing
 // in front of tests/deploy/osrm-gateway-stub.mjs):
 //
-//   node tests/deploy/edge-e2e.mjs shared-gateway
+//   node tests/deploy/edge-e2e.mjs shared-gateway   routed through the gateway
+//   node tests/deploy/edge-e2e.mjs upstream-down    their service gone, our gateway up: service_error
+//   node tests/deploy/edge-e2e.mjs osrm-down        the gateway stopped too: the name resolves to nothing
 import crypto from 'node:crypto';
 
 const BASE = process.env.EDGE_URL ?? 'http://127.0.0.1:9000';
@@ -121,6 +123,21 @@ async function sharedGateway() {
   check('the anon key is still refused before anything is asked of them', refused.status === 401 && refused.json?.reason === 'not_authenticated');
 }
 
+/**
+ * Their service is gone and our gateway is still up. The gateway answers 502, which
+ * interpretOsrmAnswer reads as `service_error` and NOT as `unreachable` - the name still
+ * resolves, to a proxy that cannot reach anyone. Two different reasons for two different
+ * failures, which is the point of having reasons at all.
+ */
+async function upstreamGone() {
+  const down = await call('ridy\'s OSRM is gone, our gateway is up', { bearer: person, body: { pairs: [pair('a'), pair('b')] } });
+  check('still a 200, with a reason on every pair and no number', down.status === 200 && down.json?.ok === true
+    && (down.json.results ?? []).length === 2 && down.json.results.every((r) => r.kind === 'unavailable'), JSON.stringify(down.json));
+  check('and the reason is service_error: the gateway answered, their service did not',
+    (down.json?.results ?? []).every((r) => r.reason === 'service_error'), JSON.stringify((down.json?.results ?? []).map((r) => r.reason)));
+  check('and no data_version, because nothing was read', down.json?.data_version === null);
+}
+
 async function containerGone() {
   const down = await call('the routing container is stopped', { bearer: person, body: { pairs: [pair('a'), pair('b')] } });
   check('still a 200, with a reason on every pair and no number', down.status === 200 && down.json?.ok === true && (down.json.results ?? []).length === 2
@@ -135,6 +152,8 @@ try {
     await containerGone();
   } else if (mode === 'shared-gateway') {
     await sharedGateway();
+  } else if (mode === 'upstream-down') {
+    await upstreamGone();
   } else {
     await whole();
   }

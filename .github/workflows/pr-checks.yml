@@ -669,10 +669,13 @@ jobs:
           # The function asks http://osrm:5000 and knows nothing of any gateway. If the
           # alias did not take, these pairs come back unreachable instead of routed.
           node tests/deploy/edge-e2e.mjs shared-gateway || status=1
-          echo "--- their service is removed (the 12 s let the gateway's cache of its address run out)"
+          echo "--- their service is removed, our gateway stays up (the 12 s let its cache of the address run out)"
+          # The gateway then answers 502, which the function reads as service_error and
+          # NOT as unreachable: the name still resolves, to a proxy that cannot reach
+          # anyone. Two failures, two reasons.
           docker rm -f osrm-stub > /dev/null
           sleep 12
-          node tests/deploy/edge-e2e.mjs osrm-down || status=1
+          node tests/deploy/edge-e2e.mjs upstream-down || status=1
           echo "--- our gateway is stopped: the name osrm resolves to nothing"
           docker stop ya-mobility-staging-osrm-gateway-1 > /dev/null
           node tests/deploy/edge-e2e.mjs osrm-down || status=1

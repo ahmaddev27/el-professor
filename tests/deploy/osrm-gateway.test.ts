@@ -570,6 +570,17 @@ describe('CI runs the gateway for real, and only when a change touches it', () =
     expect(job).toContain('node tests/deploy/edge-e2e.mjs shared-gateway');
   });
 
+  it('and tells the two failures apart: their service gone is service_error, the gateway gone is unreachable', () => {
+    // A 502 from a gateway that is up is NOT "unreachable" - the name still resolves.
+    // The first version of this job asked for `osrm-down` in both places, where the
+    // reason list would have refused the first one.
+    expect(job).toContain('node tests/deploy/edge-e2e.mjs upstream-down');
+    expect(job).toContain('node tests/deploy/edge-e2e.mjs osrm-down');
+    const e2e = repoFile('tests/deploy/edge-e2e.mjs');
+    expect(e2e).toContain("mode === 'upstream-down'");
+    expect(e2e).toContain("r.reason === 'service_error'");
+  });
+
   it('proves deploy.sh would refuse a release that names both profiles, with its own shell', () => {
     expect(job).toContain('compose_profiles_problem');
     expect(job).toContain('osrm_data_problem');
