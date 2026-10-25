@@ -14,7 +14,6 @@ import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { SimulatedBadge, SimulatedNotice } from './simulatedRides/SimulatedBadge';
-import { simulatedRidesEntryShown } from './navVisibility';
 import {
   Alert,
   Badge,
@@ -457,20 +456,10 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
 
         {/* The generator's only output is an import in this book, so it is
             offered beside Import. The page it opens gates itself on the
-            documents page right, exactly as the import does in the database.
-
-            Offered only where it is meant to be seen — see
-            `simulatedRidesEntryShown`. The page writes invented rides into the
-            statutory ride log, and the documents edit right is held by every
-            company administrator and supervisor, so until the owner agrees to
-            customers generating them this door is not advertised on production.
-            The route stays registered, so the generator is reachable by address
-            everywhere and unchanged on staging. */}
-        {simulatedRidesEntryShown(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV) && (
-          <Button variant="secondary" onClick={() => navigate('/monatsplan?art=simuliert&from=fahrtenbuch')}>
-            <Sparkles aria-hidden /> {t('simrides.entry.link')}
-          </Button>
-        )}
+            documents page right, exactly as the import does in the database. */}
+        <Button variant="secondary" onClick={() => navigate('/monatsplan?art=simuliert&from=fahrtenbuch')}>
+          <Sparkles aria-hidden /> {t('simrides.entry.link')}
+        </Button>
       </div>
 
       {loadFailed && (
