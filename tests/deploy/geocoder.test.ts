@@ -123,12 +123,15 @@ describe('nothing else in the stack learned about it', () => {
     expect(functionsBlock).not.toMatch(/ridy|nominatim|geocoder/i);
   });
 
-  it('exactly the services that were on ridy\'s network still are, plus the gateway', () => {
+  it('exactly the services that were on ridy\'s network still are, plus the two gateways', () => {
     const section = compose.slice(compose.indexOf('\nservices:\n'), compose.indexOf('\nvolumes:\n'));
     const services = [...section.matchAll(/^ {2}([a-z][a-z0-9-]*):\s*$/gm)].map((m) => m[1]);
-    expect(services).toEqual(expect.arrayContaining(['functions', 'kong', 'geocoder-gateway', 'osrm']));
-    const onRidy = services.filter((name) => /^\s+- ridy$/m.test(serviceBlock(name))).sort();
-    expect(onRidy).toEqual(['geocoder-gateway', 'kong', 'mailpit', 'web']);
+    expect(services).toEqual(expect.arrayContaining(['functions', 'kong', 'geocoder-gateway', 'osrm', 'osrm-gateway']));
+    // Two spellings, because osrm-gateway needs the mapping form to take a network
+    // alias on our own network. A list-only reader would have gone on passing while
+    // silently no longer counting it, which is the worst answer a boundary test can give.
+    const onRidy = services.filter((name) => /^ {6}(- ridy|ridy:)\s*(\{\})?$/m.test(serviceBlock(name))).sort();
+    expect(onRidy).toEqual(['geocoder-gateway', 'kong', 'mailpit', 'osrm-gateway', 'web']);
   });
 
   it('Kong has no route to it: the browser reaches it only through the function, which authenticates', () => {
@@ -268,7 +271,7 @@ describe.skipIf(!hasBash)('compose_profiles_problem (deploy.sh) and the geocoder
   });
 
   it('still refuses a name it does not know, and says which names it does', () => {
-    expect(problem('staging', 'staging,geocode')).toMatch(/does not know \(it knows staging, osrm and geocoder\)/);
+    expect(problem('staging', 'staging,geocode')).toMatch(/does not know \(it knows staging, osrm, osrm-shared and geocoder\)/);
     expect(problem('production', 'Geocoder')).toMatch(/does not know/);
     expect(problem('production', 'nominatim')).toMatch(/does not know/);
   });
