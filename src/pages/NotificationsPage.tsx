@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bell, BellOff, ShieldAlert, ShieldX, CheckCircle, Save, RotateCcw } from 'lucide-react';
+import { Bell, BellOff, ShieldAlert, ShieldX, CheckCircle, Save, RotateCcw, Lock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 
@@ -99,6 +101,31 @@ export default function NotificationsPage() {
   const { t } = useTranslation();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
+  const scope = useCompanyScope();
+
+  /**
+   * The gate the database has always enforced, and which this page had not.
+   *
+   * `notification_settings` carries exactly three policies (20260917130000,
+   * `'SIU'` with `admin_w`), and both write arms are
+   * `company_id = get_active_company_id() AND is_company_admin()`. That
+   * function is an administrator of the caller's own company, or a
+   * company-less platform account inside an open **support** session
+   * (20260917140000) — never a supervisor, an editor or a viewer, and never a
+   * `view` context. SELECT carries no role term, so those callers read the
+   * page, were offered the switches and the save, and the upsert came back
+   * 42501: the INSERT arm as "new row violates row-level security policy", the
+   * ON CONFLICT DO UPDATE arm as the same with "(USING expression)", because
+   * PostgreSQL checks an upsert's existing row rather than filtering it out.
+   * An error, then — not the silent zero-row success that a plain UPDATE or
+   * DELETE behind the same gate produces (see `src/lib/writeOutcome.ts`).
+   *
+   * Same formula as TripAnalysisPage, whose `trip_analysis_settings` carries
+   * the same administrator gate. This is the message, not the wall: the
+   * policies refuse the write either way.
+   */
+  const canEdit = !scope.readOnly && (isAdmin || scope.kind === 'support');
 
   const [globalEnabled, setGlobalEnabled] = useState(true);
   const [settings, setSettings] = useState<Record<NotificationType, boolean>>(DEFAULT_ENABLED);
@@ -187,7 +214,9 @@ export default function NotificationsPage() {
 
   // ── Save (upsert) ───────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!companyId) return;
+    // The save control is withheld without the right, so this is the second
+    // wall: no request leaves for a caller the policies are about to refuse.
+    if (!companyId || !canEdit) return;
     setSaving(true);
     try {
       const rows = NOTIFICATION_DEFS.map(def => ({
@@ -242,6 +271,32 @@ export default function NotificationsPage() {
         </p>
       </div>
 
+      {/*
+        Why the sentences are SettingsPage's and not new ones: that screen owns
+        the other `is_company_admin()`-gated settings writes and already says
+        both of these. `settings.readOnlyBody` names the actionable fact for a
+        platform read context ("…only in a support session"), which would be
+        false for a company viewer; `settings.noWritePermission` is the one it
+        prints on a 42501 from the `company_settings` upsert, which is the same
+        refusal this page was walking into.
+
+        Classes rather than a `style={…}` object: this is one of the six screens
+        phase 5 never converted, and the style ratchet counts inline styles per
+        file. `bg-[var(--token)]` is how NotesPage — another of the six — adds
+        styling without raising that count.
+      */}
+      {!canEdit && (
+        <div
+          role="note"
+          className="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm bg-[var(--bg-subtle)] border-[var(--border-subtle)] text-[var(--text-secondary)]"
+        >
+          <Lock aria-hidden className="w-4 h-4 flex-shrink-0 mt-0.5 text-[var(--warning)]" />
+          <span>
+            {scope.isPlatformSession ? t('settings.readOnlyBody') : t('settings.noWritePermission')}
+          </span>
+        </div>
+      )}
+
       {/* Global master toggle card */}
       <div
         className="rounded-2xl p-5"
@@ -272,7 +327,7 @@ export default function NotificationsPage() {
               </p>
             </div>
           </div>
-          <Toggle checked={globalEnabled} onChange={handleGlobalToggle} />
+          <Toggle checked={globalEnabled} onChange={handleGlobalToggle} disabled={!canEdit} />
         </div>
 
         {/* Quick actions */}
@@ -280,7 +335,8 @@ export default function NotificationsPage() {
           <button
             type="button"
             onClick={handleEnableAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            disabled={!canEdit}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid transparent' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -291,7 +347,8 @@ export default function NotificationsPage() {
           <button
             type="button"
             onClick={handleDisableAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            disabled={!canEdit}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid transparent' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -348,7 +405,7 @@ export default function NotificationsPage() {
                       <Toggle
                         checked={settings[def.type]}
                         onChange={v => handleTypeToggle(def.type, v)}
-                        disabled={!globalEnabled}
+                        disabled={!globalEnabled || !canEdit}
                         size="md"
                       />
                     </div>
@@ -360,7 +417,10 @@ export default function NotificationsPage() {
         );
       })}
 
-      {/* Save / reset bar */}
+      {/* Save / reset bar — withheld without the administrator right, because
+          "Alle Änderungen gespeichert" and a Speichern button are both claims
+          about a write this caller cannot make. */}
+      {canEdit && (
       <div
         className="rounded-2xl p-4 flex items-center justify-between gap-4 flex-wrap"
         style={{
@@ -400,6 +460,7 @@ export default function NotificationsPage() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Info note */}
       <div
