@@ -42,3 +42,38 @@ export function monthlyPlanInNav(deployEnv: string | undefined, isDev: boolean):
 export function tripAnalysisLinkShown(deployEnv: string | undefined, isDev: boolean): boolean {
   return shownOutsideProduction(deployEnv, isDev);
 }
+
+/**
+ * Whether the entry to the simulated-ride generator is offered.
+ *
+ * The generator writes **invented rides into the statutory ride log** — the trip
+ * table itself, which this file deliberately does not name: `readers.test.ts`
+ * inventories every file under `src/` whose text carries that table's name, and
+ * this one reads no table at all, so naming it here would record a reader that
+ * does not exist. Every invented ride is permanently marked SIMULIERT — in the database,
+ * in the trip list and in any Fahrtenbuch file built from them — so this is a
+ * marked document rather than a laundered one. But a Stundennachweis, the
+ * Lohnart premiums and the planning all read the **times** of a trip, and those
+ * times are invented; such a document reaches a Steuerberater. The owner has not
+ * agreed to customers generating them, and until he does the safe default is
+ * that the door is not advertised on production.
+ *
+ * Same rule as the Monatsplan and the Fahrtenanalyse — one `shownOutsideProduction`
+ * behind every name, so none of the three can answer differently. It is a third
+ * **name** and not a third rule, and the parity test in `navVisibility.test.ts`
+ * is what holds that.
+ *
+ * It is a separate name from `tripAnalysisLinkShown` on purpose, because the two
+ * are separate owner decisions that merely agree today. The Fahrtenanalyse is a
+ * read-only screen that changes no trip; this generator writes. Sharing one name
+ * would mean that the day the owner releases the read-only screen, flipping it
+ * also unhides the write-capable generator — the coupling the wrong way round.
+ *
+ * This hides a link, nothing else. The route stays registered, the page stays
+ * whole and the database keeps its own gate (`documents` edit right), so the
+ * generator is reachable by address in every environment and fully usable on
+ * staging, exactly as the Monatsplan is.
+ */
+export function simulatedRidesEntryShown(deployEnv: string | undefined, isDev: boolean): boolean {
+  return shownOutsideProduction(deployEnv, isDev);
+}
