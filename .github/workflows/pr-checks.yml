@@ -611,9 +611,18 @@ jobs:
           docker inspect -f 'readonly={{.HostConfig.ReadonlyRootfs}} caps_dropped={{.HostConfig.CapDrop}} caps_added={{.HostConfig.CapAdd}} security={{.HostConfig.SecurityOpt}} memory={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}} ports={{.NetworkSettings.Ports}} networks={{range $k, $v := .NetworkSettings.Networks}}{{$k}}={{$v.Aliases}} {{end}}' "$cid" | tee "$RUNNER_TEMP/gateway-inspect.txt"
           grep -q 'readonly=true' "$RUNNER_TEMP/gateway-inspect.txt"
           grep -q 'ridy_default=' "$RUNNER_TEMP/gateway-inspect.txt"
-          # The alias as docker actually registered it, not as the compose file asks for it.
-          grep -qE 'ya-mobility-staging_default=\[[^]]*osrm' "$RUNNER_TEMP/gateway-inspect.txt" \
+          # The alias as docker actually registered it, not as the compose file asks for
+          # it - and `osrm` as a WHOLE word, because the service's own name
+          # `osrm-gateway` is in that list too and a substring match would have passed
+          # with no alias at all.
+          grep -qE 'ya-mobility-staging_default=\[([^]]* )?osrm( [^]]*)?\]' "$RUNNER_TEMP/gateway-inspect.txt" \
             || { echo "::error::the gateway did not take the network alias osrm"; exit 1; }
+          # The negative control for that regex: it must NOT match the service name alone.
+          echo 'networks=ya-mobility-staging_default=[osrm-gateway 1a2b3c]' > "$RUNNER_TEMP/alias-control.txt"
+          if grep -qE 'ya-mobility-staging_default=\[([^]]* )?osrm( [^]]*)?\]' "$RUNNER_TEMP/alias-control.txt"; then
+            echo "::error::the alias check matches the service name alone, so it proves nothing"; exit 1
+          fi
+          echo "alias check: matches 'osrm' as a whole word only"
           GATEWAY_URL="http://$ip:5000" node ../tests/deploy/osrm-gateway-e2e.mjs down
       - name: Put the stand-in for ridy's OSRM behind it, under the name their container has
         if: steps.scope.outputs.run == 'true'

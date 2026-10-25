@@ -563,6 +563,14 @@ describe('CI runs the gateway for real, and only when a change touches it', () =
     expect(job).toContain('--network-alias ridy-osrm-1');
   });
 
+  it('reads the alias back out of docker, as a whole word, with a control that the check is not vacuous', () => {
+    // The service's own name `osrm-gateway` is in that alias list too, so a substring
+    // match would have passed with no alias at all. The control feeds the regex a line
+    // holding only the service name and requires it NOT to match.
+    expect(job).toContain('$v.Aliases');
+    expect(job).toContain('the alias check matches the service name alone, so it proves nothing');
+  });
+
   it('runs the real function in the stack\'s own edge-runtime image against it, which is the only proof the alias works', () => {
     const stackImage = /image: (supabase\/edge-runtime:v[\d.]+)/.exec(functionsBlock)?.[1];
     expect(stackImage).toBeDefined();
