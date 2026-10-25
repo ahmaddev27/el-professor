@@ -270,6 +270,23 @@ describe('the gateway\'s configuration', () => {
     expect(text).not.toMatch(/\$args|\$query_string|\$request_uri|\$arg_/);
   });
 
+  it('cannot be aimed anywhere else: the host comes from a set directive and no header or argument reaches it', () => {
+    // This container sits on ridy's network, where their MySQL and their Laravel also
+    // live. The upstream is a literal in a `set`, parsed before the path, and the only
+    // caller-controlled text is the coordinate capture - whose character class holds no
+    // `/`, `?`, `#`, `%`, `@` or `:`, so nothing can add a segment, a query, a fragment
+    // or a userinfo part to what is asked for.
+    expect(text).toMatch(/set \$osrm_upstream http:\/\/[a-z0-9.-]+:\d+;/);
+    expect(text).not.toMatch(/set \$osrm_upstream [^;]*\$/);
+    const charClasses = /location ~ "([^"]+)"/.exec(text)?.[1].match(/\[[^\]]*\]/g) ?? [];
+    expect(charClasses.length).toBeGreaterThan(0);
+    for (const cls of charClasses) {
+      for (const forbidden of ['/', '?', '#', '%', '@', ':']) {
+        expect(cls, `${cls} admits ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
   it('uses a NAMED capture for the coordinates, because the method `if` rewrites the numbered ones', () => {
     // `^(GET|HEAD)$` matches for a GET, so $1 would have become "GET" and gone into
     // the path. A named capture is an nginx variable and no later regex touches it.
