@@ -274,30 +274,69 @@ sys.stdout.write(text)
 
 # What COMPOSE_PROFILES may name. `staging` is the mail catcher and belongs to
 # staging alone: on production it would swallow real mail, and staging without
-# it has nowhere to send. `osrm` is the routing container (deploy/osrm-build-data.sh
-# builds what it serves) and `geocoder` the gateway to ridy's Nominatim
-# (deploy/geocoder-gateway.conf); either stack may opt in to either. Anything else is a typo or
-# a profile this release has never heard of, and a typo that reads as "none" is
-# how a service silently does not start.
+# it has nowhere to send. `osrm` is a routing container of our own
+# (deploy/osrm-build-data.sh builds what it serves), `osrm-shared` the gateway
+# to the OSRM ridy runs (deploy/osrm-gateway.conf) and `geocoder` the gateway to
+# ridy's Nominatim (deploy/geocoder-gateway.conf); either stack may opt in to
+# any of them. Anything else is a typo or a profile this release has never heard
+# of, and a typo that reads as "none" is how a service silently does not start.
+#
+# `osrm` and `osrm-shared` are MUTUALLY EXCLUSIVE, and this is the one check
+# that cannot be left to a later step. Both answer to the name `osrm` on this
+# stack's network - the first as its service name, the second as a network alias
+# so that OSRM_ORIGIN keeps resolving - so with both on, that one name means two
+# containers and travel-route reaches our own map or ridy's at random, per
+# request, with nothing anywhere saying which answered.
 # $1 = production|staging, $2 = the list as .env writes it. Prints nothing when
 # it is acceptable, otherwise one sentence.
 compose_profiles_problem() {
-  local environment="$1" list="$2" name has_staging=no
+  local environment="$1" list="$2" name has_staging=no has_own_osrm=no has_shared_osrm=no
   local -a names=()
   case "$list" in ,*|*,|*,,*) echo "COMPOSE_PROFILES '$list' has an empty name in it"; return ;; esac
   IFS=, read -ra names <<<"$list"
   for name in ${names[@]+"${names[@]}"}; do
     case "$name" in
       staging) has_staging=yes ;;
-      osrm|geocoder) ;;
-      *) echo "COMPOSE_PROFILES names '$name', which this release does not know (it knows staging, osrm and geocoder)"; return ;;
+      osrm) has_own_osrm=yes ;;
+      osrm-shared) has_shared_osrm=yes ;;
+      geocoder) ;;
+      *) echo "COMPOSE_PROFILES names '$name', which this release does not know (it knows staging, osrm, osrm-shared and geocoder)"; return ;;
     esac
   done
-  if [ "$environment" = staging ] && [ "$has_staging" != yes ]; then
+  if [ "$has_own_osrm" = yes ] && [ "$has_shared_osrm" = yes ]; then
+    echo "COMPOSE_PROFILES names both osrm and osrm-shared (found '$list'); both answer to the name osrm on this stack's network, so travel-route would reach our own map or ridy's at random. Name one."
+  elif [ "$environment" = staging ] && [ "$has_staging" != yes ]; then
     echo "staging needs COMPOSE_PROFILES to name staging, or the mailpit service it sends to never starts (found '$list')"
   elif [ "$environment" != staging ] && [ "$has_staging" = yes ]; then
     echo "production must not enable the staging profile (found COMPOSE_PROFILES=$list)"
   fi
+}
+
+# The profile check above refuses a release that NAMES both osrm profiles, but
+# it cannot see a container that is already running. Dropping `osrm` from
+# COMPOSE_PROFILES and adding `osrm-shared` is exactly the release where our own
+# routing container is still up, and until it is gone the name `osrm` on this
+# network means two containers - our own map and ridy's, one or the other per
+# request, with nothing anywhere saying which answered. `up -d --remove-orphans`
+# further down is expected to take it away, but "expected" is not a guard and by
+# then the stack is already up, so this refuses before anything changes and says
+# what to type. It asks docker for the container by its compose labels, never by
+# a guessed name.
+#
+# A docker that cannot answer reads as "nothing of ours is running", deliberately:
+# `docker compose config -q` runs a little further down and fails the release
+# hard, so a broken docker cannot slip past this and a hiccup here must not
+# block a release on its own.
+# $1 = the profile list, $2 = the project name. Prints nothing when it is right.
+osrm_shared_conflict() {
+  case ",$1," in *,osrm-shared,*) ;; *) return ;; esac
+  local running
+  running="$(docker ps --format '{{.Names}}' \
+    --filter "label=com.docker.compose.project=$2" \
+    --filter "label=com.docker.compose.service=osrm")" || true
+  running="${running//$'\n'/ }"
+  running="${running%"${running##*[![:space:]]}"}"
+  [ -z "$running" ] || echo "COMPOSE_PROFILES names osrm-shared while this stack's own routing container is still running ($running); both answer to the name osrm on this network, so remove it first with: docker rm -f $running"
 }
 
 # <<< compose profile checks
@@ -375,6 +414,8 @@ fi
 
 profiles_problem="$(compose_profiles_problem "$ENVIRONMENT" "$PROFILES")"
 [ -z "$profiles_problem" ] || fail "$profiles_problem"
+osrm_conflict="$(osrm_shared_conflict "$PROFILES" "$PROJECT_NAME")"
+[ -z "$osrm_conflict" ] || fail "$osrm_conflict. Nothing has been changed."
 
 # One-time codes are stored as HMAC-SHA256(OTP_PEPPER, "<challenge>:<code>").
 # Without the pepper the functions cannot issue a code, and nobody could sign
@@ -442,7 +483,13 @@ docker compose config -q || fail "docker compose config is invalid"
 
 # The routing container serves a build that nobody can make during a release, so
 # when the osrm profile is on the release does not start without one. The service
-# only exists in the rendered config while COMPOSE_PROFILES names it.
+# only exists in the rendered config while COMPOSE_PROFILES names it - which is
+# also why this says nothing about `osrm-shared`: that profile renders
+# `osrm-gateway`, which has no volume and no build to wait for, and the key read
+# here is "osrm" exactly. Both halves are pinned in
+# tests/deploy/osrm-gateway.test.ts, because a guard that fired in shared mode
+# would refuse every release and one that stopped firing in the old mode would
+# start a container with no map.
 osrm_image="$(docker compose config --format json < /dev/null | python3 -c '
 import json, sys
 print(((json.load(sys.stdin).get("services") or {}).get("osrm") or {}).get("image", ""))
@@ -632,7 +679,24 @@ else
   GEOCODER_CONFIG_SHA=absent
 fi
 # <<< geocoder config hash
-export KONG_CONFIG_SHA NGINX_CONFIG_SHA GEOCODER_CONFIG_SHA
+
+# >>> osrm gateway config hash
+# The OSRM gateway's config travels and is judged exactly like the geocoder's
+# above, and for the same two reasons: a rollback onto a release from before it
+# leaves none while keeping THIS deploy.sh, so "absent" is a state the newest
+# code must tolerate; and a gateway started against a config this release never
+# shipped is a proxy whose rules nobody has read - and it proxies to another
+# live product's service.
+if [ -f osrm-gateway.conf ]; then
+  OSRM_GATEWAY_CONFIG_SHA="$(sha256sum osrm-gateway.conf | cut -c1-16)"
+else
+  case ",$PROFILES," in
+    *,osrm-shared,*) fail "COMPOSE_PROFILES names osrm-shared but deploy/osrm-gateway.conf is not in this release" ;;
+  esac
+  OSRM_GATEWAY_CONFIG_SHA=absent
+fi
+# <<< osrm gateway config hash
+export KONG_CONFIG_SHA NGINX_CONFIG_SHA GEOCODER_CONFIG_SHA OSRM_GATEWAY_CONFIG_SHA
 
 # The routes GoTrue would create an account on once its signup is open. Only
 # Kong's request-termination plugin answers them with this message: the

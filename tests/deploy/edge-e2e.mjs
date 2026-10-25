@@ -7,6 +7,12 @@
 //   node tests/deploy/edge-e2e.mjs warm        first request only: the worker downloads its modules
 //   node tests/deploy/edge-e2e.mjs             the whole conversation
 //   node tests/deploy/edge-e2e.mjs osrm-down   with the container stopped: failure is a reason, not a number
+//
+// And, in the osrm-gateway job, the same function with the gateway to ridy's OSRM behind
+// the name `osrm` instead of a container of our own (deploy/osrm-gateway.conf, standing
+// in front of tests/deploy/osrm-gateway-stub.mjs):
+//
+//   node tests/deploy/edge-e2e.mjs shared-gateway
 import crypto from 'node:crypto';
 
 const BASE = process.env.EDGE_URL ?? 'http://127.0.0.1:9000';
@@ -80,6 +86,41 @@ async function whole() {
   check('a GET is refused method_not_allowed (405)', (await call('GET', { method: 'GET', bearer: person })).status === 405);
 }
 
+/**
+ * The whole point of the shared gateway: OSRM_ORIGIN is still http://osrm:5000, and that
+ * name now resolves to the gateway through a compose network alias rather than to a
+ * routing container of ours. Nothing in the function changed, so the only way to know
+ * the alias works is to make the function ask and see whose answer comes back.
+ */
+async function sharedGateway() {
+  const good = await call('a person with an active company asks for two pairs, through the gateway', {
+    bearer: person,
+    body: { pairs: [pair('a'), pair('b', { lat: 51.2277, lon: 6.7735 }, { lat: 51.1652, lon: 7.0845 })] },
+  });
+  check('answers 200 ok', good.status === 200 && good.json?.ok === true);
+  const results = good.json?.results ?? [];
+  check('both pairs are routes with a drive and a snap distance, in request order',
+    results.length === 2 && results.every((r) => r.kind === 'route' && r.durationSeconds > 0 && r.distanceMeters > 500)
+      && results[0].id === 'a' && results[1].id === 'b', JSON.stringify(results));
+  // ridy's osrm-routed was started without --data_version, so no answer of theirs has
+  // one. The function must report null rather than invent a stamp, and osrmSourceLabel
+  // then prints `osrm` without a month. This is what shared mode gives up.
+  check('and no data_version, because theirs carries none', good.json?.data_version === null, JSON.stringify(good.json?.data_version));
+
+  // Their own refusals have to survive the proxy with their OSRM code: a 400 body that
+  // nginx swallowed would turn every one of these into bad_answer.
+  const nowhere = await call('a point with no road near it', { bearer: person, body: { pairs: [pair('sea', { lat: 56, lon: 3 }, { lat: 51.2277, lon: 6.7735 })] } });
+  check('is reported not_on_road, the OSRM code read through the gateway',
+    nowhere.json?.results?.[0]?.kind === 'unavailable' && nowhere.json.results[0].reason === 'not_on_road', JSON.stringify(nowhere.json?.results));
+  const island = await call('two points a car cannot connect', { bearer: person, body: { pairs: [pair('island', { lat: 54.18, lon: 7.7 }, { lat: 51.2277, lon: 6.7735 })] } });
+  check('is reported no_route', island.json?.results?.[0]?.reason === 'no_route', JSON.stringify(island.json?.results));
+
+  // The gate is the same one, and it matters more in shared mode: the CPU behind it is
+  // another live product's.
+  const refused = await call('the anon key, with ridy\'s OSRM behind the gateway', { bearer: anon, body: { pairs: [pair('a')] } });
+  check('the anon key is still refused before anything is asked of them', refused.status === 401 && refused.json?.reason === 'not_authenticated');
+}
+
 async function containerGone() {
   const down = await call('the routing container is stopped', { bearer: person, body: { pairs: [pair('a'), pair('b')] } });
   check('still a 200, with a reason on every pair and no number', down.status === 200 && down.json?.ok === true && (down.json.results ?? []).length === 2
@@ -92,6 +133,8 @@ try {
     await call('warm-up (the worker fetches its modules on first use)', { bearer: person, body: { pairs: [pair('warm')] } });
   } else if (mode === 'osrm-down') {
     await containerGone();
+  } else if (mode === 'shared-gateway') {
+    await sharedGateway();
   } else {
     await whole();
   }

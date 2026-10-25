@@ -62,11 +62,19 @@ const MAX_ID_LENGTH = 80;
 export const MAX_BODY_CHARS = 64 * 1024;
 
 /**
- * The routing container, by its name on the compose network. A constant and not
- * configuration: the function must only ever call our own container, and a
- * value that can be typed wrong is a value that can be aimed at the database or
- * the gateway (partner-endpoint.ts has the longer argument). A test ties the
- * host and the port to the compose service.
+ * The routing service, by its name on the compose network. A constant and not
+ * configuration: the function must only ever call a container of this stack's
+ * own, and a value that can be typed wrong is a value that can be aimed at the
+ * database or the gateway (partner-endpoint.ts has the longer argument). A test
+ * ties the host and the port to the compose service.
+ *
+ * Two compose services answer to this one name, under profiles deploy.sh keeps
+ * mutually exclusive: `osrm`, a routing container of our own serving a map we
+ * built, and `osrm-gateway`, which takes the name by network alias and forwards
+ * to the OSRM ridy runs on this host under a rate limit. Since the owner's
+ * decision of 25.10.2026 the second is the one that runs. This file is the same
+ * either way, which is the point of not making the address configuration: the
+ * decision lives in COMPOSE_PROFILES, where deploy.sh can refuse a bad one.
  */
 export const OSRM_ORIGIN = 'http://osrm:5000';
 

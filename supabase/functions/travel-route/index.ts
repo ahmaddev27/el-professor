@@ -1,9 +1,19 @@
 /**
- * Road time between coordinate pairs, asked of our own routing container.
+ * Road time between coordinate pairs, asked of whatever answers to the name
+ * `osrm` on this stack's network.
+ *
+ * Since 25.10.2026 that is one of two things, and this function cannot tell
+ * them apart on purpose: the `osrm` service in deploy/docker-compose.yml, a
+ * routing container of our own, or the `osrm-gateway` service, which takes the
+ * same name by network alias and forwards to the OSRM ridy runs on this host
+ * under a rate limit (deploy/osrm-gateway.conf). The two profiles are mutually
+ * exclusive and deploy.sh refuses a release that names both. What changes for a
+ * caller is only that ridy's OSRM carries no data_version, so the answer's is
+ * null and osrmSourceLabel() prints `osrm` without a month.
  *
  * The Fahrtenanalyse checks whether a driver could get from one ride's drop-off
  * to the next ride's pickup in the time between them. It needs a driving time;
- * this function gets one from OSRM (the `osrm` service in deploy/docker-compose.yml)
+ * this function gets one from OSRM
  * and answers what the container measured, pair by pair. What the numbers mean
  * for the check is decided in the browser (src/utils/travelRouting) and by the
  * rule travel.ts already has; the wire contract is in _shared/travel-route-core.ts.
@@ -21,7 +31,10 @@
  * answer is public geography and reveals nothing of any
  * company, so there is no role gate beyond that; the point of the gate is that
  * the routing container is a CPU on a host shared with another live product,
- * and the anon key must not be able to use it.
+ * and the anon key must not be able to use it. In shared mode that point gets
+ * sharper rather than weaker: the CPU behind this gate is then that other
+ * product's own, so this gate and the gateway's budget are the two things
+ * standing between a token anyone can read out of the bundle and ridy's server.
  *
  * ## What it reads and writes
  *
@@ -52,7 +65,24 @@ import {
 
 /** One route takes milliseconds; three seconds is a container that is stuck. */
 const REQUEST_TIMEOUT_MS = 3_000
-const CONCURRENCY = 8
+/**
+ * How many of a call's pairs are asked for at once.
+ *
+ * Four, and the number is not free. Since 25.10.2026 the address behind
+ * OSRM_ORIGIN may be the gateway to the OSRM ridy runs
+ * (deploy/osrm-gateway.conf), which admits twelve requests in flight for the
+ * whole stack because that is the product's own widest fan-out: the browser
+ * runs three of these calls at a time (DEFAULT_CALL_CONCURRENCY,
+ * src/utils/travelRouting/prefetch.ts), and three times four is that twelve. So
+ * one screen fits the budget exactly and never asks for more than it may have.
+ *
+ * It costs no throughput there, because the gateway's rate and not the fan-out
+ * is what bounds a month of rides; against a routing container of our own it is
+ * the one thing it costs, and the stricter of the two modes is the one that has
+ * to bind. tests/deploy/osrm-gateway.test.ts reads all three numbers from their
+ * own sources and fails the build when they stop multiplying out.
+ */
+const CONCURRENCY = 4
 /** Inside the router's 60 s worker limit, with room to answer what was routed. */
 const DEADLINE_MS = 25_000
 
