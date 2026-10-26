@@ -22,6 +22,7 @@ import type {
   TripAnalysisResult,
   TripAnalysisSettings,
 } from '../utils/tripAnalysis/types';
+import { isDeactivatedDriver } from '../utils/driverStatus';
 import { berlinWallClockToInstant } from './tripAnalysisShifts';
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -181,6 +182,15 @@ export interface DriverTableRow {
   name: string;
   /** The id is one of the company's drivers. */
   linked: boolean;
+  /**
+   * The linked driver is deactivated.
+   *
+   * The row stays — this table reports an import that already happened, and
+   * dropping it would both hide rides that were driven and make the driver read
+   * as `unlinked`, a finding of fact that is not one. The table marks the name
+   * instead. False for a driver the import never matched to the company.
+   */
+  deactivated: boolean;
   budgetState: BudgetState;
   salaryMin: number | string | null;
   salaryMax: number | string | null;
@@ -251,6 +261,7 @@ export function driverTableRows(
         driverId: driver.driverId,
         name: company?.name ?? driver.driverNames[0] ?? driver.driverId,
         linked: Boolean(company),
+        deactivated: company ? isDeactivatedDriver(company) : false,
         budgetState: budgetState(company, row),
         salaryMin: input?.salaryMin ?? null,
         salaryMax: input?.salaryMax ?? null,

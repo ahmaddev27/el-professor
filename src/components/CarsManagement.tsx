@@ -5,6 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import { usePlan } from '../contexts/PlanContext';
 import CarModal from './CarModal';
 import type { CarWithDrivers, TuevInfo, TuevStatus } from '../types/car';
+import { driverNameWithStatus } from '../utils/driverStatus';
 import { getTuevStatus } from '../types/car';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -154,9 +155,14 @@ export default function CarsManagement() {
 
       if (assignmentsError) throw assignmentsError;
 
+      // Every driver, the deactivated included, and `status` with them: this
+      // resolves the names of the drivers each vehicle is CURRENTLY assigned to,
+      // and a filter here would drop the assignment silently at the
+      // `.filter(d => d !== null)` below, leaving the vehicle looking unassigned.
+      // The name is marked instead, so the operator can see what to reassign.
       const { data: driversData, error: driversError } = await supabase
         .from('drivers')
-        .select('id, name')
+        .select('id, name, status')
         .eq('company_id', companyId);
 
       if (driversError) throw driversError;
@@ -165,12 +171,13 @@ export default function CarsManagement() {
 
       const carsWithDrivers: CarWithDrivers[] = (carsData || []).map(car => {
         const carAssignments = (assignmentsData || []).filter(a => a.car_id === car.id);
-        const drivers = carAssignments
-          .map(a => {
-            const driver = driverMap.get(a.driver_id);
-            return driver ? { id: driver.id, name: driver.name } : null;
-          })
-          .filter((d): d is { id: string; name: string } => d !== null);
+        // `flatMap` rather than map-then-filter-with-a-predicate: the predicate
+        // had to restate the row's exact `status` type to stay assignable, and
+        // getting that wrong is a type error for a line that only drops nulls.
+        const drivers = carAssignments.flatMap(a => {
+          const driver = driverMap.get(a.driver_id);
+          return driver ? [{ id: driver.id, name: driver.name, status: driver.status }] : [];
+        });
 
         return { ...car, drivers };
       });
@@ -248,7 +255,7 @@ export default function CarsManagement() {
         : [],
       columns: [
         { key: 'kennzeichen',      label: t('werkstatt.plate'),         width: 18 },
-        { key: 'drivers',          label: t('fleet.assignedDrivers'),   width: 36, format: v => (v as { name: string }[] ?? []).map(d => d.name).join(', ') || '—' },
+        { key: 'drivers',          label: t('fleet.assignedDrivers'),   width: 36, format: v => (v as { name: string; status?: string | null }[] ?? []).map(d => driverNameWithStatus(d, t)).join(', ') || '—' },
         { key: 'tuev_gueltig_bis', label: t('fleet.tuevValidUntil'),    width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '—' },
         { key: 'tuev_status',      label: t('fleet.tuevStatusColumn'),  width: 18 },
         { key: 'letzte_hu',        label: t('fleet.lastHu'),            width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '—' },
@@ -292,10 +299,10 @@ export default function CarsManagement() {
     {
       id: 'drivers',
       header: t('fleet.assignedDrivers'),
-      value: car => car.drivers.map(driver => driver.name).join(', '),
+      value: car => car.drivers.map(driver => driverNameWithStatus(driver, t)).join(', '),
       cell: car =>
         car.drivers.length > 0 ? (
-          car.drivers.map(driver => driver.name).join(', ')
+          car.drivers.map(driver => driverNameWithStatus(driver, t)).join(', ')
         ) : (
           <span className="text-fg-subtle">{t('fleet.noDriversAssigned')}</span>
         ),

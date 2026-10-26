@@ -27,6 +27,7 @@ import {
   attachEvidence, decideNote, detachEvidence, openEvidence, removeEvidenceFile,
   type EvidenceClient, type ReviewDecision,
 } from '../lib/driverNoteProvenance';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import { NoteProvenanceFields } from '../components/notes/NoteProvenanceFields';
 import { NoteReviewPanel } from '../components/notes/NoteReviewPanel';
 
@@ -402,7 +403,8 @@ export function NotesPage() {
       .from('drivers')
       .select('id, name')
       .eq('company_id', companyId)
-      .eq('status', 'active')
+      // A chooser: a note is filed against a driver and steers future planning.
+      .eq('status', ACTIVE_DRIVER_STATUS)
       .order('name');
     if (error) throw error;
     setDrivers(data || []);

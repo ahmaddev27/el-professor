@@ -8,6 +8,7 @@ import { readOdometer } from '../utils/odometerRead';
 import { useTranslation } from '../contexts/LanguageContext';
 import { localReceiptNumber, nextReceiptNumber } from '../lib/receiptNumber';
 import type { TranslationKey } from '../i18n';
+import { selectableDrivers } from '../utils/driverStatus';
 import {
   EMPTY_DETAILS,
   RECEIPT_CATEGORIES,
@@ -691,7 +692,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     required
                   >
                     <option value="">{t('rec.selectDriver')}</option>
-                    {drivers.filter(d => d.status !== 'inactive').map(d => (
+                    {selectableDrivers(drivers).map(d => (
                       <option key={d.id} value={d.name}>{d.name}</option>
                     ))}
                   </NativeSelect>

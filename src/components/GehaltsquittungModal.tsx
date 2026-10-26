@@ -38,6 +38,7 @@ import {
   type GehaltsquittungPreselect,
 } from '../hooks/useGehaltsquittungFlow';
 import { openSignedCopy, type ReceiptSalary } from '../lib/salaryCashReceipts';
+import { driverNameWithStatus } from '../utils/driverStatus';
 import { toCents } from '../utils/money';
 import type { BalanceFigures, ReceiptFigures } from '../utils/salaryCashReceipt';
 import {
@@ -282,9 +283,11 @@ function SelectStep({ flow }: { flow: GehaltsquittungFlow }) {
               <SelectContent>
                 {drivers.data.map(driver => (
                   <SelectItem key={driver.id} value={driver.id}>
-                    {driver.status && driver.status !== 'active'
-                      ? t('gq.driver.inactive', { name: driver.name })
-                      : driver.name}
+                    {/* Former drivers stay in this picker on purpose — a salary
+                        can be owed after someone leaves — so the marker is what
+                        tells the two apart. One helper now, shared with the
+                        vehicle list and the Fahrtenanalyse table. */}
+                    {driverNameWithStatus(driver, t)}
                   </SelectItem>
                 ))}
               </SelectContent>

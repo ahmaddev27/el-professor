@@ -3,6 +3,7 @@ import { Users, UserCheck, AlertTriangle, Clock, CalendarDays, Target, Wallet, S
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { ACTIVE_DRIVER_STATUS, selectableDrivers } from '../utils/driverStatus';
 import { Alert, Badge, Button, Card, cn, formatEuro } from './ui';
 
 export interface PlanningDriver {
@@ -171,6 +172,17 @@ export default function MonatsplanungDriverPool({
   const [initialized, setInitialized] = useState(false);
 
   // Load drivers from the company.
+  //
+  // Active drivers only, and the filter is in the QUERY rather than in the
+  // render, because this list has four consumers and the deactivated leaked
+  // through three of them: the card grid below drew every driver, `selectAll`
+  // and `selectRegularOnly` selected from the unfiltered array, and
+  // `onDriversLoaded` handed it to the parent — where `MonthlyPlanPage` turns it
+  // into the engine's `PlanDriverInput[]` and `CompanyPlannerPage` into the
+  // Stundennachweis preview's `selectedDrivers`. Only the *default* selection
+  // (`planningEnabledDrivers`) ever excluded them, so one press of
+  // "Alle auswählen" put a driver who had left into the month's plan. This is
+  // the list the owner's instruction of 25.10.2026 names first.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -181,6 +193,7 @@ export default function MonatsplanungDriverPool({
           .from('drivers')
           .select('*')
           .eq('company_id', companyId)
+          .eq('status', ACTIVE_DRIVER_STATUS)
           .order('name', { ascending: true });
         if (err) {
           console.error('[Phase2] drivers query error:', err);
@@ -221,8 +234,11 @@ export default function MonatsplanungDriverPool({
     return matched;
   }, [drivers, originalDriverIds, originalDriverNames]);
 
+  // `selectableDrivers` is the second wall, not a leftover: the query above
+  // already excludes the deactivated, and keeping the term here means the
+  // default selection stays correct if that filter is ever lost in a rebase.
   const planningEnabledDrivers = useMemo(
-    () => drivers.filter(d => d.planning_enabled !== false && d.status !== 'inactive'),
+    () => selectableDrivers(drivers).filter(d => d.planning_enabled !== false),
     [drivers],
   );
 

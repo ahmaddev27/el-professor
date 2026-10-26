@@ -31,6 +31,7 @@ import { calcSalaryFromIncome, salaryBase, salaryDueState, sumIncomeAmount } fro
 import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { driverNameWithStatus, selectableDrivers } from '../utils/driverStatus';
 import {
   Alert,
   Badge,
@@ -179,7 +180,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   };
 
   const calculateSalaries = () => {
-    const activeDrivers = drivers.filter(d => d.status !== 'inactive');
+    const activeDrivers = selectableDrivers(drivers);
     const driversToCalculate = selectedDriver
       ? activeDrivers.filter(d => d.id === selectedDriver)
       : activeDrivers;
@@ -283,6 +284,14 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
    * about what a driver holds.
    */
   const rowsByDriver = useMemo(() => groupSalaryPeriodsByDriver(salaries), [salaries]);
+
+  // The full `drivers` list, not `selectableDrivers`: the periods dialog is
+  // reached from a salary that already exists, so a driver who has left must
+  // still resolve to a name — marked, so the operator can tell which it is.
+  const periodsDriverName = useMemo(() => {
+    const found = drivers.find(driver => driver.id === periodsDriverId);
+    return found ? driverNameWithStatus(found, t) : '';
+  }, [drivers, periodsDriverId, t]);
 
   const overlapsByDriver = useMemo(() => {
     const found = new Map<string, Salary[]>();
@@ -690,7 +699,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL_DRIVERS}>{t('common.allDrivers')}</SelectItem>
-                    {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
+                    {selectableDrivers(drivers).map(driver => (
                       <SelectItem key={driver.id} value={driver.id}>
                         {driver.name}
                       </SelectItem>
@@ -785,7 +794,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         <SalaryPeriodsModal
           isOpen
           onClose={() => setPeriodsDriverId(null)}
-          driverName={drivers.find(driver => driver.id === periodsDriverId)?.name ?? ''}
+          driverName={periodsDriverName}
           rows={rowsByDriver.get(periodsDriverId) ?? []}
           companyId={companyId}
           writeRefusal={writeRefusal}

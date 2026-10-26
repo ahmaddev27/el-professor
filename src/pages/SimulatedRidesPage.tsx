@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import { loadCompanyDrivers, loadSettings } from '../lib/tripAnalysisClient';
 import type { CompanyDriver } from '../lib/tripAnalysisView';
 import type { TranslationKey } from '../i18n';
+import { selectableDrivers } from '../utils/driverStatus';
 import { PoolError, buildAddressPool, readCachedPool, writeCachedPool, type AddressPool } from '../utils/simulatedRides/addressPool';
 import {
   addDays, figuresOf, generateFromFigures, mondayOf, mondaysOfMonth, weekKey, type Finding, type FindingCode, type FiguresResult, type IncomeRow,
@@ -156,7 +157,12 @@ export default function SimulatedRidesPage() {
         const carList = ((carRows.data ?? []) as { id: string; kennzeichen: string }[]).map(c => ({ id: c.id, plate: c.kennzeichen }));
         setCars(carList);
         setCarIds(carList.map(c => c.id));
-        setDrivers(driverRows);
+        // `loadCompanyDrivers` is the Fahrtenanalyse's reader and returns every
+        // driver, which is right there: it analyses an import that already
+        // happened. Here the list names who invented rides are generated FOR, so
+        // it is a chooser and the deactivated are dropped — a simulated month
+        // must not put a driver who has left back on the road.
+        setDrivers(selectableDrivers(driverRows));
         setBase(savedBase(settingsRow));
       } catch (err) {
         console.error('Fahrten simulieren: loading the company failed', err);
