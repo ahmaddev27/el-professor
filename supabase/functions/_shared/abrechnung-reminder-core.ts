@@ -50,8 +50,8 @@
  * address two drivers of one company share.
  *
  * That last one is the audience change's own cost, measured the day it was
- * made: Y&A Mobility holds two active drivers on `stefanm_26@icloud.com` — one
- * is the other's duplicate, renamed "delete it" and kept, because a driver is
+ * made: Y&A Mobility holds **two active drivers on one address** — one is the
+ * other's duplicate, renamed "delete it" and kept, because a driver is
  * never deleted here, only deactivated. Under "every active driver" both are
  * targets, the dedupe key is the driver id, and the mailbox would get two
  * reminders for one week, one of them greeting a person by the junk row's name.
@@ -261,7 +261,7 @@ export interface ReminderRosterSummary {
  * the WEEK's figures (`abrechnung_schedule_preview`), and a driver with no
  * figures appears in none of those buckets — which is how an active driver with
  * no address came to receive nothing with nobody told (production, 26.10.2026:
- * Yassin Asfour at Y&A Mobility, and 20 such drivers across six companies).
+ * one driver at Y&A Mobility, and 20 such drivers across six companies).
  *
  * It is here rather than in the card so the card and the job cannot disagree
  * about what an address is or who is active; `planReminders` above applies the

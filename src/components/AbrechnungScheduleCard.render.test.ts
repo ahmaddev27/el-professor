@@ -10,8 +10,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * The rest of the card's preview is built from the WEEK's bookings
  * (`abrechnung_schedule_preview`), so a driver with no bookings appears in none
  * of its buckets. That is how an active driver with no e-mail address came to
- * receive nothing with nobody told — measured on production 26.10.2026, Yassin
- * Asfour at Y&A Mobility, one of 20 such drivers across six companies. The run
+ * receive nothing with nobody told — measured on production 26.10.2026: one
+ * driver at Y&A Mobility, one of 20 such drivers across six companies. The run
  * counted him as `no_address: 1` in a log nobody reads.
  *
  * A missing dictionary key renders as the key itself, so these assertions also
@@ -125,8 +125,8 @@ describe('the reminder roster on the schedule card', () => {
 
   it('says that an address two drivers share gets one reminder, not two', async () => {
     state.drivers = [
-      { status: 'active', email: 'stefanm_26@icloud.com' },
-      { status: 'active', email: 'Stefanm_26@iCloud.com' },
+      { status: 'active', email: 'driver.a@example.com' },
+      { status: 'active', email: 'Driver.A@Example.com' },
     ];
     const text = await render();
     expect(text).toContain('1 E-Mail-Adresse gehört mehreren aktiven Fahrern.');

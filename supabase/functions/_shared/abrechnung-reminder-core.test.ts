@@ -22,7 +22,7 @@ const WEEK = '2026-09-21';
 
 function facts(patch: Partial<ReminderFacts> = {}): ReminderFacts {
   return {
-    driver_id: DRIVER_A, driver_name: 'Ahmed Hemaid', driver_status: 'active',
+    driver_id: DRIVER_A, driver_name: 'Fahrer A', driver_status: 'active',
     driver_email: 'a@example.com', match_count: 1,
     umsatz_amount: '812.40', bargeld_rows: 0, bar_receipt_rows: 0,
     ...patch,
@@ -74,7 +74,7 @@ describe('the audience: every active driver', () => {
       const result = planReminders([facts({ driver_email: email })], nobody, 20);
       expect(result.sendable, String(email)).toEqual([]);
       expect(result.counts.no_address, String(email)).toBe(1);
-      expect(JSON.stringify(result.counts)).not.toContain('Ahmed');
+      expect(JSON.stringify(result.counts)).not.toContain('Fahrer');
     }
   });
 
@@ -109,18 +109,23 @@ describe('the audience: every active driver', () => {
 });
 
 /**
- * Y&A Mobility, measured 26.10.2026: two active drivers on
- * `stefanm_26@icloud.com`, one of them the other's duplicate renamed
- * "delete it". Under "every active driver" both are targets and the dedupe key
- * is the driver id, so without this the mailbox gets two mails for one week.
+ * Y&A Mobility, measured 26.10.2026: **two active drivers on one address**, one
+ * of them the other's duplicate, renamed "delete it" and kept, because a driver
+ * is never deleted here. Under "every active driver" both are targets and the
+ * dedupe key is the driver id, so without this the mailbox gets two mails for
+ * one week — one of them greeting a person by the junk row's name.
+ *
+ * The real address and the real name are deliberately not written down (this
+ * repository is public); `driver.a@example.com` and its `Driver.A@Example.com`
+ * spelling carry the one property the case-insensitive grouping needs.
  */
 describe('one mailbox, one reminder', () => {
   const nobody: ReadonlySet<string> = new Set();
-  const shared = (patch: Partial<ReminderFacts>) => facts({ driver_email: 'stefanm_26@icloud.com', ...patch });
+  const shared = (patch: Partial<ReminderFacts>) => facts({ driver_email: 'driver.a@example.com', ...patch });
 
   it('sends one mail to an address two active drivers share', () => {
     const rows = [
-      shared({ driver_id: DRIVER_B, driver_name: 'Stefan Mijailovic' }),
+      shared({ driver_id: DRIVER_B, driver_name: 'Fahrer B' }),
       shared({ driver_id: DRIVER_A, driver_name: 'delete it' }),
     ];
     const { sendable, counts } = planReminders(rows, nobody, 20);
@@ -131,21 +136,21 @@ describe('one mailbox, one reminder', () => {
   it('greets nobody by name at a shared address, so the junk row cannot address a person', () => {
     const rows = [
       shared({ driver_id: DRIVER_A, driver_name: 'delete it' }),
-      shared({ driver_id: DRIVER_B, driver_name: 'Stefan Mijailovic' }),
+      shared({ driver_id: DRIVER_B, driver_name: 'Fahrer B' }),
     ];
     const [target] = planReminders(rows, nobody, 20).sendable;
     expect(target.driverName).toBeNull();
-    expect(target.email).toBe('stefanm_26@icloud.com');
+    expect(target.email).toBe('driver.a@example.com');
   });
 
   it('names the driver when the address is his alone', () => {
     const [target] = planReminders([facts()], nobody, 20).sendable;
-    expect(target.driverName).toBe('Ahmed Hemaid');
+    expect(target.driverName).toBe('Fahrer A');
   });
 
   it('chooses the same driver whatever order the rows arrive in, so two ticks claim one row', () => {
     const rows = [
-      shared({ driver_id: DRIVER_B, driver_name: 'Stefan Mijailovic' }),
+      shared({ driver_id: DRIVER_B, driver_name: 'Fahrer B' }),
       shared({ driver_id: DRIVER_A, driver_name: 'delete it' }),
     ];
     const forward = planReminders(rows, nobody, 20).sendable;
@@ -157,7 +162,7 @@ describe('one mailbox, one reminder', () => {
   it('leaves the address alone once ANY driver on it holds a claim', () => {
     const rows = [
       shared({ driver_id: DRIVER_A, driver_name: 'delete it' }),
-      shared({ driver_id: DRIVER_B, driver_name: 'Stefan Mijailovic' }),
+      shared({ driver_id: DRIVER_B, driver_name: 'Fahrer B' }),
     ];
     // DRIVER_B's own mail is claimed, so the mailbox has had its mail.
     const { sendable, counts } = planReminders(rows, new Set([DRIVER_B]), 20);
@@ -174,7 +179,7 @@ describe('one mailbox, one reminder', () => {
   it('a second tick of the same window sends nothing a first tick already sent', () => {
     const rows = [
       facts({ driver_id: DRIVER_A, driver_email: 'a@example.com' }),
-      shared({ driver_id: DRIVER_B, driver_name: 'Stefan Mijailovic' }),
+      shared({ driver_id: DRIVER_B, driver_name: 'Fahrer B' }),
       shared({ driver_id: 'd0000000-0000-4000-8000-00000000000c', driver_name: 'delete it' }),
       facts({ driver_id: 'd0000000-0000-4000-8000-00000000000d', driver_email: 'd@example.com' }),
     ];
@@ -203,26 +208,26 @@ describe('one mailbox, one reminder', () => {
   });
 
   it('compares addresses trimmed and case-insensitively, and mails the stored spelling', () => {
-    expect(reminderAddressKey('  Stefanm_26@ICloud.com ')).toBe('stefanm_26@icloud.com');
+    expect(reminderAddressKey('  Driver.A@Example.com ')).toBe('driver.a@example.com');
     expect(reminderAddressKey(null)).toBeNull();
     expect(reminderAddressKey('   ')).toBeNull();
     const rows = [
-      shared({ driver_id: DRIVER_A, driver_email: 'Stefanm_26@iCloud.com' }),
+      shared({ driver_id: DRIVER_A, driver_email: 'Driver.A@Example.com' }),
       shared({ driver_id: DRIVER_B }),
     ];
     const { sendable, counts } = planReminders(rows, new Set(), 20);
     expect(counts.shared_address).toBe(1);
-    expect(sendable[0].email).toBe('Stefanm_26@iCloud.com');
+    expect(sendable[0].email).toBe('Driver.A@Example.com');
   });
 
   it('an inactive driver does not hold an address hostage', () => {
     const rows = [
       shared({ driver_id: DRIVER_A, driver_status: 'inactive', driver_name: 'delete it' }),
-      shared({ driver_id: DRIVER_B, driver_name: 'Stefan Mijailovic' }),
+      shared({ driver_id: DRIVER_B, driver_name: 'Fahrer B' }),
     ];
     const { sendable, counts } = planReminders(rows, new Set(), 20);
     expect(sendable).toHaveLength(1);
-    expect(sendable[0].driverName).toBe('Stefan Mijailovic');
+    expect(sendable[0].driverName).toBe('Fahrer B');
     expect(counts).toMatchObject({ inactive: 1, shared_address: 0, planned: 1 });
   });
 });
@@ -267,9 +272,10 @@ describe('the run cap', () => {
 
 /**
  * The counts an operator reads on the settings card. Measured on production
- * 26.10.2026: Yassin Asfour is active at Y&A Mobility with no address, so he
+ * 26.10.2026: one driver at Y&A Mobility is active with no address, so he
  * receives nothing, and the card's other figures cannot see him — they are
- * built from the week's bookings and he has none.
+ * built from the week's bookings and he has none. Twenty such drivers across
+ * six companies.
  */
 describe('summariseReminderRoster', () => {
   const row = (status: string, email: string | null) => ({ status, email });
@@ -285,8 +291,8 @@ describe('summariseReminderRoster', () => {
 
   it('counts a shared address once, and as one mail', () => {
     expect(summariseReminderRoster([
-      row('active', 'stefanm_26@icloud.com'),
-      row('active', 'Stefanm_26@iCloud.com'),
+      row('active', 'driver.a@example.com'),
+      row('active', 'Driver.A@Example.com'),
       row('active', 'other@example.com'),
     ])).toEqual({ active: 3, noAddress: 0, sharedAddresses: 1, reachable: 2 });
   });
