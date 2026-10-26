@@ -1216,7 +1216,6 @@ export default function SuperAdminDashboard() {
                   {/* Calculated price */}
                   <td className="px-4 py-3">
                     {(() => {
-                      const bp = calcPricing(priceBook, c.plan ?? 'basic', c.subscription_car_limit, c.billing_cycle);
                       // No quote for a company means no active subscription, so
                       // nothing is invoiced and the list price stands. Only once
                       // the quotes are known — otherwise a dash, not a guess.
@@ -1229,6 +1228,33 @@ export default function SuperAdminDashboard() {
                         );
                       }
                       const quote = quotes.byCompany.get(c.id);
+                      /*
+                        The car count the invoice is priced on since
+                        20261026110000 — the FLEET, not
+                        `companies.subscription_car_limit`.
+
+                        This mattered inside one cell. The monthly figure comes
+                        from the quote, which the database priced on the fleet,
+                        while `bp` fed the yearly sub-line below and was priced
+                        on the stored allowance — so for Smooth Fahrt (billed
+                        10, runs 2) the same cell would have read 80,00 € a
+                        month and ten cars' worth a year. Both halves take the
+                        same count now.
+
+                        The quote carries the count it used; a company with no
+                        active subscription has no quote, and then the read
+                        model's own `active_car_count` is the same measurement.
+                        If neither is available the price is NOT rendered —
+                        this screen's own rule, already written above for the
+                        drivers allowance: a dash, never a plausible number.
+                      */
+                      const cars = quote?.activeCars ?? (c.counts_known ? c.active_car_count : null);
+                      if (cars === null) {
+                        return (
+                          <p className="text-xs text-fg-subtle" title={t('sa.dash.billedUnavailable')}>–</p>
+                        );
+                      }
+                      const bp = calcPricing(priceBook, c.plan ?? 'basic', cars, c.billing_cycle);
                       const monthly = quote ? quote.amountCents / 100 : bp.monthlyEquivalent;
                       return (
                         <div>

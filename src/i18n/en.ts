@@ -2121,7 +2121,7 @@ export const en: PartialDictionary = {
   'sa.dash.attentionTitle':                'Needs attention ({count})',
   'sa.dash.carLimit':                      'Plan vehicle allowance (not a limit)',
   'sa.dash.carsBilledHint':                'Billed vehicles / plan allowance. The invoice follows the actual fleet; the allowance caps nothing.',
-  'sa.dash.carsCount':                     '{count} vehicles',
+  'sa.dash.carsCount':                     '{count} vehicles stated',
   'sa.dash.changeBilling':                 'Change Abrechnung',
   'sa.dash.changeStatus':                  'Change status',
   'sa.dash.changeTariff':                  'Change tariff',

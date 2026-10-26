@@ -2157,7 +2157,13 @@ export const de = {
   // number still is: the allowance of the plan an operator assigned.
   'sa.dash.carLimit':                      'Fahrzeug-Kontingent des Tarifs (kein Limit)',
   'sa.dash.carsBilledHint':                'Abgerechnete Fahrzeuge / Kontingent des Tarifs. Abgerechnet wird der tatsächliche Fuhrpark, das Kontingent begrenzt nichts.',
-  'sa.dash.carsCount':                     '{count} Fahrzeuge',
+  // The Freigaben list, where this is the fleet size the APPLICANT declared at
+  // signup (SignupPage writes its slider into `subscription_car_limit`) and not
+  // a count of anything — a company awaiting approval has no cars in the system
+  // yet. Said '{count} Fahrzeuge', which reads as a measurement; since
+  // 20261026110000 the invoice is priced on the measured fleet, so the two must
+  // not be confusable.
+  'sa.dash.carsCount':                     '{count} Fahrzeuge angegeben',
   'sa.dash.changeBilling':                 'Abrechnung ändern',
   'sa.dash.changeStatus':                  'Status ändern',
   'sa.dash.changeTariff':                  'Tarif ändern',
