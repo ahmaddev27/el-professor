@@ -671,12 +671,17 @@ Rules:
 ### Weekday Business Rules (Override for Transfer Analysis Only)
 
 ```
-Ahmed Hemaid:  Sa, So only           → display: "Wochentage: Sa, So (Business Rule Ahmed)"
-Alev Büyükay:  Mo, Di, Mi, Do, Fr    → display: "Wochentage: Mo, Di, Mi, Do, Fr (Business Rule Alev)"
+driver A:  Sa, So only           → display: "Wochentage: Sa, So (Business Rule)"
+driver B:  Mo, Di, Mi, Do, Fr    → display: "Wochentage: Mo, Di, Mi, Do, Fr (Business Rule)"
 All others:    whole week             → display: "Wochentage: ganze Woche (Business Rule)"
 ```
 
-> These rules are hardcoded as business rules. They override the general weekly availability check.
+> These rules are hardcoded as business rules, matched on the driver’s name, and they override the
+> general weekly availability check. The two drivers are real people at one company and are not named
+> here; this repository is public. The display strings above are what the UI renders — the suffix is
+> "(Business Rule)" in every case, never the driver’s name. Measured read-only on production
+> 26.10.2026, both rules disagree with the operator’s own `drivers.allowed_weekdays`; see the comment
+> on `getTransferAnalysisWeekdayAvailability` in `MonatsplanungStundennachweisPreview.tsx`.
 
 ---
 

@@ -249,7 +249,7 @@
   <div class="crit-box">
     <p style="margin:.2em 0">القراءة الوحيدة اللي توكننا يوصلها بترجع <strong>سائقين و<code>meta</code> وبس</strong> — ولا هوية أسطول. والدالة اللي بترجع <code>tenant_id</code> خلف <code>can:connections.manage</code> ومش بقائمة الحصر، فتوكننا ياخد 403. و<code>issueToken</code> بترجع الهوية <strong>لمتصفح المشغّل، مش إلنا</strong>.</p>
     <p style="margin:.5em 0 .2em"><strong>النتيجة:</strong> إلزق توكن أسطول (أ) بـConnect شركة (ب) وبينجح — وشركة (ب) تبلّش تسحب سائقين أسطول (أ) وتأكّد ربطهم وتقبل واردات بتحرّك فلوس.</p>
-    <p style="margin:.5em 0 .2em"><strong>ومش افتراضي على هذا العميل:</strong> قياسنا المكتوب بالـmigration إنه <code>ahmedkhhemaid@gmail.com</code> يملك شركتين — نفس المشغّل اللي رح يحمل توكنين.</p>
+    <p style="margin:.5em 0 .2em"><strong>ومش افتراضي على هذا العميل:</strong> قياسنا المكتوب بالـmigration إنه عنوان مشغّل واحد (محجوب هون لأن المستودع عام) يملك شركتين — نفس المشغّل اللي رح يحمل توكنين.</p>
   </div>
   <p><strong>العلاج:</strong> هوية الأسطول تنضاف لقائمة الحصر (بالروستر أو بـ<code>GET elprofessor/fleet</code> whoami)، وتُخزّن عند الكونيكت بـ<code>external_company_id</code>، وتُقارن <strong>كل سحبة</strong> — وعند الاختلاف الاتصال يصير <code>failed</code> بسبب مميّز، مش يسحب. و«التوكن بيسمّي أسطول متصل بشركة ثانية» <strong>رفض</strong>، مش خطأ فرادة. <span class="ref">[1] [24]</span></p>
   <div class="why">

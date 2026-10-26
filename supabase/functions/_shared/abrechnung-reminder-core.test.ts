@@ -19,7 +19,7 @@ const WEEK = '2026-09-21';
 
 function facts(patch: Partial<ReminderFacts> = {}): ReminderFacts {
   return {
-    driver_id: DRIVER_A, driver_name: 'Ahmed Hemaid', driver_status: 'active',
+    driver_id: DRIVER_A, driver_name: 'Nora Vogt', driver_status: 'active',
     driver_email: 'a@example.com', match_count: 1,
     umsatz_amount: '812.40', bargeld_rows: 0, bar_receipt_rows: 0,
     ...patch,

@@ -52,7 +52,7 @@ const POOL: PoolAddress[] = Array.from({ length: 400 }, (_, i) => ({
   lon: 7.0 + (i % 20) * 0.0085,
 }));
 /** Seven names and four plates, as the audited file has. */
-const DRIVERS = ['Ferhat Erol', 'Alev Büyükay', 'Chris Muster', 'Dana Probe', 'Emil Test', 'Fritz Demo', 'Gerd Beispiel'];
+const DRIVERS = ['Timo Hahn', 'Lena Müller', 'Chris Muster', 'Dana Probe', 'Emil Test', 'Fritz Demo', 'Gerd Beispiel'];
 const VEHICLES = [
   { plate: 'SG-YA12', type: 'Toyota Corolla Touring Sports' },
   { plate: 'SG-YA14', type: 'Toyota Corolla Touring Sports' },

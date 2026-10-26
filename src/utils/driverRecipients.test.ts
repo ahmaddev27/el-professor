@@ -11,9 +11,9 @@ import { describe, it, expect } from 'vitest';
 import { planRecipients, nameKey, nothingToSend, type RecipientDriver } from './driverRecipients';
 
 const drivers: RecipientDriver[] = [
-  { id: 'd1', name: 'Ahmed Hemaid', email: 'ahmed@example.com' },
-  { id: 'd2', name: 'Alev Büyükay', email: 'alev@example.com' },
-  { id: 'd3', name: 'Ferhat Erol', email: null },
+  { id: 'd1', name: 'Nora Vogt', email: 'nora@example.com' },
+  { id: 'd2', name: 'Lena Müller', email: 'lena@example.com' },
+  { id: 'd3', name: 'Timo Hahn', email: null },
   { id: 'd4', name: 'Mehmet Yılmaz', email: 'mehmet1@example.com' },
   { id: 'd5', name: 'Mehmet Yılmaz', email: 'mehmet2@example.com' },
   { id: 'd6', name: 'Leer Adresse', email: '   ' },
@@ -21,9 +21,9 @@ const drivers: RecipientDriver[] = [
 
 describe('planRecipients', () => {
   it('sends to a driver whose name resolves to exactly one address', () => {
-    const plan = planRecipients(['Ahmed Hemaid', 'Alev Büyükay'], drivers);
+    const plan = planRecipients(['Nora Vogt', 'Lena Müller'], drivers);
     expect(plan.sendable.map(r => r.driverId)).toEqual(['d1', 'd2']);
-    expect(plan.sendable[0].email).toBe('ahmed@example.com');
+    expect(plan.sendable[0].email).toBe('nora@example.com');
     expect(plan.noEmail).toEqual([]);
     expect(plan.ambiguous).toEqual([]);
     expect(plan.unknown).toEqual([]);
@@ -39,10 +39,10 @@ describe('planRecipients', () => {
 
   it('names a driver with no address rather than skipping them silently', () => {
     // The owner asked for this explicitly: "يذكرهم".
-    const plan = planRecipients(['Ferhat Erol', 'Leer Adresse'], drivers);
+    const plan = planRecipients(['Timo Hahn', 'Leer Adresse'], drivers);
     expect(plan.sendable).toEqual([]);
     // An address of only spaces is no address.
-    expect(plan.noEmail).toEqual(['Ferhat Erol', 'Leer Adresse']);
+    expect(plan.noEmail).toEqual(['Timo Hahn', 'Leer Adresse']);
   });
 
   it('names a driver the company list does not carry at all', () => {
@@ -52,17 +52,17 @@ describe('planRecipients', () => {
   });
 
   it('keeps the table order, so the confirmation reads down the screen', () => {
-    const plan = planRecipients(['Alev Büyükay', 'Ahmed Hemaid'], drivers);
-    expect(plan.sendable.map(r => r.rowName)).toEqual(['Alev Büyükay', 'Ahmed Hemaid']);
+    const plan = planRecipients(['Lena Müller', 'Nora Vogt'], drivers);
+    expect(plan.sendable.map(r => r.rowName)).toEqual(['Lena Müller', 'Nora Vogt']);
   });
 
   it('decides a repeated name once', () => {
-    const plan = planRecipients(['Ahmed Hemaid', 'Ahmed Hemaid'], drivers);
+    const plan = planRecipients(['Nora Vogt', 'Nora Vogt'], drivers);
     expect(plan.sendable).toHaveLength(1);
   });
 
   it('ignores an empty row name instead of reporting it as unknown', () => {
-    const plan = planRecipients(['', '   ', 'Ahmed Hemaid'], drivers);
+    const plan = planRecipients(['', '   ', 'Nora Vogt'], drivers);
     expect(plan.unknown).toEqual([]);
     expect(plan.sendable).toHaveLength(1);
   });
@@ -70,14 +70,14 @@ describe('planRecipients', () => {
 
 describe('nameKey — what counts as the same person', () => {
   it('ignores case and inner spacing', () => {
-    expect(nameKey('Ahmed  Hemaid')).toBe(nameKey('ahmed hemaid'));
-    expect(nameKey('  AHMED HEMAID  ')).toBe(nameKey('Ahmed Hemaid'));
+    expect(nameKey('Nora  Vogt')).toBe(nameKey('nora vogt'));
+    expect(nameKey('  NORA VOGT  ')).toBe(nameKey('Nora Vogt'));
   });
 
   it('keeps accents and non-Latin letters, which are part of a name', () => {
     // Folding these would make two different people one, which is the same
     // defect as the ambiguous case and harder to see.
-    expect(nameKey('Büyükay')).not.toBe(nameKey('Buyukay'));
+    expect(nameKey('Müller')).not.toBe(nameKey('Muller'));
     expect(nameKey('Yılmaz')).not.toBe(nameKey('Yilmaz'));
   });
 
@@ -90,7 +90,7 @@ describe('nameKey — what counts as the same person', () => {
 
 describe('nothingToSend', () => {
   it('is true when every name was refused, however it was refused', () => {
-    expect(nothingToSend(planRecipients(['Mehmet Yılmaz', 'Ferhat Erol'], drivers))).toBe(true);
-    expect(nothingToSend(planRecipients(['Ahmed Hemaid'], drivers))).toBe(false);
+    expect(nothingToSend(planRecipients(['Mehmet Yılmaz', 'Timo Hahn'], drivers))).toBe(true);
+    expect(nothingToSend(planRecipients(['Nora Vogt'], drivers))).toBe(false);
   });
 });

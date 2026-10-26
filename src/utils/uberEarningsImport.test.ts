@@ -29,7 +29,7 @@ import {
 } from './uberEarningsImport';
 
 const driverWire = (over: Record<string, unknown> = {}) => ({
-  driver_id: 139, uber_driver_uuid: 'u-1', name: 'Ahmed Hemaid',
+  driver_id: 139, uber_driver_uuid: 'u-1', name: 'Nora Vogt',
   fare: '664.19', promotion: '0.00', tips: '28.00', cash: '226.26',
   net_outstanding: '465.93', trips: 67, difference: '0.00', ...over,
 });
@@ -140,9 +140,9 @@ function week(from: string, to: string, monday: string, wire: Record<string, unk
 
 describe('unmatched earners and the 31-day cap', () => {
   it('reads meta.unmatched by name, with no money', () => {
-    const b = { ...body([driverWire()]), meta: { driver_count: 1, unmatched: [{ name: 'Ahmed Hemaid', uber_driver_uuid: 'u-9', trips: 12 }] } };
+    const b = { ...body([driverWire()]), meta: { driver_count: 1, unmatched: [{ name: 'Nora Vogt', uber_driver_uuid: 'u-9', trips: 12 }] } };
     const r = parseEarningsBody(b, '2026-10-06', '2026-10-12');
-    expect(r.ok && r.value.unmatched).toEqual([{ name: 'Ahmed Hemaid', uberDriverUuid: 'u-9', trips: 12 }]);
+    expect(r.ok && r.value.unmatched).toEqual([{ name: 'Nora Vogt', uberDriverUuid: 'u-9', trips: 12 }]);
   });
   it('an absent list is none; a malformed one refuses the whole answer', () => {
     expect(parseEarningsBody(body([]), '2026-10-06', '2026-10-12')).toMatchObject({ ok: true, value: { unmatched: [] } });
@@ -211,7 +211,7 @@ describe('buildImportRows', () => {
     });
   });
   it('never carries Reidey\'s name to the database', () => {
-    expect(JSON.stringify(buildImportRows([w1]))).not.toContain('Hemaid');
+    expect(JSON.stringify(buildImportRows([w1]))).not.toContain('Vogt');
   });
   it('a driver with nothing to write produces no row', () => {
     const idle = week('2026-10-06', '2026-10-11', '2026-10-05',
@@ -226,7 +226,7 @@ describe('the link decides who may be imported', () => {
     driverWire({ driver_id: 7, name: 'Nobody Linked' }),
     driverWire({ driver_id: 8, name: 'Idle', fare: '0.00', tips: '0.00', cash: '0.00', trips: null }),
   ]);
-  const links = { '139': { driverId: 'd-1', driverName: 'Ahmed Hemaid GmbH-Name' } };
+  const links = { '139': { driverId: 'd-1', driverName: 'Nora Vogt GmbH-Name' } };
   it('names each unlinked driver that would produce a row, once', () => {
     expect(findUnlinked([w, w], links)).toEqual([{ externalDriverId: '7', name: 'Nobody Linked' }]);
   });
@@ -237,7 +237,7 @@ describe('the link decides who may be imported', () => {
     const wd = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire({ difference: '-2.50' })]);
     const [line] = summarizeByDriver([wd], links);
     expect(line).toMatchObject({
-      uberName: 'Ahmed Hemaid', ourName: 'Ahmed Hemaid GmbH-Name',
+      uberName: 'Nora Vogt', ourName: 'Nora Vogt GmbH-Name',
       differenceCents: -250, hasDifference: true, rowCount: 3,
     });
   });
@@ -327,26 +327,26 @@ describe('figures below zero: read, reported, never a row', () => {
 });
 
 describe('findExistingIncome: typed rows warn, imported rows refuse', () => {
-  const links = { '139': { driverId: 'd-1', driverName: 'Ahmed Hemaid' } };
+  const links = { '139': { driverId: 'd-1', driverName: 'Nora Vogt' } };
   const w = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire()]);
   const row = (over: Partial<import('./uberEarningsImport').ExistingIncome> = {}) => ({
-    driver_name: 'Ahmed Hemaid', date: '2026-10-07', type: 'umsatz', amount: 100,
+    driver_name: 'Nora Vogt', date: '2026-10-07', type: 'umsatz', amount: 100,
     source: null, source_period_start: null, source_period_end: null, ...over,
   });
   it('a hand-entered row in the week is reported as manual, naming driver and week', () => {
     expect(findExistingIncome([w], links, [row(), row({ type: 'bargeld' })])).toEqual([
-      { driverName: 'Ahmed Hemaid', segment: w.segment, manualCount: 2, importedCount: 0 },
+      { driverName: 'Nora Vogt', segment: w.segment, manualCount: 2, importedCount: 0 },
     ]);
   });
   it('nothing is reported for another driver, another week or another spelling', () => {
     expect(findExistingIncome([w], links, [
-      row({ driver_name: 'Someone Else' }), row({ date: '2026-10-12' }), row({ driver_name: 'ahmed hemaid' }),
+      row({ driver_name: 'Someone Else' }), row({ date: '2026-10-12' }), row({ driver_name: 'nora vogt' }),
     ])).toEqual([]);
   });
   it('an earlier import that overlaps by its period is imported, not manual, even dated before the range', () => {
     const imported = row({ source: 'uber', date: '2026-10-04', source_period_start: '2026-10-04', source_period_end: '2026-10-08' });
     expect(findExistingIncome([w], links, [imported])).toEqual([
-      { driverName: 'Ahmed Hemaid', segment: w.segment, manualCount: 0, importedCount: 1 },
+      { driverName: 'Nora Vogt', segment: w.segment, manualCount: 0, importedCount: 1 },
     ]);
   });
   it('both at once are counted apart', () => {
@@ -467,7 +467,7 @@ describe('a day as an import piece', () => {
   const day: WeekEarnings = {
     segment: { from: '2026-10-07', to: '2026-10-07', monday: '2026-10-05' },
     drivers: [{
-      externalDriverId: '139', uberDriverUuid: 'u-1', name: 'Ahmed Hemaid', fareCents: 10000, promotionCents: 0,
+      externalDriverId: '139', uberDriverUuid: 'u-1', name: 'Nora Vogt', fareCents: 10000, promotionCents: 0,
       tipsCents: 0, cashCents: 0, netOutstandingCents: 0, differenceCents: 0, trips: 4,
     }],
   };
