@@ -6602,7 +6602,7 @@ export const de = {
   'inc.uber.period.tooManyDays':       'Höchstens {max} Tage auf einmal; gewählt sind {count}. Bitte weniger Tage wählen.',
   'inc.uber.tab.daily':                'Täglich',
   'settings.abrSchedule.preview.manager.goesAddress': 'Übersicht geht an die hinterlegte Benachrichtigungsadresse.',
-  'settings.abrSchedule.reminder.hint':    'Ein Fahrer, der in der Woche weder Bargeld noch Barbelege erfasst hat, bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Das trifft auch Fahrer, die in der Woche nicht gefahren sind und nichts abzugeben haben. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
+  'settings.abrSchedule.reminder.hint':    'Jeder aktive Fahrer mit hinterlegter E-Mail-Adresse bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Sie nennt keine Zahlen und fragt nur, ob noch ein Fahrtenbuch, Bargeld oder Barbelege abzugeben sind. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
   'settings.abrSchedule.reminder.label':   'Fahrer vor dem Versand erinnern',
   'settings.abrSchedule.reminder.lead':    'Erinnerung vor dem Versand',
   'settings.abrSchedule.reminder.leadOption': '{minutes} Minuten vorher',
@@ -7148,4 +7148,12 @@ export const de = {
   'users.roles.group.roleControlled':      'Von der Rolle gesteuert',
   'users.roles.noEffectivePermissions':    'Keine wirksame Berechtigung',
   'users.roles.view.notEnforced':          'Die Spalte "Ansehen" ist stillgelegt: keine Berechtigungsprüfung im System liest sie. Die Haken zeigen den gespeicherten Wert und lassen sich nicht ändern; der Lesezugriff ergibt sich aus dem Abo-Paket und dem Menü.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.reminder.rosterFailed': 'Die Fahrerliste konnte nicht geladen werden. Es ist unbekannt, wen die Erinnerung erreicht.',
+  'settings.abrSchedule.reminder.rosterNoAddressOne': '{count} aktiver Fahrer hat keine E-Mail-Adresse und erhält keine Erinnerung.',
+  'settings.abrSchedule.reminder.rosterNoAddressOther': '{count} aktive Fahrer haben keine E-Mail-Adresse und erhalten keine Erinnerung.',
+  'settings.abrSchedule.reminder.rosterReach': 'Die Erinnerung erreicht {reachable} von {active} aktiven Fahrern.',
+  'settings.abrSchedule.reminder.rosterSharedOne': '{count} E-Mail-Adresse gehört mehreren aktiven Fahrern. Dorthin geht eine Erinnerung ohne Namen, nicht eine pro Fahrer.',
+  'settings.abrSchedule.reminder.rosterSharedOther': '{count} E-Mail-Adressen gehören mehreren aktiven Fahrern. Dorthin geht je eine Erinnerung ohne Namen, nicht eine pro Fahrer.',
 } as const;
