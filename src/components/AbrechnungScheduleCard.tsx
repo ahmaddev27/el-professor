@@ -20,6 +20,7 @@ import {
   type ReminderRosterSummary,
 } from '../../supabase/functions/_shared/abrechnung-reminder-core';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect } from './ui';
 
 /**
@@ -165,11 +166,21 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
     try {
       // Paged: PostgREST caps a select at 1000 rows and reports no error when
       // it truncates, and a truncated roster would understate every figure here.
+      //
+      // The status filter is in the QUERY, which is where `driverStatus.ts` says
+      // a chooser's boundary belongs. All three lines this feeds speak about
+      // ACTIVE drivers and none of them reports anything about a deactivated
+      // one, so the narrower read makes them true by construction instead of by
+      // a discard in the browser — and it stops fetching the address of every
+      // driver who will never be mailed. `summariseReminderRoster` applies the
+      // same test again because the JOB reads every driver (it has to count the
+      // deactivated for its own report); for this card that is a second wall.
       const rows = await fetchAllPaginated<{ status: string | null; email: string | null }>(
         (from, to) => supabase
           .from('drivers')
           .select('status, email')
           .eq('company_id', companyId)
+          .eq('status', ACTIVE_DRIVER_STATUS)
           .order('id')
           .range(from, to),
         { batchSize: 500, maxRows: 20_000 },

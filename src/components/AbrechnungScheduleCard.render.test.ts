@@ -1,6 +1,8 @@
 import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ACTIVE_DRIVER_STATUS, DEACTIVATED_DRIVER_STATUS } from '../utils/driverStatus';
+import { summariseReminderRoster } from '../../supabase/functions/_shared/abrechnung-reminder-core';
 
 /**
  * The Abrechnung schedule card, rendered with the real German dictionary, for
@@ -26,16 +28,34 @@ const state: {
   schedule: Record<string, unknown> | null;
   drivers: DriverRow[];
   driversFail: boolean;
-} = { schedule: null, drivers: [], driversFail: false };
+  /** Every `.eq(column, value)` the roster query applied, for the assertion below. */
+  driverFilters: Array<[string, unknown]>;
+} = { schedule: null, drivers: [], driversFail: false, driverFilters: [] };
 
-/** `.from('drivers')` as `fetchAllPaginated` drives it: select → eq → order → range. */
+/**
+ * `.from('drivers')` as `fetchAllPaginated` drives it: select → eq → eq → order
+ * → range.
+ *
+ * It **applies** the `.eq()` filters it is given and **records** them, and the
+ * two serve different assertions. Applying them makes the fake answer what the
+ * real PostgREST would, so the rendered figures are the figures. Recording them
+ * is what lets a test see the query itself — necessary here, because
+ * `summariseReminderRoster` applies the same status test a second time, so
+ * removing the filter from the card does **not** change a single rendered
+ * number. Measured, not assumed: the first version of this file claimed it did,
+ * and a mutation control showed the claim was false.
+ */
 function driversQuery() {
-  const answer = () => (state.driversFail
-    ? { data: null, error: { message: 'boom' } }
-    : { data: state.drivers, error: null });
+  const answer = () => {
+    if (state.driversFail) return { data: null, error: { message: 'boom' } };
+    const rows = state.drivers.filter(row => state.driverFilters.every(
+      ([column, value]) => column !== 'status' || row.status === value,
+    ));
+    return { data: rows, error: null };
+  };
   const chain = {
     select: () => chain,
-    eq: () => chain,
+    eq: (column: string, value: unknown) => { state.driverFilters.push([column, value]); return chain; },
     order: () => chain,
     range: () => Promise.resolve(answer()),
   };
@@ -99,6 +119,7 @@ describe('the reminder roster on the schedule card', () => {
     state.schedule = { ...REMINDING };
     state.drivers = [];
     state.driversFail = false;
+    state.driverFilters = [];
   });
 
   it('names the active driver who has no address and therefore gets nothing', async () => {
@@ -110,6 +131,64 @@ describe('the reminder roster on the schedule card', () => {
     const text = await render();
     expect(text).toContain('1 aktiver Fahrer hat keine E-Mail-Adresse und erhält keine Erinnerung.');
     expect(text).toContain('Die Erinnerung erreicht 1 von 2 aktiven Fahrern.');
+  });
+
+  /**
+   * **The control on the query itself**, and the only one at this level: the
+   * card asks for active drivers and nothing else.
+   *
+   * `summariseReminderRoster` tests the status again, so no rendered figure
+   * moves when the filter goes — which is why this assertion is about the
+   * statement the card sent and not about what it drew. The second wall is
+   * deliberate (the job shares that function and must count the deactivated for
+   * its own report), so the two walls are pinned by two different assertions:
+   * this one, and `driverReads.test.ts`'s chooser check, which reads the source.
+   */
+  it('asks the database for active drivers only', async () => {
+    state.drivers = [{ status: 'active', email: 'a@example.com' }];
+    await render();
+    expect(state.driverFilters).toContainEqual(['status', ACTIVE_DRIVER_STATUS]);
+    expect(state.driverFilters.map(([column]) => column)).toContain('company_id');
+  });
+
+  /**
+   * The behaviour the two walls produce together. It holds whichever wall is
+   * doing the work, which is the point of having two.
+   */
+  it('never counts a deactivated driver, however many of them there are', async () => {
+    state.drivers = [
+      { status: 'active', email: 'a@example.com' },
+      { status: 'inactive', email: 'b@example.com' },
+      { status: 'inactive', email: null },
+      { status: 'inactive', email: 'a@example.com' },
+    ];
+    const text = await render();
+    expect(text).toContain('Die Erinnerung erreicht 1 von 1 aktiven Fahrern.');
+    // The deactivated rows would otherwise have produced both warnings: one
+    // without an address, and one sharing the active driver's address.
+    expect(text).not.toContain('keine E-Mail-Adresse und erh');
+    expect(text).not.toContain('gehört mehreren aktiven Fahrern');
+  });
+
+  /**
+   * The one divergence the query filter leaves open, pinned rather than removed.
+   *
+   * `summariseReminderRoster` lives in `supabase/functions/_shared/` because the
+   * JOB shares it, and nothing there can import `src/utils/driverStatus.ts` — so
+   * "active" is necessarily spelled twice. This is the same situation as
+   * `notificationSelection.parity.test.ts`, and the same remedy: a test on the
+   * `src/` side, which can see both, requires them to agree. If
+   * `ACTIVE_DRIVER_STATUS` ever changes value, the card's query follows it, the
+   * shared core's literal does not, and the card and the job would disagree
+   * about who is active. Then this fails — and the fix is to decide which value
+   * is right, never to copy one side onto the other.
+   */
+  it('agrees with the shared core about which status string means active', () => {
+    const address = 'a@example.com';
+    expect(summariseReminderRoster([{ status: ACTIVE_DRIVER_STATUS, email: address }]))
+      .toMatchObject({ active: 1, reachable: 1 });
+    expect(summariseReminderRoster([{ status: DEACTIVATED_DRIVER_STATUS, email: address }]))
+      .toMatchObject({ active: 0, reachable: 0 });
   });
 
   it('uses the plural for several, and says nothing when every driver has an address', async () => {

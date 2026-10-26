@@ -78,6 +78,14 @@ const DRIVER_READS: Record<string, readonly DeclaredRead[]> = {
       why: 'Assigns drivers to a vehicle — an assignment that applies from now on.',
     },
   ],
+  'components/AbrechnungScheduleCard.tsx': [
+    {
+      statement: "select('status, email')",
+      kind: 'chooser',
+      filter: 'query',
+      why: "The roster behind the weekly reminder's own line on the settings card: how many active drivers the next reminder reaches, how many have no address, and how many addresses two of them share. Classified chooser because it describes who will be MAILED NEXT — future work — and because all three sentences it feeds say \"aktive Fahrer\" and none of them reports anything about a deactivated driver, so a deactivated row in the answer would make a figure on screen false rather than incomplete. Narrowing it is therefore not a loss of information; the cost is that the card cannot say \"N deactivated drivers are not reminded\" without widening the query again, and this line is where that is to be found out. The filter is the query rather than `selectableDrivers`, because the counting lives in `summariseReminderRoster` in `supabase/functions/_shared/`, which the job shares and which cannot import this rule module at all — a `selectableDrivers()` call added to this file to satisfy a lexical check would name a mechanism that is not the one doing the work.",
+    },
+  ],
   'components/MietwagenauftragModal.tsx': [
     {
       statement: "select('id, name')",
