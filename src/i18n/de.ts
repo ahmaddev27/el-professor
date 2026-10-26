@@ -854,7 +854,11 @@ export const de = {
   'settings.field.ownerName':          'Inhaber',
   'settings.field.representative':     'Vertretungsberechtigter',
   'settings.field.driversPerCar':      'Fahrer pro Fahrzeug',
-  'settings.field.driversPerCarHint':  'Maximale Anzahl aktiver Fahrer = Fahrzeuge x {n}',
+  // Said 'Maximale Anzahl aktiver Fahrer = Fahrzeuge x {n}' until 26.10.2026,
+  // which was true while trg_enforce_driver_limit enforced it and became false
+  // the moment 20261026110000 dropped it. The field is kept (the column is the
+  // owner's open question) but it must not promise a maximum nothing enforces.
+  'settings.field.driversPerCarHint':  'Nur ein Richtwert für die Planung: Fahrzeuge x {n}. Die Anzahl der Fahrer ist nicht begrenzt.',
   'settings.field.vatId':              'USt-IdNr.',
   'settings.field.taxNumber':          'Steuernummer',
   'settings.field.commercialRegister': 'Handelsregisternummer',
@@ -2148,7 +2152,11 @@ export const de = {
   'sa.dash.attention.pending':             'Wartet auf Freischaltung',
   'sa.dash.attention.suspended':           'Unternehmen ist gesperrt',
   'sa.dash.attentionTitle':                'Handlungsbedarf ({count})',
-  'sa.dash.carLimit':                      'Fahrzeuglimit',
+  // Not 'Fahrzeuglimit' any more: 20261026110000 dropped the trigger that made
+  // it one, and the invoice is priced on the fleet the company runs. What this
+  // number still is: the allowance of the plan an operator assigned.
+  'sa.dash.carLimit':                      'Fahrzeug-Kontingent des Tarifs (kein Limit)',
+  'sa.dash.carsBilledHint':                'Abgerechnete Fahrzeuge / Kontingent des Tarifs. Abgerechnet wird der tatsächliche Fuhrpark, das Kontingent begrenzt nichts.',
   'sa.dash.carsCount':                     '{count} Fahrzeuge',
   'sa.dash.changeBilling':                 'Abrechnung ändern',
   'sa.dash.changeStatus':                  'Status ändern',

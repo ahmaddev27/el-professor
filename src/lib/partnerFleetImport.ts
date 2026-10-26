@@ -14,6 +14,25 @@ import type { BackfillProgress, EarningsOutcome } from './uberBackfill';
 
 export type ImportScope = 'drivers' | 'vehicles';
 
+/**
+ * Why one partner link was not turned into a driver or a car.
+ *
+ * `limit_reached` is UNREACHABLE as of `20261026110000` and is kept
+ * deliberately. The two import RPCs never called the fleet-cap triggers; they
+ * caught them, by the German text of the message
+ * (`IF SQLERRM LIKE 'Fahrerlimit%'` / `'Fahrzeuglimit%'`), and that migration
+ * drops both triggers. Nothing else in the database raises P0001 with either
+ * sentence, so the server can no longer produce this reason and
+ * `import.skip.limitReached` is a label for an outcome that cannot occur.
+ *
+ * It stays for two reasons and neither is inertia: the `EXCEPTION` blocks still
+ * re-raise every OTHER P0001, so deleting them would turn a future trigger's
+ * per-row refusal into a whole-batch failure; and a row that has been skipped
+ * for this reason may still be stored in an older `partner_*_links` history, so
+ * a build that could not name it would render `unknown`. Retiring the code and
+ * its two dictionary entries is a follow-up, not this change — and it is listed
+ * as one, rather than left to be rediscovered.
+ */
 export type SkipReason =
   | 'name_missing' | 'name_taken' | 'limit_reached'
   | 'plate_missing' | 'plate_duplicate' | 'plate_unavailable';

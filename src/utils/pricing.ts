@@ -76,11 +76,36 @@ export interface PriceBreakdown {
 }
 
 /**
+ * The car count an amount is BILLED on, which is not always the car count a
+ * fleet tier is looked up on. `app_private.price_book_price()` has had this
+ * asymmetry since 20261015160000 and it is the one place SQL spells it:
+ *
+ *   v_tier_cars   integer := coalesce(p_car_limit, 1);              -- unfloored
+ *   v_billed_cars integer := greatest(coalesce(p_car_limit, 1), 1); -- floored
+ *
+ * So a company with no cars is billed one car's price and does NOT thereby
+ * qualify for a fleet tier. This is not the 200 € minimum the owner rejected on
+ * 26.10.2026 — that was a floor under the whole invoice. This is a guard
+ * against a zero quantity, and it matters from the moment the invoice is quoted
+ * on the real fleet (20261026110000): twelve of eighteen companies run no cars.
+ *
+ * It exists here because it was in SQL and in `invoiceAmountCents` and NOT in
+ * `calcPricing`, which is three decisions pretending to be one — and no gate
+ * caught it, because no parity grid used a car count below 1. Both callers go
+ * through this function now, and `pricing.parity.test.ts` prices 0 cars.
+ *
+ * Never inline it. A floor in two places is how the two engines came apart.
+ */
+export function billedCars(carLimit: number | null | undefined): number {
+  return Math.max(carLimit ?? 1, 1);
+}
+
+/**
  * The full price of a plan, a car count and a billing cycle under one price
  * book. Amounts are euros, as the screens print them.
  *
  * The rule, the same as `app_private.price_book_price()` in SQL:
- *   baseMonthly        = carLimit * pricePerCar
+ *   baseMonthly        = billedCars(carLimit) * pricePerCar
  *   monthlyAfterFleet  = baseMonthly * (1 - fleet%)
  *   yearlyTotal        = monthlyAfterFleet * 12 * (1 - yearly%)
  *   finalTotal         = yearlyTotal for 'yearly', monthlyAfterFleet otherwise
@@ -105,7 +130,8 @@ export function calcPricing(
   const fleetDiscountPct  = fleetDiscountPercent(book, carLimit);
   const yearlyPct         = book.yearly_discount_percent;
 
-  const baseMonthlyCents  = carLimit * pricePerCarCents;
+  // Floored for the amount, unfloored for the tier above: `billedCars` says why.
+  const baseMonthlyCents  = billedCars(carLimit) * pricePerCarCents;
   // euros × 10^4 and euros × 10^6: whole numbers for whole cents and percents
   const monthlyE4         = baseMonthlyCents * (100 - fleetDiscountPct);
   const yearlyE6          = monthlyE4 * 12 * (100 - yearlyPct);
@@ -165,7 +191,7 @@ export function invoiceAmountCents(
   const flatCents = flatFirstMonthCents(book, firstInvoice);
   if (flatCents !== null) return flatCents;
 
-  const monthlyE4 = Math.max(carLimit, 1) * book.price_per_car_cents[plan]
+  const monthlyE4 = billedCars(carLimit) * book.price_per_car_cents[plan]
     * (100 - fleetDiscountPercent(book, carLimit));
   if (billingCycle === 'yearly') {
     const yearlyE6 = monthlyE4 * 12 * (100 - book.yearly_discount_percent);

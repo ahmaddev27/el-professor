@@ -681,11 +681,18 @@ END $$;
   assertion, so a mutation that breaks one direction does not hide behind the
   other:
 
-    f1  premium, 5 cars, monthly, no invoice yet
-    f2  premium, 5 cars, yearly, an invoice for 10/2026
-    f3  premium, 5 cars, monthly, only a CANCELED invoice for 9/2026
-    f4  premium, 5 cars, monthly, an invoice for 12/2025 (a year boundary)
-    f5  premium, 5 cars, monthly, subscription paused
+    f1  premium, allowance 5, runs 0, monthly, no invoice yet
+    f2  premium, allowance 5, runs 5, yearly, an invoice for 10/2026
+    f3  premium, allowance 5, runs 0, monthly, only a CANCELED invoice for 9/2026
+    f4  premium, allowance 5, runs 2 (+1 deactivated), monthly, an invoice for
+        12/2025 (a year boundary)
+    f5  premium, allowance 5, runs 0, monthly, subscription paused
+    f6  premium, allowance 5, runs 0, monthly, an invoice for 12/2025
+
+  "allowance" is `companies.subscription_car_limit` and "runs" is the count of
+  cars not deactivated. Until 20261026110000 those were the same thing by
+  assumption and the allowance was what priced the invoice; since it, the fleet
+  is, and the two are deliberately made to disagree for f4.
 */
 INSERT INTO subscription_plans (id, name, monthly_price, included_cars)
 VALUES ('f1000000-0000-4000-8000-0000000000aa', 'FM plan', 200, 5);
@@ -695,12 +702,46 @@ INSERT INTO companies (id, name, slug, approval_status, status, plan, subscripti
   ('f1000000-0000-4000-8000-000000000002', 'FM f2', 'fm-f2', 'approved', 'active', 'basic', 'inactive'),
   ('f1000000-0000-4000-8000-000000000003', 'FM f3', 'fm-f3', 'approved', 'active', 'basic', 'inactive'),
   ('f1000000-0000-4000-8000-000000000004', 'FM f4', 'fm-f4', 'approved', 'active', 'basic', 'inactive'),
-  ('f1000000-0000-4000-8000-000000000005', 'FM f5', 'fm-f5', 'approved', 'active', 'basic', 'inactive');
+  ('f1000000-0000-4000-8000-000000000005', 'FM f5', 'fm-f5', 'approved', 'active', 'basic', 'inactive'),
+  -- f6 exists for 20261026110000: a company with an earlier invoice and NO cars
+  -- at all, which is the only shape that reaches the floor through the quote.
+  -- Twelve of eighteen production companies look like this.
+  ('f1000000-0000-4000-8000-000000000006', 'FM f6', 'fm-f6', 'approved', 'active', 'basic', 'inactive');
 
 UPDATE companies
    SET plan = 'premium', subscription_car_limit = 5,
        billing_cycle = CASE id WHEN 'f1000000-0000-4000-8000-000000000002' THEN 'yearly' ELSE 'monthly' END
  WHERE id::text LIKE 'f1000000-0000-4000-8000-00000000000%';
+
+/*
+  The fleets, for 20261026110000: the quote prices the cars a company RUNS, not
+  `companies.subscription_car_limit`, which every FM company has at 5 above.
+
+  Each count is chosen so one assertion each way is possible with the stored
+  number held constant at 5 — which is exactly the production situation, where
+  that number is too high for 16 of 18 companies and was never a measurement of
+  anything:
+
+    f2  5 active            the fleet MATCHES the stored 5 -> the amount must
+                            not move at all (29700, as before this migration)
+    f4  2 active + 1 INACTIVE   the Smooth Fahrt shape (billed 5, runs 2) and the
+                            all-versus-active decision in one row: 2 cars are
+                            billed, the deactivated one is not, and the amount
+                            moves off 37125
+    f6  none                the Asznee shape (billed 5, runs 0) -> the floor,
+                            one car, never 0,00
+    f1, f3, f5              left without cars on purpose: every assertion about
+                            them is a FIRST invoice (flat) or an absent item, so
+                            a fleet would prove nothing and would couple those
+                            cases to this one.
+*/
+INSERT INTO cars (company_id, kennzeichen, created_by, status)
+SELECT 'f1000000-0000-4000-8000-000000000002', 'FM-F2-' || g, 'a0000000-0000-4000-8000-000000000001', 'active'
+  FROM generate_series(1, 5) AS g;
+INSERT INTO cars (company_id, kennzeichen, created_by, status) VALUES
+  ('f1000000-0000-4000-8000-000000000004', 'FM-F4-1', 'a0000000-0000-4000-8000-000000000001', 'active'),
+  ('f1000000-0000-4000-8000-000000000004', 'FM-F4-2', 'a0000000-0000-4000-8000-000000000001', 'active'),
+  ('f1000000-0000-4000-8000-000000000004', 'FM-F4-OUT', 'a0000000-0000-4000-8000-000000000001', 'inactive');
 
 INSERT INTO company_subscriptions (id, company_id, plan_id, status, billing_day, monthly_price)
 SELECT ('f2000000-0000-4000-8000-00000000000' || right(c.id::text, 1))::uuid, c.id,
@@ -713,7 +754,8 @@ SELECT ('f2000000-0000-4000-8000-00000000000' || right(c.id::text, 1))::uuid, c.
 INSERT INTO subscription_invoices (company_id, subscription_id, invoice_month, invoice_year, invoice_number, amount, status, due_date) VALUES
   ('f1000000-0000-4000-8000-000000000002', 'f2000000-0000-4000-8000-000000000002', 10, 2026, 'FM-2026-0002', 200, 'open',     '2026-10-05'),
   ('f1000000-0000-4000-8000-000000000003', 'f2000000-0000-4000-8000-000000000003',  9, 2026, 'FM-2026-0003', 200, 'canceled', '2026-09-05'),
-  ('f1000000-0000-4000-8000-000000000004', 'f2000000-0000-4000-8000-000000000004', 12, 2025, 'FM-2025-0004', 200, 'paid',     '2025-12-05');
+  ('f1000000-0000-4000-8000-000000000004', 'f2000000-0000-4000-8000-000000000004', 12, 2025, 'FM-2025-0004', 200, 'paid',     '2025-12-05'),
+  ('f1000000-0000-4000-8000-000000000006', 'f2000000-0000-4000-8000-000000000006', 12, 2025, 'FM-2025-0006', 200, 'paid',     '2025-12-05');
 
 DO $$
 DECLARE
@@ -727,6 +769,7 @@ DECLARE
   f3 constant uuid := 'f1000000-0000-4000-8000-000000000003';
   f4 constant uuid := 'f1000000-0000-4000-8000-000000000004';
   f5 constant uuid := 'f1000000-0000-4000-8000-000000000005';
+  f6 constant uuid := 'f1000000-0000-4000-8000-000000000006';
   v_before bigint;
 BEGIN
   -- THE FIRST INVOICE is the flat price: 317,00, whatever the car count is.
@@ -746,15 +789,20 @@ BEGIN
     _pr_quote(billing, 10, 2026, f2, 'first_invoice') = 'true'
     AND _pr_quote(billing, 10, 2026, f2, 'amount_cents') = '31700');
 
-  -- Per car for a monthly company in a later month: 5 x 99,00 less 25% = 371,25.
-  PERFORM _pr_ok('quote: a monthly company''s later invoice is its price per car, 5 x 99,00 less 25%',
+  -- Per car for a monthly company in a later month. MOVED by 20261026110000,
+  -- and this is the one line in this file whose number that migration changed:
+  -- it read 37125 (5 x 99,00 less 25%) because f4's stored
+  -- `subscription_car_limit` is 5. f4 runs TWO active cars, so the quote is now
+  -- 2 x 99,00 less the 3% tier = 192,06. The stored 5 is untouched and the item
+  -- still carries it; it simply no longer prices anything.
+  PERFORM _pr_ok('quote: a monthly company''s later invoice is priced on the cars it RUNS, 2 x 99,00 less 3%',
     _pr_quote(billing, 12, 2026, f4, 'first_invoice') = 'false'
-    AND _pr_quote(billing, 12, 2026, f4, 'amount_cents') = '37125');
+    AND _pr_quote(billing, 12, 2026, f4, 'amount_cents') = '19206');
 
   -- Earlier means earlier in time, across a year boundary.
   PERFORM _pr_ok('quote: an invoice of December 2025 is earlier than January 2026',
     _pr_quote(billing, 1, 2026, f4, 'first_invoice') = 'false'
-    AND _pr_quote(billing, 1, 2026, f4, 'amount_cents') = '37125');
+    AND _pr_quote(billing, 1, 2026, f4, 'amount_cents') = '19206');
   PERFORM _pr_ok('quote: an invoice of December 2025 is not earlier than November 2025 — that one would be the first',
     _pr_quote(billing, 11, 2025, f4, 'first_invoice') = 'true'
     AND _pr_quote(billing, 11, 2025, f4, 'amount_cents') = '31700');
@@ -772,6 +820,71 @@ BEGIN
     _pr_quote(billing, 10, 2026, f1, 'plan') = 'premium'
     AND _pr_quote(billing, 10, 2026, f1, 'car_limit') = '5'
     AND _pr_quote(billing, 10, 2026, f2, 'billing_cycle') = 'yearly');
+
+  -- ── 20261026110000: the quantity is the fleet ───────────────────────────
+  --
+  -- The owner's rule: a company at its allowance adds the car anyway, the
+  -- invoice goes up and the car count goes up. So the amount cannot come from a
+  -- number somebody typed. `car_limit` stays in the item as the plan's stored
+  -- allowance, `active_cars` is what the amount is computed from, and the
+  -- assertions below are written so that each ONE of them fails on its own
+  -- against the pre-migration function.
+
+  -- a. Both numbers are in the item, and they disagree for f4 — which is the
+  --    whole point: an operator can now SEE that the stored allowance is stale.
+  --    Before this migration there was one number and no way to tell.
+  PERFORM _pr_ok('quote: the item carries the stored allowance AND the live fleet, and they may differ',
+    _pr_quote(billing, 12, 2026, f4, 'car_limit')   = '5'
+    AND _pr_quote(billing, 12, 2026, f4, 'active_cars') = '2'
+    AND _pr_quote(billing, 12, 2026, f2, 'car_limit')   = '5'
+    AND _pr_quote(billing, 12, 2026, f2, 'active_cars') = '5');
+
+  -- b. A DEACTIVATED car is not billed. `public.cars.status` is `NOT NULL
+  --    DEFAULT 'active'` under `CHECK (status = ANY (ARRAY['active','inactive']))`
+  --    — measured on production 26.10.2026 — so the domain is two values and
+  --    this is the whole of it. f4 holds three cars, one of them inactive, and
+  --    is quoted two.
+  PERFORM _pr_ok('quote: a deactivated car is neither counted nor billed',
+    (SELECT count(*) FROM cars WHERE company_id = f4) = 3
+    AND _pr_quote(billing, 12, 2026, f4, 'active_cars') = '2'
+    AND _pr_quote(billing, 12, 2026, f4, 'amount_cents') = '19206');
+
+  -- c. When the fleet MATCHES the stored number, nothing moves. f2 runs five
+  --    cars against a stored five and is still quoted 29700, exactly as before
+  --    the migration — so this change is provably a change of QUANTITY and not
+  --    of the formula, which is what the four parity gates pin.
+  PERFORM _pr_ok('quote: a company whose fleet matches its stored allowance is quoted exactly what it was before',
+    _pr_quote(billing, 11, 2026, f2, 'active_cars') = '5'
+    AND _pr_quote(billing, 11, 2026, f2, 'amount_cents') = '29700');
+
+  -- d. A company with NO cars is quoted ONE car, never 0,00. The floor lives in
+  --    app_private.price_book_price and nowhere else; src/utils/pricing.ts's
+  --    `billedCars` is its twin. 1 x 99,00 with no tier (the alien book's first
+  --    tier starts at two cars) = 99,00. Twelve of eighteen production
+  --    companies run no cars, so without this the quote would read 0,00 for
+  --    two thirds of the estate.
+  PERFORM _pr_ok('quote: a company running no cars is quoted one car''s price, not zero',
+    _pr_quote(billing, 12, 2026, f6, 'active_cars') = '0'
+    AND _pr_quote(billing, 12, 2026, f6, 'first_invoice') = 'false'
+    AND _pr_quote(billing, 12, 2026, f6, 'amount_cents') = '9900');
+
+  -- e. And the floor buys no fleet discount: f6 is billed as one car but its
+  --    tier is read on nought, so it pays the undiscounted per-car price. One
+  --    car's own price under this book is also 9900, so the assertion that
+  --    separates the two is the discount percentage itself, taken from the same
+  --    book the quote used.
+  PERFORM _pr_ok('quote: the floored count does not reach a fleet tier',
+    app_private.price_book_price(
+      (SELECT value FROM app_private.platform_settings WHERE key = 'price_book'),
+      'premium', 0, 'monthly') = 99.00);
+
+  -- f. A first invoice is still the flat figure whatever the fleet — f6 runs no
+  --    cars and f2 runs five, and in a month where each is its first they are
+  --    quoted the same 317,00. The car count must not reach the flat path.
+  PERFORM _pr_ok('quote: the first invoice is the flat figure whatever the fleet',
+    _pr_quote(billing, 11, 2025, f6, 'first_invoice') = 'true'
+    AND _pr_quote(billing, 11, 2025, f6, 'amount_cents') = '31700'
+    AND _pr_quote(billing, 10, 2026, f1, 'amount_cents') = '31700');
 
   -- Authority: billing.manage, which owner and billing hold.
   PERFORM _pr_ok('quote: owner and billing are answered',

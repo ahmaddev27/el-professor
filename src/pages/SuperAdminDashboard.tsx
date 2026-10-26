@@ -6,7 +6,6 @@ import { fetchCompanies } from '../lib/platformDirectoryClient';
 import { fetchInvoiceQuotes } from '../lib/platformBillingClient';
 import type { PlatformInvoiceQuote } from '../lib/platformBilling';
 import { collectCompanyCounts, UNKNOWN_COMPANY_COUNTS, type CompanyCounts } from '../lib/platformReadModels';
-import { driversAllowance } from '../lib/panelFigures';
 import {
   Building2, Users, Car, FileText, TrendingUp, AlertTriangle,
   CheckCircle, XCircle, PauseCircle, Plus, ExternalLink,
@@ -70,8 +69,13 @@ interface CompanyRow {
    * — is absent from the map even on a wholly successful read. This was
    * `dpcMap[c.id] ?? 4`, which made the Fahrer column print a denominator of the
    * screen's own invention (`–/12` where the truth may be `–/6`) and decided the
-   * red "limit reached" colour from it. There is no default any more:
-   * `driversAllowance()` answers null and the cell prints a dash.
+   * red "limit reached" colour from it. There is no default any more.
+   *
+   * Since 20261026110000 **this screen prints no denominator at all**: the
+   * trigger that multiplied this column by `subscription_car_limit` is dropped,
+   * so the product was a cap that could not refuse. The field is kept because
+   * `platform_companies_list` returns it and the type describes that answer; it
+   * has no reader on this screen.
    */
   drivers_per_car_limit: number | null;
   subscription_status: string | null;
@@ -1163,7 +1167,19 @@ export default function SuperAdminDashboard() {
                         style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
                         title={t('sa.dash.carLimit')}
                       />
-                      <span className="text-[10px] whitespace-nowrap" style={{ color: c.counts_known && c.active_car_count >= c.subscription_car_limit ? 'var(--danger)' : 'var(--text-tertiary)' }}>
+                      {/*
+                        Both numbers stay, the red goes. Until 20261026110000
+                        `active >= allowance` was a wall — `trg_enforce_car_limit`
+                        refused the next car — so painting it `--danger` told the
+                        operator something true. The cap is gone (billing, never
+                        blocking) and the figure on the left is now what the
+                        invoice charges, so red would claim a refusal that
+                        cannot happen. The pair is kept because the quote
+                        carries both and a stale allowance beside a live fleet
+                        is exactly what nobody could see before.
+                      */}
+                      <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}
+                            title={t('sa.dash.carsBilledHint')}>
                         {c.counts_known ? c.active_car_count : '–'}/{c.subscription_car_limit}
                       </span>
                     </div>
@@ -1171,18 +1187,30 @@ export default function SuperAdminDashboard() {
 
                   {/* Fahrer aktiv / limit */}
                   <td className="px-4 py-3">
-                    {(() => {
-                      // Both halves of the fraction, and the red colour, now come
-                      // from figures that were read. An unknown allowance is a
-                      // dash, never a plausible number.
-                      const allowance = driversAllowance(c.subscription_car_limit, c.drivers_per_car_limit);
-                      const atLimit = c.counts_known && allowance !== null && c.driver_count >= allowance;
-                      return (
-                        <span className="text-xs" style={{ color: atLimit ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                          {c.counts_known ? c.driver_count : '–'}/{allowance ?? '–'}
-                        </span>
-                      );
-                    })()}
+                    {/*
+                      The driver COUNT, and no denominator.
+
+                      This cell used to read `driver_count / driversAllowance(
+                      subscription_car_limit, drivers_per_car_limit)`, in red
+                      once the count reached it. That denominator was the
+                      product of two numbers, and since 20261026110000 neither
+                      one does anything: `trg_enforce_driver_limit`, which was
+                      the only thing that multiplied them, is dropped, and the
+                      invoice is priced on the fleet rather than on the first of
+                      them. So the fraction was a cap that could not refuse and
+                      a quantity that bills nothing — the class of figure this
+                      codebase has spent two days removing, and worse than a
+                      missing number because an operator would act on it.
+
+                      `driversAllowance` is deliberately left in
+                      src/lib/panelFigures.ts with its own test: it still
+                      describes what the dropped trigger computed, and
+                      tests/rls/fleet-caps-removed.sql's negative control uses
+                      the same arithmetic. It simply has no caller on a screen.
+                    */}
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      {c.counts_known ? c.driver_count : '–'}
+                    </span>
                   </td>
 
                   {/* Calculated price */}
