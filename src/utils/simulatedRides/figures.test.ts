@@ -15,7 +15,7 @@ const POOL: PoolAddress[] = Array.from({ length: 400 }, (_, i) => ({
   lat: 51.1 + Math.floor(i / 20) * 0.0055,
   lon: 7.0 + (i % 20) * 0.0085,
 }));
-const DRIVERS = ['Andrey Tanurkov', 'Alev Büyükay', 'Ferhat Erol'].map(name => ({ name }));
+const DRIVERS = ['Nora Vogt', 'Lena Müller', 'Timo Hahn'].map(name => ({ name }));
 const VEHICLES = ['SG-YA15', 'SG-YA18', 'SG-YA20'].map(plate => ({ plate, type: 'Mietwagen' }));
 
 interface Fig { umsatz: number; bargeld?: number; trinkgeld?: number; aktionen?: number }
@@ -31,11 +31,11 @@ function income(driver: string, monday: string, f: Fig): IncomeRow[] {
 
 const MONDAYS = mondaysOfMonth(2026, 9);
 const FIGS: [string, string, Fig][] = [
-  ['Andrey Tanurkov', MONDAYS[0], { umsatz: 1647.08, bargeld: 523.37, trinkgeld: 41.5, aktionen: 30 }],
-  ['Andrey Tanurkov', MONDAYS[1], { umsatz: 902.99, bargeld: 0, trinkgeld: 0 }],
-  ['Alev Büyükay', MONDAYS[0], { umsatz: 1203.33, bargeld: 1203.33, trinkgeld: 12.07 }],
-  ['Alev Büyükay', MONDAYS[2], { umsatz: 2210.01, bargeld: 811.11, trinkgeld: 59.99 }],
-  ['Ferhat Erol', MONDAYS[3], { umsatz: 640.05, bargeld: 100.01, trinkgeld: 3 }],
+  ['Nora Vogt', MONDAYS[0], { umsatz: 1647.08, bargeld: 523.37, trinkgeld: 41.5, aktionen: 30 }],
+  ['Nora Vogt', MONDAYS[1], { umsatz: 902.99, bargeld: 0, trinkgeld: 0 }],
+  ['Lena Müller', MONDAYS[0], { umsatz: 1203.33, bargeld: 1203.33, trinkgeld: 12.07 }],
+  ['Lena Müller', MONDAYS[2], { umsatz: 2210.01, bargeld: 811.11, trinkgeld: 59.99 }],
+  ['Timo Hahn', MONDAYS[3], { umsatz: 640.05, bargeld: 100.01, trinkgeld: 3 }],
 ];
 const ROWS = FIGS.flatMap(([d, m, f]) => income(d, m, f));
 
@@ -138,8 +138,8 @@ describe('generateFromFigures', () => {
   });
 
   it('invents nothing: a driver with no income gets no rides', () => {
-    const r = generateFromFigures(input({ income: income('Andrey Tanurkov', MONDAYS[0], { umsatz: 800 }) }));
-    expect(new Set(r.month.rides.map(x => x.driver.name))).toEqual(new Set(['Andrey Tanurkov']));
+    const r = generateFromFigures(input({ income: income('Nora Vogt', MONDAYS[0], { umsatz: 800 }) }));
+    expect(new Set(r.month.rides.map(x => x.driver.name))).toEqual(new Set(['Nora Vogt']));
     expect(generateFromFigures(input({ income: [] })).month.rides).toEqual([]);
   });
 });
@@ -148,35 +148,35 @@ describe('contradictions are reported and refused, not smoothed over', () => {
   const run = (rows: IncomeRow[], extra: Partial<FiguresInput> = {}) => generateFromFigures(input({ income: rows, ...extra }));
 
   it('cash larger than revenue', () => {
-    const r = run(income('Ferhat Erol', MONDAYS[0], { umsatz: 500, bargeld: 600 }));
+    const r = run(income('Timo Hahn', MONDAYS[0], { umsatz: 500, bargeld: 600 }));
     expect(r.findings.map(f => f.code)).toEqual(['cash_exceeds_revenue']);
     expect(r.month.rides).toEqual([]);
   });
 
   it('cash or tips with no revenue', () => {
-    expect(run(income('Ferhat Erol', MONDAYS[0], { umsatz: 0, bargeld: 50 })).findings[0].code).toBe('cash_without_revenue');
-    expect(run(income('Ferhat Erol', MONDAYS[0], { umsatz: 0, trinkgeld: 5 })).findings[0].code).toBe('tip_without_revenue');
+    expect(run(income('Timo Hahn', MONDAYS[0], { umsatz: 0, bargeld: 50 })).findings[0].code).toBe('cash_without_revenue');
+    expect(run(income('Timo Hahn', MONDAYS[0], { umsatz: 0, trinkgeld: 5 })).findings[0].code).toBe('tip_without_revenue');
   });
 
   it('a negative amount, a fraction of a cent, a driver the company does not have', () => {
-    expect(run(income('Ferhat Erol', MONDAYS[0], { umsatz: -5 })).findings[0].code).toBe('negative_amount');
-    expect(run(income('Ferhat Erol', MONDAYS[0], { umsatz: 100.005 })).findings[0].code).toBe('fractional_cent');
+    expect(run(income('Timo Hahn', MONDAYS[0], { umsatz: -5 })).findings[0].code).toBe('negative_amount');
+    expect(run(income('Timo Hahn', MONDAYS[0], { umsatz: 100.005 })).findings[0].code).toBe('fractional_cent');
     expect(run(income('Nobody Known', MONDAYS[0], { umsatz: 100 })).findings[0].code).toBe('unknown_driver');
   });
 
   it('a revenue too small for even one fare', () => {
-    expect(run(income('Ferhat Erol', MONDAYS[0], { umsatz: 3 })).findings[0].code).toBe('revenue_too_small');
+    expect(run(income('Timo Hahn', MONDAYS[0], { umsatz: 3 })).findings[0].code).toBe('revenue_too_small');
   });
 
   it('a driver-week that already has real trips is refused, another week of the same driver is not', () => {
-    const rows = [...income('Ferhat Erol', MONDAYS[0], { umsatz: 700 }), ...income('Ferhat Erol', MONDAYS[1], { umsatz: 700 })];
-    const r = run(rows, { occupied: new Set([weekKey('Ferhat Erol', MONDAYS[0])]) });
+    const rows = [...income('Timo Hahn', MONDAYS[0], { umsatz: 700 }), ...income('Timo Hahn', MONDAYS[1], { umsatz: 700 })];
+    const r = run(rows, { occupied: new Set([weekKey('Timo Hahn', MONDAYS[0])]) });
     expect(r.findings.map(f => [f.code, f.weekMonday])).toEqual([['real_trips_exist', MONDAYS[0]]]);
     expect(r.explained.map(f => f.weekMonday)).toEqual([MONDAYS[1]]);
   });
 
   it('figures no shift rules can explain are refused with a reason', () => {
-    const r = run(income('Ferhat Erol', MONDAYS[0], { umsatz: 90_000 }));
+    const r = run(income('Timo Hahn', MONDAYS[0], { umsatz: 90_000 }));
     expect(r.findings[0]).toMatchObject({ code: 'cannot_explain' });
     expect(r.month.rides).toEqual([]);
   });

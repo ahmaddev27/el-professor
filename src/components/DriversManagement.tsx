@@ -8,6 +8,12 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { pageWriteRights } from '../lib/pageWriteRights';
 import {
+  ACTIVE_DRIVER_STATUS,
+  DEACTIVATED_DRIVER_STATUS,
+  isDeactivatedDriver,
+  selectableDrivers,
+} from '../utils/driverStatus';
+import {
   Badge,
   Button,
   Card,
@@ -37,17 +43,42 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | undefined>();
 
-  const activeDrivers = drivers.filter(d => d.status === 'active');
-  const inactiveDrivers = drivers.filter(d => d.status === 'inactive');
+  // The partition is total: `selectableDrivers` keeps everything not known to
+  // be deactivated, so the two lists together are always every driver. The
+  // earlier pair of `=== 'active'` / `=== 'inactive'` tests left a row whose
+  // status the read did not carry in neither list, and this screen is the one
+  // place a deactivated driver has to be visible.
+  const activeDrivers = selectableDrivers(drivers);
+  const inactiveDrivers = drivers.filter(isDeactivatedDriver);
 
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
-  // No cap on how many drivers a company may have (owner, 21.10.2026). The cap
-  // was `planState.carLimit * company_settings.drivers_per_car_limit` and lived
-  // ONLY here, in the browser: no policy, trigger or constraint enforced it, so
-  // removing it takes nothing else with it. `drivers_per_car_limit` is still
-  // stored and still shown on the plan in AssignSubscriptionModal; it no longer
-  // stops anyone. A company decides its own number of drivers.
+  // No cap on how many drivers a company may have (owner, 21.10.2026, and
+  // again on 26.10.2026 for cars: billing, never blocking).
+  //
+  // THE COMMENT THAT STOOD HERE UNTIL 26.10.2026 WAS FALSE, and the falsehood
+  // cost five days of a live defect, so it is recorded rather than quietly
+  // replaced. It said the cap "lived ONLY here, in the browser: no policy,
+  // trigger or constraint enforced it, so removing it takes nothing else with
+  // it." A trigger enforced it: `trg_enforce_driver_limit` on `drivers`,
+  // enabled on production, refusing with P0001 and the German sentence
+  // "Fahrerlimit erreicht. Ihr Abonnement erlaubt maximal N aktive Fahrer
+  // (C Fahrzeuge × D)." So from 21.10.2026 the browser stopped explaining a
+  // refusal that the database kept making, and a company at its allowance got
+  // a raw subscription error with nothing on screen accounting for it.
+  //
+  // The trigger — and its sibling on `cars` — is dropped by
+  // `20261026110000_bill_real_cars_drop_caps.sql`, so the sentence above is
+  // true as of that migration and `tests/rls/fleet-caps-removed.sql` is what
+  // keeps it true, with a negative control that puts the cap back and requires
+  // the refusal to return.
+  //
+  // The cap was `companies.subscription_car_limit × company_settings.drivers_per_car_limit`
+  // — NOT `subscription_plans.drivers_per_car_limit`, which feeds nothing.
+  // Both columns are still stored: the first records the allowance of the plan
+  // an operator assigned, the second is the owner's open question (Docs/design/
+  // plan-system.md §12 question 6). Neither stops anyone. A company decides its
+  // own number of drivers, and the fleet it runs is what its invoice charges.
 
   const handleSave = (
     name: string,
@@ -72,7 +103,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   };
 
   const handleToggleStatus = (driver: Driver) => {
-    const newStatus = driver.status === 'active' ? 'inactive' : 'active';
+    const newStatus = isDeactivatedDriver(driver) ? ACTIVE_DRIVER_STATUS : DEACTIVATED_DRIVER_STATUS;
     // No contact argument: this toggles the status and must not rewrite anything
     // else. `updateDriver` leaves both columns alone when none is passed, which is
     // what keeps a status change from clearing an address nobody touched.
@@ -164,7 +195,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
     ) : null;
 
   const statusBadge = (driver: Driver) =>
-    driver.status === 'active' ? (
+    !isDeactivatedDriver(driver) ? (
       <Badge tone="positive">
         <UserCheck aria-hidden />
         {t('overview.status.active')}
@@ -241,18 +272,18 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const rowActions = (driver: Driver) => (
     <>
       {canEdit(driver) ? (
-        <Tooltip content={driver.status === 'active' ? t('fleet.deactivate') : t('fleet.activate')}>
+        <Tooltip content={isDeactivatedDriver(driver) ? t('fleet.activate') : t('fleet.deactivate')}>
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label={
-              driver.status === 'active'
-                ? t('fleet.deactivateDriverAria', { name: driver.name })
-                : t('fleet.activateDriverAria', { name: driver.name })
+              isDeactivatedDriver(driver)
+                ? t('fleet.activateDriverAria', { name: driver.name })
+                : t('fleet.deactivateDriverAria', { name: driver.name })
             }
             onClick={() => canEdit(driver) && handleToggleStatus(driver)}
           >
-            {driver.status === 'active' ? <PowerOff aria-hidden /> : <Power aria-hidden />}
+            {isDeactivatedDriver(driver) ? <Power aria-hidden /> : <PowerOff aria-hidden />}
           </Button>
         </Tooltip>
       ) : null}
@@ -320,9 +351,17 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           />
         )}
 
-        {/* Where "delete" used to be. A driver who leaves is deactivated, never
-            removed: salaries, receipts and the ride history reference them. */}
+        {/* Where "delete" used to be, and this is the permanent answer (owner,
+            25.10.2026), so the sentence says both halves: what survives, and
+            what deactivating actually does. The first half is not a
+            reassurance — eight foreign keys CASCADE off `drivers`, one of them
+            `salary_cash_receipts`, whose GQ-YYYY-NNNN numbers are gapless per
+            company and year and go to a Steuerberater. The second half is new
+            behaviour a user has to be told about: a deactivated driver leaves
+            every selection list, the monthly plan and the Fahrtenbuch among
+            them. */}
         <p className="text-sm text-fg-muted">{t('fleet.deactivateNotDelete')}</p>
+        <p className="text-sm text-fg-muted">{t('fleet.deactivateHidesFromLists')}</p>
       </div>
 
       <DriverModal

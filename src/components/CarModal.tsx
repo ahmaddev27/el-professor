@@ -7,6 +7,7 @@ import type { CarWithDrivers } from '../types/car';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { updateChecked } from '../lib/writeOutcome';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import {
   Button,
   cn,
@@ -69,7 +70,8 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
         .from('drivers')
         .select('id, name, status')
         .eq('company_id', companyId)
-        .eq('status', 'active')
+        // A chooser: who this vehicle is assigned to from now on.
+        .eq('status', ACTIVE_DRIVER_STATUS)
         .order('name');
       if (error) throw error;
       setAvailableDrivers(data || []);

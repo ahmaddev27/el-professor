@@ -31,6 +31,12 @@ import type { MailLanguage } from './mail-language.ts';
 
 export interface DriverMailCopy {
   hello: string;
+  /**
+   * The greeting when the mail cannot name a person: an address two drivers of
+   * one company share, so who reads it is unknown (`abrechnung-reminder-core.ts`).
+   * Greeting the wrong one by name is worse than greeting nobody.
+   */
+  helloPlain: string;
   /** Footer lines of the shared layout. */
   footer: readonly [string, string];
   abrechnung: {
@@ -49,7 +55,13 @@ export interface DriverMailCopy {
   };
   reminder: {
     intro: string;
-    missing: string;
+    /**
+     * The ask. It was `missing` — "you have recorded nothing this week" — until
+     * 26.10.2026, when the reminder began going to every active driver and that
+     * sentence became a claim the mail cannot make. It now asks for whatever is
+     * outstanding and asserts nothing about what the driver has done.
+     */
+    handIn: string;
     when: string;
     ignore: string;
     /** `HH:MM` as the schedule stores it, made into a time of day. */
@@ -63,6 +75,7 @@ export interface DriverMailCopy {
 
 const DE: DriverMailCopy = {
   hello: 'Hallo {name},',
+  helloPlain: 'Guten Tag,',
   footer: [
     'El-Professor · Lohn- und Planungsverwaltung für Taxi- und Mietwagenunternehmen',
     'Diese E-Mail wurde automatisch versendet. Antworten auf diese Adresse werden nicht gelesen.',
@@ -83,11 +96,12 @@ const DE: DriverMailCopy = {
       + 'Sie ist eine Übersicht, keine Rechnung und keine Zahlungsaufforderung.',
   },
   reminder: {
-    intro: 'das ist eine Erinnerung zur Abrechnung für {label} ({range}).',
-    missing: 'Für diese Woche hast du bisher weder Bargeld noch Barbelege erfasst.',
+    intro: 'das ist die wöchentliche Erinnerung zur Abrechnung für {label} ({range}).',
+    handIn: 'Falls du für diese Woche noch etwas abzugeben hast – ein Fahrtenbuch, Bargeld oder '
+      + 'Barbelege –, reiche es bitte jetzt ein.',
     when: 'Um {clock} verschickt {company} die Abrechnung für diese Woche automatisch per E-Mail. '
-      + 'Wenn du noch etwas einzutragen hast, mach das bitte vor {clock}, sonst fehlt es in den Zahlen.',
-    ignore: 'Hast du nichts abzugeben oder einzutragen, kannst du diese E-Mail einfach ignorieren.',
+      + 'Was danach eingeht, fehlt in den Zahlen.',
+    ignore: 'Hast du für diese Woche schon alles abgegeben, kannst du diese E-Mail einfach ignorieren.',
     clock: '{time} Uhr',
     subject: 'Erinnerung: Abrechnung {label} – {company}',
     heading: 'Erinnerung zur Abrechnung',
@@ -99,6 +113,7 @@ const DE: DriverMailCopy = {
 
 const EN: DriverMailCopy = {
   hello: 'Hello {name},',
+  helloPlain: 'Hello,',
   footer: [
     'El-Professor · Payroll and planning management for taxi and rental-car companies',
     'This email was sent automatically. Replies to this address are not read.',
@@ -119,11 +134,15 @@ const EN: DriverMailCopy = {
       + 'It is an overview, not an invoice and not a request for payment.',
   },
   reminder: {
-    intro: 'this is a reminder about the settlement for {label} ({range}).',
-    missing: 'So far you have recorded neither cash nor cash receipts for this week.',
+    intro: 'this is the weekly reminder about the settlement for {label} ({range}).',
+    // "Fahrtenbuch" stays German: it is the name of the statutory document the
+    // office and the driver both call by that word, and the UI keeps the same
+    // domain vocabulary in every language.
+    handIn: 'If you still have anything to hand in for this week – a Fahrtenbuch, cash or cash '
+      + 'receipts – please hand it in now.',
     when: 'At {clock}, {company} sends out the settlement for this week by email automatically. '
-      + 'If you still have something to enter, please do so before {clock}, otherwise it will be missing from the figures.',
-    ignore: 'If you have nothing to hand in or enter, you can simply ignore this email.',
+      + 'Anything that arrives after that is missing from the figures.',
+    ignore: 'If you have already handed in everything for this week, you can simply ignore this email.',
     clock: '{time}',
     subject: 'Reminder: settlement {label} – {company}',
     heading: 'Settlement reminder',
@@ -135,6 +154,7 @@ const EN: DriverMailCopy = {
 
 const AR: DriverMailCopy = {
   hello: 'مرحبًا {name}،',
+  helloPlain: 'مرحبًا،',
   footer: [
     'El-Professor · إدارة الرواتب والتخطيط لشركات سيارات الأجرة وسيارات الإيجار بسائق',
     'أُرسلت هذه الرسالة تلقائيًا. لا تتم قراءة الردود على هذا العنوان.',
@@ -155,11 +175,15 @@ const AR: DriverMailCopy = {
       + 'وهي ملخص فقط، وليست فاتورة ولا طلب دفع.',
   },
   reminder: {
-    intro: 'هذا تذكير بخصوص كشف الحساب عن {label} ({range}).',
-    missing: 'لم تسجّل حتى الآن أي نقد أو إيصالات نقدية لهذا الأسبوع.',
+    intro: 'هذا هو التذكير الأسبوعي بخصوص كشف الحساب عن {label} ({range}).',
+    // "Fahrtenbuch" in Latin letters inside the Arabic sentence, for the reason
+    // given in the English table; the footer already carries "El-Professor" the
+    // same way, and the layout's `dir="rtl"` renders a single Latin run correctly.
+    handIn: 'إذا كان لديك ما تسلّمه عن هذا الأسبوع – Fahrtenbuch أو نقد أو إيصالات نقدية – '
+      + 'فيرجى تسليمه الآن.',
     when: 'في الساعة {clock} تُرسل {company} كشف حساب هذا الأسبوع تلقائيًا بالبريد الإلكتروني. '
-      + 'إذا كان لديك ما تسجّله، فيرجى فعل ذلك قبل الساعة {clock}، وإلا فلن يظهر في الأرقام.',
-    ignore: 'إذا لم يكن لديك ما تسلّمه أو تسجّله، يمكنك ببساطة تجاهل هذه الرسالة.',
+      + 'وما يصل بعد ذلك لن يظهر في الأرقام.',
+    ignore: 'إذا كنت قد سلّمت كل شيء عن هذا الأسبوع، يمكنك ببساطة تجاهل هذه الرسالة.',
     clock: '{time}',
     subject: 'تذكير: كشف الحساب {label} – {company}',
     heading: 'تذكير بكشف الحساب',

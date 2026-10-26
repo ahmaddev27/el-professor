@@ -19,7 +19,7 @@ import {
 
 const input = (over: Partial<AbrechnungMailInput> = {}): AbrechnungMailInput => ({
   language: 'de',
-  driverName: 'Ahmed Hemaid',
+  driverName: 'Nora Vogt',
   companyName: 'Y&A Mobility',
   periodLabel: 'Woche 5',
   periodRange: '31.08.2026 – 06.09.2026',
@@ -62,11 +62,11 @@ describe('percent', () => {
 describe('renderAbrechnungMail', () => {
   it('names the driver, the period and the company', () => {
     const mail = renderAbrechnungMail(input());
-    expect(mail.html).toContain('Ahmed Hemaid');
+    expect(mail.html).toContain('Nora Vogt');
     expect(mail.html).toContain('Woche 5');
     expect(mail.html).toContain('31.08.2026 – 06.09.2026');
     expect(mail.html).toContain('Y&amp;A Mobility');
-    expect(mail.text).toContain('Ahmed Hemaid');
+    expect(mail.text).toContain('Nora Vogt');
   });
 
   it('carries no figure in the subject', () => {
@@ -171,7 +171,7 @@ describe('renderAbrechnungMail without the image', () => {
 
 describe('renderAbrechnungSummaryMail', () => {
   const rows = [
-    { driverName: 'Ahmed Hemaid', figures: { cash: 506.95, belege: 112, difference: 394.95, belegeCount: 2, tankenquote: 11.3 } },
+    { driverName: 'Nora Vogt', figures: { cash: 506.95, belege: 112, difference: 394.95, belegeCount: 2, tankenquote: 11.3 } },
     { driverName: 'Max <b>Muster</b>', figures: { cash: 100, belege: 130.5, difference: -30.5, belegeCount: 1, tankenquote: null } },
   ];
   const summary = () => renderAbrechnungSummaryMail({
@@ -181,7 +181,7 @@ describe('renderAbrechnungSummaryMail', () => {
 
   it('lists every driver with German figures and adds the totals', () => {
     const mail = summary();
-    expect(mail.text).toContain('Ahmed Hemaid: Bargeld 506,95 €, Belege 112,00 €, Abzugeben 394,95 €');
+    expect(mail.text).toContain('Nora Vogt: Bargeld 506,95 €, Belege 112,00 €, Abzugeben 394,95 €');
     expect(mail.text).toContain('Guthaben 30,50 €');
     expect(mail.text).toContain('Gesamt: Bargeld 606,95 €, Belege 242,50 €, Saldo 364,45 €');
   });
@@ -210,7 +210,7 @@ describe('renderAbrechnungSummaryMail', () => {
 describe('renderReminderMail', () => {
   const reminder = () => renderReminderMail({
     language: 'de',
-    driverName: 'Ahmed Hemaid',
+    driverName: 'Nora Vogt',
     companyName: 'Y&A Mobility',
     periodLabel: 'Woche 5 - August 2026',
     periodRange: '31.08.2026 – 06.09.2026',
@@ -218,12 +218,37 @@ describe('renderReminderMail', () => {
     appUrl: 'https://app.elprofessor.eu',
   });
 
-  it('says which week, what is missing and when the figures go out', () => {
+  it('says which week, asks for whatever is outstanding, and when the figures go out', () => {
     const { text } = reminder();
     expect(text).toContain('Woche 5 - August 2026');
     expect(text).toContain('31.08.2026 – 06.09.2026');
-    expect(text).toContain('weder Bargeld noch Barbelege');
+    expect(text).toContain('Fahrtenbuch, Bargeld oder Barbelege');
     expect(text).toContain('08:00 Uhr');
+  });
+
+  /**
+   * It goes to every active driver since 26.10.2026, so it may not say what
+   * this one has or has not recorded — and at reminder time it could not know:
+   * the week's cash rows are typed in by the office hours later (measured).
+   */
+  it('claims nothing about what the driver has recorded', () => {
+    const { text, html } = reminder();
+    for (const part of [text, html]) {
+      expect(part).not.toMatch(/hast du bisher|weder Bargeld noch|nicht erfasst|keine Belege/i);
+    }
+  });
+
+  it('greets nobody by name when the address stands for more than one driver', () => {
+    const mail = renderReminderMail({
+      language: 'de', driverName: null, companyName: 'Y&A Mobility',
+      periodLabel: 'Woche 5 - August 2026', periodRange: '31.08.2026 – 06.09.2026',
+      sendTime: '08:00', appUrl: 'https://app.elprofessor.eu',
+    });
+    expect(mail.text).toContain('Guten Tag,');
+    expect(mail.text).not.toContain('Hallo');
+    // Never an empty greeting: "Hallo ," is what a missing name would render as.
+    expect(mail.text).not.toMatch(/Hallo\s*,/);
+    expect(mail.html).not.toMatch(/Hallo\s*,/);
   });
 
   it('states no amount anywhere, because the figures are what is incomplete', () => {

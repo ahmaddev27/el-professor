@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { calcPricing, invoiceAmountCents, type BillingCycle, type PriceBook } from './pricing';
+import { billedCars, calcPricing, fleetDiscountPercent, invoiceAmountCents, type BillingCycle, type PriceBook } from './pricing';
 import { SEED_PRICE_BOOK } from '../lib/appConfigSeed';
 import type { Plan } from '../contexts/PlanContext';
 
@@ -208,5 +208,95 @@ describe('invoiceAmountCents is the twin of app_private.invoice_amount_cents', (
         }
       }
     }
+  });
+});
+
+// ─── 5. the zero-car floor (20261026110000) ─────────────────────────────────
+
+/**
+ * `billedCars` is the one place either engine floors the quantity, and until
+ * 20261026110000 it did not exist: `app_private.price_book_price` floored,
+ * `invoiceAmountCents` floored, and `calcPricing` did not. No gate caught the
+ * difference, because every grid above starts at one car.
+ *
+ * It starts to matter the day the invoice is quoted on the real fleet rather
+ * than on `companies.subscription_car_limit`, which is what that migration
+ * does: measured on production 26.10.2026, twelve of eighteen companies run no
+ * cars at all, so without the floor twelve invoices would read 0,00 EUR.
+ *
+ * The numbers are the ones SQL already asserts, read out of the same alien book
+ * `tests/rls/pricing.sql` prices from — so this block and that file cannot
+ * drift, and a formula that ignored the book would fail here as well:
+ *
+ *   PERFORM _pr_ok('alien book: a NULL car count bills one car, a count below
+ *                   one bills one at its own tier',
+ *     public.compute_plan_price('basic', NULL, 'monthly') = 12.5
+ *     AND public.compute_plan_price('basic', 0, 'monthly') = 12.5
+ *     AND public.compute_plan_price('basic', -3, 'monthly') = 12.5);
+ *
+ * The asymmetry is the point and is asserted separately below: the AMOUNT is
+ * floored to one car, the fleet TIER is looked up on the count as given. The
+ * alien book's first tier is at two cars, so neither 0 nor -3 reaches one.
+ */
+describe('a car count below one bills one car, and reaches no fleet tier', () => {
+  it('billedCars is the floor, and nothing else is', () => {
+    for (const cars of [0, -3, null, undefined]) expect(billedCars(cars)).toBe(1);
+    expect(billedCars(1)).toBe(1);
+    expect(billedCars(5)).toBe(5);
+    expect(billedCars(25)).toBe(25);
+  });
+
+  it('calcPricing bills one car for a count of none, under both books', () => {
+    for (const cars of [0, -3]) {
+      // basic, monthly: the figure SQL pins at 12,50 under the alien book.
+      expect([cars, calcPricing(ALIEN_BOOK, 'basic', cars, 'monthly').finalTotal]).toEqual([cars, 12.5]);
+      // and under the book we ship: one car on premium is 70,00, not 0,00.
+      expect([cars, calcPricing(SEED_PRICE_BOOK, 'premium', cars, 'monthly').finalTotal]).toEqual([cars, 70]);
+      expect([cars, calcPricing(SEED_PRICE_BOOK, 'premium', cars, 'monthly').baseMonthly]).toEqual([cars, 70]);
+    }
+  });
+
+  it('invoiceAmountCents agrees with it, in whole cents, on every plan and cycle', () => {
+    for (const book of [SEED_PRICE_BOOK, ALIEN_BOOK]) {
+      for (const plan of PLANS) {
+        for (const cycle of CYCLES) {
+          const one = invoiceAmountCents(book, plan, 1, cycle, false);
+          for (const cars of [0, -3]) {
+            expect([plan, cycle, cars, invoiceAmountCents(book, plan, cars, cycle, false)])
+              .toEqual([plan, cycle, cars, one]);
+          }
+        }
+      }
+    }
+  });
+
+  it('the floor does not buy a fleet discount: the tier is read on the count as given', () => {
+    // The alien book's cheapest tier starts at two cars and takes 3% off.
+    expect(fleetDiscountPercent(ALIEN_BOOK, 0)).toBe(0);
+    expect(fleetDiscountPercent(ALIEN_BOOK, -3)).toBe(0);
+    expect(fleetDiscountPercent(ALIEN_BOOK, 2)).toBe(3);
+    // So 0 cars and 1 car cost the same, and 2 cars is not twice 1 car.
+    expect(calcPricing(ALIEN_BOOK, 'basic', 0, 'monthly').finalTotal)
+      .toBe(calcPricing(ALIEN_BOOK, 'basic', 1, 'monthly').finalTotal);
+    expect(calcPricing(ALIEN_BOOK, 'basic', 2, 'monthly').fleetDiscountPct).toBe(3);
+  });
+
+  it('a first invoice is the flat figure even with no cars at all', () => {
+    for (const cars of [0, -3]) {
+      expect(calcPricing(SEED_PRICE_BOOK, 'premium', cars, 'monthly', true).finalTotal).toBe(200);
+      expect(invoiceAmountCents(SEED_PRICE_BOOK, 'premium', cars, 'monthly', true)).toBe(20000);
+    }
+  });
+
+  it('leaves all 42 of the listed numbers exactly where they were', () => {
+    // The floor cannot reach a count of one or more, so this restates the grid
+    // above on purpose: it is the assertion that this gate added a row rather
+    // than moving one.
+    for (const [key, expected] of Object.entries(EXPECTED)) {
+      const [plan, cars, cycle] = key.split('|');
+      expect([key, calcPricing(SEED_PRICE_BOOK, plan as Plan, Number(cars), cycle as BillingCycle).finalTotal])
+        .toEqual([key, expected]);
+    }
+    expect(Object.keys(EXPECTED)).toHaveLength(42);
   });
 });

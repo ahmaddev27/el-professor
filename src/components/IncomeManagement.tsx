@@ -19,6 +19,7 @@ import IncomeGroupedList, { type IncomeLevel } from './IncomeGroupedList';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { selectableDrivers } from '../utils/driverStatus';
 import {
   Badge,
   Button,
@@ -547,7 +548,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     return { bargeld, nettoFahrpreis, trinkgeld, aktionen, summe, ...tallyTrips(weeklyIncomes) };
   };
 
-  const activeDrivers = drivers.filter(driver => driver.status !== 'inactive');
+  const activeDrivers = selectableDrivers(drivers);
 
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is the screen's logic and is unchanged, less three pieces
@@ -619,7 +620,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
       onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
       aria-label={t('common.driver')}
     >
-      {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
+      {selectableDrivers(drivers).map(driver => (
         <option key={driver.id} value={driver.name}>{driver.name}</option>
       ))}
     </NativeSelect>
@@ -992,7 +993,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   onChange={(e) => setSelectedDriver(e.target.value)}
                 >
                   <option value="">{t('common.allDrivers')}</option>
-                  {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
+                  {selectableDrivers(drivers).map(driver => (
                     <option key={driver.id} value={driver.name}>{driver.name}</option>
                   ))}
                 </NativeSelect>
@@ -1034,7 +1035,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                     onChange={(e) => setBatchForm(prev => ({ ...prev, driver_name: e.target.value }))}
                   >
                     <option value="">{t('inc.selectDriver')}</option>
-                    {drivers.filter(d => d.status !== 'inactive').map(d => (
+                    {selectableDrivers(drivers).map(d => (
                       <option key={d.id} value={d.name}>{d.name}</option>
                     ))}
                   </NativeSelect>

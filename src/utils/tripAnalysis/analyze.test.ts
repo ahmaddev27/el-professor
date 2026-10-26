@@ -407,14 +407,14 @@ describe('rows that cannot be measured stay in the result', () => {
 
   it('one driver id under two names → a mismatch citing the odd rows', () => {
     const result = run([
-      trip('t1', 'd1', 'X', '08:00', '08:10', { driver_name: 'Ayman Sleem' }),
-      trip('t2', 'd1', 'X', '09:00', '09:10', { driver_name: 'Ayman Sleem' }),
-      trip('t3', 'd1', 'X', '10:00', '10:10', { driver_name: 'A. Sleem' }),
+      trip('t1', 'd1', 'X', '08:00', '08:10', { driver_name: 'Sara Weiss' }),
+      trip('t2', 'd1', 'X', '09:00', '09:10', { driver_name: 'Sara Weiss' }),
+      trip('t3', 'd1', 'X', '10:00', '10:10', { driver_name: 'S. Weiss' }),
     ]);
     expect(issuesOf(result, 'driver_name_mismatch')).toMatchObject([
-      { driverId: 'd1', tripIds: ['t3'], values: { names: 'A. Sleem | Ayman Sleem', majorityName: 'Ayman Sleem' } },
+      { driverId: 'd1', tripIds: ['t3'], values: { names: 'S. Weiss | Sara Weiss', majorityName: 'Sara Weiss' } },
     ]);
-    expect(result.drivers[0].driverNames).toEqual(['A. Sleem', 'Ayman Sleem']);
+    expect(result.drivers[0].driverNames).toEqual(['S. Weiss', 'Sara Weiss']);
   });
 });
 

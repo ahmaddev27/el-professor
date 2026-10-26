@@ -47,7 +47,7 @@ function schedule(patch: Partial<ScheduleCompany> = {}): ScheduleCompany {
 
 function row(patch: Partial<WeekFigureRow> = {}): WeekFigureRow {
   return {
-    driver_name: 'Ahmed Hemaid', anzahl_belege: 2, ausgegebene_bargeld: '112.00',
+    driver_name: 'Nora Vogt', anzahl_belege: 2, ausgegebene_bargeld: '112.00',
     bargeld: '506.95', bar_zuruck: '394.95', tanken_brutto: '40', umsatz_netto: '400',
     match_count: 1, driver_id: DRIVER_A, driver_email: 'a@example.com', ...patch,
   };
@@ -216,7 +216,7 @@ describe('planDriverMails', () => {
   it('never resolves a shared name by picking one', () => {
     const plan = planDriverMails([row({ match_count: 2, driver_id: null, driver_email: null })], new Set());
     expect(plan.sendable).toEqual([]);
-    expect(plan.ambiguous).toEqual(['Ahmed Hemaid']);
+    expect(plan.ambiguous).toEqual(['Nora Vogt']);
   });
 
   it('reports a driver with no address, or no active match, rather than skipping silently', () => {
@@ -224,13 +224,13 @@ describe('planDriverMails', () => {
       row({ driver_email: null }),
       row({ driver_name: 'Fremd', match_count: 0, driver_id: null, driver_email: null }),
     ], new Set());
-    expect(plan.noAddress).toEqual(['Ahmed Hemaid', 'Fremd']);
+    expect(plan.noAddress).toEqual(['Nora Vogt', 'Fremd']);
   });
 
   it('does not mail a driver already claimed for the week', () => {
     const plan = planDriverMails([row()], new Set([DRIVER_A]));
     expect(plan.sendable).toEqual([]);
-    expect(plan.alreadyClaimed).toEqual(['Ahmed Hemaid']);
+    expect(plan.alreadyClaimed).toEqual(['Nora Vogt']);
   });
 });
 

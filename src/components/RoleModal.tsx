@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Save, ShieldCheck } from 'lucide-react';
-import { Role, RolePermission, RoleWithPermissions, PAGE_DEFINITIONS } from '../types/role';
+import { Role, RolePermission, RoleWithPermissions } from '../types/role';
 import { emptyPermissions, permissionsFromTemplate, type PermissionMap } from '../lib/companyRoles';
+import {
+  editBoxIsSettable,
+  grantedAreaCount,
+  permissionGroups,
+  viewBoxIsSettable,
+  type PageEnforcement,
+} from '../lib/rolePermissionEnforcement';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogTitle, Field, Input, NativeSelect, cn } from './ui';
 import { controlFrameClass } from './ui/Input';
@@ -89,6 +96,15 @@ const RoleModal: React.FC<RoleModalProps> = ({
     }
   }, [isOpen]);
 
+  /*
+    Reachable only while `viewBoxIsSettable()` is true, which it is not: the
+    `Ansehen` boxes are rendered `disabled`, and a disabled input fires no
+    change event. It is wired to the row all the same rather than deleted,
+    because the one constant that stills the column —
+    `VIEW_IS_ENFORCED` in `lib/rolePermissionEnforcement.ts` — is also the one
+    thing that would bring it back, and a handler re-derived later would not be
+    this one. `can_view` still travels in the payload; see `toggleEdit` below.
+  */
   const toggleView = (pageKey: string) => {
     setPermissionMap(prev => {
       const newView = !(prev[pageKey]?.can_view || false);
@@ -102,6 +118,13 @@ const RoleModal: React.FC<RoleModalProps> = ({
     });
   };
 
+  /*
+    Unchanged, and it must stay unchanged: it is what keeps `can_view` true
+    wherever `can_edit` is, which is the rule `company_role_save` enforces with
+    `IS NOT DISTINCT FROM` and refuses as `edit_without_view`. The disabled
+    `Ansehen` box therefore still moves when this one is ticked — deliberately
+    visible, because that is the database's rule and not a glitch.
+  */
   const toggleEdit = (pageKey: string) => {
     setPermissionMap(prev => {
       const newEdit = !(prev[pageKey]?.can_edit || false);
@@ -143,8 +166,6 @@ const RoleModal: React.FC<RoleModalProps> = ({
 
   if (!isOpen) return null;
 
-  const enabledCount = Object.values(permissionMap).filter(p => p.can_view || p.can_edit).length;
-
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is unchanged, the scroll lock included (the dialog below
   // locks the page as well; the two agree). The form was an always-dark panel
@@ -156,6 +177,35 @@ const RoleModal: React.FC<RoleModalProps> = ({
 
   const viewLabel = t('users.roles.col.view');
   const editLabel = t('users.roles.col.edit');
+
+  /*
+    What this role actually grants, which is not how many boxes are ticked.
+
+    The subtitle counted every area with either box set. For a role copied from
+    `viewer` — sixteen `can_view` rows and no `can_edit` — that read *16
+    Bereiche ausgewählt* about a role which grants no right anywhere in the
+    product, and it is the same claim the twenty-two disabled boxes below were
+    making. `grantedAreaCount` counts `can_edit` on the ten pages a policy
+    actually gates, and nothing else.
+  */
+  const grantedCount = grantedAreaCount(permissionMap);
+
+  /*
+    The sixteen areas, grouped by what enforces them, the ten that work first.
+
+    Every reason is **visible text** under its section heading rather than a
+    tooltip: an administrator who cannot tick a box is not going to hover it to
+    find out why, and a disabled input is skipped by the tab order, so a
+    `title` or an `aria-describedby` alone would be an explanation nobody is
+    offered. The `aria-describedby` is set as well — it costs nothing and some
+    screen-reader modes do read a disabled control — but the sentence on screen
+    is the explanation.
+  */
+  const groups = permissionGroups();
+  const viewNoteId = 'role-modal-view-note';
+  const reasonId = (kind: PageEnforcement) => `role-modal-reason-${kind}`;
+  const lastGroup = groups.length - 1;
+
   /*
     A system role is opened to be read. `roles_update` requires
     `is_system = false` and `company_role_save` answers `not_found` for a role
@@ -177,9 +227,9 @@ const RoleModal: React.FC<RoleModalProps> = ({
               {role ? t('users.roles.edit') : t('users.roles.createNew')}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              {enabledCount > 0
-                ? tPlural({ one: 'users.roles.areasSelected.one', other: 'users.roles.areasSelected.other' }, enabledCount)
-                : t('users.roles.noPermissionsSet')}
+              {grantedCount > 0
+                ? tPlural({ one: 'users.roles.areasEffective.one', other: 'users.roles.areasEffective.other' }, grantedCount)
+                : t('users.roles.noEffectivePermissions')}
             </DialogDescription>
           </div>
         </div>
@@ -254,36 +304,73 @@ const RoleModal: React.FC<RoleModalProps> = ({
               </div>
 
               <div className="overflow-hidden rounded-surface border border-line">
-                {/* Table header */}
-                <div aria-hidden className="grid grid-cols-[1fr_4.5rem_4.5rem] items-center border-b border-line bg-sunken px-3 py-2 sm:grid-cols-[1fr_6.5rem_7rem] sm:px-4">
+                {/* Table header. `Ansehen` is marked in the header itself, so the
+                    column is labelled as stilled even before the sentence below. */}
+                <div aria-hidden className="grid grid-cols-[1fr_4.5rem_4.5rem] items-start border-b border-line bg-sunken px-3 py-2 sm:grid-cols-[1fr_6.5rem_7rem] sm:px-4">
                   <span className="text-xs font-semibold text-fg-muted">{t('users.roles.col.area')}</span>
-                  <span className="text-center text-xs font-semibold text-fg-muted">{viewLabel}</span>
+                  <span className="text-center text-xs font-semibold text-fg-subtle">
+                    <span className="block line-through">{viewLabel}</span>
+                    <span className="mt-0.5 block text-[10px] font-normal leading-tight">
+                      {t('users.roles.col.view.disabled')}
+                    </span>
+                  </span>
                   <span className="text-center text-xs font-semibold text-fg-muted">{editLabel}</span>
                 </div>
 
-                {/* Rows */}
-                {PAGE_DEFINITIONS.map((page, idx) => {
-                  const canView = permissionMap[page.key]?.can_view || false;
-                  const canEdit = permissionMap[page.key]?.can_edit || false;
-                  const isLast = idx === PAGE_DEFINITIONS.length - 1;
+                {/* Why every `Ansehen` box is unsettable. One sentence for the
+                    whole column, because the reason is the column's and not any
+                    one row's. */}
+                <p id={viewNoteId} className="border-b border-line bg-sunken/60 px-3 py-2 text-xs leading-snug text-fg-muted sm:px-4">
+                  {t('users.roles.view.notEnforced')}
+                </p>
 
-                  return (
-                    <PermissionRow
-                      key={page.key}
-                      pageKey={page.key}
-                      label={t(page.label)}
-                      description={t(page.description)}
-                      canView={canView}
-                      canEdit={canEdit}
-                      isLast={isLast}
-                      isSubmitting={isSubmitting || readOnly}
-                      onToggleView={toggleView}
-                      onToggleEdit={toggleEdit}
-                      viewLabel={viewLabel}
-                      editLabel={editLabel}
-                    />
-                  );
-                })}
+                {/* Rows, in three sections */}
+                {groups.map((group, groupIdx) => (
+                  <div key={group.kind}>
+                    <div className="border-b border-line bg-sunken/40 px-3 py-2 sm:px-4">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+                        {t(group.headingKey)}
+                      </h4>
+                      {group.reasonKey && (
+                        <p id={reasonId(group.kind)} className="mt-1 text-xs leading-snug text-fg-subtle">
+                          {t(group.reasonKey)}
+                        </p>
+                      )}
+                    </div>
+
+                    {group.pages.map((page, idx) => {
+                      const canView = permissionMap[page.key]?.can_view || false;
+                      const canEdit = permissionMap[page.key]?.can_edit || false;
+                      const isLast = groupIdx === lastGroup && idx === group.pages.length - 1;
+                      const editSettable = editBoxIsSettable(page.key);
+
+                      return (
+                        <PermissionRow
+                          key={page.key}
+                          pageKey={page.key}
+                          label={t(page.label)}
+                          description={t(page.description)}
+                          canView={canView}
+                          canEdit={canEdit}
+                          isLast={isLast}
+                          isSubmitting={isSubmitting || readOnly}
+                          onToggleView={toggleView}
+                          onToggleEdit={toggleEdit}
+                          viewLabel={viewLabel}
+                          editLabel={editLabel}
+                          /* Both boxes keep their stored value and their
+                             handler; what changes is whether they can be
+                             pressed. `viewSettable` is false on every row —
+                             `viewBoxIsSettable()` takes no page, by design. */
+                          viewSettable={viewBoxIsSettable()}
+                          editSettable={editSettable}
+                          viewReasonId={viewNoteId}
+                          editReasonId={editSettable ? undefined : reasonId(group.kind)}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -327,18 +414,42 @@ interface PermissionRowProps {
   /** The two column names, for each box's accessible name. */
   viewLabel: string;
   editLabel: string;
+  /**
+   * Whether each box enforces anything, and so whether it may be pressed.
+   *
+   * A box that is not settable is still drawn, still shows the row's **stored**
+   * value and still carries that value into the payload — it is only
+   * unsettable. Removing it would answer "where did the column go?" with
+   * silence; disabling it answers the question an administrator actually has.
+   */
+  viewSettable: boolean;
+  editSettable: boolean;
+  /** The id of the visible sentence that says why, for `aria-describedby`. */
+  viewReasonId?: string;
+  editReasonId?: string;
 }
 
 /**
  * One area and its two boxes. The boxes toggle through the form's own
  * toggleView / toggleEdit, which keep "edit implies view" and "no view, no
  * edit"; the row only draws. Each box is a 44 px target on a touch screen.
+ *
+ * A box is disabled for one of two reasons, and the row does not conflate them:
+ * `isSubmitting` is temporary (the form is saving, or a system role is being
+ * read) and gets no explanation, while `viewSettable` / `editSettable` are
+ * permanent properties of the page that the sentence above the section states.
+ * Only the second kind is described, so a saving form does not point every box
+ * at a reason that is not the reason.
  */
 const PermissionRow: React.FC<PermissionRowProps> = ({
   pageKey, label, description, canView, canEdit, isLast, isSubmitting, onToggleView, onToggleEdit, viewLabel, editLabel,
+  viewSettable, editSettable, viewReasonId, editReasonId,
 }) => {
   const box = 'size-4 cursor-pointer accent-brand disabled:cursor-not-allowed [@media(pointer:coarse)]:size-5';
   const target = 'flex size-9 items-center justify-center justify-self-center rounded-control [@media(pointer:coarse)]:size-11';
+  // A stilled box is drawn faintly, so "ticked but inert" cannot be mistaken
+  // for "ticked and in force" at a glance.
+  const inert = 'opacity-50';
 
   return (
     <div
@@ -354,26 +465,28 @@ const PermissionRow: React.FC<PermissionRowProps> = ({
         )}
       </div>
 
-      {/* View checkbox */}
-      <label className={target}>
+      {/* View checkbox — never settable; shows what the row holds. */}
+      <label className={cn(target, !viewSettable && inert)}>
         <input
           type="checkbox"
           checked={canView}
           onChange={() => onToggleView(pageKey)}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !viewSettable}
           aria-label={`${label}: ${viewLabel}`}
+          aria-describedby={viewSettable ? undefined : viewReasonId}
           className={box}
         />
       </label>
 
       {/* Edit checkbox */}
-      <label className={target}>
+      <label className={cn(target, !editSettable && inert)}>
         <input
           type="checkbox"
           checked={canEdit}
           onChange={() => onToggleEdit(pageKey)}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !editSettable}
           aria-label={`${label}: ${editLabel}`}
+          aria-describedby={editSettable ? undefined : editReasonId}
           className={box}
         />
       </label>

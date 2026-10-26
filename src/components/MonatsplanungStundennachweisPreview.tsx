@@ -2901,24 +2901,55 @@ const WEEKEND_ONLY = ['sat', 'sun'];
 
 interface EffectiveWeekdays {
   codes: string[];
-  source: 'business_rule_ahmed' | 'business_rule_alev' | 'business_rule_all_week';
+  source: 'business_rule_weekend_only' | 'business_rule_weekdays_only' | 'business_rule_all_week';
   labelKey: TranslationKey;
 }
 
-// Transfer Analysis weekday availability — DB data is intentionally bypassed here
-// because planning_working_days is not yet reliably populated for all drivers.
-// Business rules take full precedence for this read-only analysis.
+// Transfer Analysis weekday availability.
+//
+// Two drivers' working days are hard-coded below, matched by name. This is an
+// OVERRIDE: it bypasses the per-driver weekday columns entirely, and it is the
+// only input to check 6 of `validateTransfer`, which HARD-FAILS a candidate
+// shift falling outside `codes`. Transfer Analysis is on the path to a
+// Stundennachweis, so changing what this returns changes a payroll document.
+//
+// The justification this carried until 26.10.2026 was that
+// "planning_working_days is not yet reliably populated". No such column exists.
+// The real ones are `drivers.planned_working_days` (text[], NOT NULL, DEFAULT
+// {mon..fri}) and `drivers.allowed_weekdays` (integer[], ISO 1=Mon..7=Sun,
+// nullable) — and this component already selects `planned_working_days` into
+// `DriverWage`, so the data is in hand at the call site.
+//
+// Measured read-only on production, 26.10.2026 (62 drivers, 6 companies): the
+// override and the operator's own curated data disagree on every row it touches.
+// Of the two name-matched rules, one returns sat+sun for a driver curated as
+// available the whole week, the other returns mon..fri for another curated the
+// whole week — and a third driver, the only one curated weekend-only (6,7), is
+// not named here at all, so the override reports the whole week for them.
+// `planned_working_days` sits at its DEFAULT on 62 of 62 rows, so it carries no
+// operator intent; `allowed_weekdays` is curated (54 of 62 non-NULL). Reading
+// either column instead would change the answer for 61 of 62 drivers.
+//
+// Two further hazards, measured rather than supposed: the match is `includes()`,
+// not equality, so a different driver with a similar name inherits the rule; and
+// there is NO company term, so the weekend rule already fires on two driver rows
+// in two different companies. Changing a driver's days needs a release.
+//
+// Left as-is deliberately, pending the owner's decision — swapping in the
+// curated column is a change to a payroll document's input, not a cleanup. The
+// two name literals below ARE the behaviour and cannot be renamed without
+// changing it; `source` is written here and read nowhere, so only it was renamed.
 function getTransferAnalysisWeekdayAvailability(driverName: string): EffectiveWeekdays {
   // Normalize: lowercase, collapse multiple spaces, strip accents for matching
   const n = driverName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
   if (n.includes('ahmed') && n.includes('hemaid')) {
-    return { codes: WEEKEND_ONLY, source: 'business_rule_ahmed', labelKey: 'stn.weekdayRule.weekendOnly' };
+    return { codes: WEEKEND_ONLY, source: 'business_rule_weekend_only', labelKey: 'stn.weekdayRule.weekendOnly' };
   }
 
   // Match "alev" + ("buyukay" or "büyükay" — accent already stripped above)
   if (n.includes('alev') && (n.includes('buyukay') || n.includes('b yukay'))) {
-    return { codes: WEEKDAYS_ONLY, source: 'business_rule_alev', labelKey: 'stn.weekdayRule.weekdaysOnly' };
+    return { codes: WEEKDAYS_ONLY, source: 'business_rule_weekdays_only', labelKey: 'stn.weekdayRule.weekdaysOnly' };
   }
 
   return { codes: ALL_WEEK, source: 'business_rule_all_week', labelKey: 'stn.weekdayRule.allWeek' };

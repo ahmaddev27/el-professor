@@ -356,7 +356,7 @@ export interface GeneratedWorksheetAuditResult {
   isClean: boolean;
   entries: GeneratedWorksheetOverlapEntry[];
   diagnosticRows: ExportRowDiagnostic[];
-  /** Regression check: rows 99 & 100 overlap (Yassin Asfour scenario) */
+  /** Regression check: rows 99 & 100 overlap (one driver's reported scenario) */
   regressionA_99_100: boolean;
   /** Regression check: rows 425 & 426 overlap (SG-YA14 scenario) */
   regressionB_425_426: boolean;

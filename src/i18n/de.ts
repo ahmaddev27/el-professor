@@ -854,7 +854,11 @@ export const de = {
   'settings.field.ownerName':          'Inhaber',
   'settings.field.representative':     'Vertretungsberechtigter',
   'settings.field.driversPerCar':      'Fahrer pro Fahrzeug',
-  'settings.field.driversPerCarHint':  'Maximale Anzahl aktiver Fahrer = Fahrzeuge x {n}',
+  // Said 'Maximale Anzahl aktiver Fahrer = Fahrzeuge x {n}' until 26.10.2026,
+  // which was true while trg_enforce_driver_limit enforced it and became false
+  // the moment 20261026110000 dropped it. The field is kept (the column is the
+  // owner's open question) but it must not promise a maximum nothing enforces.
+  'settings.field.driversPerCarHint':  'Nur ein Richtwert für die Planung: Fahrzeuge x {n}. Die Anzahl der Fahrer ist nicht begrenzt.',
   'settings.field.vatId':              'USt-IdNr.',
   'settings.field.taxNumber':          'Steuernummer',
   'settings.field.commercialRegister': 'Handelsregisternummer',
@@ -2148,8 +2152,18 @@ export const de = {
   'sa.dash.attention.pending':             'Wartet auf Freischaltung',
   'sa.dash.attention.suspended':           'Unternehmen ist gesperrt',
   'sa.dash.attentionTitle':                'Handlungsbedarf ({count})',
-  'sa.dash.carLimit':                      'Fahrzeuglimit',
-  'sa.dash.carsCount':                     '{count} Fahrzeuge',
+  // Not 'Fahrzeuglimit' any more: 20261026110000 dropped the trigger that made
+  // it one, and the invoice is priced on the fleet the company runs. What this
+  // number still is: the allowance of the plan an operator assigned.
+  'sa.dash.carLimit':                      'Fahrzeug-Kontingent des Tarifs (kein Limit)',
+  'sa.dash.carsBilledHint':                'Abgerechnete Fahrzeuge / Kontingent des Tarifs. Abgerechnet wird der tatsächliche Fuhrpark, das Kontingent begrenzt nichts.',
+  // The Freigaben list, where this is the fleet size the APPLICANT declared at
+  // signup (SignupPage writes its slider into `subscription_car_limit`) and not
+  // a count of anything — a company awaiting approval has no cars in the system
+  // yet. Said '{count} Fahrzeuge', which reads as a measurement; since
+  // 20261026110000 the invoice is priced on the measured fleet, so the two must
+  // not be confusable.
+  'sa.dash.carsCount':                     '{count} Fahrzeuge angegeben',
   'sa.dash.changeBilling':                 'Abrechnung ändern',
   'sa.dash.changeStatus':                  'Status ändern',
   'sa.dash.changeTariff':                  'Tarif ändern',
@@ -2635,8 +2649,6 @@ export const de = {
   'users.readOnlyBody':                    'Diese Ansicht ist schreibgeschützt. Die Benutzerverwaltung ist nur in einer Support-Sitzung möglich; eine reine Übersicht der Konten steht unter "Verzeichnisse" im Plattform-Bereich.',
   'users.readOnlyTitle':                   'Nur-Lese-Ansicht',
   'users.roleNone':                        'Keine',
-  'users.roles.areasSelected.one':         '{count} Bereich ausgewählt',
-  'users.roles.areasSelected.other':       '{count} Bereiche ausgewählt',
   'users.roles.col.area':                  'Bereich',
   'users.roles.col.edit':                  'Bearbeiten',
   'users.roles.col.view':                  'Ansehen',
@@ -2679,7 +2691,6 @@ export const de = {
   'users.roles.new':                       'Neue Rolle',
   'users.roles.editNamed':                 'Rolle {name} bearbeiten',
   'users.roles.deleteNamed':               'Rolle {name} löschen',
-  'users.roles.noPermissionsSet':          'Keine Berechtigungen gesetzt',
   'users.roles.note.editImpliesView':      'Bearbeiten-Berechtigung erfordert automatisch Ansehen-Berechtigung',
   'users.roles.note.immediateEffect':      'Änderungen an Rollen wirken sich sofort auf alle Benutzer mit dieser Rolle aus',
   'users.roles.note.systemUndeletable':    'Systemrollen (admin, supervisor, editor) können nicht gelöscht werden',
@@ -6605,7 +6616,7 @@ export const de = {
   'inc.uber.period.tooManyDays':       'Höchstens {max} Tage auf einmal; gewählt sind {count}. Bitte weniger Tage wählen.',
   'inc.uber.tab.daily':                'Täglich',
   'settings.abrSchedule.preview.manager.goesAddress': 'Übersicht geht an die hinterlegte Benachrichtigungsadresse.',
-  'settings.abrSchedule.reminder.hint':    'Ein Fahrer, der in der Woche weder Bargeld noch Barbelege erfasst hat, bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Das trifft auch Fahrer, die in der Woche nicht gefahren sind und nichts abzugeben haben. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
+  'settings.abrSchedule.reminder.hint':    'Jeder aktive Fahrer mit hinterlegter E-Mail-Adresse bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Sie nennt keine Zahlen und fragt nur, ob noch ein Fahrtenbuch, Bargeld oder Barbelege abzugeben sind. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
   'settings.abrSchedule.reminder.label':   'Fahrer vor dem Versand erinnern',
   'settings.abrSchedule.reminder.lead':    'Erinnerung vor dem Versand',
   'settings.abrSchedule.reminder.leadOption': '{minutes} Minuten vorher',
@@ -7006,7 +7017,8 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fahrer.updateRefused':      'Die Änderung wurde von der Datenbank abgelehnt: Ihrer Rolle fehlt die Berechtigung. Es wurde nichts geändert.',
-  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, Belege und die Fahrtenhistorie verweisen auf sie.',
+  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, unterschriebene Gehaltsquittungen und Stundennachweise verweisen auf sie und bleiben erhalten.',
+  'fleet.deactivateHidesFromLists': 'Ein deaktivierter Fahrer erscheint in keiner Auswahlliste mehr – auch nicht in der Monatsplanung oder im Fahrtenbuch. In bereits abgerechneten Monaten bleibt er sichtbar und ist als inaktiv gekennzeichnet.',
   'sa.subs.actionDelete':              'Löschen',
   'sa.subs.confirmDelete.description': 'Die Rechnung wird endgültig gelöscht. Der durch sie gewährte Zugangszeitraum wird ungültig; der Kunde kann dadurch den Zugang verlieren. Bezahlte Rechnungen lassen sich nicht löschen, nur stornieren.',
   'sa.subs.deleteRefused.paid':        'Eine bezahlte Rechnung kann nicht gelöscht werden. Sie belegt den Zahlungseingang; bitte stattdessen stornieren.',
@@ -7139,4 +7151,24 @@ export const de = {
   'sa.modules.state.planOff':         'Nicht im Tarif',
   'sa.modules.title':                 'Module',
   'sa.modules.viewOnly':              '· nur Ansicht',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'users.roles.areasEffective.one':        '{count} Bereich wirksam freigegeben',
+  'users.roles.areasEffective.other':      '{count} Bereiche wirksam freigegeben',
+  'users.roles.col.view.disabled':         'stillgelegt',
+  'users.roles.group.adminOnly':           'Nur Unternehmens-Administratoren',
+  'users.roles.group.adminOnly.reason':    'Benutzer, Rollen und Einstellungen sind Administratoren vorbehalten. Maßgeblich ist, ob ein Konto die Rolle "admin" trägt — eine andere Rolle kann diese Bereiche nicht freigeben, auch nicht mit gesetztem Haken.',
+  'users.roles.group.notRoleControlled':   'Nicht von der Rolle gesteuert',
+  'users.roles.group.notRoleControlled.reason': 'Für diese Bereiche prüft keine Berechtigung die Rolle. Wer die Seite über das Menü erreicht, kann sie auch bearbeiten.',
+  'users.roles.group.roleControlled':      'Von der Rolle gesteuert',
+  'users.roles.noEffectivePermissions':    'Keine wirksame Berechtigung',
+  'users.roles.view.notEnforced':          'Die Spalte "Ansehen" ist stillgelegt: keine Berechtigungsprüfung im System liest sie. Die Haken zeigen den gespeicherten Wert und lassen sich nicht ändern; der Lesezugriff ergibt sich aus dem Abo-Paket und dem Menü.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.reminder.rosterFailed': 'Die Fahrerliste konnte nicht geladen werden. Es ist unbekannt, wen die Erinnerung erreicht.',
+  'settings.abrSchedule.reminder.rosterNoAddressOne': '{count} aktiver Fahrer hat keine E-Mail-Adresse und erhält keine Erinnerung.',
+  'settings.abrSchedule.reminder.rosterNoAddressOther': '{count} aktive Fahrer haben keine E-Mail-Adresse und erhalten keine Erinnerung.',
+  'settings.abrSchedule.reminder.rosterReach': 'Die Erinnerung erreicht {reachable} von {active} aktiven Fahrern.',
+  'settings.abrSchedule.reminder.rosterSharedOne': '{count} E-Mail-Adresse gehört mehreren aktiven Fahrern. Dorthin geht eine Erinnerung ohne Namen, nicht eine pro Fahrer.',
+  'settings.abrSchedule.reminder.rosterSharedOther': '{count} E-Mail-Adressen gehören mehreren aktiven Fahrern. Dorthin geht je eine Erinnerung ohne Namen, nicht eine pro Fahrer.',
 } as const;

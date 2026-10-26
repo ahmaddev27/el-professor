@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { tripAnalysisLinkShown } from '../components/navVisibility';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import { Button, PageHeader } from '../components/ui';
 
 // The Fahrtenbuch used to be a sub-view of DocumentsPage; it has its own route
@@ -26,7 +27,8 @@ const FahrtenbuchPage: React.FC = () => {
       .from('drivers')
       .select('id, name')
       .eq('company_id', companyId)
-      .eq('status', 'active')
+      // A chooser: who a trip is reassigned to.
+      .eq('status', ACTIVE_DRIVER_STATUS)
       .order('name')
       .then(({ data }) => setDrivers((data || []) as DriverOption[]));
 

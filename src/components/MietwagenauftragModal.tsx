@@ -8,6 +8,7 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import type { CompanySettings } from '../types/settings';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -485,7 +486,8 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
       .from('drivers')
       .select('id, name')
       .eq('company_id', companyId)
-      .eq('status', 'active')
+      // A chooser: the driver a new Mietwagenauftrag is written for.
+      .eq('status', ACTIVE_DRIVER_STATUS)
       .order('name')
       .then(({ data: d }) => setDrivers(d || []));
 

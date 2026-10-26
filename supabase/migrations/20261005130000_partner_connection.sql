@@ -18,9 +18,9 @@
   The design keys on "the company registers in both products with the same
   address". Measured on production 05.10.2026: of 18 companies, **15 have an
   active admin profile and 15 distinct addresses** — so the premise holds. But
-  **two addresses each own two companies**, and one of them is
-  `ahmedkhhemaid@gmail.com`, which is the very fleet this integration starts
-  with.
+  **two addresses each own two companies**, and one of them is the operator of
+  the very fleet this integration starts with. (That address is a real
+  customer's and is not written down here; this repository is public.)
 
   So an address identifies a **person**, not a company. One owner holds several
   fleets, here and there. Connect therefore never infers the company: it is

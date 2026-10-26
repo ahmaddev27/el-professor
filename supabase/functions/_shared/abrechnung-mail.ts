@@ -411,7 +411,13 @@ export function renderAbrechnungSummaryMail(input: AbrechnungSummaryInput): Rend
 export interface ReminderMailInput {
   /** Required, like `AbrechnungMailInput.language`. */
   language: MailLanguage;
-  driverName: string;
+  /**
+   * Whom to greet, or **null** when the address stands for more than one driver
+   * of the company: the mail then greets nobody (`copy.helloPlain`). See
+   * `abrechnung-reminder-core.ts` — one mailbox gets one reminder, and naming
+   * the wrong person at a shared address is worse than naming none.
+   */
+  driverName: string | null;
   companyName: string;
   periodLabel: string;
   periodRange: string;
@@ -421,16 +427,23 @@ export interface ReminderMailInput {
 }
 
 /**
- * The reminder sent shortly before the weekly Abrechnung: this driver has
- * recorded neither cash nor a cash receipt for the week.
+ * The reminder sent shortly before the weekly Abrechnung, to **every active
+ * driver** of the company (owner, 26.10.2026; who exactly is
+ * `abrechnung-reminder-core.ts`).
  *
- * It states **no amount, on purpose**. The figures are exactly what is
- * incomplete, and a confident number in a reminder would be wrong. It says what
- * the mail is about (which week), what is missing, and when the Abrechnung goes
- * out, and it says that a driver with nothing to hand in can ignore it, because
- * the rule behind it is deliberately plain and will sometimes reach someone who
- * did nothing wrong. No link: there is nothing to open, and a driver has no
- * account here.
+ * It states **no amount, on purpose**, and that part has not changed: the
+ * figures are the thing that may still be incomplete, and a confident number in
+ * a reminder would be wrong.
+ *
+ * What changed with the audience is that the mail **asserts nothing about what
+ * this driver has done**. It used to say "you have recorded neither cash nor a
+ * cash receipt this week", which was a claim about his records; going to
+ * everybody, that sentence would be false for most readers — and measured on
+ * production it was unreliable even for the few it went to, because the week's
+ * rows are typed in by the office hours after the reminder looks. So it names
+ * the week, asks for anything still outstanding, says when the figures go out,
+ * and tells a driver who has handed everything in to ignore it. No link: there
+ * is nothing to open, and a driver has no account here.
  */
 export function renderReminderMail(input: ReminderMailInput): RenderedMail {
   const { driverName, companyName, periodRange, sendTime } = input;
@@ -441,22 +454,29 @@ export function renderReminderMail(input: ReminderMailInput): RenderedMail {
   const origin = appOrigin(input.appUrl);
   const clock = fillTemplate(c.clock, { time: sendTime }, (literal) => literal);
   const slots: Slots = {
-    name: driverName, label: periodLabel, range: periodRange, company: companyName, clock,
+    // `voice()` fills every hole with '' for a slot it was not given, so a null
+    // name must pick the other greeting here rather than render "Hallo ,".
+    name: driverName ?? undefined,
+    label: periodLabel,
+    range: periodRange,
+    company: companyName,
+    clock,
   };
+  const greeting = driverName === null ? copy.helloPlain : copy.hello;
 
   const bodyHtml =
-    `<p style="margin:0 0 16px;">${v.html(copy.hello, slots)}</p>`
+    `<p style="margin:0 0 16px;">${v.html(greeting, slots)}</p>`
     + `<p style="margin:0 0 16px;">${v.html(c.intro, slots)}</p>`
-    + `<p style="margin:0 0 16px;">${v.html(c.missing, slots)}</p>`
+    + `<p style="margin:0 0 16px;">${v.html(c.handIn, slots)}</p>`
     + `<p style="margin:0 0 16px;">${v.html(c.when, slots)}</p>`
     + `<p style="margin:0;">${v.html(c.ignore, slots)}</p>`;
 
   const bodyText = [
-    v.text(copy.hello, slots),
+    v.text(greeting, slots),
     '',
     v.text(c.intro, slots),
     '',
-    v.text(c.missing, slots),
+    v.text(c.handIn, slots),
     '',
     v.text(c.when, slots),
     '',
