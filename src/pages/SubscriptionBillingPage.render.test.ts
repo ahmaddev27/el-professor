@@ -1,4 +1,5 @@
 import { createElement } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -38,6 +39,13 @@ const world = vi.hoisted(() => ({
   fetchCompanies: vi.fn(),
   showToast: vi.fn(),
   /**
+   * `platform_plans_list`, the plan catalogue the Tarife tab reads since
+   * 20261026120000. A function so one case can make it refuse: the page's own
+   * job is invoices, and a catalogue it cannot read must cost it the Tarife
+   * tab and nothing else.
+   */
+  plansRpc: vi.fn(),
+  /**
    * One `t`, not a new one per render, and that is not a convenience: the page's
    * `loadData` is a useCallback over `[query, subscriptionPage, showToast, t]`,
    * and the effect that calls it depends on `loadData`. A `t` with a fresh
@@ -54,7 +62,10 @@ const world = vi.hoisted(() => ({
 vi.mock('../lib/supabase', () => ({
   supabase: {
     from: () => ({ select: () => ({ order: async () => ({ data: [{ id: 'p1', name: 'Advanced', monthly_price: 49, included_cars: 5, max_cars: null, features: [], is_active: true }] }) }) }),
-    rpc: async () => ({ data: null, error: null }),
+    // Dispatched by name so the catalogue can be made to refuse without
+    // changing what every other direct rpc call on this page answers.
+    rpc: async (name: string) =>
+      (name === 'platform_plans_list' ? world.plansRpc() : { data: null, error: null }),
   },
 }));
 vi.mock('../lib/platformRpc', () => ({ callPlatformRpc: vi.fn(), PlatformRpcError: class extends Error {} }));
@@ -123,16 +134,86 @@ function text(tree: ReactTestRenderer): string {
   return out.join(' | ');
 }
 
+/**
+ * Inside a router, because the page always is.
+ *
+ * It is registered under `AdminLayout` inside `BrowserRouter` (App.tsx), and
+ * since 20261026120000 its Tarife tab carries a `<Link>` to the plan screen —
+ * `react-router`'s `useHref` raises outside a `Router`, which killed the whole
+ * tree and made all nine cases here fail against an empty string, including
+ * the three that have nothing to do with plans.
+ *
+ * Wrapping is the honest fix rather than dropping the `<Link>`: a bare `<a>`
+ * would reload the SPA and throw away the operator's session state, and a test
+ * that renders this page outside a router measures an environment the product
+ * never has. What wrapping must NOT be allowed to hide is a failing read, so
+ * `platform_plans_list` is stubbed below and the catalogue's own containment is
+ * asserted by a case of its own rather than left to the absence of a crash.
+ */
 async function render(): Promise<ReactTestRenderer> {
   let tree!: ReactTestRenderer;
-  await act(async () => { tree = create(createElement(SubscriptionBillingPage)); });
+  await act(async () => {
+    tree = create(createElement(MemoryRouter, null, createElement(SubscriptionBillingPage)));
+  });
   // The two loads and the company picker settle in their own microtasks.
   await act(async () => { await Promise.resolve(); });
   return tree;
 }
 
+/**
+ * Clicks the Tarife tab. The three tab panels are mounted one at a time, so the
+ * catalogue's own states — the failure sentence and the plan cards — are not in
+ * the tree until the tab is selected, and an assertion made without this would
+ * pass for the wrong reason whatever the catalogue did.
+ *
+ * `t` answers its key here, so the button is found by the label key itself.
+ */
+async function selectPlansTab(tree: ReactTestRenderer): Promise<void> {
+  // The strings under a node, never JSON.stringify of its props: React's
+  // children carry a provider whose `_context.Provider` closes a circle, and
+  // stringifying them throws "Converting circular structure to JSON".
+  const strings = (node: unknown): string[] => {
+    const out: string[] = [];
+    const walk = (n: unknown): void => {
+      if (typeof n === 'string') { out.push(n); return; }
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n && typeof n === 'object' && 'children' in (n as object)) {
+        walk((n as { children: unknown }).children);
+      }
+    };
+    walk(node);
+    return out;
+  };
+
+  const button = tree.root.findAll(node => node.type === 'button')
+    .find(node => strings(node.children).some(s => s.includes('sa.subs.tab.plans')));
+  if (!button) throw new Error('the Tarife tab button is not on the page');
+  await act(async () => { (button.props as { onClick: () => void }).onClick(); });
+}
+
 const okInvoices = (items: unknown[], total = items.length, over = {}) =>
   ({ ok: true as const, total, limit: 100, offset: 0, items, summary: summary(over) });
+/** The three seeded plans, in the shape `platform_plans_list` answers. */
+const okCatalogue = () => ({
+  ok: true as const,
+  version: 1,
+  fixed_slugs: ['advanced', 'basic', 'premium'],
+  feature_keys: ['abrechnung', 'bargeldbestand', 'belege', 'benachrichtigungen', 'dokumente',
+    'fahrer', 'fahrzeuge', 'fixkosten', 'gehaelter', 'notizen', 'overview', 'rollen_nutzer',
+    'stundennachweis', 'trinkgeld_quittung', 'umsaetze', 'werkstatt'],
+  plans: [
+    { slug: 'basic', name: 'Basic', rank: 0, price_per_car_cents: 2000, is_active: true,
+      features: ['bargeldbestand', 'belege', 'fahrer', 'fahrzeuge', 'fixkosten', 'overview', 'umsaetze'] },
+    { slug: 'advanced', name: 'Advanced', rank: 1, price_per_car_cents: 4000, is_active: true,
+      features: ['abrechnung', 'bargeldbestand', 'belege', 'benachrichtigungen', 'fahrer', 'fahrzeuge',
+        'fixkosten', 'notizen', 'overview', 'rollen_nutzer', 'umsaetze', 'werkstatt'] },
+    { slug: 'premium', name: 'Premium', rank: 2, price_per_car_cents: 7000, is_active: true,
+      features: ['abrechnung', 'bargeldbestand', 'belege', 'benachrichtigungen', 'dokumente', 'fahrer',
+        'fahrzeuge', 'fixkosten', 'gehaelter', 'notizen', 'overview', 'rollen_nutzer',
+        'stundennachweis', 'trinkgeld_quittung', 'umsaetze', 'werkstatt'] },
+  ],
+});
+
 const okSubscriptions = (items: unknown[], total = items.length) =>
   ({ ok: true as const, total, limit: 100, offset: 0, items, summary: { activeCount: 3, activeByPlan: { p1: 2 } } });
 
@@ -145,6 +226,7 @@ beforeEach(() => {
   }]));
   world.fetchCompanies.mockReset().mockResolvedValue({ ok: true, total: 1, limit: 100, offset: 0, items: [{ id: 'c1', name: 'Taxi Nord GmbH' }] });
   world.showToast.mockReset();
+  world.plansRpc.mockReset().mockResolvedValue({ data: okCatalogue(), error: null });
 });
 
 describe('SubscriptionBillingPage', () => {
@@ -216,6 +298,64 @@ describe('SubscriptionBillingPage', () => {
 
     expect(shown).toContain('admin.read.failed');
     expect(world.showToast).toHaveBeenCalledWith('error', 'sa.subs.errorLoad');
+  });
+
+  /*
+    20261026120000. The Tarife tab reads the plan catalogue, which is a
+    different read from the two this page exists for. Its failure must cost the
+    Tarife tab and nothing else.
+
+    Both directions are asserted, because only the pair is a containment claim:
+    a refused catalogue must leave every invoice figure on screen, AND it must
+    not be shown as an empty catalogue — `parseCatalogue` throws rather than
+    answering `[]` precisely because "no plan exists" is a claim, and the page
+    turns that throw into its own `catalogueFailed` state.
+
+    Mutation control, MEASURED rather than assumed — and the first version of
+    this comment was wrong about it, which is why it is spelled out. Deleting
+    the `.catch` on `listPlans()` in SubscriptionBillingPage does NOT blank the
+    page: `.then(setCatalogue)` with no catch leaves a rejected promise and the
+    render goes on. What it does is leak an unhandled rejection, so the mutant
+    is killed twice over — by `selectPlansTab` below finding no failure
+    sentence (the state is never set), and by the run exiting 1 with
+    "Vitest caught 2 unhandled errors during the test run /
+    Error: platform_plans_list refused: unreadable at parseCatalogue".
+
+    So the real hazard the page had was never the read. It was a `<Link>`
+    rendered outside a `Router`, which DID blank it — see `render` above.
+  */
+  it('keeps every invoice figure when the plan catalogue cannot be read, and says so on its own tab', async () => {
+    world.plansRpc.mockResolvedValue({ data: { ok: false, reason: 'unreadable' }, error: null });
+    const tree = await render();
+
+    // The page this screen exists for is untouched.
+    expect(text(tree)).toContain('INV-2026-0007');
+    expect(text(tree)).toContain('Taxi Nord GmbH');
+
+    // And the Tarife tab states the failure instead of showing an empty
+    // catalogue, which would read as "this platform sells no plans".
+    await selectPlansTab(tree);
+    expect(text(tree)).toContain('admin.read.failed');
+    expect(text(tree)).not.toContain('Premium');
+  });
+
+  it('shows the three plans on its own tab when the catalogue reads', async () => {
+    const tree = await render();
+    await selectPlansTab(tree);
+    const shown = text(tree);
+    expect(shown).toContain('Basic');
+    expect(shown).toContain('Advanced');
+    expect(shown).toContain('Premium');
+    expect(shown).not.toContain('admin.read.failed');
+  });
+
+  it('reads the catalogue through platform_plans_list, once, and survives a transport error', async () => {
+    await render();
+    expect(world.plansRpc).toHaveBeenCalledTimes(1);
+
+    world.plansRpc.mockRejectedValue(new Error('network'));
+    const shown = text(await render());
+    expect(shown).toContain('INV-2026-0007');
   });
 
   it('offers a pager only when the server has a next page', async () => {

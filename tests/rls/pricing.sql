@@ -551,6 +551,10 @@ DECLARE
   v_want     numeric;
   v_got      numeric;
   v_count    integer := 0;
+  -- 20261026120000: the alien fixture's other half, the catalogue.
+  v_alien_plans jsonb;
+  v_plan_ver    integer;
+  v_saved       jsonb;
   r          record;
 BEGIN
   PERFORM _pr_reset();
@@ -576,6 +580,44 @@ BEGIN
   PERFORM _pr_ok('alien book: billing installs it (pricing.manage), version 2 -> 3',
     _pr_put(billing, 'price_book', v_alien, 2, 'ok') = 'true'
     AND _pr_put(billing, 'price_book', v_alien, 3, 'version') = '4');
+
+  /*
+    20261026120000: the per-car price is the CATALOGUE's now, not the book's,
+    so installing the alien book alone no longer changes what
+    compute_plan_price answers — and this probe is the one gate in the kit that
+    catches a formula ignoring its input. It caught exactly that when the
+    catalogue shipped: `compute_plan_price(basic|1|yearly) = 192.00, expected
+    120 — it is not reading the price book`, because 192 is the SEEDED 20,00 €
+    priced with the alien book's tiers and yearly discount.
+
+    So both halves of the alien fixture are installed. The book still owns the
+    fleet tiers, the yearly discount and the first month; the catalogue owns
+    the three per-car prices. The alien prices are the same three the fixture
+    has always carried — 1250 / 3300 / 9900 in $alien_book$ above — and all 42
+    numbers in $alien_expected$ are unchanged. What moved is where one input
+    lives, which is the whole claim of that migration.
+
+    Installed through the REAL RPC and never with an INSERT: an INSERT would
+    skip app_private.plan_catalogue_problem(), which is the only thing standing
+    between an operator and a catalogue that locks every gated screen for every
+    customer below premium. Built as the owner before becoming billing, because
+    `authenticated` holds no USAGE on app_private.
+  */
+  SELECT jsonb_agg(jsonb_set(e.value, '{price_per_car_cents}',
+                             to_jsonb((v_alien -> 'price_per_car_cents' ->> (e.value ->> 'slug'))::integer)))
+    INTO v_alien_plans
+    FROM jsonb_array_elements(app_private.plan_catalogue()) AS e(value);
+  SELECT version INTO v_plan_ver FROM app_private.plan_catalogue_meta WHERE id;
+
+  PERFORM _pr_become(billing);
+  v_saved := public.platform_plans_save(v_alien_plans, v_plan_ver);
+  PERFORM _pr_reset();
+
+  PERFORM _pr_ok('alien catalogue: billing installs the alien per-car prices through platform_plans_save (pricing.manage)',
+    (v_saved ->> 'success') = 'true');
+  PERFORM _pr_ok('alien catalogue: and the price_book shadow follows it, so a rollback across 20261026120000 prices from the alien book too',
+    (app_private.platform_setting_value('price_book') -> 'price_per_car_cents')
+      = (v_alien -> 'price_per_car_cents'));
 
   PERFORM _pr_reset();
   FOR r IN SELECT key, value::numeric AS want FROM jsonb_each_text(v_expected) LOOP

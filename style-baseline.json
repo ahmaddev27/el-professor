@@ -101,10 +101,6 @@
       "style": 207,
       "color": 139
     },
-    "src/components/PlanManagementModal.tsx": {
-      "style": 24,
-      "color": 3
-    },
     "src/components/ReferralCodesManagement.tsx": {
       "style": 42,
       "color": 11
@@ -218,8 +214,8 @@
       "color": 0
     },
     "src/pages/PlatformSettingsPage.tsx": {
-      "style": 50,
-      "color": 2
+      "style": 49,
+      "color": 1
     },
     "src/pages/PlatformTeamPage.tsx": {
       "style": 65,
@@ -234,7 +230,7 @@
       "color": 71
     },
     "src/pages/SubscriptionBillingPage.tsx": {
-      "style": 81,
+      "style": 79,
       "color": 5
     },
     "src/pages/SuperAdminDashboard.tsx": {
