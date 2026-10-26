@@ -1079,6 +1079,7 @@ instructions.
 | 2 | Q4 (what the car limit means) |
 | 3 | Q5 (access on invoice or on payment) |
 | 4 | the owner's yes for a host cron line, twice (staging, then production) |
+| **5a** | **Q11 only** (the four expiry mails' German). Nothing else — it depends on no other slice and on no other decision. See §14, and §14.11 for why it goes ahead of slice 5. |
 | 5 | Q6 (dunning wording — German, fixed in code, so it is his words) |
 | 6 | which bank, and whether it exports CAMT.053 |
 | 8 | Q1 |
@@ -1190,6 +1191,14 @@ is his call — and it is the same question he answered for Smooth Fahrt by hand
 "Jahrespreis, monatlich berechnet", or commission real annual billing with credit
 notes.
 
+**Q11 — the German wording of the four expiry mails. (§14.11)**
+Two to the customer, two to the operator, fixed in
+`supabase/functions/_shared/notification-mail.ts` like every other notification,
+so they must be his sentences. §14.2 bounds what the customer's two may say: they
+may name the date and the activation-code path, and must not say *verlängern* or
+*bezahlen*, because there is no payment path to send anyone to.
+*Blocks slice 5a — and it is the only thing that blocks it.*
+
 ### Engineering choices already made, for the record
 
 These are mine, taken on the repository's own precedents; he can overrule any of
@@ -1215,6 +1224,14 @@ them but none needs his input to proceed.
    (§7.3).
 10. **Bank statement import before SEPA or a provider** as the next step after
     the invoice is correct (§3.2).
+11. **The expiry reminder's two customer types are unconditional too**, extending
+    choice 9 beyond dunning, for the reason in §14.6(a) — a redirect is still
+    allowed, a switch is not.
+12. **The operator's alert does not live in `notification_deliveries`**, because
+    that table's claim refuses a suspended company and so would refuse exactly
+    the two measured cases (§14.6b).
+13. **The expiry window is 7 days, read off `CompanyBillingPage`'s own amber
+    threshold** rather than chosen, and held to it by a parity test (§14.3).
 
 ---
 
@@ -1264,3 +1281,543 @@ used where the quoting limit on the primary blocked the full list):**
 in §1 and §8.2 is `SELECT` only; the one write visible in the data
 (Smooth Fahrt's 19:04:26 coverage row) was somebody else's and is reported, not
 made.
+
+---
+
+## 14. The subscription-expiry reminder
+
+**Added 25.10.2026**, after §1–§13 were approved. It is numbered 14 rather than
+inserted beside §7, which is where it belongs conceptually, because §10 and §12
+cross-reference every section by number and renumbering would invalidate them.
+Read it as §7's sibling: §7 duns an **invoice**, this duns a **coverage
+period**, and §14.9 is the measurement that proves those are not the same thing.
+
+Every claim below carries its file and line or its production query. Read-only
+SQL was run against production (`ya-mobility-db-1`) on 25.10.2026.
+
+### 14.1 There is no expiry reminder of any kind, and the partial one was deleted
+
+```ts
+// supabase/functions/_shared/notification-core.ts:40
+export type NotificationType = 'tuev_bald_ablaufend' | 'tuev_abgelaufen';
+```
+
+Two types, both about a vehicle's TÜV. The two trial types went with the trial:
+`20261015170000_remove_free_trial.sql:196-217` deletes their
+`notification_deliveries`, `notification_recipients` and `notification_settings`
+rows, narrows both CHECK constraints and patches `notification_delivery_claim`'s
+`IN` list. Production's live constraint confirms it —
+`CHECK (notification_type = ANY (ARRAY['tuev_bald_ablaufend','tuev_abgelaufen']))`
+— so the two dead values are genuinely gone from the database, not merely from
+the TypeScript. **They are not to be resurrected**; there is no trial.
+
+What the gap costs, measured. Six of eighteen companies carry a
+`subscription_expires_at` at all; twelve are open-ended and have no occurrence to
+notify about:
+
+| company | status | subscription_status | expires | invoices | active admins |
+|---|---|---|---|---|---|
+| AT Autovermietung GmbH | suspended | expired | 2026-07-22 | **0** | 1 |
+| AK 95 GmbH# | suspended | expired | 2026-08-19 | **0** | 1 |
+| tester | suspended | active | 2026-10-13 | **0** | 1 |
+| Y&A Mobility | active | active | 2027-08-22 | 0 | 1 |
+| Dinari Transport | active | active | 2027-09-17 | 0 | 1 |
+| Smooth Fahrt GmbH | active | active | 2027-10-25 | 0 | 1 |
+
+Three expiries are in the past. Nobody was told about any of them. And
+`notification_deliveries` holds **one row in its entire history** — a TÜV
+warning claimed 05.10.2026 for `period_key` 2026-11-01, settled, `mail_sent`
+true, one recipient. So the machinery works, is installed, has run, and has
+simply never had an expiry type to carry.
+
+### 14.2 Both audiences, and the different job each one does
+
+**The owner's decision, 25.10.2026: both.** The premise he stated himself is
+that renewal is a manual act by the operator from the panel, and that premise is
+what makes the two notifications different rather than redundant:
+
+- **The customer** is told so the lapse is not a surprise. It **cannot** be told
+  to fix it, because there is nothing to fix it with — see below.
+- **The operator** is told so no company sits unreachable. This is the control
+  that was missing, and §14.10 shows it is the half that would have caught both
+  measured cases.
+
+**I agree, and the asymmetry matters more than the agreement.** The operator's
+alert is the load-bearing half: it is the only one of the two that fires for a
+company the product has administratively blocked, and both real cases are
+exactly that. A design that shipped only the customer's mail would read as
+solving this and would have caught neither.
+
+**What the customer may truthfully be told — measured, because the mail must not
+instruct them to do something that does not exist.** `/abo-aktivieren` is
+`ActivationPage`, and its one write is `redeem_activation_code`
+(`src/pages/ActivationPage.tsx:136`). Its own German says what it is:
+`'activation.subtitle'` — *"Geben Sie Ihren Aktivierungscode ein, um Ihr
+Abonnement freizuschalten."* (`src/i18n/de.ts:902`) — and
+`'activation.codeFromAdmin'` — *"Den Code erhalten Sie von Ihrem
+Administrator"* (`:906`). `CompanyBillingPage` offers no payment path either;
+its only two occurrences of *Zahlung* are the invoice table's heading
+(`src/pages/CompanyBillingPage.tsx:135,143`). So:
+
+- the mail **may** name the date access ends, name the activation-code path and
+  name a contact;
+- the mail **may not** say *verlängern*, *bezahlen* or *jetzt erneuern*, and may
+  not link to a renewal page, because there is none. An activation code is a
+  real path; a payment page is not.
+
+### 14.3 The window is 7 days, and it is the product's own number
+
+The TÜV window is 60 because `getTuevStatus()` already turns the badge amber at
+60 (`src/types/car.ts:43`), and the rule stated at
+`notification-core.ts:22-29` is that **the mail and the screen must not disagree
+about the same subject on the same day.** The same derivation exists here and was
+found rather than invented:
+
+```tsx
+// src/pages/CompanyBillingPage.tsx:378  (and again at :419)
+<Badge tone={daysRemaining <= 7 ? 'caution' : 'positive'}>
+```
+
+The Abo-Status screen already turns the Restlaufzeit amber at **7 days**, in two
+places. So `ABO_SOON_DAYS = 7`, derived from that threshold, with the same parity
+discipline the two lists held in two places already follow
+(`src/utils/planFeatures.test.ts`, `src/utils/rolePageKeys.test.ts`): a test
+reads the threshold out of `CompanyBillingPage`'s source and fails the build when
+the two part. Corroboration, not derivation: the deleted `TRIAL_SOON_DAYS` was
+also 7, from `TrialBanner`'s `days <= 7`.
+
+It is **passed into** the candidate query as an argument, never written in SQL —
+`20260924100000`'s decision 2, so there is one copy of the number.
+
+**Seven days is a short lead for a manual renewal, and the answer to that is not
+a wider window.** An invoice has to be raised, sent, paid by transfer and
+recorded by hand. If that does not fit, the fix is to raise the invoice earlier
+on the billing day (§10 slice 3) — because a mail that fires before the screen's
+own badge turns amber is precisely the disagreement the TÜV derivation exists to
+prevent. If the owner wants a longer lead anyway, the threshold and the constant
+move **together, in one commit**, so they stay one number.
+
+### 14.4 `period_key` is the Berlin calendar day of `companies.subscription_expires_at`
+
+Not the day of the run, and not the invoice's due date. Walk the cases, as
+`20260924100000`'s decision 1 does for the TÜV:
+
+- A company never renewed keeps the same `subscription_expires_at`, so its
+  occurrence is one and it is mailed **once** — not nightly for three months,
+  which is the failure worse than no feature.
+- A company renewed gets a new expiry from
+  `app_private.recompute_company_subscription`, the only writer of that column
+  (`20260919150000:356-432`). That is a new occurrence, so it is warned again
+  seven days before the new date and told again if that one lapses.
+- The "soon" and the "lapsed" types are **separate occurrences of the same
+  date**, exactly as the two TÜV types are, so a company warned at seven days is
+  still told on the day access ends.
+- `subscription_expires_at IS NULL` is open-ended access: **no occurrence,
+  nothing mailed.** Twelve of eighteen production companies, and it is why rule 1
+  of the recompute matters here.
+
+The column is `timestamptz` and `period_key` is CHECK'd to `^\d{4}-\d{2}-\d{2}$`
+(`20260924100000:170-171`), so it is the Berlin day of that instant —
+`toBerlinDay()` (`notification-core.ts:96-103`) already does exactly that
+reduction and already refuses a value that does not parse.
+
+### 14.5 Four type values, and that is forced rather than chosen
+
+Two occurrences × two audiences. The open question was whether the audience lives
+in `notification_type` or in `target_id`, and the existing claim function answers
+it mechanically:
+
+```sql
+-- 20260924100000_notification_delivery.sql:438-443
+IF p_target_id <> p_company_id
+   AND NOT EXISTS (SELECT 1 FROM public.cars v
+                    WHERE v.id = p_target_id AND v.company_id = p_company_id) THEN
+  RETURN NULL;
+```
+
+`target_id` must be the company or one of its cars; anything else is refused with
+a silent NULL. And `period_key` is CHECK'd to a date. **So the audience cannot go
+in either field, and it must go in `notification_type`** — four values, one per
+audience per occurrence. Were the audience not in the type, the first row claimed
+for an occurrence would make the other audience's claim return NULL, and one
+audience would silently suppress the other.
+
+Names: **`abo_bald_ablaufend`** and **`abo_abgelaufen`** for the customer, using
+the product's own `Abo` vocabulary, and **`platform_abo_bald_ablaufend`** and
+**`platform_abo_abgelaufen`** for the operator — in a store of their own, for the
+reason in §14.6.
+
+### 14.6 Where each audience's dedupe lives
+
+**(a) Neither new customer type is a `notification_settings` row, and this is the
+one place §7.3's rule is extended rather than applied.**
+
+§7.3 records it for dunning: *"a customer must not be able to switch its own
+dunning off."* `notification_settings` is written by the company's own
+administrators under `is_company_admin()`, and the master switch is real, not
+theoretical — production holds four rows across two companies, and **one of those
+companies has `email_global_enabled = false`**, which `notificationEnabled()`
+(`notification-core.ts:189`) honours by returning false for every type.
+
+An expiry reminder is dunning's sibling, not the TÜV's. The TÜV warning is about
+the customer's own asset and its consequence falls on the customer, so a switch
+is right. The expiry notice is about the commercial relationship, its consequence
+falls on **both** parties, and it lands on the operator's desk as a support call.
+So both customer types are unconditional, `NotificationsPage` is untouched, and
+there is no new row, no new label and no new dictionary key.
+
+**A redirect is still allowed, because a redirect is not a switch.** Both types
+go through `chooseCompanyRecipients` (`notification-recipients.ts:109-129`): the
+addresses listed for that kind, else the company's single `notification_email`,
+else the administrators. Both are added to
+`notification_recipients_type_check` and to `RECIPIENT_KINDS`
+(`notification-recipients.ts:61-65`), so a company can send its billing mail to
+the Buchhaltung while the TÜV goes to the Fuhrparkleiter. The cost — a listed
+address that is wrong receives nothing — is already accepted product-wide and
+stated at `notification-recipients.ts:11-15`.
+
+**(b) The operator's alert is not in `notification_deliveries` either, and the
+reason is the boundary, not taste.**
+
+Both existing entry points apply the same hard boundary —
+`notification_candidates` at `20260924100000:323-326` and
+`notification_delivery_claim` at `:431-436`:
+
+```sql
+WHERE c.approval_status = 'approved'
+  AND c.status IN ('active', 'trial')
+```
+
+**AT Autovermietung and AK 95 are `suspended`. So the claim returns NULL for
+exactly the two companies this section exists for.** Decision 3's reasoning for
+that boundary is sound and is about mail *to the customer* — *"Suspension in
+particular is an administrative block, and mailing through it would undo it"* —
+it is simply not the operator's boundary. Putting two boundaries in one claim
+function means a per-type branch in a function whose boundary is currently one
+uniform rule, pinned by a self-check.
+
+Two further reasons, each independent of the first:
+
+- `notification_deliveries`' SELECT policy is the ordinary tenant shape, so a
+  company would read the rows recording that El-Professor had been warned about
+  it — and an **expired** company could not, because `get_active_company_id()`
+  answers NULL, which is the absurd half: the rows it could never see are exactly
+  the ones about it.
+- `company_id` is `REFERENCES companies(id) ON DELETE CASCADE` (`:154`). A hard
+  delete would take the record of three months of operator warnings with it.
+  `target_id` deliberately carries no foreign key for precisely this reason
+  (`:156-158`, *"a car deleted after its warning must not take the record of that
+  warning with it"*); this is the same argument one level up.
+
+**Engineering choice made:** `app_private.platform_alert_deliveries
+(id, alert_type, subject_type, subject_id, period_key, claimed_at, settled_at,
+mail_sent, recipient_count)` with `UNIQUE (alert_type, subject_type, subject_id,
+period_key)`, no foreign key on `subject_id`, the four `app_private` rules of
+CLAUDE.md's *`app_private`* section (REVOKE from `PUBLIC, anon, authenticated`;
+its own REVOKE; `LANGUAGE plpgsql` with a pinned `search_path`; outcomes as
+return values), and a claim/settle pair granted to `service_role` alone.
+`subject_type` is there so a later operator alert about something that is not a
+company needs no second table.
+
+**This is "do not build a parallel system" applied, not broken.** The decision
+logic stays one pure module, the claim-before-send order is the same, the edge
+function is the same and the cron tick is the same. What is not reused is the
+*tenant* delivery table and the *tenant* boundary, because an operator alert is
+not a tenant notification.
+
+**The one-table alternative, with its cost, so the trade is visible rather than
+asserted:** keep all four types in `notification_deliveries` and give
+`notification_delivery_claim` a per-type boundary — roughly six lines, with both
+arms pinned by the self-check. It buys one table, one settle and one report. It
+costs the cascade, the tenant SELECT, and a hole in a uniform boundary. Taken the
+other way for the three reasons above; if a later reader reverses it, **the
+cascade is the one that must be answered first.**
+
+### 14.7 Where the operator's recipients come from
+
+Platform staff sit in **no company**, so `selectActivationCodeRecipients`'
+company branch cannot serve them. Measured: `app_private.platform_staff` holds
+two rows on production — `super@professor.com` (`owner`, active) and
+`admin@yamobility.de` (`owner`, disabled).
+
+The precedent for reading a staff address already exists and is pinned.
+`platform_staff_list` (`20260920140000:148-153`) joins `auth.users` and reads
+**only** `id` and `email`, and its self-check *"fails a release that reads another
+column"* (`:84-85`). But that read model is `authenticated`-only, asks
+`staff.manage` and needs an `auth.uid()`; the job is a cron line holding the
+service key and has none. So it needs a sibling:
+`public.platform_alert_recipients()`, `service_role` only, SECURITY DEFINER, the
+same two-column discipline and the same self-check copied.
+
+**Which roles — derived, not invented.** The active staff rows that hold
+**`billing.manage`**, which is `owner` and `billing`
+(`20260916110000:166-167`), and which `20260923110000:310-311` asserts `support`
+and `read_only` do **not** hold. That is already the capability that reads an
+invoice and a subscription (`20260924110000`, decision D14), so the alert goes to
+the set that may already read the money, and inventing a `billing.notify` would
+decide open questions D2 and D3 by accident. The function reads the pairs out of
+`app_private.platform_capability_matrix()` rather than writing the two role names
+down again, so changing who may do what stays one migration replacing one
+function.
+
+A disabled row receives nothing. **A company whose only owner's account is
+unconfirmed, banned or deleted receives nothing and the claim is settled with
+`mail_sent = false`**, as `deliverOne` already does
+(`notification-delivery.ts:205-210`), so the job does not come back to it
+nightly. Measured for the three companies in §14.1: each has exactly one active
+admin, and all three accounts are confirmed, unbanned and undeleted — so the
+customer's half would have had a recipient in every case.
+
+### 14.8 One mail per company, not a digest — and the point at which that changes
+
+**Recommendation: per company, one mail per occurrence, on the claim machinery.**
+It is the only shape that keeps *one mail per fact*, and it needs no new dedupe
+rule. A digest's natural key is the **day of the run**, which is exactly what
+decision 1 forbids, and for a good reason: a digest keyed on the day either
+repeats last night's companies or needs a second rule to decide what is new.
+
+The measured volume says this is not a close call. Three companies with a future
+expiry, three with a past one, and one row in `notification_deliveries` in the
+product's history. At six customers a mail each is nothing.
+
+**When it should change, and how.** When one run would send the operator more
+than roughly ten alerts — or when the customer count passes roughly fifty, the
+same threshold §3.2 uses for SEPA — add the digest as a **rendering of the run,
+never as a new dedupe key.** The per-company rows still claim and settle exactly
+as now; the digest is built from the rows *this run* claimed and sent, in place
+of N mails. The dedupe rule never becomes the day of the run, and the change is
+purely additive. The realistic cause is monthly billing with every contract on
+`billing_day` 1, which bunches every expiry on one date — so this is worth
+re-measuring when slice 2 fills in the seventeen missing contracts.
+
+### 14.9 How this relates to dunning — two mechanisms, settled by measurement
+
+**The measurement that settles it: AT Autovermietung has 0 invoices. AK 95 has
+0 invoices.** Production holds two invoices in total and both belong to MoveNow
+(§1.1). §7.2's schedule counts every stage from an invoice's `due_date` — so
+**there is no invoice to count from for either company this section exists for**,
+and dunning alone would have left both cases exactly as they were. That is the
+whole argument for two mechanisms rather than one.
+
+They cannot collide in the unique constraint, because they key on different
+facts:
+
+| | dunning (§7.3) | expiry reminder (§14.4) |
+|---|---|---|
+| the fact | an invoice was not paid | a coverage period ends |
+| `target_id` | the invoice id | the company id |
+| `period_key` | the invoice's `due_date` | `companies.subscription_expires_at` |
+| exists today without an invoice? | **no** | **yes** |
+
+**The overlap, and the suppression rule.** Once slices 1–3 land, a company with
+an invoice has both — and the two dates coincide, because the invoice's grace end
+*is* its coverage end. Measured from the live catalogue:
+
+```sql
+-- app_private.invoice_grace_end, read from production's pg_proc
+RETURN app_private.add_business_days(p_due_date,
+         app_private.subscription_grace_business_days())::timestamp
+         AT TIME ZONE 'Europe/Berlin';
+```
+
+So the customer would get a Mahnung naming `grace_end` and an expiry reminder
+naming the same day.
+
+- **Dunning wins, for the customer.** When the coverage row that decides access
+  has `source = 'invoice'`, the customer's two expiry types stand down: the
+  Mahnung already names the date, the amount and what to do, and two mails about
+  one date read as a system that does not know what it has sent. The term lives
+  in the pure module beside the status term, not in a SQL join — the place
+  decision 3 already put the subscription question.
+- **The operator's alert does not stand down.** Its job is *"no company sits
+  unreachable"*, and a dunned company that never pays is precisely such a
+  company. It is one mail per occurrence either way, so it is not noise.
+
+**And the build order follows from this, not from preference.** This section needs
+no invoice, no VAT, no numbering, no contract and no settings key. Dunning needs
+all of them. So this is the cheaper half and it goes first.
+
+### 14.10 What the mechanism would have done, in the two measured cases
+
+The cheapest test of whether this design solves the problem it was written for.
+Every date below is arithmetic over the measured expiry and the installed 07:10
+run.
+
+**Smooth Fahrt GmbH — expired 16.09.2026, unnoticed for five weeks.** It was
+`approval_status = 'approved'` with `companies.status = 'active'` throughout
+(§1.2 shows `subscription_status = 'expired'` beside an unchanged `status`), so
+it is inside the customer boundary and **both** halves fire:
+
+| date | what fires | to whom |
+|---|---|---|
+| 09.09.2026 | `abo_bald_ablaufend`, `period_key` 2026-09-16 | the company's admin (confirmed address, measured) |
+| 09.09.2026 | `platform_abo_bald_ablaufend`, same `period_key` | the owner |
+| 17.09.2026 | `abo_abgelaufen` and `platform_abo_abgelaufen`, same `period_key` | both |
+| every night after | **nothing** — all four occurrences are claimed | — |
+| 25.10.2026 | the hand-typed coverage row moves the expiry to 2027-10-25: a **new** occurrence, so the company is warned again on 18.10.2027 | both |
+
+Five weeks becomes seven days of warning and one day of notice.
+
+**AT Autovermietung GmbH — expired 22.07.2026, unnoticed for three months.**
+`suspended` and `expired`, 0 invoices:
+
+| date | what fires | to whom |
+|---|---|---|
+| 15.07.2026 | `platform_abo_bald_ablaufend`, `period_key` 2026-07-22 | the owner |
+| 23.07.2026 | `platform_abo_abgelaufen`, same `period_key` | the owner |
+| 15.07. / 23.07. | the customer's two types **only if `status` was still `active` on that day** | the company's admin, otherwise nobody |
+| every night after | nothing | — |
+
+Three months becomes one day — **and only because of §14.6(b).** Had the
+operator's dedupe ridden `notification_delivery_claim`, every row above would
+have returned NULL and this case would be unchanged. That is §14.6(b)'s
+justification in one line.
+
+**The customer's half of that case cannot be replayed exactly, and that is a
+finding rather than a gap in the arithmetic.** It depends on when the suspension
+was imposed, and `companies` records neither a reason nor a time: its only
+relevant columns are `status`, `approval_status`, `rejection_reason` and
+`subscription_status` (measured — there is no `suspension_reason` and no
+`suspended_at`). §2.6 already names the missing reason column; **this adds that
+there is no timestamp either**, so "was it suspended before or after it expired"
+is unanswerable for any company today. It is a second argument for §2.6's
+`suspension_reason`, and an argument for a `suspended_at` beside it.
+
+**Two cases the brief did not name, which the same mechanism catches:**
+
+- **AK 95 GmbH# — expired 19.08.2026**, same shape, 0 invoices: the operator is
+  told on 20.08.2026 instead of two months later.
+- **`tester` — `subscription_status = 'active'` with an expiry of 2026-10-13,
+  twelve days in the past today.** It is §8.2's one company, and `suspended`, so
+  only the operator's half fires. It is the live instance of the failure, right
+  now, unresolved.
+
+### 14.11 Where it sits in the slice plan
+
+**Slice 5a, ahead of slice 5, and independent of slices 1–4.** It reads
+`companies.subscription_expires_at`, which the recompute already maintains as its
+only writer, and it needs nothing else from this document. So it is the cheapest
+change here that closes the measured failure, and it is the **only slice in §10
+or §14 that is not blocked on §12** — bar its wording.
+
+**Its one decision, for §12 as Q11** (not an edit to Q6, which is dunning's): the
+German wording of the four mails. Fixed in
+`supabase/functions/_shared/notification-mail.ts` like every other notification —
+its `switch` on `item.type` (`:73-102`) gains four cases — so they must be the
+owner's sentences, and §14.2 bounds what the customer's two may say.
+
+**Migration — one file.** Its number must be re-checked against the union of
+`staging` and every open branch immediately before pushing; §10's warning has
+fired three times.
+
+- Widen `notification_deliveries_type_check` and
+  `notification_recipients_type_check` by the two customer types, and patch
+  `notification_delivery_claim`'s `IN` list. `20261015170000:205-217` is the
+  technique, splicing the function body from the catalogue rather than restating
+  it.
+- `public.abo_expiry_candidates(p_soon_days integer, p_limit integer, p_after uuid)` —
+  `service_role` only, SECURITY DEFINER, `SET search_path = pg_catalog, public`,
+  REVOKE from `PUBLIC, anon, authenticated`. Boundary
+  `approval_status = 'approved' AND status NOT IN ('archived','deleted')`,
+  narrowed to `subscription_expires_at IS NOT NULL AND subscription_expires_at <
+  now() + make_interval(days => p_soon_days)`, and returning the claimed rows
+  from **both** stores. **`notification_candidates` is not touched** — its
+  decision-3 boundary and its self-check 6 stay exactly as they are, and that is
+  the main benefit of a second function over a widened one. Note in passing that
+  `notification_candidates`' own narrowing is already wider than it needs to be:
+  its `c.trial_end IS NOT NULL` arm (`:327`) admits **15 of 18** production
+  companies every night for a column nothing reads any more. Harmless, and a
+  trap — an expiry term must not be left to ride it.
+- `app_private.platform_alert_deliveries` and its claim/settle pair (§14.6b).
+- `public.platform_alert_recipients()` (§14.7).
+
+**The pure module.** The arithmetic goes in `notification-core.ts` beside
+`selectNotifications`, with the per-type terms where decision 3 put the
+subscription question: the customer's two additionally require
+`status = 'active'`, the operator's two do not, and the customer's two stand down
+under §14.9's dunning rule. No Deno, `npm:` or `jsr:` import, so vitest runs it.
+
+**Gates.**
+
+- **Migration self-check:** the three new functions are `service_role`-only with
+  a pinned `search_path` (`20260924100000:565-592`'s shape);
+  `notification_candidates`' `prosrc` is **unchanged**, compared against its
+  recorded text, so a release that widens it instead of adding a function fails;
+  the new candidate function names neither `get_active_company_id` nor
+  `platform_reads_company_data`; `platform_alert_recipients` reads no
+  `auth.users` column but `id` and `email` (`20260920140000`'s self-check,
+  copied); the capability it asks is `billing.manage` and is read from
+  `platform_capability_matrix()`; `platform_alert_deliveries` is unreachable by
+  `anon`, `authenticated` and `service_role`'s USAGE on the schema.
+- **`tests/rls/abo-expiry-notifications.sql`:** the claim refuses a suspended
+  company for a customer type and the operator's store admits it; the unique
+  constraint refuses a second claim of one occurrence and **admits the other
+  audience's**, which is §14.5's whole point; an extended expiry is a new
+  occurrence; a NULL expiry yields nothing; `anon`, `authenticated` and
+  `postgres` reach neither new store nor either new function; the recipient
+  function answers `owner` and `billing`, not `support` or `read_only`, and skips
+  a disabled row. **A mutation control on each**, per this repository's
+  discipline — in particular one that removes the per-type status term and must
+  be watched showing a suspended company receiving customer mail.
+- **`matrix.sql`:** rpc lines for the two new `public` functions. The
+  `app_private` table is outside that file's scope by construction, since it
+  probes `public` and `storage` — stated here so its absence is not read as an
+  omission.
+- **vitest:** `notification-core` cases for all four types; the window boundary
+  at exactly 7 and at 8 days; the dunning suppression; and the parity test of
+  §14.3 that reads `CompanyBillingPage`'s threshold out of its source.
+- **No host step, and no new cron line.** It rides the tick that already runs:
+  `/etc/cron.d/el-professor-notifications`, `10 7 * * *` — **07:10**, on both
+  stacks, each line guarded on its own `PROJECT_NAME` and `flock`ed. This is the
+  one thing in this document that needs no new "yes" from the owner. §7.4 still
+  applies: test with `@example.com` addresses only, and watch the first
+  production run — on the measured data it would plan at most a handful of mails,
+  and `{"mode":"dry_run"}` reads the same rows, builds the same mails and writes
+  nothing (`notify-expiries/index.ts:46-52`).
+- **No `SCHEMA_EPOCH` bump:** every change is additive, and the previous release
+  neither reads nor writes any of it.
+
+### 14.12 What I would not build here
+
+- **A `notification_settings` row for either customer type.** §14.6(a). A
+  reminder a customer can switch off is not a reminder, and one production
+  company has already switched everything off.
+- **A digest as the dedupe unit.** §14.8. Its key would be the day of the run,
+  which decision 1 forbids. The digest comes later, as a rendering of a run whose
+  rows are already deduped per occurrence.
+- **Any mail that tells a customer to renew or to pay.** §14.2. There is no
+  payment path to send them to; naming one would be a promise the product cannot
+  honour.
+- **Widening `notification_candidates`' boundary.** §14.11. It would mail a
+  suspended company about its TÜV, which decision 3 refuses on purpose.
+- **An alert about a company whose `status` is `archived` or `deleted`.** Those
+  are an operator's own terminal acts, not a surprise to be reported back.
+- **Automatic suspension, or automatic reactivation, on an expiry.** §7.2 rule 2
+  and §2.6 already settle both; a notification must not acquire a side effect.
+- **Making the wording editable from the panel.** A `mail.template.*` key means
+  restating `app_private.platform_settings_problem` with every existing branch
+  carried over character for character — a slice of its own, exactly as
+  `20260924100000`'s *"Not in this slice"* says.
+
+### 14.13 Three corrections to §7.1, found while measuring this
+
+§7.1 summarises the notification machinery. Three of its claims are out of date,
+and each matters to anyone building from it:
+
+1. **The cron line is at 07:10, not 10:07.** `/etc/cron.d/el-professor-notifications`
+   reads `10 7 * * *`, and cron's fields are minute then hour. (The file's own
+   header comment is also stale — it says *"The production line is deliberately
+   absent"* while the production line sits two lines below it, added 04.10.2026.)
+2. **Recipients are a three-step precedence, not just the administrators.** Since
+   `20261015140000` and `20261015100000` it is: the addresses listed for that
+   kind in `notification_recipients`, else `company_settings.notification_email`,
+   else the company's active non-staff `admin` profiles with a confirmed account
+   (`notification-recipients.ts:109-129`). Measured on production: 4
+   `notification_recipients` rows and 1 company with a `notification_email`. A
+   customer-facing expiry type inherits that precedence for free, and §14.6(a)
+   says it should.
+3. **`notify-expiries` is three jobs behind one door, not one.** `{"job":"abrechnung"}`
+   and `{"job":"uber_pull"}` ride the same function and the same tick
+   (`notify-expiries/index.ts:20-35`). A fourth job is not what §14 needs — the
+   expiry types are the TÜV job's own siblings and belong in its run — but anyone
+   reading §7.1 should know the door is shared.
