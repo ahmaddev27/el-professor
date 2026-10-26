@@ -62,5 +62,20 @@ bash.exe.stackdump
 # 898 KB of a real customer's ride export and a simulated Fahrtenbuch, neither
 # of which belongs in version control. Put a sample under tests/fixtures/ with
 # a name that says what it is, or keep it outside the checkout.
-/*.xlsx
+# The two rules below were ROOT-ONLY (the leading slash), so a workbook one
+# directory down was never ignored: on 26.10.2026 `corection/` held a real
+# Fahrtenbuch export and one `git add -A` would have published it, which is
+# the same accident as 22.10 with the subdirectory left open. This repository
+# is public. So: any spreadsheet, anywhere, unless it is a named fixture.
+*.xlsx
+*.xlsm
+*.xls
+*.csv
 SIMULIERT_*.xlsx
+# A fixture is opted IN by path, so a sample with a name that says what it is
+# stays in version control and nothing else does.
+!tests/fixtures/**/*.xlsx
+!tests/fixtures/**/*.csv
+!src/**/__fixtures__/**/*.csv
+# The owner's own working folder: audit reports, prompts and real exports.
+corection/
