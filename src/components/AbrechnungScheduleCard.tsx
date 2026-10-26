@@ -15,6 +15,12 @@ import {
   REMINDER_LEAD_MAX_MINUTES,
   REMINDER_LEAD_MIN_MINUTES,
 } from '../../supabase/functions/_shared/abrechnung-schedule-core';
+import {
+  summariseReminderRoster,
+  type ReminderRosterSummary,
+} from '../../supabase/functions/_shared/abrechnung-reminder-core';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect } from './ui';
 
 /**
@@ -45,10 +51,23 @@ interface ScheduleForm {
   weekday: number;
   /** `HH:MM`, the value an `<input type="time">` holds. */
   time: string;
-  /** Remind a driver who recorded nothing, `reminderLead` minutes before the driver mail. */
+  /** Remind every active driver, `reminderLead` minutes before the driver mail. */
   reminder: boolean;
   reminderLead: number;
 }
+
+/**
+ * What the reminder reaches, counted from the company's roster.
+ *
+ * **Why it is a second read and not part of the preview**: the preview
+ * (`abrechnung_schedule_preview`) is built from the WEEK's bookings, so a driver
+ * with no bookings is in none of its buckets. The reminder's audience is the
+ * roster, not the week, and an active driver with no address therefore received
+ * nothing with nobody told — measured on production 26.10.2026 (one at Y&A
+ * Mobility, 20 across six companies). `null` means not loaded; `'failed'` is
+ * shown as a failure, never as a count of zero.
+ */
+type RosterState = ReminderRosterSummary | 'failed' | null;
 
 const DEFAULTS: ScheduleForm = {
   driverMail: false, managerSummary: false, weekday: 1, time: '08:00',
@@ -89,6 +108,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
   /** When the stored row last changed: a moment at or before it never fires (the job's rule 3). */
   const [armedAt, setArmedAt] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: 'idle' });
+  const [roster, setRoster] = useState<RosterState>(null);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -137,6 +157,41 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
   }, [saved]);
 
   useEffect(() => { loadPreview(); }, [loadPreview]);
+
+  // The roster behind the reminder. Only asked for when the saved schedule
+  // actually reminds, so a company that does not use it pays no query.
+  const remindsNow = Boolean(saved?.reminder && saved?.driverMail);
+  const loadRoster = useCallback(async () => {
+    if (!companyId || !remindsNow) { setRoster(null); return; }
+    try {
+      // Paged: PostgREST caps a select at 1000 rows and reports no error when
+      // it truncates, and a truncated roster would understate every figure here.
+      //
+      // The status filter is in the QUERY, which is where `driverStatus.ts` says
+      // a chooser's boundary belongs. All three lines this feeds speak about
+      // ACTIVE drivers and none of them reports anything about a deactivated
+      // one, so the narrower read makes them true by construction instead of by
+      // a discard in the browser — and it stops fetching the address of every
+      // driver who will never be mailed. `summariseReminderRoster` applies the
+      // same test again because the JOB reads every driver (it has to count the
+      // deactivated for its own report); for this card that is a second wall.
+      const rows = await fetchAllPaginated<{ status: string | null; email: string | null }>(
+        (from, to) => supabase
+          .from('drivers')
+          .select('status, email')
+          .eq('company_id', companyId)
+          .eq('status', ACTIVE_DRIVER_STATUS)
+          .order('id')
+          .range(from, to),
+        { batchSize: 500, maxRows: 20_000 },
+      );
+      setRoster(summariseReminderRoster(rows));
+    } catch {
+      setRoster('failed');
+    }
+  }, [companyId, remindsNow]);
+
+  useEffect(() => { loadRoster(); }, [loadRoster]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -262,6 +317,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
           armedAt={armedAt}
           loading={loading}
           preview={preview}
+          roster={roster}
           dirty={JSON.stringify(form) !== JSON.stringify(saved ?? DEFAULTS)}
           onRetry={loadPreview}
         />
@@ -297,6 +353,7 @@ interface SchedulePreviewProps {
   armedAt: string | null;
   loading: boolean;
   preview: PreviewState;
+  roster: RosterState;
   dirty: boolean;
   onRetry: () => void;
 }
@@ -305,7 +362,9 @@ interface SchedulePreviewProps {
  * The statement of what the next send does. An empty preview and a confident
  * "0 drivers" are different claims: a failed load shows the failure and no figure.
  */
-const SchedulePreview: React.FC<SchedulePreviewProps> = ({ saved, armedAt, loading, preview, dirty, onRetry }) => {
+const SchedulePreview: React.FC<SchedulePreviewProps> = ({
+  saved, armedAt, loading, preview, roster, dirty, onRetry,
+}) => {
   const { t } = useTranslation();
   if (loading) return null;
 
@@ -330,8 +389,54 @@ const SchedulePreview: React.FC<SchedulePreviewProps> = ({ saved, armedAt, loadi
     <section aria-live="polite" className="grid grid-cols-1 gap-2 rounded-md border border-border bg-canvas p-4 text-sm text-fg">
       <h3 className="font-medium">{t('settings.abrSchedule.preview.title')}</h3>
       {body}
+      {/* Outside `body`: the roster is read separately, so a failed week
+          preview must not also hide who the reminder reaches. */}
+      {saved?.reminder && saved?.driverMail && <ReminderRoster roster={roster} />}
       {dirty && <p className="text-xs text-fg-subtle">{t('settings.abrSchedule.preview.savedNote')}</p>}
     </section>
+  );
+};
+
+/**
+ * Who the reminder reaches, and who it cannot reach.
+ *
+ * The two silences it exists to break: an active driver with no address gets
+ * nothing, and an address two drivers share gets one mail rather than two. Both
+ * were invisible — the first in a run counter nobody reads, the second not
+ * reported at all. A failed read says so instead of printing a zero, because
+ * "no driver is missing an address" is a claim.
+ */
+const ReminderRoster: React.FC<{ roster: RosterState }> = ({ roster }) => {
+  const { t, tPlural } = useTranslation();
+  if (roster === null) return null;
+  if (roster === 'failed') {
+    return <p className="text-fg-subtle">{t('settings.abrSchedule.reminder.rosterFailed')}</p>;
+  }
+  return (
+    <>
+      <p>
+        {t('settings.abrSchedule.reminder.rosterReach', {
+          reachable: roster.reachable, active: roster.active,
+        })}
+      </p>
+      {/* `caution` on `canvas` is a pair `tokens.contrast.test.ts` already pins. */}
+      {roster.noAddress > 0 && (
+        <p className="text-caution">
+          {tPlural({
+            one: 'settings.abrSchedule.reminder.rosterNoAddressOne',
+            other: 'settings.abrSchedule.reminder.rosterNoAddressOther',
+          }, roster.noAddress)}
+        </p>
+      )}
+      {roster.sharedAddresses > 0 && (
+        <p className="text-fg-subtle">
+          {tPlural({
+            one: 'settings.abrSchedule.reminder.rosterSharedOne',
+            other: 'settings.abrSchedule.reminder.rosterSharedOther',
+          }, roster.sharedAddresses)}
+        </p>
+      )}
+    </>
   );
 };
 
