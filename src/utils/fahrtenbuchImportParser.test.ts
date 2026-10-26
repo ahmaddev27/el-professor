@@ -222,7 +222,7 @@ describe('absolute times', () => {
 
     it('reproduces the one production row this corrects, to the second', () => {
       // Production row 0ba35175-1c75-4ad0-884a-36e65dfb30b1 (read-only, 23.10.2026):
-      // vehicle SG-YA14, assigned driver Mhmoud Zedya, trip_date 2026-03-29,
+      // vehicle SG-YA14, assigned driver withheld, trip_date 2026-03-29,
       // start_at 00:42:40Z, end_at 01:01:46Z, duration_minutes 79 stored
       // against 19.10 minutes elapsed. Both wall times fall inside 00:00–04:00
       // on a Sunday. The stored row is NOT changed by this fix — the column is

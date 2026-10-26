@@ -14,7 +14,7 @@ import { resolveMailLanguage, type MailLanguage } from './mail-language.ts';
 const abrechnung = (language: MailLanguage, over: Partial<AbrechnungMailInput> = {}) =>
   renderAbrechnungMail({
     language,
-    driverName: 'Ahmed Hemaid',
+    driverName: 'Nora Vogt',
     companyName: 'Y&A Mobility',
     periodLabel: 'Woche 5 - August 2026',
     periodRange: '31.08.2026 – 06.09.2026',
@@ -25,7 +25,7 @@ const abrechnung = (language: MailLanguage, over: Partial<AbrechnungMailInput> =
 
 const reminder = (language: MailLanguage) => renderReminderMail({
   language,
-  driverName: 'Ahmed Hemaid',
+  driverName: 'Nora Vogt',
   companyName: 'Y&A Mobility',
   periodLabel: 'Woche 5 - August 2026',
   periodRange: '31.08.2026 – 06.09.2026',
@@ -65,7 +65,7 @@ describe('English', () => {
   it('is written in English with the credit and the owed cases told apart', () => {
     const owing = abrechnung('en');
     expect(owing.subject).toBe('Settlement Week 5 - August 2026 – Y&A Mobility');
-    expect(owing.text).toContain('Hello Ahmed Hemaid,');
+    expect(owing.text).toContain('Hello Nora Vogt,');
     expect(owing.text).toContain('To hand in: 1.394,95 €');
     expect(owing.html).not.toContain('Abzugeben');
     const credit = abrechnung('en', {
@@ -110,9 +110,9 @@ describe('Arabic', () => {
 
   it('isolates names so Latin text cannot reorder the sentence', () => {
     const { html, text } = abrechnung('ar');
-    expect(html).toContain('<bdi>Ahmed Hemaid</bdi>');
+    expect(html).toContain('<bdi>Nora Vogt</bdi>');
     expect(html).toContain('<bdi>Y&amp;A Mobility</bdi>');
-    expect(text).toContain('⁨Ahmed Hemaid⁩');
+    expect(text).toContain('⁨Nora Vogt⁩');
     expect(text).toContain('⁦1.506,95 €⁩');
   });
 

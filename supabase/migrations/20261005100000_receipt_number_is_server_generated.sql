@@ -36,8 +36,12 @@
   Two pairs inside our own shape collide, and both are a double submit, not two
   receipts:
 
-    BEL-1770624209411-6879  Mhmoud Zedya     28.01.2026  44,96 EUR  Tanken
-    BEL-1771166119677-4654  Ayman Alyoussef  14.01.2026  30,00 EUR  Straffe
+    BEL-1770624209411-6879  driver A  28.01.2026  44,96 EUR  Tanken
+    BEL-1771166119677-4654  driver B  14.01.2026  30,00 EUR  Straffe
+
+  (The two drivers are real people at one company and are not named here; this
+  repository is public. The Belegnummern below are what the index and the
+  self-check key on, and they are the only identifiers this migration needs.)
 
   Every field of each pair is identical and the two rows were created **118 ms
   and 41 ms apart**. Both are `payment_method = 'bar'`, so both sit in

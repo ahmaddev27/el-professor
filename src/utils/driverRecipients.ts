@@ -48,7 +48,7 @@ export interface RecipientPlan {
 /**
  * The comparison key for a name.
  *
- * Case and inner spacing are noise — "Ahmed  Hemaid" and "ahmed hemaid" are one
+ * Case and inner spacing are noise — "Nora  Vogt" and "nora vogt" are one
  * person in anybody's reading. Everything else is kept: accents and non-Latin
  * letters are part of a name, and folding them would make two different people
  * one.
