@@ -8,6 +8,12 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { pageWriteRights } from '../lib/pageWriteRights';
 import {
+  ACTIVE_DRIVER_STATUS,
+  DEACTIVATED_DRIVER_STATUS,
+  isDeactivatedDriver,
+  selectableDrivers,
+} from '../utils/driverStatus';
+import {
   Badge,
   Button,
   Card,
@@ -37,8 +43,13 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | undefined>();
 
-  const activeDrivers = drivers.filter(d => d.status === 'active');
-  const inactiveDrivers = drivers.filter(d => d.status === 'inactive');
+  // The partition is total: `selectableDrivers` keeps everything not known to
+  // be deactivated, so the two lists together are always every driver. The
+  // earlier pair of `=== 'active'` / `=== 'inactive'` tests left a row whose
+  // status the read did not carry in neither list, and this screen is the one
+  // place a deactivated driver has to be visible.
+  const activeDrivers = selectableDrivers(drivers);
+  const inactiveDrivers = drivers.filter(isDeactivatedDriver);
 
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
@@ -72,7 +83,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   };
 
   const handleToggleStatus = (driver: Driver) => {
-    const newStatus = driver.status === 'active' ? 'inactive' : 'active';
+    const newStatus = isDeactivatedDriver(driver) ? ACTIVE_DRIVER_STATUS : DEACTIVATED_DRIVER_STATUS;
     // No contact argument: this toggles the status and must not rewrite anything
     // else. `updateDriver` leaves both columns alone when none is passed, which is
     // what keeps a status change from clearing an address nobody touched.
@@ -164,7 +175,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
     ) : null;
 
   const statusBadge = (driver: Driver) =>
-    driver.status === 'active' ? (
+    !isDeactivatedDriver(driver) ? (
       <Badge tone="positive">
         <UserCheck aria-hidden />
         {t('overview.status.active')}
@@ -241,18 +252,18 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const rowActions = (driver: Driver) => (
     <>
       {canEdit(driver) ? (
-        <Tooltip content={driver.status === 'active' ? t('fleet.deactivate') : t('fleet.activate')}>
+        <Tooltip content={isDeactivatedDriver(driver) ? t('fleet.activate') : t('fleet.deactivate')}>
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label={
-              driver.status === 'active'
-                ? t('fleet.deactivateDriverAria', { name: driver.name })
-                : t('fleet.activateDriverAria', { name: driver.name })
+              isDeactivatedDriver(driver)
+                ? t('fleet.activateDriverAria', { name: driver.name })
+                : t('fleet.deactivateDriverAria', { name: driver.name })
             }
             onClick={() => canEdit(driver) && handleToggleStatus(driver)}
           >
-            {driver.status === 'active' ? <PowerOff aria-hidden /> : <Power aria-hidden />}
+            {isDeactivatedDriver(driver) ? <Power aria-hidden /> : <PowerOff aria-hidden />}
           </Button>
         </Tooltip>
       ) : null}
@@ -320,9 +331,17 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           />
         )}
 
-        {/* Where "delete" used to be. A driver who leaves is deactivated, never
-            removed: salaries, receipts and the ride history reference them. */}
+        {/* Where "delete" used to be, and this is the permanent answer (owner,
+            25.10.2026), so the sentence says both halves: what survives, and
+            what deactivating actually does. The first half is not a
+            reassurance — eight foreign keys CASCADE off `drivers`, one of them
+            `salary_cash_receipts`, whose GQ-YYYY-NNNN numbers are gapless per
+            company and year and go to a Steuerberater. The second half is new
+            behaviour a user has to be told about: a deactivated driver leaves
+            every selection list, the monthly plan and the Fahrtenbuch among
+            them. */}
         <p className="text-sm text-fg-muted">{t('fleet.deactivateNotDelete')}</p>
+        <p className="text-sm text-fg-muted">{t('fleet.deactivateHidesFromLists')}</p>
       </div>
 
       <DriverModal

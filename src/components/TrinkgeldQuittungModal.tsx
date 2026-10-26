@@ -9,6 +9,7 @@ import type { CompanySettings } from '../types/settings';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import { amountInWordsFromCents } from '../utils/germanAmountInWords';
 import { formatCentsDe, formatCentsForInput, toCents } from '../utils/money';
 import { parseQuittungAmountCents } from '../utils/quittungAmount';
@@ -319,7 +320,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
       .from('drivers')
       .select('id, name, gender')
       .eq('company_id', companyId)
-      .eq('status', 'active')
+      // A chooser: the driver a new Trinkgeld-Quittung is issued to.
+      .eq('status', ACTIVE_DRIVER_STATUS)
       .order('name')
       .then(({ data }) => {
         const list = (data ?? []).map(d => ({

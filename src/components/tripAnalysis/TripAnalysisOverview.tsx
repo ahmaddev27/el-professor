@@ -96,6 +96,14 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
           </Button>
           <span className="mt-1 flex flex-wrap gap-1">
             {row.linked ? <BudgetStateBadge state={row.budgetState} /> : <Badge tone="caution">{t('ta.notLinked')}</Badge>}
+            {/* The row stays: these rides were driven. The badge is so the
+                figures are not read as a current driver's. */}
+            {row.deactivated ? (
+              <Badge tone="neutral">
+                <UserX aria-hidden />
+                {t('overview.status.inactive')}
+              </Badge>
+            ) : null}
           </span>
         </span>
       ),
