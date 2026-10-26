@@ -124,6 +124,19 @@ export interface PlatformInvoiceQuote {
   companyId: string;
   firstInvoice: boolean;
   amountCents: number;
+  /**
+   * The cars the company runs — the quantity `amountCents` was computed from
+   * since `20261026110000`, where it used to be
+   * `companies.subscription_car_limit`, a number somebody typed.
+   *
+   * **Null means "the answer did not carry it", never "no cars".** It is
+   * informational: the amount beside it is already validated, so an absent or
+   * unusable count must not make `parseInvoiceQuotes` refuse the batch —
+   * refusing is how a generation run creates nothing and says nothing, which is
+   * the failure that comment warns about. A screen printing this must print the
+   * null case as unknown and never as 0.
+   */
+  activeCars: number | null;
 }
 
 export const EMPTY_INVOICE_SUMMARY: PlatformInvoiceSummary = Object.freeze({
@@ -278,11 +291,15 @@ export function parseInvoiceQuotes(data: unknown): Map<string, PlatformInvoiceQu
         || typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0) {
       return null;
     }
+    // Informational, so an absent or unusable value is "unknown" and never a
+    // reason to refuse the batch. See `activeCars` on the interface.
+    const cars = item.active_cars;
     quotes.set(item.subscription_id, {
       subscriptionId: item.subscription_id,
       companyId: item.company_id,
       firstInvoice: item.first_invoice,
       amountCents: amount,
+      activeCars: typeof cars === 'number' && Number.isInteger(cars) && cars >= 0 ? cars : null,
     });
   }
   return quotes;

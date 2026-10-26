@@ -53,12 +53,32 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
 
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
-  // No cap on how many drivers a company may have (owner, 21.10.2026). The cap
-  // was `planState.carLimit * company_settings.drivers_per_car_limit` and lived
-  // ONLY here, in the browser: no policy, trigger or constraint enforced it, so
-  // removing it takes nothing else with it. `drivers_per_car_limit` is still
-  // stored and still shown on the plan in AssignSubscriptionModal; it no longer
-  // stops anyone. A company decides its own number of drivers.
+  // No cap on how many drivers a company may have (owner, 21.10.2026, and
+  // again on 26.10.2026 for cars: billing, never blocking).
+  //
+  // THE COMMENT THAT STOOD HERE UNTIL 26.10.2026 WAS FALSE, and the falsehood
+  // cost five days of a live defect, so it is recorded rather than quietly
+  // replaced. It said the cap "lived ONLY here, in the browser: no policy,
+  // trigger or constraint enforced it, so removing it takes nothing else with
+  // it." A trigger enforced it: `trg_enforce_driver_limit` on `drivers`,
+  // enabled on production, refusing with P0001 and the German sentence
+  // "Fahrerlimit erreicht. Ihr Abonnement erlaubt maximal N aktive Fahrer
+  // (C Fahrzeuge × D)." So from 21.10.2026 the browser stopped explaining a
+  // refusal that the database kept making, and a company at its allowance got
+  // a raw subscription error with nothing on screen accounting for it.
+  //
+  // The trigger — and its sibling on `cars` — is dropped by
+  // `20261026110000_bill_real_cars_drop_caps.sql`, so the sentence above is
+  // true as of that migration and `tests/rls/fleet-caps-removed.sql` is what
+  // keeps it true, with a negative control that puts the cap back and requires
+  // the refusal to return.
+  //
+  // The cap was `companies.subscription_car_limit × company_settings.drivers_per_car_limit`
+  // — NOT `subscription_plans.drivers_per_car_limit`, which feeds nothing.
+  // Both columns are still stored: the first records the allowance of the plan
+  // an operator assigned, the second is the owner's open question (Docs/design/
+  // plan-system.md §12 question 6). Neither stops anyone. A company decides its
+  // own number of drivers, and the fleet it runs is what its invoice charges.
 
   const handleSave = (
     name: string,

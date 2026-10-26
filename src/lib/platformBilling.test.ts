@@ -259,13 +259,40 @@ describe('collectAllPages', () => {
 describe('parseInvoiceQuotes', () => {
   const item = (over: Record<string, unknown> = {}) => ({
     subscription_id: 's1', company_id: 'c1', company_name: 'MoveNow', plan: 'premium',
-    car_limit: 5, billing_cycle: 'monthly', first_invoice: true, amount_cents: 20000, ...over,
+    // `car_limit` is still in the answer and is still the stored allowance;
+    // `active_cars` is the quantity the amount is computed from since
+    // 20261026110000. MoveNow is the one production company where the two
+    // agree, which is why the fixture uses its name and its figures.
+    car_limit: 5, active_cars: 5, billing_cycle: 'monthly', first_invoice: true,
+    amount_cents: 20000, ...over,
   });
 
   it('reads each item by subscription id, in integer cents', () => {
     const quotes = parseInvoiceQuotes({ ok: true, items: [item(), item({ subscription_id: 's2', company_id: 'c2', first_invoice: false, amount_cents: 35000 })] });
-    expect(quotes?.get('s1')).toEqual({ subscriptionId: 's1', companyId: 'c1', firstInvoice: true, amountCents: 20000 });
-    expect(quotes?.get('s2')).toEqual({ subscriptionId: 's2', companyId: 'c2', firstInvoice: false, amountCents: 35000 });
+    expect(quotes?.get('s1')).toEqual({ subscriptionId: 's1', companyId: 'c1', firstInvoice: true, amountCents: 20000, activeCars: 5 });
+    expect(quotes?.get('s2')).toEqual({ subscriptionId: 's2', companyId: 'c2', firstInvoice: false, amountCents: 35000, activeCars: 5 });
+  });
+
+  it('carries the fleet the amount was priced on, and a count of none as 0', () => {
+    expect(parseInvoiceQuotes({ ok: true, items: [item({ active_cars: 0, amount_cents: 7000 })] })?.get('s1')?.activeCars).toBe(0);
+    expect(parseInvoiceQuotes({ ok: true, items: [item({ active_cars: 2, amount_cents: 8000 })] })?.get('s1')?.activeCars).toBe(2);
+  });
+
+  /*
+    The fleet count is informational and the amount beside it is already
+    validated, so an answer without a usable count still bills. Refusing here
+    would return null, which the caller reads as "nothing to raise" — a
+    generation run that creates nothing and says nothing. That trade is wrong
+    for a field no invoice is computed from in the browser, and this is the
+    assertion that keeps it wrong-proof: `null` means unknown, never 0.
+  */
+  it('an absent or unusable fleet count is unknown, and never refuses the batch', () => {
+    for (const active_cars of [undefined, null, -1, 2.5, '2', {}]) {
+      const quotes = parseInvoiceQuotes({ ok: true, items: [item({ active_cars })] });
+      expect([active_cars, quotes?.size]).toEqual([active_cars, 1]);
+      expect([active_cars, quotes?.get('s1')?.activeCars]).toEqual([active_cars, null]);
+      expect([active_cars, quotes?.get('s1')?.amountCents]).toEqual([active_cars, 20000]);
+    }
   });
 
   it('is null, never an empty map, for a refusal or a shape it does not know', () => {

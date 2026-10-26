@@ -329,15 +329,47 @@ BEGIN
          ('2f000000-0000-4000-8000-000000003002', co_a, 'reidey', '3002', 'Lars Limit', NULL),
          ('2f000000-0000-4000-8000-000000003003', co_a, 'reidey', '3003', 'Gone Limit', now());
 
-  PERFORM _fi_rec(24, 'one slot left: the first fits, the second is reported as limit_reached, the departed one is inactive and fits',
+  /*
+    MOVED by 20261026110000, from '2/1' to '3/0', and the fixture above is kept
+    exactly as it was so that the move is the only difference.
+
+    `partner_drivers_import` does not call `enforce_driver_limit` — it CATCHES
+    it, by the German text of its message:
+
+        EXCEPTION WHEN SQLSTATE 'P0001' THEN
+          IF SQLERRM LIKE 'Fahrerlimit%' THEN v_reason := 'limit_reached';
+
+    So the partner fleet import was a consumer of both dropped triggers that no
+    catalogue sweep could find, because the dependency is on a sentence and not
+    on a name. (Both the brief for that migration and
+    Docs/design/plan-system.md §8 say nothing else reads the triggers. This
+    probe is why that is wrong, and it is the only reason it was caught.)
+
+    With the trigger gone the handler's limit branch is unreachable: nothing
+    else in the database raises P0001 with a message starting 'Fahrerlimit', so
+    `limit_reached` can no longer be produced for a driver. Every link is
+    created instead, which is the owner's rule — a company at its allowance
+    adds the driver, and the invoice follows the fleet.
+
+    Three links, so three created: Lena and Lars active, and 'Gone Limit'
+    inactive because the partner removed it.
+  */
+  PERFORM _fi_rec(24, 'no driver cap: all three links are created, none is reported as limit_reached',
     _fi_call(admin_a, $q$SELECT (x->>'created') || '/' ||
         (SELECT count(*) FROM jsonb_array_elements(x->'skipped') e WHERE e->>'reason' = 'limit_reached')
         FROM (SELECT partner_drivers_import() AS x) s$q$),
-    '2/1');
-  PERFORM _fi_rec(25, 'the company''s limit was not raised',
+    '3/0');
+  -- Unchanged, and it means MORE than it did: nothing writes
+  -- `companies.subscription_car_limit` automatically, which is the rule
+  -- 20261026110000 depends on now that the column prices nothing and caps
+  -- nothing. An import that raised it would be billing a customer with nobody
+  -- confirming.
+  PERFORM _fi_rec(25, 'the company''s stored allowance was not raised',
     (SELECT subscription_car_limit::text FROM companies WHERE id = co_a), (v_limit / v_per_car)::text);
-  PERFORM _fi_rec(26, 'and the one that did not fit was not created',
-    (SELECT count(*)::text FROM drivers WHERE name = 'Lars Limit'), '0');
+  -- MOVED with 24, from '0' to '1', for the same reason: the driver that did
+  -- not fit now goes in.
+  PERFORM _fi_rec(26, 'and the one that used not to fit is created',
+    (SELECT count(*)::text FROM drivers WHERE name = 'Lars Limit'), '1');
 END $$;
 
 -- ─── 5. vehicles ────────────────────────────────────────────────────────────
@@ -397,14 +429,41 @@ BEGIN
   UPDATE companies SET subscription_car_limit = (SELECT count(*) FROM cars WHERE company_id = co_a) WHERE id = co_a;
   SELECT subscription_car_limit INTO v_limit_before FROM companies WHERE id = co_a;
   v_out := _fi_call(admin_a, $q$SELECT partner_vehicles_import()::text$q$);
-  -- Two, not one: the limit trigger is a BEFORE trigger, so it speaks before
-  -- the unique index does. A plate held by another company reads as
-  -- limit_reached once the company is full, which is true and not a leak.
-  PERFORM _fi_rec(35, 'at the car limit every plate that would be created is reported as limit_reached, none is created',
+  /*
+    MOVED by 20261026110000, from '0 2' to '1 0', and the move has TWO causes,
+    which is why the old comment is kept above the new one rather than replaced.
+
+    It used to read: "Two, not one: the limit trigger is a BEFORE trigger, so it
+    speaks before the unique index does. A plate held by another company reads
+    as limit_reached once the company is full, which is true and not a leak."
+
+    That was exactly right, and it is what makes this probe the interesting one.
+    `trg_enforce_car_limit` fired BEFORE INSERT, ahead of `cars_kennzeichen_key`,
+    so it masked the unique violation and BOTH candidate plates came back as
+    `limit_reached`. With the trigger dropped:
+
+      - 'Z-LI 1' is created, because there is no cap any more     -> created 1
+      - the plate another company already holds reaches the unique
+        index, which is now the first thing to speak, and comes
+        back as `plate_unavailable`                               -> not a limit
+
+    So `limit_reached` falls to 0 for cars as well, and the ordering the old
+    comment described is the reason one of the two outcomes changed CLASS rather
+    than merely changing count. `plate_unavailable` is the better answer of the
+    two: it is what is actually wrong with that row.
+  */
+  -- One probe and not two, because `_fi_rec` numbers are integers: the three
+  -- figures are read in one string so that a release which turned the unique
+  -- violation back into a limit — or into nothing at all — fails here whichever
+  -- way it went. created / limit_reached / plate_unavailable.
+  PERFORM _fi_rec(35, 'no car cap: the new plate is created, and the one another company holds is plate_unavailable, not limit_reached',
     (v_out::jsonb ->> 'created') || ' ' ||
-    (SELECT count(*)::text FROM jsonb_array_elements(v_out::jsonb -> 'skipped') e WHERE e->>'reason' = 'limit_reached'),
-    '0 2');
-  PERFORM _fi_rec(36, 'the limit was not raised',
+    (SELECT count(*)::text FROM jsonb_array_elements(v_out::jsonb -> 'skipped') e WHERE e->>'reason' = 'limit_reached') || ' ' ||
+    (SELECT count(*)::text FROM jsonb_array_elements(v_out::jsonb -> 'skipped') e WHERE e->>'reason' = 'plate_unavailable'),
+    '1 0 1');
+  -- Unchanged, and load-bearing for the same reason as probe 25: no import
+  -- writes the stored allowance.
+  PERFORM _fi_rec(36, 'the stored allowance was not raised',
     (SELECT subscription_car_limit::text FROM companies WHERE id = co_a), v_limit_before::text);
 END $$;
 
