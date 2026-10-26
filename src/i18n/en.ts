@@ -6545,7 +6545,7 @@ export const en: PartialDictionary = {
   'inc.uber.period.tooManyDays':       'At most {max} days at once; {count} are chosen. Please choose fewer days.',
   'inc.uber.tab.daily':                'Daily',
   'settings.abrSchedule.preview.manager.goesAddress': 'The summary goes to the saved notification address.',
-  'settings.abrSchedule.reminder.hint':    'A driver who recorded neither cash nor cash receipts that week gets a short e-mail without amounts at the chosen time before the send, the evening before included. This also reaches drivers who did not work that week and have nothing to hand in. Only applies when sending to the drivers is on.',
+  'settings.abrSchedule.reminder.hint':    'Every active driver with an e-mail address gets a short e-mail without amounts at the chosen time before the send, the evening before included. It states no figures and only asks whether a Fahrtenbuch, cash or cash receipts are still to be handed in. Only applies when sending to the drivers is on.',
   'settings.abrSchedule.reminder.label':   'Remind drivers before it is sent',
   'settings.abrSchedule.reminder.lead':    'Reminder before the send',
   'settings.abrSchedule.reminder.leadOption': '{minutes} minutes before',
@@ -7092,4 +7092,12 @@ export const en: PartialDictionary = {
   'users.roles.group.roleControlled':      'Controlled by the role',
   'users.roles.noEffectivePermissions':    'No effective permission',
   'users.roles.view.notEnforced':          'The "View" column is switched off: no permission check in the system reads it. The boxes show the stored value and cannot be changed; read access follows from the plan and the menu.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.abrSchedule.reminder.rosterFailed': 'The driver list could not be loaded. Who the reminder reaches is unknown.',
+  'settings.abrSchedule.reminder.rosterNoAddressOne': '{count} active driver has no email address and receives no reminder.',
+  'settings.abrSchedule.reminder.rosterNoAddressOther': '{count} active drivers have no email address and receive no reminder.',
+  'settings.abrSchedule.reminder.rosterReach': 'The reminder reaches {reachable} of {active} active drivers.',
+  'settings.abrSchedule.reminder.rosterSharedOne': '{count} email address belongs to more than one active driver. One reminder goes there, without a name, not one per driver.',
+  'settings.abrSchedule.reminder.rosterSharedOther': '{count} email addresses belong to more than one active driver. One reminder goes to each, without a name, not one per driver.',
 };

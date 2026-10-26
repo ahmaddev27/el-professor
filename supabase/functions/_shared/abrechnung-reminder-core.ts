@@ -7,48 +7,92 @@
  * is mounted into the functions container), while the browser may import from
  * here, as it already does for the schedule core.
  *
- * ## The rule, in one place
+ * ## The rule, in one place: EVERY active driver
  *
- * The weekly mail is built from rows that exist only for a driver with a `bar`
- * receipt or `bargeld` income in the week, so the driver who recorded nothing
- * gets no mail at all. This module is the reminder for exactly that driver:
+ * The owner's instruction of 26.10.2026: "الأصل يصل تذكير للسائق — إذا عندك
+ * فرونتير وما رفعتها ارفعها" — the reminder goes to the driver as a matter of
+ * course, saying "if you have a Fahrtenbuch you have not handed in, hand it in".
+ * So the audience is
  *
- *     he handed nothing in (no `bargeld` income row, no `bar` receipt).
+ *     every ACTIVE driver of the company who has an address,
  *
- * Until 20.10.2026 the rule also required "he drove" (income of type `umsatz`).
- * Measured on production: the reminder ticked three times at 09:30, 09:40 and
- * 09:50, each with `reminders_due: 1`, `planned: 0` and every skip counter at
- * zero, because the company entered that week's revenue in one go at 09:52:25.
- * The rule read a week that was not filled in yet, and could not tell "drove
- * and handed nothing in" from "not entered yet". Revenue is the company's own
- * data entry, so the term is gone; the cost is a harmless reminder to a driver
- * who did not work that week. Restoring it is one line in `nothingRecorded`.
+ * and nothing about the week is read.
  *
- * The owner decided (15.10.2026) that a reminder reaching somebody who did not
- * need it is not worth machinery: "if the driver forgets to submit the data on
- * Reidey it is his fault not ours". So there is no history window, no
- * "usually pays by card" exemption, and nothing else here. Change the rule by
- * changing `nothingRecorded` and its test.
+ * ### This reverses the rule of 15.10.2026, deliberately
  *
- * Skips that are not about the rule but about who can be mailed are the driver
- * mail's own: an inactive driver, no address, a name two drivers share (income
- * and receipts carry a name and no driver id, so a shared name would mail one
- * person for the other's week).
+ * Until now the reminder went only to a driver who had recorded nothing that
+ * week (`nothingRecorded`, gone with this change), because "a confident number
+ * in a reminder would be wrong". That reason was about the mail's CONTENT, and
+ * it still holds: the reminder states no amount, and `renderReminderMail` and
+ * `abrechnung-mail-language.test.ts` keep it that way. What is dropped is using
+ * the week's data to pick the AUDIENCE, and two measurements say it never could:
+ *
+ * * 19.10.2026 — a company entered the whole week's revenue at 09:52, after the
+ *   reminder had looked three times. The `umsatz` term was removed then.
+ * * 26.10.2026 — the same for cash: every `bargeld` row of the week 19.–25.10.
+ *   at Y&A Mobility was created at 10:37, an hour and a half after the 09:00
+ *   reminder. At reminder time the rule could not tell "handed nothing in" from
+ *   "the office has not typed it in yet" for ANY driver of that company.
+ *
+ * A rule that reads data which does not exist yet is not a narrower rule, it is
+ * an arbitrary one. The honest choice is to read nothing and say nothing about
+ * what the driver has or has not done — which is what the wording now does.
+ *
+ * `ReminderFacts` still carries `umsatz_amount`, `bargeld_rows` and
+ * `bar_receipt_rows`, because that is the shape
+ * `public.abrechnung_reminder_facts` returns. **Nothing here reads them, and a
+ * new rule that wants to must first answer the two measurements above.**
+ *
+ * ## One mailbox, one reminder
+ *
+ * The exclusions left are about who can be mailed at all, not about the week:
+ * an inactive driver, no address, an address a claim already covers, and an
+ * address two drivers of one company share.
+ *
+ * That last one is the audience change's own cost, measured the day it was
+ * made: Y&A Mobility holds **two active drivers on one address** — one is the
+ * other's duplicate, renamed "delete it" and kept, because a driver is
+ * never deleted here, only deactivated. Under "every active driver" both are
+ * targets, the dedupe key is the driver id, and the mailbox would get two
+ * reminders for one week, one of them greeting a person by the junk row's name.
+ * So an address is taken by exactly one driver per week, and because the mail
+ * carries no figure and no amount, the one that goes is complete for whoever
+ * reads it. When an address stands for more than one driver the mail greets
+ * nobody by name (`driverName: null`), because which person reads it is exactly
+ * what is not known.
+ *
+ * The name-collision guard (`match_count`) is gone with the week's data: it was
+ * there because `income` and `receipts` carry a driver NAME and no id, so a
+ * shared name could have attributed one person's figures to another. A mail
+ * that attributes nothing cannot do that, and measured on production
+ * (26.10.2026) no company has two drivers sharing a normalised name, so the
+ * guard excluded nobody. Addresses are what collide in practice.
  *
  * ## The cap
  *
  * `MAX_REMINDERS_PER_RUN` bounds the mails one run may send across ALL
  * companies. The ones over the cap are left unclaimed, so the next tick (the
- * window is three ticks wide) takes them: the cap delays, it does not drop.
+ * window is `REMINDER_WINDOW_MINUTES` wide, three ticks) takes them: the cap
+ * delays, it does not drop.
  */
 
 /**
- * The most reminder mails one run sends. A fleet is dozens of drivers, so this
- * is above any honest run and far below a roster-wide blast from a schedule
- * switched on by mistake, or a company the rule matches entirely. Staging holds
- * real addresses and relays through production's Resend account.
+ * The most reminder mails one run sends.
+ *
+ * **It was 20 while the audience was "recorded nothing", and 20 is too small
+ * for a roster.** Measured on production 26.10.2026: 43 active drivers in the
+ * whole product, 23 of them with an address, and the two companies that have
+ * the reminder switched on would have 22 targets between them — over the old
+ * cap on the first week, which would have left two drivers to the next tick and
+ * mailed them at a time the schedule card does not name.
+ *
+ * 150 is some six times today's whole product and still bounds a runaway: a
+ * roster-wide blast is now the INTENDED behaviour, so the cap no longer guards
+ * against the audience being wide, only against a loop that does not terminate
+ * and against one run's SMTP work. The driver mails beside it have no cap at
+ * all, so this is not what bounds the run's wall-clock time.
  */
-export const MAX_REMINDERS_PER_RUN = 20;
+export const MAX_REMINDERS_PER_RUN = 150;
 
 /** One row of `abrechnung_reminder_facts`: what the week holds for one driver. */
 export interface ReminderFacts {
@@ -56,49 +100,70 @@ export interface ReminderFacts {
   driver_name: string;
   driver_status: string;
   driver_email: string | null;
+  /** Drivers of the company sharing this one's normalised name. Not read: see the header. */
   match_count: number | string;
+  /** The week's figures. Not read: see the header, and do not revive them without it. */
   umsatz_amount: number | string;
   bargeld_rows: number | string;
   bar_receipt_rows: number | string;
 }
 
-function num(value: number | string): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-/**
- * THE rule: the driver recorded neither cash nor a cash receipt. No revenue term
- * (20.10.2026): revenue is entered by the company from the Uber export, often
- * after the reminder has looked, so a rule hanging on it found nobody.
- */
-export function nothingRecorded(facts: Pick<ReminderFacts, 'bargeld_rows' | 'bar_receipt_rows'>): boolean {
-  return num(facts.bargeld_rows) === 0
-    && num(facts.bar_receipt_rows) === 0;
-}
-
 export interface ReminderTarget {
   driverId: string;
-  driverName: string;
+  /**
+   * Whom to greet, or null when the address stands for more than one driver of
+   * the company and the person reading it is therefore unknown.
+   */
+  driverName: string | null;
   email: string;
 }
 
 /** Counts only: a report built from this carries no name and no address. */
 export interface ReminderCounts {
-  /** Matches the rule, can be mailed, not covered, and within the cap. */
+  /** Active, addressable, not covered, one per address, and within the cap. */
   planned: number;
-  /** Matches the rule and can be mailed, but the run's cap is spent. */
+  /** Would be reminded, but the run's cap is spent. */
   capped: number;
-  /** Matches the rule, but a reminder or the driver mail is already claimed. */
+  /** This driver's own reminder or driver mail for the week is already claimed. */
   already_covered: number;
   no_address: number;
-  ambiguous: number;
+  /** Skipped because another driver of the company holds the same address. */
+  shared_address: number;
   inactive: number;
 }
 
 export interface ReminderPlanResult {
   sendable: ReminderTarget[];
   counts: ReminderCounts;
+}
+
+/**
+ * How two addresses are compared, here and on the settings card.
+ *
+ * Trimmed and lower-cased. The database already trims (`abrechnung_reminder_facts`
+ * returns `NULLIF(btrim(...), '')`); the lower-casing is this module's, and it
+ * is deliberately more eager than the RFC: a local part is technically
+ * case-sensitive, but no mail provider in this market treats it as such, and
+ * being wrong in this direction sends one mail where two were possible, never
+ * two where one was meant.
+ */
+export function reminderAddressKey(email: string | null | undefined): string | null {
+  const trimmed = (email ?? '').trim().toLowerCase();
+  return trimmed === '' ? null : trimmed;
+}
+
+/** The addresses a claimed reminder or driver mail already covers this week. */
+function claimedAddresses(
+  rows: readonly ReminderFacts[],
+  covered: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const taken = new Set<string>();
+  for (const row of rows) {
+    if (!covered.has(row.driver_id)) continue;
+    const address = reminderAddressKey(row.driver_email);
+    if (address) taken.add(address);
+  }
+  return taken;
 }
 
 /**
@@ -113,22 +178,107 @@ export function planReminders(
   budget: number,
 ): ReminderPlanResult {
   const counts: ReminderCounts = {
-    planned: 0, capped: 0, already_covered: 0, no_address: 0, ambiguous: 0, inactive: 0,
+    planned: 0, capped: 0, already_covered: 0, no_address: 0, shared_address: 0, inactive: 0,
   };
-  const eligible: ReminderTarget[] = [];
+  const taken = claimedAddresses(rows, coveredDriverIds);
+  /** The eligible drivers per address, so one of them can be chosen per mailbox. */
+  const groups = new Map<string, ReminderFacts[]>();
 
   for (const row of rows) {
-    if (!nothingRecorded(row)) continue;
-    if (num(row.match_count) > 1) counts.ambiguous += 1;
-    else if (row.driver_status !== 'active') counts.inactive += 1;
-    else if (!row.driver_email) counts.no_address += 1;
-    else if (coveredDriverIds.has(row.driver_id)) counts.already_covered += 1;
-    else eligible.push({ driverId: row.driver_id, driverName: row.driver_name, email: row.driver_email });
+    if (row.driver_status !== 'active') { counts.inactive += 1; continue; }
+    const address = reminderAddressKey(row.driver_email);
+    if (!address) { counts.no_address += 1; continue; }
+    if (coveredDriverIds.has(row.driver_id)) { counts.already_covered += 1; continue; }
+    // Whoever at this address holds the claim, the mailbox has its mail.
+    if (taken.has(address)) { counts.shared_address += 1; continue; }
+    const group = groups.get(address);
+    if (group) group.push(row);
+    else groups.set(address, [row]);
   }
 
+  const eligible = chooseOnePerAddress(groups, counts);
   const room = Math.max(0, Math.floor(budget));
   const sendable = eligible.slice(0, room);
   counts.planned = sendable.length;
   counts.capped = eligible.length - sendable.length;
   return { sendable, counts };
+}
+
+/**
+ * One target per address, and the losers counted.
+ *
+ * The chosen driver is the one with the smallest id, never the first row the
+ * query happened to return: the claim is keyed on the driver id, so two ticks
+ * of the same window must choose the same driver or the mailbox gets a second
+ * mail. The order the targets come back in is by driver id for the same reason
+ * — it decides which of them the cap delays, and a name can be edited between
+ * two ticks (measured: a driver was renamed to "delete it" between two runs).
+ */
+function chooseOnePerAddress(
+  groups: ReadonlyMap<string, ReminderFacts[]>,
+  counts: ReminderCounts,
+): ReminderTarget[] {
+  const targets: ReminderTarget[] = [];
+  for (const group of groups.values()) {
+    const chosen = group.reduce((best, row) => (row.driver_id < best.driver_id ? row : best));
+    counts.shared_address += group.length - 1;
+    targets.push({
+      driverId: chosen.driver_id,
+      // Several drivers, one mailbox: who reads it is exactly what is unknown.
+      driverName: group.length === 1 ? chosen.driver_name : null,
+      // The address as it is STORED, never the lower-cased grouping key: a
+      // local part is case-sensitive to a pedantic server, and comparing two
+      // addresses is not the same act as addressing a mail to one.
+      email: (chosen.driver_email ?? '').trim(),
+    });
+  }
+  return targets.sort((a, b) => (a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0));
+}
+
+// ─── What the settings card tells the operator ───────────────────────────────
+
+/** One driver as the roster summary needs him: status and address, no name. */
+export interface ReminderRosterRow {
+  status: string | null;
+  email: string | null;
+}
+
+export interface ReminderRosterSummary {
+  /** Active drivers of the company, whatever their address. */
+  active: number;
+  /** Active drivers with no address: they receive nothing, and nothing says so. */
+  noAddress: number;
+  /** Addresses held by more than one active driver: one reminder goes to each. */
+  sharedAddresses: number;
+  /** Mails a full week's reminder would send: one per distinct address. */
+  reachable: number;
+}
+
+/**
+ * What the next reminder reaches, from the company's roster alone.
+ *
+ * The settings card needs this because the rest of its preview is built from
+ * the WEEK's figures (`abrechnung_schedule_preview`), and a driver with no
+ * figures appears in none of those buckets — which is how an active driver with
+ * no address came to receive nothing with nobody told (production, 26.10.2026:
+ * one driver at Y&A Mobility, and 20 such drivers across six companies).
+ *
+ * It is here rather than in the card so the card and the job cannot disagree
+ * about what an address is or who is active; `planReminders` above applies the
+ * same two tests to the same values.
+ */
+export function summariseReminderRoster(rows: readonly ReminderRosterRow[]): ReminderRosterSummary {
+  const perAddress = new Map<string, number>();
+  let active = 0;
+  let noAddress = 0;
+  for (const row of rows) {
+    if (row.status !== 'active') continue;
+    active += 1;
+    const address = reminderAddressKey(row.email);
+    if (!address) { noAddress += 1; continue; }
+    perAddress.set(address, (perAddress.get(address) ?? 0) + 1);
+  }
+  let sharedAddresses = 0;
+  for (const held of perAddress.values()) if (held > 1) sharedAddresses += 1;
+  return { active, noAddress, sharedAddresses, reachable: perAddress.size };
 }
