@@ -1,7 +1,9 @@
 # The plan system
 
 **Status:** design only. No migration, no production code, no schema change. Written
-26.10.2026 against `staging` = `main` = `62c3139`.
+26.10.2026 against `main` = `62c3139` and `staging` = `286a1fa` (`main` plus PR #323,
+the Rollen screen — no migration, nothing in the pricing path, so nothing below depends
+on which of the two you read it against).
 
 **Companion documents.** This is the third of three that overlap and must stay
 consistent: [`billing-system.md`](billing-system.md) (the money path, invoices, VAT,
@@ -976,11 +978,12 @@ and carries its own migration self-check, `tests/rls/` file and `matrix.sql` lin
 because the RLS kit is the only gate that parses SQL.
 
 **Numbering.** The highest timestamp on `staging` is `20261025130000_seed_viewer_system_role.sql`.
-The three open branches (`work/billing-plan-reminder`, `work/deactivated-drivers-hidden`,
-`work/roles-screen-honest`) carry **no** migrations — checked by diff against
-`origin/staging`, 26.10.2026. So slice 1 is free to take `20261026100000`. Re-check the
-union before numbering anyway; this has collided three times, and a renumber must sweep
-`src/` for the filename too.
+The open branches carry **no** migrations — checked by diff against `origin/staging`,
+26.10.2026: `work/billing-plan-reminder` and `work/deactivated-drivers-hidden` touch only
+`el-professor-plan.html` and one component, and `work/roles-screen-honest` merged as
+PR #323 while this document was being written, with no migration. So slice 1 is free to
+take `20261026100000`. Re-check the union before numbering anyway; this has collided
+three times, and a renumber must sweep `src/` for the filename too.
 
 ### Slice 1 — the catalogue exists and is the price. **Start here.**
 
