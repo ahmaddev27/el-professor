@@ -3,6 +3,7 @@ import {
   ShieldAlert, Save, Plus, Trash2, Tags, SlidersHorizontal,
   Building2, Receipt, Mail, Megaphone, ToggleRight, Scale, Landmark,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAppConfig } from '../contexts/AppConfigContext';
 import { useToast } from '../contexts/ToastContext';
@@ -11,7 +12,7 @@ import type { TranslationKey } from '../i18n';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess } from '../lib/platformAccess';
 import { calcPricing, fmt, type PriceBook } from '../utils/pricing';
-import { Field as UiField, Input as UiInput } from '../components/ui';
+import { Alert, Field as UiField, Input as UiInput } from '../components/ui';
 import type { PlanFeatureMap } from '../utils/planFeatures';
 import {
   canReadAnnouncements,
@@ -24,7 +25,6 @@ import {
   parseInvoice,
   parseSeller,
   planFeaturesFromAnswer,
-  planFeaturesFromForm,
   priceBookFromAnswer,
   priceBookFromForm,
   priceBookToForm,
@@ -300,6 +300,10 @@ const PriceBookEditor: React.FC = () => {
 
           <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
             <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.pricePerCar')}</h2>
+            {/* The per-car prices are projected from the plan catalogue; the
+                stored values are a shadow nothing reads, so they are shown, not
+                edited. The save still sends them unchanged. */}
+            <PlansPageNote />
             <div className="grid gap-4 sm:grid-cols-3">
               {PLANS.map(plan => (
                 <label key={plan} className="block">
@@ -308,11 +312,11 @@ const PriceBookEditor: React.FC = () => {
                   </span>
                   <input
                     value={form.pricePerCar[plan]}
-                    disabled={!maySave}
-                    onChange={e => setForm({ ...form, pricePerCar: { ...form.pricePerCar, [plan]: e.target.value } })}
+                    disabled
+                    readOnly
                     /* German decimal comma in both languages — src/i18n/index.ts. */
                     placeholder="0,00"
-                    style={{ ...controlStyle, width: '100%', opacity: maySave ? 1 : 0.6 }}
+                    style={{ ...controlStyle, width: '100%', opacity: 0.6 }}
                   />
                 </label>
               ))}
@@ -453,25 +457,17 @@ const PriceBookEditor: React.FC = () => {
 // ─── The plan feature map ───────────────────────────────────────────────────
 
 const PlanFeaturesEditor: React.FC = () => {
-  const { platformAccess } = useSuperAdmin();
-  const { refresh } = useAppConfig();
-  const { showToast } = useToast();
   const { t } = useTranslation();
-
-  const maySave = canSaveSetting(platformAccess, 'plan_features');
 
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<TranslationKey | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Loaded<PlanFeatureMap> | null>(null);
-  const [changes, setChanges] = useState<Record<string, Plan>>({});
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setProblem(null);
     setDetail(null);
-    setChanges({});
     try {
       const answer = await getSetting('plan_features');
       if (!answer.ok) {
@@ -494,45 +490,11 @@ const PlanFeaturesEditor: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const save = async () => {
-    if (!loaded) return;
-    // Built from the map the database returned, so no key is ever dropped: a
-    // map that fails to name a feature is refused, and a feature the map does
-    // not name reads as premium.
-    const map = planFeaturesFromForm(loaded.value, changes);
-    if (!map) {
-      showToast('error', t('admin.settings.refusal.invalidValue'));
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const answer = await putSetting('plan_features', map, loaded.version);
-      if (!answer.ok) {
-        const missing = !answer.ok && answer.missingFeatures?.length
-          ? t('admin.settings.missingFeatures', { keys: answer.missingFeatures.join(', ') })
-          : t(settingRefusalKey(answer.reason));
-        showToast('error', missing);
-        // As on the price book: load() replaces the map and clears `changes`,
-        // so the unsaved edits are discarded rather than kept for a retry. The
-        // message says so — never re-send with the version that came back,
-        // which would overwrite somebody else's change unseen.
-        if (isVersionConflict(answer)) await load();
-        return;
-      }
-      showToast('success', t('admin.settings.saved'));
-      setLoaded({ value: map, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
-      setChanges({});
-      await refresh();
-    } catch (err) {
-      showToast('error', err instanceof Error ? err.message : t('admin.settings.refusal.failed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const features = loaded ? Object.keys(loaded.value).sort() : [];
 
+  // Read-only since the plan catalogue became the source (26.10.2026): the
+  // stored map is rewritten by every catalogue save and read by nothing, so an
+  // editor here would write a value no screen or gate ever uses.
   return (
     <EditorShell
       loading={loading}
@@ -544,8 +506,7 @@ const PlanFeaturesEditor: React.FC = () => {
     >
       {loaded && (
         <>
-          <Note textKey="admin.settings.featuresHint" />
-          {!maySave && <Note textKey="admin.settings.readOnly" />}
+          <PlansPageNote />
 
           <div className="rounded-2xl overflow-hidden" style={cardStyle}>
             <div style={{ overflowX: 'auto' }}>
@@ -561,44 +522,30 @@ const PlanFeaturesEditor: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {features.map(feature => {
-                    const value = changes[feature] ?? loaded.value[feature];
-                    return (
-                      <tr key={feature} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="px-5 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>{feature}</td>
-                        <td className="px-5 py-3">
-                          <select
-                            value={value}
-                            disabled={!maySave}
-                            onChange={e => setChanges({ ...changes, [feature]: e.target.value as Plan })}
-                            style={{ ...controlStyle, opacity: maySave ? 1 : 0.6 }}
-                          >
-                            {PLANS.map(plan => <option key={plan} value={plan}>{t(PLAN_LABELS[plan])}</option>)}
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {features.map(feature => (
+                    <tr key={feature} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td className="px-5 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>{feature}</td>
+                      <td className="px-5 py-3" style={{ color: 'var(--text-secondary)' }}>{t(PLAN_LABELS[loaded.value[feature]])}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
-
-          {maySave && (
-            <div className="flex justify-end">
-              <button
-                onClick={() => void save()}
-                disabled={saving || Object.keys(changes).length === 0}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-                style={{ background: 'var(--accent)', opacity: saving || Object.keys(changes).length === 0 ? 0.6 : 1 }}
-              >
-                <Save size={16} />{saving ? t('admin.common.saving') : t('admin.settings.save')}
-              </button>
-            </div>
-          )}
         </>
       )}
     </EditorShell>
+  );
+};
+
+/** Points an operator at the page that now owns prices and features. */
+const PlansPageNote: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <Alert tone="brand" className="font-ui">
+      {t('admin.plans.editedOnPlansPage')}{' '}
+      <Link to="/admin/plaene" className="font-semibold underline">{t('admin.plans.openPage')}</Link>
+    </Alert>
   );
 };
 

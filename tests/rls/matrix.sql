@@ -1017,6 +1017,16 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO notification_settings (id, company_id, notification_type) VALUES ({id}, {co}, 'tuev_abgelaufen')$q$, NULL,
   $q$INSERT INTO notification_settings (company_id, notification_type) VALUES ({co}, 'tuev_bald_ablaufend')$q$,
   $q$enabled = enabled$q$),
+-- 20261026120000: the plan catalogue. No tenant, like subscription_plans
+-- below, but SELECT is the ONLY policy and the only grant — the cross-row
+-- invariants I1 and I2 cannot be enforced by a per-row write, so
+-- platform_plans_save is the one writer. Distinct ranks per row because
+-- plans_rank_key is UNIQUE (deferred, so a collision would only surface at
+-- commit, which this transaction never reaches).
+(83, 'plans', $q$slug = 'mx_{s}'$q$,
+  $q$INSERT INTO plans (slug, name, rank, price_per_car_cents) VALUES ('mx_{s}', 'MX {s}', CASE '{s}' WHEN 'a' THEN 900 ELSE 901 END, 100)$q$, NULL,
+  $q$INSERT INTO plans (slug, name, rank, price_per_car_cents) VALUES ('mx_new_{s}', 'MX new {s}', CASE '{s}' WHEN 'a' THEN 910 ELSE 911 END, 100)$q$,
+  $q$name = name$q$),
 (42, 'subscription_plans', $q$id = {id}$q$,
   $q$INSERT INTO subscription_plans (id, name, monthly_price, included_cars) VALUES ({id}, 'MX plan {s}', 20, 1)$q$, NULL,
   $q$INSERT INTO subscription_plans (name, monthly_price, included_cars) VALUES ('MX plan new {s}', 20, 1)$q$,
@@ -1521,6 +1531,7 @@ INSERT INTO _mx_move VALUES
 ('saved_stundennachweise',               $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('notification_settings',                $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM notification_settings WHERE id = {ref_other:notification_settings}$q$, 'Y', 'one per company and type'),
+('plans',                                NULL, NULL, 'Y', 'no tenant: a platform catalogue'),
 ('subscription_plans',                   NULL, NULL, 'Y', 'no tenant: a platform catalogue'),
 ('company_subscriptions',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner'),
 ('subscription_invoices',                $q$company_id = {other_co}$q$,
@@ -2158,6 +2169,19 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('subscription_payment_audit',         'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- 20261026120000, the plan catalogue. Read by every signed-in principal,
+-- because a plan's name and price are what the panel and the plan cards print;
+-- anon reads it through get_public_config() and holds no grant here. Written by
+-- nobody: there is no INSERT, UPDATE or DELETE policy AND no write grant, so
+-- every write is refused for lack of the table privilege before RLS is even
+-- consulted — which is why the platform principal is 'PP' too and not 'YY' as
+-- it is on subscription_plans. tests/rls/plans.sql section 2 probes the same
+-- ground per principal and section 3 the two RPCs.
+('plans',                              'S', 'PP', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', 'no tenant: a platform catalogue'),
+('plans',                              'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'platform_plans_save is the only writer'),
+('plans',                              'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('plans',                              'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('plans',                              'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('subscription_plans',                 'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
 ('subscription_plans',                 'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -3569,6 +3593,28 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- the settings RPCs of 20260916150000. Both answer ok=false without an
     -- active staff role, so only the platform principal gets Y; anon holds
     -- EXECUTE on neither. tests/rls/pricing.sql probes them by role
+    -- 20261026120000, the plan catalogue's two RPCs.
+    --
+    -- The list carries no capability and writes no audit row: public.plans is
+    -- already SELECT-able by every signed-in principal and the version it adds
+    -- is not a secret. It answers an object with no `success` key, so _mx_call
+    -- reads it as Y; anon holds no EXECUTE.
+    ('platform_plans_list() is allowed',
+     $q$SELECT platform_plans_list() ->> 'ok'$q$,
+     'PYYYYYY', NULL),
+    -- The save asks pricing.manage — the owner's and billing's. Probed by
+    -- INVERSION, which is deliberate: the payload is the empty array, which
+    -- every caller past the capability check is then refused for by
+    -- plan_catalogue_problem. So `reason = 'denied'` is true exactly for the
+    -- principals that lack pricing.manage (Y) and false for the one that holds
+    -- it (N, an invalid_value). Written this way so the probe mutates nothing
+    -- and does not depend on the order the principals are tried in: a probe
+    -- with a VALID payload would succeed for the platform principal, bump the
+    -- catalogue version, and make the two context principals after it answer
+    -- version_conflict instead of what their capability deserves.
+    ('platform_plans_save(empty, 1) answers denied — i.e. the caller lacks pricing.manage',
+     $q$SELECT (platform_plans_save('[]'::jsonb, 1) ->> 'reason' = 'denied')::text$q$,
+     'PYYYYYN', NULL),
     ('platform_settings_get(price_book) is ok',
      $q$SELECT (platform_settings_get('price_book') ->> 'ok')::text$q$,
      'PNNNNNY', NULL),

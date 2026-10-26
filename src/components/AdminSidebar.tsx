@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   BarChart3, Building2, Receipt, Stethoscope,
   Menu, X, LogOut, UserCog,
-  Library, ScrollText, SlidersHorizontal, Users,
+  Library, ScrollText, SlidersHorizontal, Users, Layers,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from './BrandLogo';
@@ -35,6 +35,9 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   // /admin/companies, where every company's own subscription state is shown.
   { path: '/admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'billing.manage' },
   // The diagnosis reads a company's Fahrtenbuch and planning data.
+  // The plan catalogue (prices per car and features per plan) is written by
+  // platform_plans_save, which asks for pricing.manage; billing holds it too.
+  { path: '/admin/plaene',           icon: Layers,      labelKey: 'admin.nav.plans',       requires: 'pricing.manage' },
   { path: '/admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
   // The directories read every company's vehicles, drivers and users through
   // the audited read models, which ask for business.read.

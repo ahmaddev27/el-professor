@@ -48,6 +48,7 @@ import AbnahmeDiagnosticPage from './pages/AbnahmeDiagnosticPage';
 import PlatformDirectoriesPage from './pages/PlatformDirectoriesPage';
 import PlatformAuditPage from './pages/PlatformAuditPage';
 import PlatformSettingsPage from './pages/PlatformSettingsPage';
+import PlatformPlansPage from './pages/PlatformPlansPage';
 import PlatformTeamPage from './pages/PlatformTeamPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import RejectedPage from './pages/RejectedPage';
@@ -713,6 +714,7 @@ function App() {
                   <Route path="verzeichnisse"    element={<PlatformDirectoriesPage />} />
                   <Route path="protokoll"        element={<PlatformAuditPage />} />
                   <Route path="einstellungen"    element={<PlatformSettingsPage />} />
+                  <Route path="plaene"           element={<PlatformPlansPage />} />
                   <Route path="team"             element={<PlatformTeamPage />} />
                   {/* The same AccountPage the company shell registers. It reads
                       only the caller's own record, so it needs nothing this
