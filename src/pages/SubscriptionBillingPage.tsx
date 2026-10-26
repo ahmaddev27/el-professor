@@ -14,14 +14,15 @@ import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import MarkPaidModal from '../components/MarkPaidModal';
-import PlanManagementModal from '../components/PlanManagementModal';
 import GenerateInvoicesModal from '../components/GenerateInvoicesModal';
 import AssignSubscriptionModal from '../components/AssignSubscriptionModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import { generateSubscriptionPdf, InvoicePdfData } from '../utils/subscriptionPdf';
 import { getInvoiceSeller } from '../lib/platformSettingsClient';
+import { listPlans, type PlanCatalogue } from '../lib/platformPlansClient';
+import { Link } from 'react-router-dom';
 import { invoiceSellerFields } from '../lib/platformSettings';
-import { Alert, Button, ConfirmDialog } from '../components/ui';
+import { Alert, Button, ConfirmDialog, formatEuroCents } from '../components/ui';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import {
   buildInvoicesExport,
@@ -178,6 +179,13 @@ export default function SubscriptionBillingPage() {
    * withholding facts that *were* read is the mirror image of the defect.
    */
   const [plansFailed, setPlansFailed] = useState(false);
+  /**
+   * The plan catalogue (`public.plans`), which is what prices and gates. The
+   * Tarife tab shows it; `plans` above is the older `subscription_plans` table,
+   * kept only because AssignSubscriptionModal still picks a row from it.
+   */
+  const [catalogue, setCatalogue] = useState<PlanCatalogue | null>(null);
+  const [catalogueFailed, setCatalogueFailed] = useState(false);
 
   // Filters. The search box is submitted rather than applied per keystroke:
   // every call to a read model writes one row into an append-only audit log.
@@ -195,7 +203,6 @@ export default function SubscriptionBillingPage() {
   // Modals
   const [markPaidInvoice, setMarkPaidInvoice] = useState<PlatformInvoiceRow | null>(null);
   const [invoiceConfirm, setInvoiceConfirm] = useState<{ kind: 'unpaid' | 'cancel' | 'delete'; invoice: PlatformInvoiceRow } | null>(null);
-  const [showPlanModal, setShowPlanModal] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [detailInvoice, setDetailInvoice] = useState<PlatformInvoiceRow | null>(null);
@@ -214,6 +221,12 @@ export default function SubscriptionBillingPage() {
     setLoading(true);
     setProblem(null);
     setPlansFailed(false);
+    setCatalogueFailed(false);
+    listPlans().then(setCatalogue).catch(err => {
+      console.error(err);
+      setCatalogue(null);
+      setCatalogueFailed(true);
+    });
     try {
       const [plansRes, invRes, subsRes] = await Promise.all([
         supabase.from('subscription_plans').select('*').order('monthly_price'),
@@ -689,15 +702,13 @@ export default function SubscriptionBillingPage() {
           >
             <Plus size={16} /> {t('sa.subs.assignSubscription')}
           </button>
-          <button
-            onClick={() => setShowPlanModal(true)}
+          <Link
+            to="/admin/plaene"
             className={`${canPricing ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
           >
             <CreditCard size={16} /> {t('sa.subs.managePlans')}
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -1002,56 +1013,43 @@ export default function SubscriptionBillingPage() {
         </div>
       )}
 
-      {/* Plans Tab */}
+      {/* Plans Tab: the catalogue that prices and gates, read-only. It is
+          edited on its own page. */}
       {activeTab === 'plans' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {plansFailed ? (
-            /* Not "no plans exist" — the catalogue was not read. Offering
-               "Tarif erstellen" here would invite a duplicate of a plan that is
-               already there, so the button is withheld with the claim. */
+          {catalogueFailed || !catalogue ? (
+            /* Not "no plans exist": the catalogue was not read (or is still
+               being read), and a price of 0,00 EUR would be a claim. */
             <div className="col-span-full">
-              <Alert tone="critical" className="font-ui" title={t('admin.read.failedTitle')}>
-                {t('admin.read.failed')}
-              </Alert>
+              {catalogueFailed && (
+                <Alert tone="critical" className="font-ui" title={t('admin.read.failedTitle')}>
+                  {t('admin.read.failed')}
+                </Alert>
+              )}
             </div>
-          ) : plans.length === 0 ? (
-            <div className="col-span-full text-center py-16" style={{ color: 'var(--text-tertiary)' }}>
-              <CreditCard size={40} className="mx-auto mb-3 opacity-40" />
-              <p className="text-sm">{t('sa.subs.noPlans')}</p>
-              <button
-                hidden={!canPricing}
-                onClick={() => setShowPlanModal(true)}
-                className="mt-4 px-4 py-2 rounded-xl text-sm font-medium"
-                style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-              >
-                {t('sa.subs.createPlan')}
-              </button>
-            </div>
-          ) : plans.map(plan => {
-            // The count is every active subscription of that plan, not the
-            // page's: it comes back with the subscriptions read model.
-            const subCount = subscriptionSummary.activeByPlan[plan.id] ?? 0;
-            return (
-              <div key={plan.id} className="rounded-xl p-5 space-y-3" style={{
-                background: 'var(--bg-surface)',
-                border: `1px solid ${plan.is_active ? 'var(--border)' : 'var(--danger)'}`,
-                opacity: plan.is_active ? 1 : 0.6,
-              }}>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{plan.name}</h3>
-                  {!plan.is_active && (
-                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}>{t('sa.status.inactive')}</span>
-                  )}
-                </div>
-                <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(plan.monthly_price)}<span className="text-sm font-normal" style={{ color: 'var(--text-tertiary)' }}>{t('sa.subs.perMonthSuffix')}</span></p>
-                <div className="space-y-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  <p>{t('sa.subs.plan.carsIncluded', { count: plan.included_cars })}</p>
-                  <p>{t('sa.subs.plan.driversPerCar', { count: plan.drivers_per_car_limit })}</p>
-                  <p>{t('sa.subs.plan.activeSubscriptions', { count: subCount })}</p>
-                </div>
+          ) : catalogue.plans.map(plan => (
+            <div key={plan.slug} className="rounded-xl p-5 space-y-3" style={{
+              background: 'var(--bg-surface)',
+              border: `1px solid ${plan.is_active ? 'var(--border)' : 'var(--danger)'}`,
+              opacity: plan.is_active ? 1 : 0.6,
+            }}>
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{plan.name}</h3>
+                {!plan.is_active && (
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}>{t('sa.status.inactive')}</span>
+                )}
               </div>
-            );
-          })}
+              <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{formatEuroCents(plan.price_per_car_cents)}<span className="text-sm font-normal" style={{ color: 'var(--text-tertiary)' }}>{t('admin.plans.perCarSuffix')}</span></p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {t('admin.plans.field.features', { count: plan.features.length, total: catalogue.featureKeys.length })}
+              </p>
+            </div>
+          ))}
+          {catalogue && canPricing && (
+            <p className="col-span-full text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              <Link to="/admin/plaene" style={{ color: 'var(--accent)' }}>{t('sa.subs.managePlans')}</Link>
+            </p>
+          )}
         </div>
       )}
 
@@ -1074,13 +1072,6 @@ export default function SubscriptionBillingPage() {
           invoice={markPaidInvoice}
           onClose={() => setMarkPaidInvoice(null)}
           onConfirm={loadData}
-        />
-      )}
-      {showPlanModal && (
-        <PlanManagementModal
-          plans={plans}
-          onClose={() => setShowPlanModal(false)}
-          onSaved={loadData}
         />
       )}
       {showGenerateModal && (
