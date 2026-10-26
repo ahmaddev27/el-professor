@@ -2635,8 +2635,6 @@ export const de = {
   'users.readOnlyBody':                    'Diese Ansicht ist schreibgeschützt. Die Benutzerverwaltung ist nur in einer Support-Sitzung möglich; eine reine Übersicht der Konten steht unter "Verzeichnisse" im Plattform-Bereich.',
   'users.readOnlyTitle':                   'Nur-Lese-Ansicht',
   'users.roleNone':                        'Keine',
-  'users.roles.areasSelected.one':         '{count} Bereich ausgewählt',
-  'users.roles.areasSelected.other':       '{count} Bereiche ausgewählt',
   'users.roles.col.area':                  'Bereich',
   'users.roles.col.edit':                  'Bearbeiten',
   'users.roles.col.view':                  'Ansehen',
@@ -2679,7 +2677,6 @@ export const de = {
   'users.roles.new':                       'Neue Rolle',
   'users.roles.editNamed':                 'Rolle {name} bearbeiten',
   'users.roles.deleteNamed':               'Rolle {name} löschen',
-  'users.roles.noPermissionsSet':          'Keine Berechtigungen gesetzt',
   'users.roles.note.editImpliesView':      'Bearbeiten-Berechtigung erfordert automatisch Ansehen-Berechtigung',
   'users.roles.note.immediateEffect':      'Änderungen an Rollen wirken sich sofort auf alle Benutzer mit dieser Rolle aus',
   'users.roles.note.systemUndeletable':    'Systemrollen (admin, supervisor, editor) können nicht gelöscht werden',
@@ -7006,7 +7003,8 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fahrer.updateRefused':      'Die Änderung wurde von der Datenbank abgelehnt: Ihrer Rolle fehlt die Berechtigung. Es wurde nichts geändert.',
-  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, Belege und die Fahrtenhistorie verweisen auf sie.',
+  'fleet.deactivateNotDelete': 'Fahrer werden deaktiviert, nicht gelöscht: Gehälter, unterschriebene Gehaltsquittungen und Stundennachweise verweisen auf sie und bleiben erhalten.',
+  'fleet.deactivateHidesFromLists': 'Ein deaktivierter Fahrer erscheint in keiner Auswahlliste mehr – auch nicht in der Monatsplanung oder im Fahrtenbuch. In bereits abgerechneten Monaten bleibt er sichtbar und ist als inaktiv gekennzeichnet.',
   'sa.subs.actionDelete':              'Löschen',
   'sa.subs.confirmDelete.description': 'Die Rechnung wird endgültig gelöscht. Der durch sie gewährte Zugangszeitraum wird ungültig; der Kunde kann dadurch den Zugang verlieren. Bezahlte Rechnungen lassen sich nicht löschen, nur stornieren.',
   'sa.subs.deleteRefused.paid':        'Eine bezahlte Rechnung kann nicht gelöscht werden. Sie belegt den Zahlungseingang; bitte stattdessen stornieren.',
@@ -7139,4 +7137,16 @@ export const de = {
   'sa.modules.state.planOff':         'Nicht im Tarif',
   'sa.modules.title':                 'Module',
   'sa.modules.viewOnly':              '· nur Ansicht',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'users.roles.areasEffective.one':        '{count} Bereich wirksam freigegeben',
+  'users.roles.areasEffective.other':      '{count} Bereiche wirksam freigegeben',
+  'users.roles.col.view.disabled':         'stillgelegt',
+  'users.roles.group.adminOnly':           'Nur Unternehmens-Administratoren',
+  'users.roles.group.adminOnly.reason':    'Benutzer, Rollen und Einstellungen sind Administratoren vorbehalten. Maßgeblich ist, ob ein Konto die Rolle "admin" trägt — eine andere Rolle kann diese Bereiche nicht freigeben, auch nicht mit gesetztem Haken.',
+  'users.roles.group.notRoleControlled':   'Nicht von der Rolle gesteuert',
+  'users.roles.group.notRoleControlled.reason': 'Für diese Bereiche prüft keine Berechtigung die Rolle. Wer die Seite über das Menü erreicht, kann sie auch bearbeiten.',
+  'users.roles.group.roleControlled':      'Von der Rolle gesteuert',
+  'users.roles.noEffectivePermissions':    'Keine wirksame Berechtigung',
+  'users.roles.view.notEnforced':          'Die Spalte "Ansehen" ist stillgelegt: keine Berechtigungsprüfung im System liest sie. Die Haken zeigen den gespeicherten Wert und lassen sich nicht ändern; der Lesezugriff ergibt sich aus dem Abo-Paket und dem Menü.',
 } as const;

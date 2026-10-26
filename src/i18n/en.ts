@@ -2602,8 +2602,6 @@ export const en: PartialDictionary = {
   'users.readOnlyBody':                    'This view is read-only. Managing users needs a support session; a read-only list of the accounts is under "Directories" in the platform area.',
   'users.readOnlyTitle':                   'Read-only view',
   'users.roleNone':                        'None',
-  'users.roles.areasSelected.one':         '{count} area selected',
-  'users.roles.areasSelected.other':       '{count} areas selected',
   'users.roles.col.area':                  'Area',
   'users.roles.col.edit':                  'Edit',
   'users.roles.col.view':                  'View',
@@ -2645,7 +2643,6 @@ export const en: PartialDictionary = {
   'users.roles.new':                       'New role',
   'users.roles.editNamed':                 'Edit the role {name}',
   'users.roles.deleteNamed':               'Delete the role {name}',
-  'users.roles.noPermissionsSet':          'No permissions set',
   'users.roles.note.editImpliesView':      'The edit permission automatically implies the view permission',
   'users.roles.note.immediateEffect':      'Role changes take effect immediately for every user holding that role',
   'users.roles.note.systemUndeletable':    'System roles (admin, supervisor, editor) cannot be deleted',
@@ -6948,7 +6945,8 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'fahrer.updateRefused':      'The database refused the change: your role lacks the permission. Nothing was changed.',
-  'fleet.deactivateNotDelete': 'Drivers are deactivated, not deleted: salaries, receipts and the ride history refer to them.',
+  'fleet.deactivateNotDelete': 'Drivers are deactivated, not deleted: salaries, signed Gehaltsquittungen and Stundennachweise refer to them and are kept.',
+  'fleet.deactivateHidesFromLists': 'A deactivated driver no longer appears in any selection list – not in the Monatsplanung and not in the Fahrtenbuch. In months already settled they stay visible, marked inactive.',
   'sa.subs.actionDelete':              'Delete',
   'sa.subs.confirmDelete.description': 'The invoice is deleted for good. The access period it granted is voided; the customer may lose access. Paid invoices cannot be deleted, only cancelled.',
   'sa.subs.deleteRefused.paid':        'A paid invoice cannot be deleted. It is the record of a payment received; cancel it instead.',
@@ -7081,4 +7079,16 @@ export const en: PartialDictionary = {
   'sa.modules.state.planOff':         'Not in the plan',
   'sa.modules.title':                 'Modules',
   'sa.modules.viewOnly':              '· view only',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'users.roles.areasEffective.one':        '{count} area effectively granted',
+  'users.roles.areasEffective.other':      '{count} areas effectively granted',
+  'users.roles.col.view.disabled':         'switched off',
+  'users.roles.group.adminOnly':           'Company administrators only',
+  'users.roles.group.adminOnly.reason':    'Users, roles and settings are reserved for administrators. What decides is whether an account holds the role "admin" — no other role can grant these areas, not even with the box ticked.',
+  'users.roles.group.notRoleControlled':   'Not controlled by the role',
+  'users.roles.group.notRoleControlled.reason': 'No permission check consults the role for these areas. Whoever reaches the page from the menu can edit it as well.',
+  'users.roles.group.roleControlled':      'Controlled by the role',
+  'users.roles.noEffectivePermissions':    'No effective permission',
+  'users.roles.view.notEnforced':          'The "View" column is switched off: no permission check in the system reads it. The boxes show the stored value and cannot be changed; read access follows from the plan and the menu.',
 };

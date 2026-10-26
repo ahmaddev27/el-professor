@@ -41,6 +41,7 @@ import {
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { selectableDrivers } from '../utils/driverStatus';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -647,7 +648,15 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       .eq('company_id', companyId)
       .order('name')
       .then(({ data }) => {
-        setAllDrivers(((data ?? []) as DriverRow[]).filter(d => d.status !== 'inactive'));
+        // Brutto-Gehälter mode's driver list, and the one genuinely ambiguous
+        // read in the product: the wizard reconstructs a PAST month, which is
+        // why the sibling Arbeitsstunden wizard deliberately keeps former
+        // drivers — but this list is what the operator picks from, and it has
+        // excluded the deactivated since before the owner asked for it. Left as
+        // it stands rather than reopened: which of the two wizards is right
+        // about a historical month is his decision, not a side effect of
+        // centralising the filter.
+        setAllDrivers(selectableDrivers((data ?? []) as DriverRow[]));
         setLoadingDrivers(false);
       });
   }, [companyId]);
