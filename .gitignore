@@ -77,5 +77,16 @@ SIMULIERT_*.xlsx
 !tests/fixtures/**/*.xlsx
 !tests/fixtures/**/*.csv
 !src/**/__fixtures__/**/*.csv
-# The owner's own working folder: audit reports, prompts and real exports.
+# The owner's own working folders: audit reports, prompts and real exports.
+# `w/` joined the list on 27.10.2026, carrying audit round 2's evidence.
+#
+# Note WHY a folder rule is needed beside the extension rules above, because
+# the extension rules would not have saved us: that evidence arrived as a
+# PASTED MARKDOWN TABLE — `w/Pasted markdown(20261027-075704).md`, 222 rows
+# holding four drivers' names and 222 real street addresses. No `*.xlsx` or
+# `*.csv` rule matches a `.md` file, and `*.md` cannot be ignored in a
+# repository whose documentation is Markdown. A ride export is customer data
+# whatever extension it is pasted into, so the folder is the unit that is
+# ignored, not the file type.
 corection/
+w/
