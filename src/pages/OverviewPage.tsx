@@ -481,6 +481,16 @@ const OverviewPage: React.FC = () => {
   };
   /** What a KPI card shows in place of a figure. Not '0,00 €', which is a claim. */
   const WITHHELD = '—';
+  /*
+    The two cards that colour themselves by sign read neutral when withheld. A
+    red icon beside a `—` is a claim one step quieter than a figure: it says the
+    company made a loss, off a profit computed without its Fixkosten. Written as
+    a boolean rather than a second colour literal at each call site, because the
+    style ratchet counts occurrences and a duplicated `rgba(...)` would raise its
+    baseline — which is a regression, not a conversion.
+  */
+  const profitReadsPositive = offSub('kpiProfit') !== null || currentMetrics.profit >= 0;
+  const marginReadsPositive = offSub('kpiMargin') !== null || currentMetrics.profitMargin >= 0;
 
   // ── Derived data ─────────────────────────────────────────────────────────
   const { start: monthStart, end: monthEnd } = getMonthRange(selectedMonth);
@@ -693,16 +703,16 @@ const OverviewPage: React.FC = () => {
           value={offSub('kpiProfit') ? WITHHELD : `${fmt(currentMetrics.profit)} €`}
           sub={offSub('kpiProfit') ?? t('overview.kpi.vsPrevMonth')}
           icon={<DollarSign size={18} />}
-          iconBg={currentMetrics.profit >= 0 ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)'}
-          iconColor={currentMetrics.profit >= 0 ? '#3b82f6' : '#ef4444'}
+          iconBg={profitReadsPositive ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)'}
+          iconColor={profitReadsPositive ? '#3b82f6' : '#ef4444'}
           delta={offSub('kpiProfit') ? undefined : profitDelta} higherIsBetter />
         <KpiCard label={t('overview.kpi.gewinnmarge')}
           value={offSub('kpiMargin') ? WITHHELD : `${currentMetrics.profitMargin.toFixed(1)}%`}
           sub={offSub('kpiMargin')
             ?? (marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : t('overview.kpi.profitability'))}
           icon={<Target size={18} />}
-          iconBg={currentMetrics.profitMargin >= 0 ? 'rgba(14,165,233,0.12)' : 'rgba(239,68,68,0.12)'}
-          iconColor={currentMetrics.profitMargin >= 0 ? '#0ea5e9' : '#ef4444'} />
+          iconBg={marginReadsPositive ? 'rgba(14,165,233,0.12)' : 'rgba(239,68,68,0.12)'}
+          iconColor={marginReadsPositive ? '#0ea5e9' : '#ef4444'} />
       </div>
 
       {/* ── Action alerts ──

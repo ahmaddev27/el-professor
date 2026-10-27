@@ -362,6 +362,21 @@ describe('OverviewPage.tsx asks the question it is given', () => {
     expect(PAGE).toContain("const WITHHELD = '—';");
   });
 
+  it('and the two cards that colour by sign read neutral when withheld', () => {
+    /*
+      A red icon beside a dash is a claim one step quieter than a figure: it
+      says the company made a loss, off a profit computed without its Fixkosten.
+      Both booleans are true when the panel is withheld, so the positive palette
+      renders — and they are booleans rather than a second colour literal at the
+      call site because the style ratchet counts occurrences, and a duplicated
+      `rgba(...)` would raise its baseline.
+    */
+    expect(PAGE).toContain("const profitReadsPositive = offSub('kpiProfit') !== null || currentMetrics.profit >= 0;");
+    expect(PAGE).toContain("const marginReadsPositive = offSub('kpiMargin') !== null || currentMetrics.profitMargin >= 0;");
+    expect(PAGE).not.toContain('iconColor={currentMetrics.profit >= 0');
+    expect(PAGE).not.toContain('iconColor={currentMetrics.profitMargin >= 0');
+  });
+
   it('the four helpers that compute over a set are emptied, not merely unrendered', () => {
     // `generateInsights` is the sharp one: it compares two months and would
     // write a confident sentence about a collapse that is only a closed read.
