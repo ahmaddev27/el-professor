@@ -858,15 +858,26 @@ DECLARE
   v_out text;
 BEGIN
   -- ── the admission ────────────────────────────────────────────────────────
+  -- An app_private helper is reached with _amr_claims and called directly, as
+  -- sections 1 and 2 do: _amr_try becomes `authenticated`, which holds no USAGE
+  -- on app_private, so calling one through it answers ERR 42501 and a
+  -- comparison against the expected value would read as an ordinary failure.
+  -- The kit caught exactly that in the first draft of this section.
+  PERFORM _amr_claims(owner, _amr_passkey(), true);
   PERFORM _amr_ok('passkey: the rule admits a passkey session',
-    _amr_try(owner, _amr_passkey(), 'SELECT app_private.session_amr_permits_platform()::text') = 'true');
-
-  PERFORM _amr_ok('passkey: it holds the account''s role',
-    _amr_try(owner, _amr_passkey(), 'SELECT platform_staff_role()') = 'owner');
+    app_private.session_amr_permits_platform());
 
   PERFORM _amr_ok('passkey: the gated seam answers it',
-    _amr_try(owner, _amr_passkey(),
-      format('SELECT app_private.platform_staff_role_of(%L)', owner)) = 'owner');
+    app_private.platform_staff_role_of(owner) = 'owner');
+
+  PERFORM _amr_ok('passkey: the account fact is unchanged underneath it',
+    app_private.platform_staff_role_of_account(owner) = 'owner');
+  PERFORM _amr_reset();
+
+  -- Everything below is a `public` function, so it goes through _amr_try as
+  -- `authenticated` — the role a real caller holds.
+  PERFORM _amr_ok('passkey: it holds the account''s role',
+    _amr_try(owner, _amr_passkey(), 'SELECT platform_staff_role()') = 'owner');
 
   PERFORM _amr_ok('passkey: is_user_super_admin is true for it',
     _amr_try(owner, _amr_passkey(), 'SELECT is_user_super_admin()::text') = 'true');
