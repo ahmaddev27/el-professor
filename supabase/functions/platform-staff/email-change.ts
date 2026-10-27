@@ -34,7 +34,7 @@
  *    code path), `account_blocked` (banned or deleted in GoTrue, the
  *    containment lever that must work even while an issued token is still
  *    valid), `no_account`.
- * 3. `reauth_required`   — the session's amr does not name a password sign-in
+ * 3. `reauth_required`   — the session's amr names no fresh re-authentication
  *    inside PASSWORD_PROOF_MAX_AGE_SECONDS. With the code gone this is the only
  *    proof that the person at the keyboard knows the password.
  * 4. the request itself: `rate_limited` (five completed changes this hour),
@@ -83,7 +83,7 @@ import {
   emailChanged,
   isAccountStanding,
   parseEmailChangeBody,
-  passwordProofState,
+  reauthProofState,
 } from '../_shared/platform-email-change.ts';
 
 const FN = 'platform-staff';
@@ -127,7 +127,7 @@ async function changeEmail(req: Request, newEmail: string, requestId: string): P
     // 3. The password proof. This is the control the emailed code did not
     //    provide and does not replace: the code went to the *new* address,
     //    which whoever asks has already chosen. Do not relax this.
-    if (passwordProofState(caller.claims, Math.floor(Date.now() / 1000)) !== 'fresh') {
+    if (reauthProofState(caller.claims, Math.floor(Date.now() / 1000)) !== 'fresh') {
       return reauthRequired();
     }
 
