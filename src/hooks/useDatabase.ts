@@ -347,6 +347,11 @@ export const useDatabase = () => {
           pricePerLitre: numberOrUndefined(r.price_per_litre),
           odometerKm: numberOrUndefined(r.odometer_km),
           rangeKm: numberOrUndefined(r.range_km),
+          stationName: r.station_name || undefined,
+          operatorName: r.operator_name || undefined,
+          street: r.street || undefined,
+          printedReceiptNumber: r.printed_receipt_number || undefined,
+          tseTime: r.tse_time || undefined,
           submittedByName: r.submitted_by_name || undefined
         };
       });
@@ -391,6 +396,11 @@ export const useDatabase = () => {
           price_per_litre: receipt.pricePerLitre ?? null,
           odometer_km: receipt.odometerKm ?? null,
           range_km: receipt.rangeKm ?? null,
+          station_name: receipt.stationName ?? null,
+          operator_name: receipt.operatorName ?? null,
+          street: receipt.street ?? null,
+          printed_receipt_number: receipt.printedReceiptNumber ?? null,
+          tse_time: receipt.tseTime ?? null,
           company_id: companyId
         })
         .select()
@@ -446,6 +456,11 @@ export const useDatabase = () => {
           price_per_litre: receipt.pricePerLitre ?? null,
           odometer_km: receipt.odometerKm ?? null,
           range_km: receipt.rangeKm ?? null,
+          station_name: receipt.stationName ?? null,
+          operator_name: receipt.operatorName ?? null,
+          street: receipt.street ?? null,
+          printed_receipt_number: receipt.printedReceiptNumber ?? null,
+          tse_time: receipt.tseTime ?? null,
         })
         .eq('id', id);
       

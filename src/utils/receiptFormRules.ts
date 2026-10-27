@@ -49,6 +49,15 @@ export interface ReceiptDetailsFields {
   pricePerLitre: string;
   odometerKm: string;
   rangeKm: string;
+  /** The letterhead split and the printed number (20261027150000). All free
+   *  text and all optional in both modes: old Belege carry none, and the OCR
+   *  only sometimes finds them. */
+  street: string;
+  stationName: string;
+  operatorName: string;
+  printedNumber: string;
+  /** `HH:MM` or `HH:MM:SS` — the TSE clock, kept apart from receiptTime. */
+  tseTime: string;
 }
 
 export const EMPTY_DETAILS: ReceiptDetailsFields = {
@@ -60,6 +69,11 @@ export const EMPTY_DETAILS: ReceiptDetailsFields = {
   pricePerLitre: '',
   odometerKm: '',
   rangeKm: '',
+  street: '',
+  stationName: '',
+  operatorName: '',
+  printedNumber: '',
+  tseTime: '',
 };
 
 /** The values that reach the columns; `undefined` is an absent figure. */
@@ -70,6 +84,11 @@ export interface ReceiptDetailsValues {
   pricePerLitre?: number;
   odometerKm?: number;
   rangeKm?: number;
+  street?: string;
+  stationName?: string;
+  operatorName?: string;
+  printedReceiptNumber?: string;
+  tseTime?: string;
 }
 
 /**
@@ -83,6 +102,7 @@ export type ReceiptProblemKey =
   | 'rec.err.merchantRequired'
   | 'rec.err.cityRequired'
   | 'rec.err.timeInvalid'
+  | 'rec.err.tseTimeInvalid'
   | 'rec.err.plzInvalid'
   | 'rec.err.litresInvalid'
   | 'rec.err.priceInvalid'
@@ -90,6 +110,8 @@ export type ReceiptProblemKey =
   | 'rec.err.rangeInvalid';
 
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** The TSE clock may carry its seconds; the sale time never does on this form. */
+const CLOCK_WITH_SECONDS = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 const POSTAL_CODE = /^\d{5}$/;
 const LITRES_MAX = 2000;
 const PRICE_MAX = 20;
@@ -135,6 +157,13 @@ function timeProblem(time: string, mode: ReceiptFormMode): ReceiptProblemKey | n
   return CLOCK.test(time.trim()) ? null : 'rec.err.timeInvalid';
 }
 
+/** Optional in both modes — the OCR only sometimes finds the TSE clock — but a
+ *  filled value must be a time, or the column refuses the whole save. */
+function tseTimeProblem(tseTime: string): ReceiptProblemKey | null {
+  if (isBlank(tseTime)) return null;
+  return CLOCK_WITH_SECONDS.test(tseTime.trim()) ? null : 'rec.err.tseTimeInvalid';
+}
+
 function postalProblem(postalCode: string): ReceiptProblemKey | null {
   return isBlank(postalCode) || POSTAL_CODE.test(postalCode.trim()) ? null : 'rec.err.plzInvalid';
 }
@@ -164,6 +193,7 @@ export function receiptDetailsProblem(
     postalProblem(fields.postalCode) ??
     requiredText(fields.city, mode, 'rec.err.cityRequired') ??
     timeProblem(fields.receiptTime, mode) ??
+    tseTimeProblem(fields.tseTime) ??
     (hasFuelFigures(category) ? fuelProblem(fields, mode) : null)
   );
 }
@@ -194,6 +224,11 @@ export function receiptDetailsValues(category: string, f: ReceiptDetailsFields):
     pricePerLitre: fuel ? decimalOrUndefined(f.pricePerLitre, 3) : undefined,
     odometerKm: fuel ? wholeNumberOrUndefined(f.odometerKm) : undefined,
     rangeKm: fuel ? wholeNumberOrUndefined(f.rangeKm) : undefined,
+    street: textOrUndefined(f.street),
+    stationName: textOrUndefined(f.stationName),
+    operatorName: textOrUndefined(f.operatorName),
+    printedReceiptNumber: textOrUndefined(f.printedNumber),
+    tseTime: textOrUndefined(f.tseTime),
   };
 }
 
@@ -219,5 +254,12 @@ export function detailsFieldsFromReceipt(receipt: Receipt): ReceiptDetailsFields
     pricePerLitre: figureToInput(receipt.pricePerLitre),
     odometerKm: figureToInput(receipt.odometerKm),
     rangeKm: figureToInput(receipt.rangeKm),
+    street: receipt.street ?? '',
+    stationName: receipt.stationName ?? '',
+    operatorName: receipt.operatorName ?? '',
+    printedNumber: receipt.printedReceiptNumber ?? '',
+    // The TSE clock keeps its seconds in the form: unlike the sale time it is
+    // the fiscal stamp, and 08:46 is a different claim from 08:46:19.
+    tseTime: receipt.tseTime ?? '',
   };
 }

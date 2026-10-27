@@ -85,11 +85,16 @@ export type ReceiptProblem =
   | 'invalid_date'
   | 'invalid_postal_code'
   | 'invalid_time'
+  | 'invalid_tse_time'
   | 'invalid_litres'
   | 'invalid_price_per_litre'
   | 'invalid_odometer'
   | 'invalid_range'
   | 'invalid_payment_method'
+  | 'invalid_station_name'
+  | 'invalid_operator_name'
+  | 'invalid_street'
+  | 'invalid_receipt_number'
   | 'subject_missing'
 
 export interface ReceiptSubmissionInput {
@@ -106,6 +111,20 @@ export interface ReceiptSubmissionInput {
   merchant_name: string | null
   city: string | null
   receipt_time: string | null
+  /** The letterhead split (27.10.2026): the brand half (`JET Tankstelle`), the
+   *  franchise operator after it, and the street with its house number. Older
+   *  app builds send `merchant_name` alone, so all three are optional. */
+  station_name: string | null
+  operator_name: string | null
+  street: string | null
+  /** The number PRINTED on the receipt (beside `Bon` on a JET one) — never a
+   *  Reidey id and never the TSE Transaktionsnummer. The Belegnummer this
+   *  product draws (`BEL-…`) is a different number and stays server-drawn. */
+  receipt_number: string | null
+  /** The fiscal TSE clock's time of day, `HH:MM:SS`. NOT the sale time, which
+   *  stays `receipt_time`; the two differ on a real receipt and an audit wants
+   *  both unmixed. */
+  tse_time: string | null
   /** Fuel only. Plain decimals with a dot, as strings: the column is numeric
    *  and a float here would round a unit price on its way through. */
   litres: string | null
@@ -223,6 +242,35 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
     return { ok: false, problem: 'invalid_time' }
   }
 
+  // The fiscal TSE clock, `HH:MM:SS` — the shape Reidey's validator pins
+  // (`date_format:H:i:s`). It is never the sale time, which stays
+  // `receipt_time`; a reader that mixed the two is the defect of 27.10.2026.
+  const tseTime = text(b.tse_time)
+  if (tseTime !== null && !/^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(tseTime)) {
+    return { ok: false, problem: 'invalid_tse_time' }
+  }
+
+  // The letterhead split and the printed receipt number, bounded to the digit
+  // of Reidey's own validator (120/120/200/32). Over-long text is refused by
+  // name rather than truncated: a cut-off name reads as a different person,
+  // and nothing on this door may rewrite what the receipt says.
+  const stationName = text(b.station_name)
+  if (stationName !== null && stationName.length > 120) {
+    return { ok: false, problem: 'invalid_station_name' }
+  }
+  const operatorName = text(b.operator_name)
+  if (operatorName !== null && operatorName.length > 120) {
+    return { ok: false, problem: 'invalid_operator_name' }
+  }
+  const street = text(b.street)
+  if (street !== null && street.length > 200) {
+    return { ok: false, problem: 'invalid_street' }
+  }
+  const printedNumber = text(b.receipt_number)
+  if (printedNumber !== null && printedNumber.length > 32) {
+    return { ok: false, problem: 'invalid_receipt_number' }
+  }
+
   // Both fuel figures travel as plain decimals with a dot, like the amount,
   // and for the same reason: `parseDisplayAmount` reads `1.234` as 1.23 and
   // answers 0 for what it cannot read, and these reach an accountant.
@@ -324,6 +372,11 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
       merchant_name: text(b.merchant_name),
       city: text(b.city),
       receipt_time: receiptTime,
+      station_name: stationName,
+      operator_name: operatorName,
+      street,
+      receipt_number: printedNumber,
+      tse_time: tseTime,
       litres,
       price_per_litre: pricePerLitre,
       odometer_km: odometer,
@@ -349,6 +402,9 @@ const FINAL: ReadonlySet<ReceiptProblem> = new Set<ReceiptProblem>([
   // A malformed figure does not become well formed on a retry, and the app has
   // already discarded the photo it read them from by the time it sends.
   'invalid_odometer', 'invalid_range',
+  // The header split and the TSE clock are read off the same discarded photo.
+  'invalid_tse_time', 'invalid_station_name', 'invalid_operator_name',
+  'invalid_street', 'invalid_receipt_number',
 ])
 
 export function receiptProblemIsFinal(problem: ReceiptProblem): boolean {

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { AlertCircle, Camera, CheckCircle, ChevronRight, Loader2, Receipt as ReceiptIcon, Save, Upload, X } from 'lucide-react';
+import { AlertCircle, Camera, CheckCircle, ChevronRight, History, Loader2, Receipt as ReceiptIcon, Save, Upload, X } from 'lucide-react';
+import { format as formatDateFns } from 'date-fns';
 import { Receipt, ReceiptFormData, Driver } from '../types/receipt';
+import { receiptEditFieldKey, sortReceiptEdits, type ReceiptEditEntry } from '../utils/receiptEditHistory';
 import { getCityFromPostalCode, isValidGermanPostalCode } from '../utils/germanPostalCodes';
 import { useToast } from '../contexts/ToastContext';
 import { extractReceiptData, extractClusterLines, OcrResult, formatAmountDE } from '../utils/receiptOcr';
@@ -43,6 +45,20 @@ interface ReceiptModalProps {
   title: string;
   drivers: Driver[];
   existingReceipts: Receipt[];
+  /**
+   * The Beleg's edit history (receipt_edits, 20261027160000), loaded by the
+   * page for the receipt being edited. `undefined` while loading or in create
+   * mode, `null` when the read failed — a failed read is said, never drawn as
+   * an empty history (CLAUDE.md, "A figure whose load failed is not shown").
+   */
+  editHistory?: ReceiptEditEntry[] | null;
+  /** Resolves an editor's user id to a display name; absent ids stay unknown. */
+  editorNames?: Map<string, string>;
+  /**
+   * Records a `confirm` row: the reviewer vouches for the Beleg as shown.
+   * Returns whether the database accepted it; the page owns the write.
+   */
+  onConfirmValues?: () => Promise<boolean>;
 }
 
 // The category values (utils/receiptFormRules.ts) are written to
@@ -70,6 +86,9 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
   title,
   drivers,
   existingReceipts,
+  editHistory,
+  editorNames,
+  onConfirmValues,
 }) => {
   const { success: showSuccess, error: showError } = useToast();
   const { t } = useTranslation();
@@ -101,6 +120,9 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const setDetail = (key: keyof ReceiptDetailsFields, value: string) =>
     setDetails(prev => ({ ...prev, [key]: value }));
   const [customDescription, setCustomDescription] = useState('');
+  // The reviewer's confirm (receipt_edits): the write is the page's, the
+  // button and its pending state live here.
+  const [confirming, setConfirming] = useState(false);
 
   // Image scanning state
   const [scanState, setScanState] = useState<ScanState>('idle');
@@ -319,6 +341,25 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   // Map extracted data onto form fields
   const applyExtracted = useCallback(async (data: OcrResult) => {
+    // What the parser reads beyond the base fields goes into the details the
+    // same save already stores. The sale time comes from `time` and NEVER from
+    // `tseTime` — the TSE signs AFTER the sale, and mixing the two clocks is
+    // the defect the 27.10.2026 parser work unpicked. The printed number
+    // prefers the columnar Bon and falls back to a labelled Beleg-Nr; the
+    // Belegnummer field (BEL-…) is never written from a scan, as before.
+    setDetails(prev => ({
+      ...prev,
+      ...(data.merchantName ? { merchant: data.merchantName } : {}),
+      ...(data.time ? { receiptTime: data.time } : {}),
+      ...(data.tseTime ? { tseTime: data.tseTime } : {}),
+      ...(data.street ? { street: data.street } : {}),
+      ...(data.stationName ? { stationName: data.stationName } : {}),
+      ...(data.operatorName ? { operatorName: data.operatorName } : {}),
+      ...(data.bonNumber ?? data.receiptNumber
+        ? { printedNumber: (data.bonNumber ?? data.receiptNumber) as string }
+        : {}),
+    }));
+
     setFormData(prev => {
       const next = { ...prev };
 
@@ -685,6 +726,19 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   />
                 </Field>
 
+                {/* The number the till itself printed — a different number from
+                    the BEL- id above, and a scan fills only this one. */}
+                <Field label={t('rec.printedNumber')} hint={t('rec.printedNumberHint')}>
+                  <Input
+                    type="text"
+                    value={details.printedNumber}
+                    onChange={e => setDetail('printedNumber', e.target.value)}
+                    className="tabular-nums"
+                    placeholder="90521"
+                    maxLength={32}
+                  />
+                </Field>
+
                 <Field label={t('common.driver')} required>
                   <NativeSelect
                     value={formData.driverName}
@@ -734,6 +788,37 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     value={details.merchant}
                     onChange={e => setDetail('merchant', e.target.value)}
                     placeholder={t('rec.merchantPlaceholder')}
+                  />
+                </Field>
+
+                {/* The letterhead split, when the receipt carries one: the
+                    brand half and the franchise operator after it. The merchant
+                    above keeps the whole name, as stored rows do. */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label={t('rec.stationName')}>
+                    <Input
+                      type="text"
+                      value={details.stationName}
+                      onChange={e => setDetail('stationName', e.target.value)}
+                      maxLength={120}
+                    />
+                  </Field>
+                  <Field label={t('rec.operatorName')}>
+                    <Input
+                      type="text"
+                      value={details.operatorName}
+                      onChange={e => setDetail('operatorName', e.target.value)}
+                      maxLength={120}
+                    />
+                  </Field>
+                </div>
+
+                <Field label={t('rec.street')}>
+                  <Input
+                    type="text"
+                    value={details.street}
+                    onChange={e => setDetail('street', e.target.value)}
+                    maxLength={200}
                   />
                 </Field>
 
@@ -794,17 +879,32 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   required
                 />
 
-                <Field label={t('rec.receiptTime')} hint={t('rec.receiptTimeHint')} required={!receipt}>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    value={details.receiptTime}
-                    onChange={e => setDetail('receiptTime', e.target.value)}
-                    placeholder="14:32"
-                    maxLength={5}
-                    className="tabular-nums"
-                  />
-                </Field>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label={t('rec.receiptTime')} hint={t('rec.receiptTimeHint')} required={!receipt}>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={details.receiptTime}
+                      onChange={e => setDetail('receiptTime', e.target.value)}
+                      placeholder="14:32"
+                      maxLength={5}
+                      className="tabular-nums"
+                    />
+                  </Field>
+                  {/* The fiscal clock, kept apart from the sale time: a scan
+                      fills it from `tseTime` and never the other way round. */}
+                  <Field label={t('rec.tseTime')} hint={t('rec.tseTimeHint')}>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={details.tseTime}
+                      onChange={e => setDetail('tseTime', e.target.value)}
+                      placeholder="08:46:19"
+                      maxLength={8}
+                      className="tabular-nums"
+                    />
+                  </Field>
+                </div>
               </section>
 
               <section className="grid gap-4">
@@ -937,6 +1037,96 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </section>
               )}
             </form>
+
+            {/* ── Edit history and the reviewer's confirm (edit mode only) ──
+                Every change to a stored Beleg is logged by the database
+                (receipt_edits, 20261027160000); this section shows that log and
+                offers the one client write it accepts: a confirm, vouching for
+                the Beleg as shown. The page owns both the read and the write. */}
+            {receipt && (editHistory !== undefined || onConfirmValues) ? (
+              <section aria-label={t('rec.history.title')} className="grid gap-3 border-t border-line pt-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-fg">
+                    <History aria-hidden className="size-3.5 text-fg-subtle" />
+                    {t('rec.history.title')}
+                  </h3>
+                  {onConfirmValues ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={confirming}
+                      title={t('rec.confirmValuesHint')}
+                      onClick={() => {
+                        void (async () => {
+                          setConfirming(true);
+                          try {
+                            if (await onConfirmValues()) {
+                              showSuccess(t('rec.confirmSaved'));
+                            } else {
+                              showError(t('rec.confirmFailed'));
+                            }
+                          } finally {
+                            setConfirming(false);
+                          }
+                        })();
+                      }}
+                    >
+                      {confirming
+                        ? <Loader2 aria-hidden className="motion-safe:animate-spin" />
+                        : <CheckCircle aria-hidden />}
+                      {t('rec.confirmValues')}
+                    </Button>
+                  ) : null}
+                </div>
+
+                {editHistory === null ? (
+                  // A failed read is said, never drawn as an empty history.
+                  <p className="text-[13px] text-critical">{t('rec.history.loadFailed')}</p>
+                ) : editHistory !== undefined && editHistory.length === 0 ? (
+                  <p className="text-[13px] text-fg-subtle">{t('rec.history.empty')}</p>
+                ) : editHistory ? (
+                  <ul className="grid gap-2">
+                    {sortReceiptEdits(editHistory).map(entry => (
+                      <li key={entry.id} className="grid gap-0.5 text-[13px]">
+                        <span className="text-xs tabular-nums text-fg-subtle">
+                          {formatDateFns(new Date(entry.editedAt), 'dd.MM.yyyy HH:mm')}
+                          {' · '}
+                          {editorNames?.get(entry.editedBy) ?? t('rec.unknownUser')}
+                        </span>
+                        {entry.action === 'confirm' ? (
+                          <span className="justify-self-start">
+                            <Badge tone="positive">{t('rec.history.confirmed')}</Badge>
+                          </span>
+                        ) : (
+                          <span className="min-w-0 break-words text-fg-muted">
+                            <span className="font-medium text-fg">
+                              {(() => {
+                                const key = receiptEditFieldKey(entry.field);
+                                return key ? t(key) : entry.field;
+                              })()}
+                              :
+                            </span>{' '}
+                            {/* The stored values verbatim: the log holds the
+                                column's own text, and reformatting an audit
+                                value is how a helper disagrees with it. */}
+                            <span className="line-through opacity-70">
+                              {entry.oldValue === null || entry.oldValue.trim() === ''
+                                ? t('rec.history.emptyValue') : entry.oldValue}
+                            </span>
+                            {' → '}
+                            <span className="text-fg">
+                              {entry.newValue === null || entry.newValue.trim() === ''
+                                ? t('rec.history.emptyValue') : entry.newValue}
+                            </span>
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            ) : null}
           </div>
         </SheetBody>
 

@@ -12,6 +12,7 @@ import {
   receiptFuelFigures,
   receiptFuelParts,
   receiptSourceParts,
+  receiptStationCell,
   textOrNull,
 } from '../utils/receiptDisplay';
 import {
@@ -191,7 +192,11 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
         receipt.date.includes(searchTerm) ||
         receipt.receiptNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         receipt.driverName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (receipt.merchantName ?? '').toLowerCase().includes(searchTerm.toLowerCase())
+        (receipt.merchantName ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        // The printed Bon number and the street travel with the Beleg since
+        // 20261027150000; a reviewer holding the paper searches by exactly these.
+        (receipt.printedReceiptNumber ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (receipt.street ?? '').toLowerCase().includes(searchTerm.toLowerCase())
       );
 
       let matchesDate = true;
@@ -380,6 +385,13 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           {/* Not nowrap: on a phone the number may break at its hyphens, or it
               alone pushes the table past the screen. */}
           <span className="text-xs tabular-nums text-fg-subtle">{receipt.receiptNumber}</span>
+          {/* The number the till itself printed — a different number from the
+              BEL- id above it, and shown apart on purpose. */}
+          {textOrNull(receipt.printedReceiptNumber) ? (
+            <span className="text-xs tabular-nums text-fg-muted">
+              {t('rec.printedShort', { number: receipt.printedReceiptNumber as string })}
+            </span>
+          ) : null}
           {/* A phone hides the date and driver columns; their values move here. */}
           <span className="text-[13px] text-fg-muted md:hidden">
             <span className="tabular-nums sm:hidden">{formatDate(receipt.date)} · </span>
@@ -405,7 +417,20 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     {
       id: 'merchantName',
       header: t('rec.merchant'),
-      cell: receipt => textOrNull(receipt.merchantName),
+      // Stacked: the brand half when the header split (old rows keep the whole
+      // name), the operator when the name line does not already carry it, and
+      // the street beneath — "street under the station cell".
+      cell: receipt => {
+        const station = receiptStationCell(receipt);
+        if (station.name === null && station.street === null) return null;
+        return (
+          <span className="grid min-w-0 gap-0.5 py-2">
+            {station.name ? <span>{station.name}</span> : null}
+            {station.operator ? <span className="text-xs text-fg-muted">{station.operator}</span> : null}
+            {station.street ? <span className="text-xs text-fg-muted">{station.street}</span> : null}
+          </span>
+        );
+      },
       hideBelow: 'lg',
       className: 'px-3',
     },
