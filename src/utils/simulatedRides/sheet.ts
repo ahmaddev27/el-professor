@@ -8,6 +8,34 @@ import type { GeoPoint, SimRide } from './types';
 /** How the export writes an empty cell. */
 const EMPTY = '\\N';
 
+/**
+ * The word each status is written as in `Fahrtstatus`.
+ *
+ * `abgeschlossen` and `storniert` are the two the importer knows:
+ * `COMPLETED_STATUS_WORDS` and `CANCELLED_STATUS_WORDS` in
+ * `fahrtenbuchImportParser.ts`.
+ *
+ * **`abgelehnt` is deliberately in neither list, and that is the whole answer
+ * to section 3's import question.** `mapTripStatus` returns `'unknown'` for a
+ * word it does not know, which means the row is *stored and flagged for
+ * review*, counted as neither completed nor cancelled, with `is_canceled`
+ * false — so a declined ride that is re-imported enters **no** existing figure
+ * on any screen or document. That is the honest state of the product: a third
+ * ride status in the ledger is a migration, a CHECK change and a decision
+ * about what a word in a customer's file means — the header of
+ * `CANCELLED_STATUS_WORDS` says in so many words that widening a list is such
+ * a decision — and it is not taken under an audit's name. Writing `storniert`
+ * here instead would be worse than leaving it unknown: it would silently
+ * merge declines into cancellations, which is exactly what section 3 forbids.
+ */
+const STATUS_WORDS: Readonly<Record<SimRide['status'], string>> = {
+  completed: 'abgeschlossen',
+  cancelled: 'storniert',
+  declined: 'abgelehnt',
+};
+
+export const DECLINED_STATUS_WORD = STATUS_WORDS.declined;
+
 const COLUMNS = FAHRTENBUCH_ORIGINAL_COLUMNS;
 export const SIMULATED_SHEET_COLUMNS: readonly string[] = COLUMNS;
 
@@ -38,7 +66,7 @@ export function rideToRow(ride: SimRide): RawRow {
     'Uhrzeit der Auftragsuebermittlung': stamp(ride.orderTransmittedMs, true),
     'Geplante Abholzeit': stamp(ride.plannedPickupMs),
     'Datum der Fahrt': rideDate(ride),
-    Fahrtstatus: ride.status === 'completed' ? 'abgeschlossen' : 'storniert',
+    Fahrtstatus: STATUS_WORDS[ride.status],
     'Standort des Fahrzeugs bei Auftragsuebermittlung': formatPosition(ride.vehiclePosition),
     'Uhrzeit des Fahrtbeginns': stamp(ride.startMs),
     'Uhrzeit des Fahrtendes': stamp(ride.endMs),

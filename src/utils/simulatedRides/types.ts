@@ -15,6 +15,23 @@ export interface SimVehicle {
 
 export interface SimDriver {
   name: string;
+  /**
+   * `drivers.id`, when the caller knew it.
+   *
+   * It was always **present at runtime** — `runShift` spreads its `owner` onto
+   * every ride, and `generateFullMonth` passes a driver object that carries its
+   * id — but the type did not say so, so every reader grouped rides by the
+   * driver's **name**. Two drivers of one company with the same name therefore
+   * merged into one row of a per-driver total, and the external audit's section
+   * 5 is explicit that a driver is matched on the UUID and never on the name
+   * alone. Declaring it is what lets a reader group by the id and fall back to
+   * the name only when there is none.
+   *
+   * Optional, because `generateFromFigures` resolves its drivers out of the
+   * company's income rows by name and genuinely has no id for some of them —
+   * and `undefined` says that, where an empty string would not.
+   */
+  id?: string;
 }
 
 export interface GeneratorOptions {
@@ -42,11 +59,37 @@ export interface SimShift {
   endMs: number;
 }
 
+/**
+ * What became of an order.
+ *
+ * `declined` is the external audit's section 3 and it is **distinct from
+ * `cancelled`**: a cancellation is an accepted ride that did not happen, a
+ * decline is an order the driver turned down. The audit is explicit that the
+ * two must not be conflated and that a cancellation earns no decline fee
+ * unless company policy says so, which is why `chargeDeclinedFeeOnCancelled`
+ * defaults to false and the sheet writes a third word.
+ *
+ * Every existing reader branches on `=== 'completed'`, so a declined ride is
+ * already excluded from fares, tips, kilometres and the shift's own counts —
+ * `figures.ts` zeroes the fare of any ride that is not completed. The fee is
+ * therefore never inside a fare, and the two cannot double count.
+ */
+export type SimRideStatus = 'completed' | 'cancelled' | 'declined';
+
 export interface SimRide {
   shiftId: string;
   vehicle: SimVehicle;
   driver: SimDriver;
-  status: 'completed' | 'cancelled';
+  status: SimRideStatus;
+  /**
+   * The decline fee, in **integer cents**, and only for a declined ride.
+   *
+   * It is a field of its own, as section 3 requires ("خزّن الرسوم كحقل مستقل
+   * عن أجرة الرحلات المكتملة"), and it is optional so that a ride built before
+   * the feature existed carries **no fee** rather than a zero one — the two
+   * are different statements, and no construction site had to change.
+   */
+  declinedFeeCents?: number;
   orderReceivedMs: number;
   orderTransmittedMs: number;
   plannedPickupMs: number | null;

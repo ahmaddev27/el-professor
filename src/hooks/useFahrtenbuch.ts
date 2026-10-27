@@ -78,6 +78,13 @@ export interface TripImportFacts {
   currency_source: 'assumed' | 'source';
   source_row_key: string | null;
   source_row_key_basis: SourceRowKeyBasis | null;
+  /**
+   * The fee a declined order earned, in integer cents, or null when none is
+   * recorded (`20261027140000`). Never a fare: the table's
+   * `fahrtenbuch_trips_declined_fee_check` refuses it on a completed trip,
+   * which is what keeps the two from being counted as one.
+   */
+  declined_fee_cents: number | null;
 }
 
 // The database allows NULL in these two for a row written without them (a

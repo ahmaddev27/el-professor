@@ -1,4 +1,5 @@
-import { SOURCE_TIME_ZONE, formatWall, wallAt, wallDate, wallTimeToInstant } from '../fahrtenbuchImportParser';
+import { SOURCE_TIME_ZONE, formatWall, wallAt, wallTimeToInstant } from '../fahrtenbuchImportParser';
+import { operatingDayIn } from './period';
 
 const HOUR_MS = 3_600_000;
 const OPERATING_DAY_START_HOUR = 4;
@@ -7,9 +8,20 @@ export function localHour(ms: number): number {
   return wallAt(ms, SOURCE_TIME_ZONE).hour;
 }
 
-/** The day a ride belongs to when days start at 04:00 (the same rule the shift recommendation uses). */
+/**
+ * The day a ride belongs to when days start at 04:00 (the same rule the shift
+ * recommendation uses).
+ *
+ * It used to subtract four hours of **absolute** time and read the calendar day
+ * of the result. Four absolute hours are not four clock hours on a day the
+ * offset changes, so a ride at 04:30 local on the spring-forward day was dated
+ * the day before while the same reading on every other day was dated the same
+ * day — measured in `dstProbe.test.ts`. The rule now lives in `period.ts`,
+ * stated on the clock, and this is the call with the shipped defaults. Nothing
+ * outside this folder reads it, so no stored row moves.
+ */
 export function operatingDayOf(ms: number): string {
-  return wallDate(wallAt(ms - OPERATING_DAY_START_HOUR * HOUR_MS, SOURCE_TIME_ZONE));
+  return operatingDayIn(ms, SOURCE_TIME_ZONE, OPERATING_DAY_START_HOUR);
 }
 
 /** 04:00 local on the given calendar day; null on a day where that clock reading is not unique. */

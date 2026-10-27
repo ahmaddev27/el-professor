@@ -143,7 +143,15 @@ function fareFor(rng: Rng, km: number, seconds: number): number {
 }
 
 /** The order time is the key of a ride in the file, so two rides never share one. */
-function uniqueTransmit(ctx: Context, ms: number): number {
+/**
+ * A transmission instant no other ride of the month holds.
+ *
+ * Exported for `fullMonth.ts`, which adds declined orders to a shift and needs
+ * the same uniqueness: the instant is part of `source_row_key`, so two rides
+ * sharing one would hash to one key and the second would be refused as a
+ * duplicate on import.
+ */
+export function uniqueTransmit(ctx: Context, ms: number): number {
   let t = ms;
   while (ctx.usedTransmits.has(t)) t += 1;
   ctx.usedTransmits.add(t);
