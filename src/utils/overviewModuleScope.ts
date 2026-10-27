@@ -237,9 +237,15 @@ export function overviewReadEnabled(modules: CompanyModules, table: OverviewRead
  * The Overview's whole module surface: every module it reads rows from, own
  * queries and hook alike, sorted.
  *
- * This is the set `moduleReadScope.test.ts` pins as the Overview's crossings, so
- * the two halves of the same fact cannot drift: a module added to a panel above
- * but to no read, or to a read but to no panel, fails there.
+ * **Seven, not the five `moduleReadScope.test.ts` pins as `overview reads …`.**
+ * That file attributes a crossing to the file that issues the request, so
+ * `receipts` and `drivers` are recorded against `useDatabase` as `shared`
+ * crossings, not against the Overview — and they stay there, because the hook
+ * has three other callers. A panel's dependency is about where a figure comes
+ * from, so both belong here.
+ *
+ * Its own guard is `overviewModuleScope.test.ts`: a module named by a panel but
+ * by no read, or by a read but by no panel, fails there.
  */
 export const OVERVIEW_MODULE_SURFACE: readonly CompanyModuleKey[] = [
   ...new Set<CompanyModuleKey>([
