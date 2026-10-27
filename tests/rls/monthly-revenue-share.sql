@@ -177,9 +177,22 @@ CREATE OR REPLACE FUNCTION _rs_u(p_who text) RETURNS uuid
 LANGUAGE sql STABLE AS $$ SELECT (SELECT w.uid FROM _rs_who w WHERE w.who = p_who) $$;
 
 -- One configured month per company, written as the table's owner.
+/*
+  The two rows are deliberately for **different months**, and tidying them to
+  the same month breaks the move control rather than the move probe.
+
+  `UNIQUE (company_id, year, month)` is what the table is for. With both rows at
+  2026-08, re-pointing company A's row at company B collides with company B's
+  own row, so the move fails with 23505 — and the control below, which loosens
+  the WITH CHECK and requires the move to SUCCEED, could never pass. The
+  refusal probe above it would still have read as green, because RLS refuses
+  before the unique constraint is reached, so the pair would have looked fine
+  while the control was measuring a constraint instead of the policy. The first
+  run of this file failed on exactly that, and the control is what caught it.
+*/
 INSERT INTO company_monthly_revenue_share (id, company_id, year, month, rate_basis_points) VALUES
   (_rs_id('share:a'), 'c0000000-0000-4000-8000-00000000000a', 2026, 8, 3142),
-  (_rs_id('share:b'), 'c0000000-0000-4000-8000-00000000000b', 2026, 8, 2500);
+  (_rs_id('share:b'), 'c0000000-0000-4000-8000-00000000000b', 2026, 7, 2500);
 
 -- ─── 1. shape ───────────────────────────────────────────────────────────────
 
