@@ -2,7 +2,137 @@
 
 Last updated: **27.10.2026**
 
-- **27.10.2026 (latest) - switching a module off closes its route and its writes (branch `fix/module-off-closes-route-and-query`, PR against `staging`, one migration `20261027120000`, nothing deployed).**
+- **27.10.2026 (latest) - passkey (WebAuthn) sign-in: measured, and prepared behind a switch that ships off (branch `feat/passkey-groundwork`, PR against `staging`, no migration, no image bump, nothing deployed).**
+  - **What this slice does NOT do.** It ships no passkey. No user can register or use one, no screen mentions them, no `supabase/gotrue` version changed, no migration is added, and nothing was touched on either host. What it adds is the configuration seam, its release guards, their tests, and the answers below.
+  - **The version: `v2.188.0` adds passkeys; pin `v2.190.0` or newer.** Established from the `supabase/auth` repository, two ways independently: the `PasskeyConfiguration` and `WebAuthnConfiguration` structs are **absent** at tag `v2.187.0` and **present and wired into `GlobalConfiguration`** at `v2.188.0`, and `internal/api/passkey_authentication.go` 404s at `v2.187.0` and resolves at `v2.188.0`. The changelog line is `* **passkeys:** add configuration, error codes, and schemas`. Three corrections to that headline, all load-bearing:
+    - **`v2.188.0` has no Docker image.** Its release workflow failed (`v2.188.1`'s sole changelog entry is `remove make all from release workflow`); both `supabase/gotrue:v2.188.0` and `supabase/auth:v2.188.0` answer 404 on Docker Hub. `v2.188.1` is the first pullable passkey build.
+    - **`v2.189.0` changes the passkey request and response shapes**, so browser code written against 2.188.x breaks there.
+    - **`v2.190.0` is the first version worth pinning**: it makes `GOTRUE_WEBAUTHN_RP_*` authoritative on the MFA WebAuthn path too (before it, that path read `rpId`/`rpOrigins` from the request body) and downgrades an incomplete WebAuthn config from a **startup error** to a warning - so a half-written `.env` degrades to "passkeys off" instead of an auth container that will not boot. `deploy.sh` therefore refuses the switch below `2.190.0`. The latest release is `v2.197.0`; `v2.198.0` is at `-rc.25`. Both image namespaces are published in lockstep and upstream's own self-hosting compose still says `supabase/gotrue`, so the name stays.
+  - **Q1 - does a passkey create an account? NO, and `GOTRUE_DISABLE_SIGNUP` is not weakened.** Measured in GoTrue's source, three negatives: no passkey handler calls `NewUser`, `signupNewUser` or `CreateUser`; no passkey route reads `DisableSignup` (and none needs to); `/signup` has no passkey branch. Registration takes the user from an **already-authenticated** context (`requireAuthentication` plus `requireNotAnonymous`) and only ever inserts a credential row; authentication resolves an existing user through `FindUserByID` and errors when the user handle matches nothing, additionally refusing an unconfirmed address and a banned account. **So the absence of a signup guard on that path is not a hole**, and the auth entrypoint is deliberately untouched - a test pins that it still reads only the Google switch.
+  - **Q1b - Kong admits every new passkey route today, with no change to `kong.yml`.** `auth-v1-open` matches the bare prefix `[/auth/v1/]`, so all nine new method+path pairs route straight to GoTrue. Nothing needs adding to `auth-v1-closed`, because none of them can create an account. The nine, with their middleware:
+
+    | method | path (behind Kong's `/auth/v1` prefix) | session required |
+    |---|---|---|
+    | POST | `/passkeys/authentication/options` | **no** - rate-limited and captcha'd |
+    | POST | `/passkeys/authentication/verify` | **no** - **mints the session**; no limiter, no captcha in the router |
+    | POST | `/passkeys/registration/options` | yes, + not-anonymous, + AAL |
+    | POST | `/passkeys/registration/verify` | yes, + not-anonymous, + AAL |
+    | GET | `/passkeys/` | yes |
+    | PATCH | `/passkeys/{id}` | yes |
+    | DELETE | `/passkeys/{id}` | yes, + AAL |
+    | GET | `/admin/users/{id}/passkeys/` | admin credentials |
+    | DELETE | `/admin/users/{id}/passkeys/{id}` | admin credentials |
+
+    All but the admin pair sit behind `requirePasskeyEnabled`, which 404s while the switch is off - so today and with the switch off, enabling the *image* alone exposes nothing. The one line to carry forward: **`/passkeys/authentication/verify` is an unauthenticated, session-minting route with neither a rate limiter nor a captcha in GoTrue's own router.** Caddy's `X-Client-IP` still identifies the client for the limits GoTrue does apply, and `GOTRUE_RATE_LIMIT_PASSKEY` (default 30) covers the `/options` route only.
+  - **Q2 - the `amr` is `passkey`, alone, and it locks every platform operator out of the panel.** `internal/models/factor.go` maps `PasskeyLogin` to the string **`passkey`** (and `MFAWebAuthn`, a different thing, to `mfa/webauthn`). `PasskeyAuthenticationVerify` issues through `IssueRefreshToken`, which **creates a new session** and adds that **single** claim - it does not append to a password session the way MFA verification does. So a passkey session's `amr` is `[{"method":"passkey",...}]` with **no `password` entry**. `app_private.session_amr_permits_platform()` requires `password` (`c_permitted CONSTANT text[] := ARRAY['password']`), so with passkeys on and that function unchanged, a platform operator signing in with a passkey holds **no platform capability at all**: `platform_can`, `platform_whoami`, `is_user_super_admin`, the eight read models and every write RPC refuse together and the admin panel comes up empty, with no error anywhere. `PasskeyLogin` is also **not** in `IsAAL2Claim`, so a passkey session is AAL1.
+    - **This is why `deploy.sh` refuses the switch while no migration admits `passkey`.** Whether a passkey session *should* carry platform rights is a decision about authority - the owner's decision of 16.09.2026 is that platform staff never sign in through an external provider, and a passkey is not one, so the answer is genuinely open. The guard does not take it; it refuses the switch until a migration has, and names what is missing.
+    - **One thing already works in our favour:** `app_private.jwt_amr()`/`session_amr_permits_platform()` already read an `amr` entry as **either** a string or an object (`jsonb_typeof`), so GoTrue 2.185.0's `allow amr claim to be array of strings or objects` needs nothing from us.
+    - **Measured from source, not from a running server.** The source chain is unambiguous, and the probe below confirms it - worth doing precisely because the failure mode is silent and total.
+  - **Q3 - the RP ID, and the recommendation: `elprofessor.eu`.** One RP ID at the apex covers production (`elprofessor.eu`) and staging (`app.elprofessor.eu`) with one credential, because the RP ID must be a registrable domain suffix of each origin's effective domain. The alternative - a separate RP ID per environment - buys a clean separation between a copy of production's accounts and production itself, and costs re-registration for anyone who ever tests on staging. **Recommended: `elprofessor.eu`, with `PASSKEY_RP_ORIGINS=https://elprofessor.eu,https://app.elprofessor.eu`.** The reasoning, and the asymmetry worth naming: this is structurally the same call as the shared Google OAuth client (owner decision G3), **except that it cannot be undone** - changing the RP ID invalidates every passkey already registered. A per-environment RP ID can always be narrowed *to* later by adding a second one; an apex RP ID that turns out to be wrong cannot be walked back without every user re-enrolling. That argues for the apex only because the per-environment split has a real cost on every staging test and no security benefit that `platform_staff` and the amr rule do not already provide. If the owner prefers the split, it is the cheaper decision to reverse and the guard accepts either.
+  - **Q4 - what the upgrade itself costs: 15 releases, nothing marked breaking, five that matter.** `grep -niE 'breaking'` over the whole changelog returns **zero** matches - this project ships behaviour changes under Features and Bug Fixes without marking them, so "no breaking changes" is not reassurance. In the range `v2.170.0` → `v2.188.0`, the entries that touch **our** configuration:
+    - **2.185.0 `allow amr claim to be array of strings or objects`** - our reader already handles both. The single most important entry in the range for this codebase, and it costs us nothing.
+    - **2.181.0 `introduce v2 refresh token algorithm`** and 2.183.0/2.184.0's MFA-verify fixes around it, plus 2.186.0's `upgrade existing sessions to v2 refresh tokens though config value` - session machinery, and the reason to measure token refresh after the upgrade.
+    - **2.181.0 adds five new outbound notification mails** (email address changed, identity linked/unlinked, MFA factor enrolled, phone changed) and 2.180.0 a `password changed email notification`. These send mail our users have **never received**, from the product's Resend domain, in GoTrue's own wording - not our German templates. Check whether they are on by default before a production release.
+    - **2.185.0 `Add Sb-Forwarded-For header and IP-based rate limiting`** and `Treat rate limit header value as comma-separated list` - interacts directly with `GOTRUE_RATE_LIMIT_HEADER: X-Client-IP` and Caddy overwriting it.
+    - **2.183.0 `async, concurrent index creation for users table`** - GoTrue runs DDL on `auth.users` at startup. On a release, not during one.
+    - Also: 2.188.0 caps request bodies at 1 MB; 2.188.0 `enable custom providers by default` (a default flipping on, against our "every provider off as a literal" rule - the rendered-compose check already fails any `GOTRUE_EXTERNAL_*_ENABLED` that is not `false`, so this is caught); 2.187.0 `correctly parse JWT ValidMethods from env by enabling split_words`; 2.171.0's two redirect-sanitisation fixes; 2.185.0 `tighten email validation rules`. `GOTRUE_MAILER_URLPATHS_*`, the template URLs and the `issueSession()` magic-link exchange have no entry against them in the range, but all three are on the probe because the whole mail path is what broke the last time GoTrue's URL handling moved.
+  - **What is in the repository.** One switch, `PASSKEY_SIGNIN_ENABLED`, on `GOOGLE_SIGNIN_ENABLED`'s pattern: documented in `deploy/.env.example` and shipping `false`; `deploy.sh`'s new `passkey_guard` (its own marker block, sourced by the test) refuses any value but empty/`true`/`false`, an RP ID that is not one bare lowercase domain, an origin that is not HTTPS or not under the RP ID, a GoTrue below `2.190.0`, and the missing amr migration; the seven variables are wired into the `auth` service behind the switch; the rendered-compose check and the live `/auth/v1/settings` read-back both carry it, the latter treating an absent `passkeys_enabled` as off so the version we run today still passes. **`tests/deploy/passkey-config.test.ts`: 33 assertions, all passing, with 10 mutation controls each watched failing.** Two of its tests assert the repository's own state - that the pinned GoTrue is too old, and that no migration admits `passkey` - so each will fail, separately and with a message naming which half moved, the day one of those preconditions is met. Both ratchets exactly at the baseline (168; 4703/2613 in 62 files); the 51 existing Google deploy assertions still pass.
+  - **The owner's staging probe.** Staging only, and in this order. **Take a `pg_dump` of staging's database first**: GoTrue applies 15 releases' worth of `auth` schema migrations at boot and there is no way back through a rollback.
+
+    ```bash
+    # ── 0. The baseline, on today's image. Read-only, nothing changed. ───────
+    API=https://api-staging.elprofessor.eu
+    curl -s $API/auth/v1/settings | python3 -m json.tool
+    #   EXPECT: no "passkeys_enabled" key; "google": true, "email": true,
+    #           "phone": false, "saml_enabled": false.
+    #   BAD:    the key is already there -> the image is not v2.170.0.
+
+    for p in passkeys/authentication/options passkeys/authentication/verify \
+             passkeys/registration/options passkeys/ factors; do
+      printf '%-42s %s\n' "$p" \
+        "$(curl -s -o /dev/null -w '%{http_code}' -X POST $API/auth/v1/$p)"
+    done
+    #   EXPECT: 404 for every passkeys/* path, 401 for factors.
+    #   WHY IT MATTERS: a 404 is GoTrue's answer, which proves KONG ADMITS the
+    #           path. A 403 with "This route is closed by the gateway" would
+    #           mean Kong blocks it. We expect 404 -> Kong admits them already.
+
+    # ── 1. The upgrade. Staging only, on a branch, through the normal deploy. ─
+    #   Edit deploy/docker-compose.yml: supabase/gotrue:v2.170.0 -> :v2.197.0
+    #   Leave PASSKEY_SIGNIN_ENABLED=false. Push the branch to `staging`.
+    #   EXPECT: deploy.sh green, including its /auth/v1/settings read-back.
+    #   BAD:    the auth container restart-loops -> read `docker compose logs auth`;
+    #           an incomplete WebAuthn config warns rather than fails from 2.190.0,
+    #           so a boot failure here is something else and is worth reading.
+
+    # ── 2. The four regressions, BEFORE passkeys are touched. ────────────────
+    curl -s $API/auth/v1/settings | python3 -m json.tool
+    #   EXPECT: "passkeys_enabled": false now present; everything else as in 0.
+    #   a) password sign-in and token refresh (the v2 refresh algorithm landed
+    #      in this range): sign in on app.elprofessor.eu, leave the tab open
+    #      past one token expiry, confirm it is still signed in.
+    #   b) Google: sign in with Google end to end.
+    #   c) the one-time codes: "Passwort vergessen" and a fresh invitation.
+    #      Read both in Mailpit (mail-staging.elprofessor.eu). These exercise
+    #      otp-request/otp-verify AND issueSession()'s magic-link exchange at
+    #      POST /auth/v1/verify, which is the piece most likely to have moved.
+    #   d) the mail templates GoTrue fetches from the web container: confirm the
+    #      German El-Professor layout, not GoTrue's default.
+    #   ALSO: check for mail nobody asked for. 2.180.0/2.181.0 added six
+    #      notifications (password changed, address changed, identity linked
+    #      and unlinked, MFA factor enrolled, phone changed). Change a password
+    #      on staging and watch Mailpit: a second, English, unbranded mail is
+    #      the thing to find now rather than on production.
+    #   BAD: any of a-d failing -> stop. The upgrade is the problem, not passkeys.
+
+    # ── 3. The amr. This is the measurement the whole slice turns on. ────────
+    #   deploy.sh REFUSES PASSKEY_SIGNIN_ENABLED=true while no migration admits
+    #   `passkey`, which is deliberate - and it also means the amr cannot be
+    #   measured through a release. So measure it on the auth container alone,
+    #   by hand, on staging:
+    #
+    #     cd /srv/PRO-staging/deploy
+    #     docker compose run --rm -e GOTRUE_PASSKEY_ENABLED=true \
+    #       -e GOTRUE_WEBAUTHN_RP_ID=app.elprofessor.eu \
+    #       -e GOTRUE_WEBAUTHN_RP_DISPLAY_NAME=El-Professor-staging \
+    #       -e GOTRUE_WEBAUTHN_RP_ORIGINS=https://app.elprofessor.eu \
+    #       --service-ports auth
+    #
+    #   This is the one step that steps outside the release path, on purpose and
+    #   on staging's auth container only; a redeploy restores it. Use a THROWAWAY
+    #   @example.com account, never a platform account and never a real one.
+    #
+    #   A passkey cannot be created with curl - WebAuthn needs a real
+    #   authenticator - so register and sign in from a browser console on
+    #   app.elprofessor.eu while signed in as the throwaway account, then read
+    #   the token:
+    #
+    #     const t = JSON.parse(localStorage.getItem(
+    #       Object.keys(localStorage).find(k => k.endsWith('-auth-token'))));
+    #     JSON.parse(atob(t.access_token.split('.')[1]));
+    #
+    #   EXPECT (and this is the prediction being tested):
+    #       "amr": [ { "method": "passkey", "timestamp": ... } ]
+    #       "aal": "aal1"
+    #     i.e. exactly one entry, named `passkey`, and NO `password` entry.
+    #   BAD / INTERESTING: anything else. If `amr` names `password` too, the
+    #     platform lockout does not happen and the migration is unnecessary. If
+    #     it names something other than `passkey` (`webauthn`, `mfa/webauthn`),
+    #     the allow-list migration must name THAT string - write down what the
+    #     token actually said and do not infer it.
+
+    # ── 4. Only after 3: the enrolment question, confirmed live. ─────────────
+    curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+      $API/auth/v1/passkeys/registration/options
+    #   EXPECT: 401. Registration needs a session, so it cannot create an account.
+    #   BAD:    200 -> enrolment is reachable unauthenticated; stop and re-read
+    #           the source, because this contradicts it.
+    ```
+
+    **Then stop.** Turning the switch on for real needs the amr migration, which is the owner's decision and a slice of its own, and a production GoTrue upgrade is its own release with its own rehearsal.
+  - **Open for the owner, and the PR asks all four:** (1) the **amr rule** - should a passkey session carry platform capabilities at all, given that platform staff never sign in with Google; (2) the **RP ID** - the recommendation is `elprofessor.eu`, and it is irreversible; (3) the **GoTrue upgrade** as its own release, with the six new notification mails checked first; (4) whether `/passkeys/authentication/verify` having no captcha and no router rate limit needs a Kong-side limit before this is ever on in production.
+
+- **27.10.2026 - switching a module off closes its route and its writes (branch `fix/module-off-closes-route-and-query`, PR against `staging`, one migration `20261027120000`, nothing deployed).**
   - **What the owner did:** switched **Fahrtenbuch** off for his own company in the platform panel, then typed `elprofessor.eu/fahrtenbuch`. The page rendered, fully working - the imports list, the Import button, the simulate button, every row.
   - **Why.** Slice 1 (`20261025120000`) stored the decision and gated the sidebar **link**. Verified on this head: `Sidebar.tsx:120` is the **only** caller of `moduleEnabledForRoute` in the tree; `grep -nI 'companyModules|moduleEnabled|ModuleGate' src/App.tsx` returns **nothing**; no policy and no function in the database mentions `company_modules`. So the panel's switch was cosmetic - which `src/lib/companyModules.ts`' own header had already said: *"until slice 3 puts the write term in `current_role_permits()`, the browser IS the only module wall."* (One brief detail was off: the Fahrtenbuch route is `App.tsx:657`, not 656.)
   - **The route.** `ModuleGate` beside `PlanGate` and **nested inside it**, which is section 7's message precedence: the plan is the outer boundary, so a company whose plan lacks the feature is told *that* - with the plan forbidding it the module row is **inert** and "support switched this off" would be false. Applied to all **16 toggleable modules'** routes, including the **seven that had no gate at all** (`/belege`, `/fahrer`, `/datenimport`, `/cars`, `/umsaetze`, `/fixkosten`, `/bargeldbestand`). The locked six carry **no** gate, deliberately: `platform_company_set_module` refuses them with `module_locked` and the table has no write policy, so a gate there is unreachable code rather than defence in depth.
