@@ -21,10 +21,11 @@
  *     renderer answers badly — "no panel in the map is unguarded" is a claim
  *     about 20 declarations, not about one render.
  *
- * `fmt()` renders a euro figure with a decimal comma (`0,00`), so "no zero
- * appears" is checkable as text and is the assertion that matters most: it is
- * the difference between a withheld figure and a false statement about a
- * customer's money.
+ * **"No zero appears" is the assertion that matters most** — it is the
+ * difference between a withheld figure and a false statement about a customer's
+ * money — and it is also the one that took two attempts to state correctly. The
+ * `cells()` helper below says why: a substring scan is the wrong instrument, and
+ * a fixture with an honest zero in it is the wrong fixture.
  */
 import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
