@@ -75,8 +75,8 @@ END $$;
 
 -- An import to hang the rows off. The real table, as the owner, so the checks
 -- under test are the live ones and not a copy.
-INSERT INTO fahrtenbuch_imports (id, company_id, file_name, imported_by, row_count)
-VALUES ('11110000-0000-4000-8000-00000000000a', :company_a, 'declined-kit.xlsx', :admin_a, 0)
+INSERT INTO fahrtenbuch_imports (id, company_id, month, year, file_name, imported_by, row_count)
+VALUES ('11110000-0000-4000-8000-00000000000a', :company_a, 10, 2026, 'declined-kit.xlsx', :admin_a, 0)
 ON CONFLICT (id) DO NOTHING;
 
 DO $$
