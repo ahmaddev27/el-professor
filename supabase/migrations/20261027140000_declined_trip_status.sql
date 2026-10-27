@@ -223,6 +223,24 @@ DECLARE
     'assignment_block_id', 'assignment_planning_run_id', 'assignment_applied_at',
     'assignment_applied_by'
   ];
+  /*
+    Immutable, but not by `protect_fahrtenbuch_immutable_fields`.
+
+    `is_simulated` (20261020110000) has a trigger of its own,
+    `fahrtenbuch_trips_keep_simulated`, which inherits the value from the
+    import on INSERT and refuses a change afterwards with its own message and
+    the hint `simulated_marker_fixed`. So it is neither in the big trigger's
+    list nor mutable, and the two-list partition 20260922100000 wrote could not
+    place it — that migration ran before the column existed, which is why its
+    own self-check never saw this.
+
+    It gets a list rather than being filed under `c_mutable`, because calling
+    the simulation marker mutable is exactly the wrong thing to write down: it
+    is the column that keeps a generated month from being read as a record of
+    real journeys. Self-check 2b asserts its trigger is still there, so this
+    list cannot become a place to put a column nobody protects.
+  */
+  c_protected_elsewhere CONSTANT text[] := ARRAY['is_simulated'];
   v_wrong      text;
   v_refused    boolean;
   v_col        text;
@@ -239,19 +257,35 @@ BEGIN
     RAISE EXCEPTION 'declined status self-check 1: declined_fee_cents is missing or is not an integer';
   END IF;
 
-  -- 2. Every column is protected or known to be mutable, and none is both.
-  --    20260922100000's own rule, restated because a new column has to join a
-  --    list rather than quietly belong to neither.
+  -- 2. Every column is in exactly one of the three lists. 20260922100000's own
+  --    rule, restated because a new column has to join a list rather than
+  --    quietly belong to none — which is how this migration's first run was
+  --    refused by the RLS kit for leaving `is_simulated` unplaced.
   SELECT string_agg(a.attname, ', ' ORDER BY a.attnum) INTO v_wrong
     FROM pg_attribute a
    WHERE a.attrelid = 'public.fahrtenbuch_trips'::regclass
      AND a.attnum > 0 AND NOT a.attisdropped
-     AND NOT (a.attname = ANY (c_protected)) AND NOT (a.attname = ANY (c_mutable));
+     AND NOT (a.attname = ANY (c_protected))
+     AND NOT (a.attname = ANY (c_mutable))
+     AND NOT (a.attname = ANY (c_protected_elsewhere));
   IF v_wrong IS NOT NULL THEN
-    RAISE EXCEPTION 'declined status self-check 2: columns neither protected nor known to be mutable: %', v_wrong;
+    RAISE EXCEPTION 'declined status self-check 2: columns in none of the three lists: %', v_wrong;
   END IF;
-  IF EXISTS (SELECT 1 FROM unnest(c_protected) p WHERE p = ANY (c_mutable)) THEN
-    RAISE EXCEPTION 'declined status self-check 2: a column is listed as both protected and mutable';
+  SELECT string_agg(x, ', ') INTO v_wrong
+    FROM unnest(c_protected || c_mutable || c_protected_elsewhere) x
+   GROUP BY x HAVING count(*) > 1;
+  IF v_wrong IS NOT NULL THEN
+    RAISE EXCEPTION 'declined status self-check 2: columns in more than one list: %', v_wrong;
+  END IF;
+
+  -- 2b. The column filed under "protected elsewhere" really is. Without this,
+  --     the third list is a place to hide a column nobody protects.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+     WHERE tgrelid = 'public.fahrtenbuch_trips'::regclass
+       AND tgname = 'fahrtenbuch_trips_keep_simulated' AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'declined status self-check 2b: fahrtenbuch_trips_keep_simulated is gone, so is_simulated is unprotected';
   END IF;
 
   -- 3. The restated trigger refuses the new column, and still refuses an old

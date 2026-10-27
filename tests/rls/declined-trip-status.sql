@@ -242,9 +242,22 @@ BEGIN
     RAISE EXCEPTION 'declined 6: the fee changed after insert';
   END IF;
 
+  -- is_simulated is immutable too, by its own trigger rather than by the big
+  -- one. The migration files it under "protected elsewhere", and this is the
+  -- probe that the filing is true rather than a label.
+  v_refused := false;
+  BEGIN
+    UPDATE fahrtenbuch_trips SET is_simulated = NOT is_simulated WHERE id = v_id;
+  EXCEPTION WHEN raise_exception THEN
+    v_refused := true;
+  END;
+  IF NOT v_refused THEN
+    RAISE EXCEPTION 'declined 6: the simulation marker changed after insert';
+  END IF;
+
   -- An assignment column still moves, or applying a plan would stop working.
   UPDATE fahrtenbuch_trips SET assignment_note = 'kit' WHERE id = v_id;
-  RAISE NOTICE 'declined 6: the fee is immutable and the assignment columns are not';
+  RAISE NOTICE 'declined 6: the fee and the simulation marker are immutable, the assignment columns are not';
 END $$;
 
 ROLLBACK;
