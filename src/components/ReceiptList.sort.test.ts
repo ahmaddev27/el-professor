@@ -39,6 +39,22 @@ vi.mock('../contexts/LanguageContext', async () => {
 });
 
 const { default: ReceiptList } = await import('./ReceiptList');
+const { formatEuro } = await import('./ui/format');
+
+/**
+ * The two figures the header prints, taken from the formatter the screen itself
+ * uses rather than written out here.
+ *
+ * What is pinned is the arithmetic — 245,21 € and 39,15 € — and not the
+ * spelling, which is `formatEuroCents`' business and includes a NON-BREAKING
+ * space before the sign. A literal one in this file would be invisible to the
+ * next person to edit it: replaced by an ordinary space, every assertion below
+ * would quietly stop matching anything while still reading as if it asserted.
+ */
+/** 18,47 + 72,30 + 12,00 + 103,55 + 0,01 + 5,55 + 33,33 */
+const TOTAL_EXPENSES = formatEuro(245.21);
+/** The 19 % inside those gross amounts. */
+const TOTAL_VAT19 = formatEuro(39.15);
 
 /**
  * The list opens on the current business month, so the fixture has to sit
@@ -138,7 +154,7 @@ const rowOrder = (tree: ReactTestRenderer): string[] => text(tree).match(/BEL-\d
  * would appear or disappear and the comparison fails.
  */
 function euroFigures(tree: ReactTestRenderer): string[] {
-  return (text(tree).match(/-?\d[\d.]*,\d{2} €/g) ?? []).slice().sort();
+  return (text(tree).match(/-?\d[\d.]*,\d{2}\u00a0€/g) ?? []).slice().sort();
 }
 
 describe('the five measured columns offer the sort control', () => {
@@ -181,13 +197,28 @@ describe('the five measured columns offer the sort control', () => {
     tree.unmount();
   });
 
+  /**
+   * Both directions, and the descending half is the one that carries the
+   * assertion — which a mutation control is what showed. BEL-0002 (05:26:00)
+   * and BEL-0006 (05:26:30) both print `05:26`, and they arrive in that order,
+   * so a sort that dropped the seconds would tie them and the stable sort would
+   * still hand back BEL-0002 first: the ascending list alone cannot tell the
+   * two implementations apart. Descending, a tie keeps BEL-0002 first and the
+   * clock puts BEL-0006 there.
+   */
   it('ranks the printed time by the clock, including the seconds the cell hides', async () => {
     const tree = render();
     await press(header(tree, HEADERS.receiptTime));
-    // BEL-0002 and BEL-0006 both print 05:26; the stored seconds order them.
     expect(rowOrder(tree)).toEqual([
       'BEL-0004', 'BEL-0002', 'BEL-0006', 'BEL-0007', 'BEL-0001', 'BEL-0005',
       'BEL-0003', // no time
+    ]);
+    await press(header(tree, HEADERS.receiptTime));
+    expect(rowOrder(tree)).toEqual([
+      'BEL-0005', 'BEL-0001', 'BEL-0007',
+      'BEL-0006', 'BEL-0002', // 05:26:30 ahead of 05:26:00, which only the seconds say
+      'BEL-0004',
+      'BEL-0003', // still last, on the descending sort too
     ]);
     tree.unmount();
   });
@@ -208,10 +239,11 @@ describe('the two totals are unchanged by sorting', () => {
     // The reference is a real screen, not an empty one: the figures must be
     // there for their being unchanged to mean anything.
     expect(expectedRows).toBe(RECEIPTS.length);
-    expect(text(tree)).toContain('245,21 €'); // 18,47 + 72,30 + 12,00 + 103,55 + 0,01 + 5,55 + 33,33
-    expect(text(tree)).toContain('39,15 €');  // the 19 % inside those gross amounts
-    expect(expectedFigures.filter(figure => figure === '245,21 €')).toHaveLength(2); // KPI card + totals row
-    expect(expectedFigures.filter(figure => figure === '39,15 €')).toHaveLength(2);
+    expect(text(tree)).toContain(TOTAL_EXPENSES);
+    expect(text(tree)).toContain(TOTAL_VAT19);
+    // Twice each: the KPI card and the table's own totals row.
+    expect(expectedFigures.filter(figure => figure === TOTAL_EXPENSES)).toHaveLength(2);
+    expect(expectedFigures.filter(figure => figure === TOTAL_VAT19)).toHaveLength(2);
 
     for (const label of Object.values(HEADERS)) {
       for (const pressNumber of [1, 2]) {
@@ -219,8 +251,8 @@ describe('the two totals are unchanged by sorting', () => {
         const where = `${label}, press ${pressNumber}`;
         expect(rowOrder(tree).length, where).toBe(expectedRows);
         expect(euroFigures(tree), where).toEqual(expectedFigures);
-        expect(text(tree), where).toContain('245,21 €');
-        expect(text(tree), where).toContain('39,15 €');
+        expect(text(tree), where).toContain(TOTAL_EXPENSES);
+        expect(text(tree), where).toContain(TOTAL_VAT19);
       }
     }
 
