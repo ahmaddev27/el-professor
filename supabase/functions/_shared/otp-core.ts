@@ -42,8 +42,43 @@ export const OTP_VALIDITY_SECONDS = 600;
 
 export const MAX_BODY_BYTES = 4096;
 export const MAX_EMAIL_LENGTH = 254;
-/** email_change needs a password sign-in at most this old (the amr claim). */
+/**
+ * email_change needs a re-authentication at most this old (the amr claim).
+ *
+ * The name says PASSWORD and the window is still exactly the password rule's:
+ * neither the value nor the meaning changed when passkeys were admitted, and
+ * CLAUDE.md names this constant, so it keeps its name. What changed is which
+ * methods count as the proof — see REAUTH_PROOF_METHODS below.
+ */
 export const PASSWORD_PROOF_MAX_AGE_SECONDS = 600;
+
+/**
+ * The sign-in methods that count as a re-authentication proof.
+ *
+ * This is the browser-side twin of `c_permitted` in
+ * `app_private.session_amr_permits_platform()`, and the two must name the same
+ * methods: one decides whether a session holds platform capabilities at all,
+ * this one decides whether it may move its own address. The owner's decision of
+ * 27.10.2026 is that a passkey counts as a password does.
+ *
+ * Why a passkey satisfies this and `otp` still does not: the proof being asked
+ * for is "the person at the keyboard holds the account's own secret". A password
+ * sign-in proves it; a passkey assertion proves it and is additionally
+ * device-bound and phishing-resistant. A one-time code proves control of a
+ * *mailbox*, which for an email change is precisely the thing under change —
+ * the code is mailed to the NEW address, so it proves nothing about the account.
+ * That is the whole reason this rule exists and why `otp` is absent by omission.
+ *
+ * MEASURED, and the reason a passkey can be trusted here at all: GoTrue writes
+ * the `amr` entry's `timestamp` from `mfa_amr_claims.updated_at`, set by the one
+ * `AddClaimToSession` call inside `IssueRefreshToken` — the same line, with no
+ * method-specific branch, for `password` and `passkey` alike. `AddClaimToSession`
+ * has exactly two non-test call sites in GoTrue, and the refresh path is neither
+ * of them, so a long-lived session that merely refreshes keeps its ORIGINAL
+ * sign-in timestamp and cannot satisfy this window indefinitely. Both halves
+ * hold at v2.170.0 and at v2.197.0.
+ */
+export const REAUTH_PROOF_METHODS: readonly string[] = ['password', 'passkey'];
 /** Public otp-request responses never leave sooner than this after arrival. */
 export const PUBLIC_RESPONSE_FLOOR_MS = 1500;
 export const MIN_PEPPER_LENGTH = 32;
@@ -261,23 +296,32 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | null 
 }
 
 /**
- * Seconds since the newest password sign-in recorded in the token's amr claim,
- * or null when the session was never established with a password.
+ * Seconds since the newest re-authentication recorded in the token's amr claim,
+ * or null when the session carries none.
  *
- * GoTrue v2.170.0 writes `amr: [{method: "password", timestamp: <sign-in>}]`
- * and keeps that timestamp when a refresh issues a new token (probed
- * 15.09.2026), so this is the age of the password proof, not of the access
- * token. A session made by /verify, as issueSession makes them, carries
- * `method: "otp"` and never counts as a password proof.
+ * GoTrue writes `amr: [{method: "password"|"passkey", timestamp: <sign-in>}]`
+ * and keeps that timestamp when a refresh issues a new token (probed on staging
+ * 15.09.2026, and confirmed from source at v2.170.0 and v2.197.0: the refresh
+ * path never calls `AddClaimToSession`). So this is the age of the proof, not of
+ * the access token. A session made by /verify, as issueSession makes them,
+ * carries `method: "otp"` and is never a proof — see REAUTH_PROOF_METHODS.
+ *
+ * Only object entries are read. A bare-string entry carries no timestamp at
+ * all, so it cannot establish freshness and is skipped rather than trusted:
+ * from GoTrue v2.185.0 a custom access-token hook may legally return `amr` as
+ * bare strings, and reading one as fresh would be a proof made of nothing.
+ * The SQL twin reads bare strings too, because it asks only *which* methods are
+ * named and never *when*.
  */
-export function passwordAmrAgeSeconds(payload: Record<string, unknown>, nowSec: number): number | null {
+export function reauthProofAgeSeconds(payload: Record<string, unknown>, nowSec: number): number | null {
   const amr = payload.amr;
   if (!Array.isArray(amr)) return null;
   let newest: number | null = null;
   for (const entry of amr) {
     if (!entry || typeof entry !== 'object') continue;
     const { method, timestamp } = entry as { method?: unknown; timestamp?: unknown };
-    if (method !== 'password' || typeof timestamp !== 'number' || !Number.isFinite(timestamp)) continue;
+    if (typeof method !== 'string' || !REAUTH_PROOF_METHODS.includes(method)) continue;
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) continue;
     newest = newest === null ? timestamp : Math.max(newest, timestamp);
   }
   return newest === null ? null : Math.max(0, Math.floor(nowSec - newest));

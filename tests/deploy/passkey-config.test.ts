@@ -412,12 +412,24 @@ describe.skipIf(!hasPython)("the repository's own state: the switch ships off an
     expect(output).toContain('needs supabase/gotrue v2.190.0 or newer');
   });
 
-  it('carries no migration admitting passkey, so the switch is refused on the amr rule alone', () => {
-    // Fails on purpose once that migration is written — which is the decision
-    // this slice deliberately does not take.
-    const { output, status } = guard(env(ON), GOOD_COMPOSE(), REAL_MIGRATIONS);
-    expect(status).toBe(1);
-    expect(output).toContain("no migration admits 'passkey'");
+  it('carries the migration admitting passkey, so the amr half is satisfied', () => {
+    // This assertion is the inverse of the one shipped first, and the inversion
+    // is the owner's decision of 27.10.2026 ("a passkey is like a password")
+    // landing as `20261027140000`. Before it, the guard refused the switch here
+    // too; now the IMAGE is the only thing left refusing, which the test above
+    // pins. If this ever goes back to refusing, the migration has been lost.
+    expect(guard(env(ON), GOOD_COMPOSE(), REAL_MIGRATIONS).output).toBe('PASSED');
+  });
+
+  it('admits exactly password and passkey in the amr allow-list, and keeps all three refusals', () => {
+    // The guard only asks whether SOME migration names `passkey` beside the
+    // function. That is the right question for a release gate and the wrong one
+    // for the rule itself, so the rule's shape is pinned here as text: a
+    // migration that admitted a third method, or dropped a refusal, would pass
+    // the guard and fail this.
+    const migration = repoFile('supabase/migrations/20261027140000_platform_amr_admits_passkey.sql');
+    expect(migration).toContain("c_permitted CONSTANT text[] := ARRAY['password', 'passkey']");
+    expect(migration).toContain("c_refused   CONSTANT text[] := ARRAY['oauth', 'sso/saml', 'anonymous']");
   });
 
   it('wires every passkey variable in docker-compose.yml behind the switch', () => {
