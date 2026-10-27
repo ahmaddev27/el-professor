@@ -23,6 +23,22 @@ export interface Receipt {
   odometerKm?: number;
   rangeKm?: number;
   /**
+   * The letterhead split (20261027150000): the brand half ("JET Tankstelle"),
+   * the franchise operator after it, and the street with its house number.
+   * `merchantName` keeps the whole name; old Belege carry none of these.
+   */
+  stationName?: string;
+  operatorName?: string;
+  street?: string;
+  /**
+   * The number PRINTED on the receipt (beside `Bon` on a JET one). NOT the
+   * Belegnummer: `receiptNumber` stays the server-drawn `BEL-…` id, and
+   * neither is ever copied into the other.
+   */
+  printedReceiptNumber?: string;
+  /** `HH:MM:SS`, the fiscal TSE clock — not the sale time, which is `receiptTime`. */
+  tseTime?: string;
+  /**
    * The driver's name when the Beleg came from the driver app, which has no
    * user behind it: `createdBy` is then absent and this is who uploaded it.
    */
@@ -50,6 +66,13 @@ export interface ReceiptFormData {
   pricePerLitre?: number;
   odometerKm?: number;
   rangeKm?: number;
+  /** The letterhead split and the printed number, as the receipt carries them. */
+  stationName?: string;
+  operatorName?: string;
+  street?: string;
+  printedReceiptNumber?: string;
+  /** `HH:MM` or `HH:MM:SS`, the TSE clock - never written into receiptTime. */
+  tseTime?: string;
 }
 
 export interface Income {

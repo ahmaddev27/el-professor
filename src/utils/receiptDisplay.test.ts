@@ -6,6 +6,7 @@ import {
   receiptAuthor,
   receiptFuelFigures,
   receiptFuelParts,
+  receiptStationCell,
   textOrNull,
   receiptSourceParts,
 } from './receiptDisplay';
@@ -113,5 +114,55 @@ describe('receiptFuelFigures', () => {
     expect(textOrNull('  ')).toBeNull();
     expect(textOrNull(undefined)).toBeNull();
     expect(textOrNull('Solingen')).toBe('Solingen');
+  });
+});
+
+describe('receiptStationCell (27.10.2026)', () => {
+  it('stacks the split header: brand, operator, street', () => {
+    expect(receiptStationCell({
+      ...BASE,
+      merchantName: 'JET Tankstelle Morten Jürgensmeier',
+      stationName: 'JET Tankstelle',
+      operatorName: 'Morten Jürgensmeier',
+      street: 'Eckeseyer Straße 113-115',
+    })).toEqual({
+      name: 'JET Tankstelle',
+      operator: 'Morten Jürgensmeier',
+      street: 'Eckeseyer Straße 113-115',
+    });
+  });
+
+  it('keeps an old row readable: the whole merchant name, nothing repeated', () => {
+    // Rows from before the split carry the operator INSIDE merchantName; the
+    // cell must not print the same person twice.
+    expect(receiptStationCell({
+      ...BASE,
+      merchantName: 'JET Tankstelle Morten Jürgensmeier',
+      operatorName: 'Morten Jürgensmeier',
+    })).toEqual({
+      name: 'JET Tankstelle Morten Jürgensmeier',
+      operator: null,
+      street: null,
+    });
+  });
+
+  it('is all null for a Beleg entered by hand with no merchant at all', () => {
+    expect(receiptStationCell(BASE)).toEqual({ name: null, operator: null, street: null });
+  });
+});
+
+describe('receiptSourceParts with a street', () => {
+  it('reads merchant, street, city, time in that order', () => {
+    expect(receiptSourceParts({
+      ...BASE,
+      merchantName: 'JET Tankstelle',
+      street: 'Eckeseyer Straße 113-115',
+      city: 'Hagen',
+      receiptTime: '08:45:00',
+    })).toEqual(['JET Tankstelle', 'Eckeseyer Straße 113-115', 'Hagen', '08:45']);
+  });
+
+  it('skips what the Beleg does not carry, as before', () => {
+    expect(receiptSourceParts({ ...BASE, city: 'Hagen' })).toEqual(['Hagen']);
   });
 });

@@ -22,6 +22,12 @@ const COMPLETE: ReceiptDetailsFields = {
   pricePerLitre: '2,049',
   odometerKm: '123456',
   rangeKm: '480',
+  // The five of 27.10.2026 — all optional, so a complete Beleg needs none.
+  street: '',
+  stationName: '',
+  operatorName: '',
+  printedNumber: '',
+  tseTime: '',
 };
 
 const fuel = (patch: Partial<ReceiptDetailsFields>): ReceiptDetailsFields => ({ ...COMPLETE, ...patch });
@@ -185,5 +191,60 @@ describe('a stored Beleg round-trips through the form', () => {
     expect(values).toEqual({
       merchantName: 'Shell', receiptTime: '14:32', litres: 41.47, pricePerLitre: 2.049, odometerKm: 123456, rangeKm: 480,
     });
+  });
+});
+
+describe('the letterhead split, the printed number and the TSE clock (27.10.2026)', () => {
+  const stored: Receipt = {
+    id: '2', receiptNumber: 'BEL-2', date: '2026-10-20', description: 'Tanken',
+    driverName: 'Omar', expense: 41.08,
+    merchantName: 'JET Tankstelle Morten Jürgensmeier',
+    stationName: 'JET Tankstelle', operatorName: 'Morten Jürgensmeier',
+    street: 'Eckeseyer Straße 113-115', printedReceiptNumber: '90521',
+    receiptTime: '08:45:00', tseTime: '08:46:19',
+  };
+
+  it('round-trips all five through the form', () => {
+    const fields = detailsFieldsFromReceipt(stored);
+    expect(fields.stationName).toBe('JET Tankstelle');
+    expect(fields.operatorName).toBe('Morten Jürgensmeier');
+    expect(fields.street).toBe('Eckeseyer Straße 113-115');
+    expect(fields.printedNumber).toBe('90521');
+    // The TSE clock keeps its seconds — unlike the sale time, it is the
+    // fiscal stamp, and 08:46 is a different claim from 08:46:19.
+    expect(fields.tseTime).toBe('08:46:19');
+    expect(fields.receiptTime).toBe('08:45');
+
+    const values = receiptDetailsValues('Tanken', fields);
+    expect(values.stationName).toBe('JET Tankstelle');
+    expect(values.operatorName).toBe('Morten Jürgensmeier');
+    expect(values.street).toBe('Eckeseyer Straße 113-115');
+    expect(values.printedReceiptNumber).toBe('90521');
+    expect(values.tseTime).toBe('08:46:19');
+  });
+
+  it('keeps all five optional in BOTH modes — a scan only sometimes finds them', () => {
+    expect(receiptDetailsProblem('Tanken', {
+      ...EMPTY_DETAILS,
+      merchant: 'JET', city: 'Hagen', receiptTime: '08:45',
+      litres: '19,95', pricePerLitre: '2,059', odometerKm: '25382',
+    }, 'create')).toBeNull();
+  });
+
+  it('refuses a filled TSE time that is not a time, with or without seconds', () => {
+    expect(receiptDetailsProblem('Tanken', { ...EMPTY_DETAILS, tseTime: '08:46' }, 'edit')).toBeNull();
+    expect(receiptDetailsProblem('Tanken', { ...EMPTY_DETAILS, tseTime: '08:46:19' }, 'edit')).toBeNull();
+    expect(receiptDetailsProblem('Tanken', { ...EMPTY_DETAILS, tseTime: '25:00:00' }, 'edit')).toBe('rec.err.tseTimeInvalid');
+    expect(receiptDetailsProblem('Tanken', { ...EMPTY_DETAILS, tseTime: '08:46:60' }, 'edit')).toBe('rec.err.tseTimeInvalid');
+    expect(receiptDetailsProblem('Tanken', { ...EMPTY_DETAILS, tseTime: 'morgens' }, 'edit')).toBe('rec.err.tseTimeInvalid');
+  });
+
+  it('drops a blank to undefined, never an empty string, on all five', () => {
+    const values = receiptDetailsValues('Autowäsche', EMPTY_DETAILS);
+    expect(values.street).toBeUndefined();
+    expect(values.stationName).toBeUndefined();
+    expect(values.operatorName).toBeUndefined();
+    expect(values.printedReceiptNumber).toBeUndefined();
+    expect(values.tseTime).toBeUndefined();
   });
 });

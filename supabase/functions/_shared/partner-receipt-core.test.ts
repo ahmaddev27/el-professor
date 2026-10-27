@@ -396,3 +396,74 @@ describe('the odometer and the range', () => {
     expect(receiptProblemIsFinal('invalid_range')).toBe(true)
   })
 })
+
+describe('the letterhead split, the printed number and the TSE clock (27.10.2026)', () => {
+  const withHeader = (extra: Record<string, unknown>) => ({ ...good, ...extra })
+
+  it('reads all five and keeps the two clocks apart', () => {
+    const r = parseReceiptSubmission(withHeader({
+      station_name: 'JET Tankstelle',
+      operator_name: 'Morten Jürgensmeier',
+      street: 'Eckeseyer Straße 113-115',
+      receipt_number: '90521',
+      receipt_time: '08:45',
+      tse_time: '08:46:19',
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.station_name).toBe('JET Tankstelle')
+    expect(r.value.operator_name).toBe('Morten Jürgensmeier')
+    expect(r.value.street).toBe('Eckeseyer Straße 113-115')
+    expect(r.value.receipt_number).toBe('90521')
+    // The sale time and the fiscal clock are different claims about the same
+    // paper, and mixing them is the defect the 27.10 parser work unpicked.
+    expect(r.value.receipt_time).toBe('08:45')
+    expect(r.value.tse_time).toBe('08:46:19')
+  })
+
+  it('leaves all five null when an older build sends none', () => {
+    const r = parseReceiptSubmission(good)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.station_name).toBeNull()
+    expect(r.value.operator_name).toBeNull()
+    expect(r.value.street).toBeNull()
+    expect(r.value.receipt_number).toBeNull()
+    expect(r.value.tse_time).toBeNull()
+  })
+
+  it('refuses a TSE time that is not HH:MM:SS, by name', () => {
+    // Reidey's validator pins `date_format:H:i:s`; a bare HH:MM here is a
+    // drifted sender, not a time to guess seconds onto.
+    for (const bad of ['8:46:19', '08:46', '24:00:00', '08:46:60', 'morgens']) {
+      expect(parseReceiptSubmission(withHeader({ tse_time: bad })))
+        .toEqual({ ok: false, problem: 'invalid_tse_time' })
+    }
+  })
+
+  it('refuses text over the wire bound by name, and never truncates', () => {
+    // 120/120/200/32, to the digit of Reidey's own validator. A cut-off name
+    // reads as a different person, so over-long is refused, not shortened.
+    expect(parseReceiptSubmission(withHeader({ station_name: 'x'.repeat(121) })))
+      .toEqual({ ok: false, problem: 'invalid_station_name' })
+    expect(parseReceiptSubmission(withHeader({ operator_name: 'x'.repeat(121) })))
+      .toEqual({ ok: false, problem: 'invalid_operator_name' })
+    expect(parseReceiptSubmission(withHeader({ street: 'x'.repeat(201) })))
+      .toEqual({ ok: false, problem: 'invalid_street' })
+    expect(parseReceiptSubmission(withHeader({ receipt_number: 'x'.repeat(33) })))
+      .toEqual({ ok: false, problem: 'invalid_receipt_number' })
+    // and exactly at the bound is accepted
+    expect(parseReceiptSubmission(withHeader({ station_name: 'x'.repeat(120) })).ok).toBe(true)
+    expect(parseReceiptSubmission(withHeader({ street: 'x'.repeat(200) })).ok).toBe(true)
+    expect(parseReceiptSubmission(withHeader({ receipt_number: 'x'.repeat(32) })).ok).toBe(true)
+  })
+
+  it('calls every one of the five refusals final', () => {
+    // All five are read off a photo the app has already discarded.
+    for (const problem of ['invalid_tse_time', 'invalid_station_name',
+                           'invalid_operator_name', 'invalid_street',
+                           'invalid_receipt_number'] as const) {
+      expect(receiptProblemIsFinal(problem)).toBe(true)
+    }
+  })
+})

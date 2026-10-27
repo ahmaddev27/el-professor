@@ -8,20 +8,52 @@
  * roll is the total, which date is the receipt's own, which five digits are a
  * postal code, and how sure we are about each.
  *
+ * **Reidey's driver app carries a COPY of this file, and the two must move
+ * together**: `driver-app/src/lib/receipt-text-parse.ts` in that repository,
+ * the same rules reading another OCR engine's text, because a driver's receipt
+ * is read over there and the resulting figure is reviewed over here. Nothing
+ * in either repository can compare the two files directly - they are different
+ * repositories. What CAN be compared is behaviour: `receiptTextParse.test.ts`
+ * here and `tests/receipt-text-parse.test.mjs` there hold the same fixtures,
+ * so a change made on one side and not the other shows up as a failing
+ * assertion rather than as a silent disagreement about what a receipt said.
+ *
  * Every reason string is GERMAN and several are read as data, not shown as
  * prose: `ReceiptModal` tests `dateReason`/`amountReason` for the `Unsicher`
  * prefix to decide what to highlight. Rewording one is a behaviour change.
+ *
+ * ⚠ 27.10.2026, resolved the same day: Reidey's copy moved ahead (sale-time vs
+ * TSE-time separation, the columnar `Datum Zeit Bon` trailer, the station
+ * header split, the Summe-Netto and payment-line guards, the Liter×Preis
+ * cross-check, the two-space column boundary in `normalizeOcrText`), and this
+ * file took the identical change with the JET fixtures. The copies are level.
  */
 
 export interface OcrResult {
   date?: string;          // ISO yyyy-MM-dd
-  time?: string;          // HH:mm
+  time?: string;          // HH:mm — the printed SALE time, never the TSE one
+  /** The fiscal TSE clock (Anmeldezeit), HH:mm:ss. Kept apart from `time`
+   *  because the TSE signs the transaction AFTER the sale: on a real receipt
+   *  the two differ, and whoever audits the Beleg needs both unmixed. */
+  tseTime?: string;
   receiptNumber?: string;
+  /** The receipt's own printed number (JET and friends print it beside `Bon`
+   *  in a columnar trailer). NOT any internal id, and not the TSE
+   *  Transaktionsnummer — those are different numbers on the same paper. */
+  bonNumber?: string;
   amount?: number;
   postalCode?: string;
   city?: string;
   category?: string;
   merchantName?: string;
+  /** Street and house number from the station's header block. */
+  street?: string;
+  /** The brand half of the header name — "JET Tankstelle" — when the name
+   *  contains a station word to split on; absent otherwise. */
+  stationName?: string;
+  /** The person after the station word — the franchise operator — when what
+   *  follows looks like a name and not more branding. */
+  operatorName?: string;
   /** Litres filled. Only a fuel receipt has one. */
   litres?: number;
   /** Price per litre, in euros. Only a fuel receipt has one. */
@@ -59,11 +91,17 @@ export interface OcrCandidate {
 // ── OCR text normalization ───────────────────────────────────────────────────
 
 function normalizeOcrText(raw: string): string {
+  // Runs of spaces collapse to TWO, never one. Two spaces is the column
+  // boundary: `rowsFromLines` joins a row's columns with exactly two, and the
+  // city rule cuts on `\s{2,}`. Collapsing to one — as this did until
+  // 27.10.2026 — erased that boundary, and on a merged row the city happily
+  // read on into the phone number ("Hagen Tei.Nr."). Every matching rule uses
+  // `\s`-quantifiers and is indifferent to one space or two.
   return raw
     .replace(/€/g, 'EUR')
     .replace(/\bEUF\b/g, 'EUR')   // OCR misreads EUR as EUF
     .replace(/\t/g, ' ')
-    .replace(/ {2,}/g, ' ')
+    .replace(/ {3,}/g, '  ')
     .trim();
 }
 
@@ -108,6 +146,15 @@ function isDatePart(raw: string, datePartSet: Set<string>): boolean {
 
 // Labels confirming the final total — scored strongly positive
 const TOTAL_LABEL_RE = /\b(gesamtbetrag|z[-\s]?summe|endbetrag|zu\s*zahlen|total|summe\s*eur|summe)\b/i;
+// `Summe` that is NOT a total: the net or an intermediate sum. Checked before
+// the label above may score, because `summe` alone matches inside both, and
+// the position bonus once let `Summe Netto` outscore the real `Summe` on a
+// JET receipt — 34,52 reported as the total with full confidence.
+const NETTO_SUMME_RE = /\bsumme\s*netto\b|\bnetto\s*summe\b|\bzwischensumme\b/i;
+// A payment line: what was TENDERED, not what was owed. Same-line only — as a
+// context test it would wrongly tax the real total sitting one row above the
+// payment row, which is where tills print it.
+const TENDER_LINE_RE = /\b(bar|gegeben|kartenzahlung|girocard|ec[-\s]?karte|kreditkarte|visa|mastercard|maestro|kundenkarte)\b/i;
 // Secondary total labels
 const SECONDARY_TOTAL_RE = /\b(brutto|betrag)\b/i;
 
@@ -301,15 +348,22 @@ function extractAmountCandidates(lines: string[], datePartSet: Set<string>): Ocr
       const nextLine = lines[idx + 1] ?? '';
       const context = [prevLine, line, nextLine].join(' ').toLowerCase();
 
-      // +100: Gesamtbetrag on same line
-      if (TOTAL_LABEL_RE.test(line)) {
+      // +100: Gesamtbetrag on same line — unless the `Summe` is a Netto one
+      const totalOn = (l: string) => TOTAL_LABEL_RE.test(l) && !NETTO_SUMME_RE.test(l);
+      if (totalOn(line)) {
         score += 100;
         const lbl = line.match(TOTAL_LABEL_RE)?.[0] ?? '';
         reasons.push(`+100 Label: ${lbl}`);
-      } else if (TOTAL_LABEL_RE.test(prevLine) || TOTAL_LABEL_RE.test(nextLine)) {
+      } else if (totalOn(prevLine) || totalOn(nextLine)) {
         // +90: Gesamtbetrag on adjacent line
         score += 90;
         reasons.push('+90 Label auf Nachbarzeile');
+      }
+
+      // Tendered, not owed: a payment word on the amount's own line
+      if (TENDER_LINE_RE.test(line) && !totalOn(line)) {
+        score -= 40;
+        reasons.push('-40 Zahlungszeile');
       }
 
       // +70: EUR on same line
@@ -366,6 +420,10 @@ function extractAmountCandidates(lines: string[], datePartSet: Set<string>): Ocr
 
 const DATE_LABEL_RE = /\b(datum|date|beleg[-\s]?datum|startzeitpunkt|tse[-\s]?start|belegdatum)\b/i;
 const DATE_NOISE_RE = /\b(tse|seriennr|signaturz|steuer[-\s]?nr|ust[-\s]?id|trace|genehmigung)\b/i;
+// The fiscal clock's own lines. Penalised rather than skipped: when a receipt
+// prints its date ONLY there, a low-confidence answer the driver confirms
+// beats a retake loop that can never succeed. Any labelled Datum outscores it.
+const DATE_TECH_RE = /\b(anmeldezeit|abmeldezeit|beendigungszeitpunkt)\b/i;
 
 const DATE_PATTERNS = [
   /\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/,
@@ -418,6 +476,11 @@ function extractDateCandidates(lines: string[]): OcrCandidate[] {
       if (hasTime) {
         score += 20;
         reasons.push('+20 Uhrzeit in Nähe');
+      }
+
+      if (DATE_TECH_RE.test(line)) {
+        score -= 15;
+        reasons.push('-15 TSE-Anmeldezeit, nicht das Verkaufsdatum');
       }
 
       const earlyBonus = Math.floor(((lines.length - idx) / Math.max(lines.length, 1)) * 15);
@@ -490,7 +553,18 @@ function extractPlzCandidates(lines: string[]): PlzCandidate[] {
   // Core logic — all rejections check only the candidate's own line, NOT adjacent lines.
   // This prevents Tel./Fax on the line AFTER the PLZ from falsely rejecting the PLZ.
   const tryAdd = (postalCode: string, rawCity: string, lineIdx: number, adjacent: boolean) => {
-    const city = rawCity.trim().split(/\s{2,}/)[0].trim();
+    // Two cuts, because a merged row arrives both ways: at the column
+    // boundary (two spaces) when row reconstruction joined the lines, and at
+    // the first contact word when the OCR engine itself merged them with
+    // single spaces — `58089 Hagen Tei.Nr. 0 23 31…` once shipped the city
+    // as "Hagen Tei.Nr.". `te[li1]` tolerates the thermal-paper misreads of
+    // `Tel.`; the dot after it is required, so Teltow stays a city.
+    const city = rawCity
+      .trim()
+      .split(/\s{2,}/)[0]
+      .replace(/\s*(?:\bte[li1]\s*\.|\btelefon\b|\bfax\b|\bsteuer\b|\bust\b|\bwww\.|@|\be-?mail\b).*$/i, '')
+      .replace(/[\s.,;:-]+$/, '')
+      .trim();
     if (!isValidCity(city)) return;
 
     const line = lines[lineIdx] ?? '';
@@ -574,24 +648,101 @@ function extractPlzCandidates(lines: string[]): PlzCandidate[] {
   return candidates;
 }
 
-// ── Other parsers ────────────────────────────────────────────────────────────
+// ── Time: the sale's clock, not the TSE's ───────────────────────────────────
 
-function parseTime(lines: string[]): string | undefined {
-  for (const line of lines) {
-    const m = line.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
-    if (!m) continue;
-    const h = parseInt(m[1]);
-    const min = parseInt(m[2]);
-    if (h > 23 || min > 59) continue;
-    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+// Lines carrying the fiscal TSE clock or another technical timestamp. A time
+// found here is never the sale time — the TSE signs the transaction AFTER the
+// sale — but it is kept apart as `tseTime`, because an audit wants both.
+// `parseTime` used to take the FIRST time in reading order, and on a JET
+// receipt that is the Anmeldezeit (08:46:19), two lines above the printed
+// `Datum Zeit` row that says 08:45.
+const TIME_TECH_RE = /\b(anmeldezeit|abmeldezeit|startzeitpunkt|beendigungszeitpunkt|tse|signatur\w*|transaktion\w*|terminal|vorgangs?\w*)\b/i;
+const TIME_LABEL_RE = /\b(uhrzeit|zeit|uhr)\b/i;
+const TIME_VALUE_RE = /\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/g;
+
+/** The printed sale time (HH:mm) and the TSE clock (HH:mm:ss), told apart. */
+function parseTimes(lines: string[]): { time?: string; tseTime?: string } {
+  let best: { value: string; score: number } | undefined;
+  let tse: string | undefined;
+
+  lines.forEach((line, idx) => {
+    const re = new RegExp(TIME_VALUE_RE.source, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      const h = parseInt(m[1]);
+      const min = parseInt(m[2]);
+      if (h > 23 || min > 59) continue;
+      const hhmm = `${String(h).padStart(2, '0')}:${m[2]}`;
+
+      if (TIME_TECH_RE.test(line)) {
+        if (tse === undefined) tse = `${hhmm}:${m[3] ?? '00'}`;
+        continue;
+      }
+
+      // Scored like the other fields: a Zeit label on the line or — the
+      // columnar trailer case — on the header line above it, and a date
+      // standing next to it, are what mark the sale's own stamp.
+      let score = 10;
+      if (TIME_LABEL_RE.test(line)) score += 50;
+      else if (TIME_LABEL_RE.test(lines[idx - 1] ?? '')) score += 35;
+      if (DATE_PATTERNS.some((p) => p.test(line))) score += 30;
+      else if (DATE_PATTERNS.some((p) => p.test(lines[idx - 1] ?? '') || p.test(lines[idx + 1] ?? ''))) score += 15;
+
+      if (best === undefined || score > best.score) best = { value: hhmm, score };
+    }
+  });
+
+  return { time: best?.value, tseTime: tse };
+}
+
+// ── Receipt numbers: the printed Bon and the labelled Beleg-Nr ──────────────
+
+/**
+ * The columnar trailer: `Datum  Zeit  Bon  …` over a row of values.
+ *
+ * JET and friends print the sale stamp as a little table — a header row of
+ * labels, a value row beneath. Date and time find their way there through the
+ * label-on-previous-line bonuses; the Bon number has no shape of its own — it
+ * is just digits — so it is read by COLUMN: the value standing where the
+ * header says `Bon`. With the columns miscounted (OCR splits unevenly), the
+ * value right after the time-shaped token is taken, which is where `Bon`
+ * sits on every seen layout.
+ */
+function parseTrailerBon(lines: string[]): string | undefined {
+  for (let i = 0; i < lines.length - 1; i++) {
+    const header = lines[i];
+    if (/\d/.test(header)) continue;
+    const labels = header.toLowerCase().split(/\s+/).filter((t) => t !== '');
+    const bonIdx = labels.findIndex((t) => /^bon\.?$/.test(t));
+    if (bonIdx === -1) continue;
+    if (!labels.includes('datum') && !labels.some((t) => /^(uhr)?zeit$/.test(t))) continue;
+    const values = (lines[i + 1] ?? '').trim().split(/\s+/).filter((t) => t !== '');
+    let candidate: string | undefined;
+    if (values.length === labels.length) {
+      candidate = values[bonIdx];
+    } else {
+      const timeAt = values.findIndex((v) => /^\d{1,2}:\d{2}(?::\d{2})?$/.test(v));
+      if (timeAt !== -1) candidate = values[timeAt + 1];
+    }
+    if (candidate !== undefined && /^\d{3,10}$/.test(candidate)) return candidate;
   }
   return undefined;
+}
+
+/** The printed Bon number: columnar trailer first, a `Bon-Nr` label second. */
+function parseBonNumber(lines: string[], fullText: string): string | undefined {
+  const columnar = parseTrailerBon(lines);
+  if (columnar !== undefined) return columnar;
+  const m = fullText.match(/\bbon(?:[-\s]?nr\.?)?\s*[:#]?\s*(\d{3,10})\b/i);
+  return m ? m[1] : undefined;
 }
 
 function parseReceiptNumber(text: string): string | undefined {
   const patterns = [
     /(?:TSE-?Beleg-?Nr\.?|Beleg-?Nr\.?|Belegnummer|Bon-?Nr\.?|Rechnungs-?Nr\.?|Quittungs-?Nr\.?)[:\s#]*([A-Z0-9\/\-\.]{4,30})/i,
-    /(?:Bon|Beleg|Quittung)\s*[:#]?\s*([A-Z0-9\/\-\.]{4,30})/i,
+    // The bare words need a boundary: without one, `Belegdatum` yields the
+    // word "datum" as a number — recorded in the fixtures until 27.10.2026.
+    /(?:Bon|Beleg|Quittung)\b\s*[:#]?\s*([A-Z0-9\/\-\.]{4,30})/i,
     /\b(\d{4}\/\d{5}\/\d{3})\b/,
   ];
   for (const pat of patterns) {
@@ -599,6 +750,77 @@ function parseReceiptNumber(text: string): string | undefined {
     if (m) return m[1].trim();
   }
   return undefined;
+}
+
+// ── The station's header block ──────────────────────────────────────────────
+
+// The first rows are the station's letterhead: name, street, `PLZ Stadt`,
+// then the contact block (Tel/Fax/Steuer-Nr/www) and the priced lines. The
+// name used to be "the first meaningful line", which a tilted photo defeats:
+// row reconstruction can merge the name with the street, street first, and
+// the whole blob went out as the merchant. Here the street is recognised by
+// its own shape and cut out wherever it sits; the PLZ row and everything from
+// the first contact line down are excluded; what remains is the name.
+// `te[li1]` because OCR reads `Tel.` as `Tei.` or `Te1.` on thermal paper.
+const HEADER_NOISE_RE = /\bte[li1](?:efon)?\s*\.|\btelefon\b|\bfax\b|\bsteuer[-\s]?nr\b|\bust[-\s]?id\w*\b|\bwww\.|@|\be-?mail\b|\binh\.|\böffnungszeiten\b/i;
+// One optional qualifier word, then the word ending in a street term, then a
+// house number (possibly a range). A single qualifier on purpose: two would
+// let the match reach back into the station's name on a merged row.
+const STREET_RE = /((?:[\wÄÖÜäöüß.\-]+ )?[\wÄÖÜäöüß.\-]*(?:straße|strasse|gasse|allee|platz|damm|chaussee|ufer|weg|ring|str)\.?\s+\d+(?:\s*[-–\/]\s*\d+)?[a-z]?)\b/i;
+const STATION_WORD_RE = /\b(tankstelle|tankstation|autohof|rasthof|tankcenter|station)\b/i;
+
+interface StationHeader {
+  merchantName?: string;
+  street?: string;
+  stationName?: string;
+  operatorName?: string;
+}
+
+function parseStationHeader(lines: string[]): StationHeader {
+  const out: StationHeader = {};
+  const nameParts: string[] = [];
+  const limit = Math.min(lines.length, 10);
+
+  for (let i = 0; i < limit; i++) {
+    const line = lines[i];
+    // The letterhead ends where the transaction, the contact block or the
+    // first priced line begins.
+    if (BODY_START_RE.test(line)) break;
+    if (HEADER_NOISE_RE.test(line)) break;
+    if (/\bEUR\b|\d+[.,]\d{2}/.test(line)) break;
+
+    let rest = line;
+    const streetM = line.match(STREET_RE);
+    if (streetM && out.street === undefined && streetM.index !== undefined) {
+      out.street = streetM[1].replace(/\s{2,}/g, ' ').trim();
+      rest = (line.slice(0, streetM.index) + '  ' + line.slice(streetM.index + streetM[0].length)).trim();
+    }
+    // The `PLZ Stadt` row belongs to the PLZ rules, not the name.
+    if (/\b\d{5}\b/.test(rest)) continue;
+    const cleaned = rest.replace(/[*#|]/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    if ((cleaned.match(/\p{L}/gu) ?? []).length >= 3 && !/\d{4,}/.test(cleaned)) {
+      nameParts.push(cleaned);
+    }
+  }
+
+  const name = nameParts[0];
+  if (name !== undefined) {
+    out.merchantName = name;
+    // "JET Tankstelle Morten Jürgensmeier": the station word ends the brand,
+    // and what follows is the operator — when it reads like a person's name
+    // and not like more branding or a legal form.
+    const stationM = name.match(STATION_WORD_RE);
+    if (stationM && stationM.index !== undefined) {
+      const end = stationM.index + stationM[0].length;
+      const station = name.slice(0, end).trim();
+      const after = name.slice(end).trim();
+      if (station !== '') out.stationName = station;
+      if (after !== '' && /^[A-ZÄÖÜ][\p{L}.\-]*(?:\s+[A-ZÄÖÜ][\p{L}.\-]*){1,3}$/u.test(after)) {
+        out.operatorName = after;
+      }
+    }
+  }
+  return out;
 }
 
 function parseCategory(text: string): string | undefined {
@@ -745,13 +967,45 @@ export function parseReceiptText(text: string): OcrResult {
     result.city = bestPlz.city;
   }
 
-  result.time = parseTime(lines);
+  const times = parseTimes(lines);
+  result.time = times.time;
+  result.tseTime = times.tseTime;
   result.receiptNumber = parseReceiptNumber(fullText);
+  result.bonNumber = parseBonNumber(lines, fullText);
   result.category = parseCategory(fullText);
-  result.merchantName = parseMerchantName(lines);
+  const header = parseStationHeader(lines);
+  result.merchantName = header.merchantName ?? parseMerchantName(lines);
+  result.street = header.street;
+  result.stationName = header.stationName;
+  result.operatorName = header.operatorName;
   // Only a fuel receipt has these; both stay undefined on anything else.
   result.litres = parseLitres(lines);
   result.pricePerLitre = parsePricePerLitre(lines);
+
+  // ── Liter × Preis against the total ────────────────────────────────────
+  // The product of the two printed fuel figures must roughly reproduce the
+  // printed total. It never REPLACES the total — discounts and shop items
+  // are real — but agreement confirms it (and clears a tax-line false flag),
+  // while a total BELOW the fuel line alone means a net or tax figure was
+  // probably chosen: exactly what the driver must confirm by eye before the
+  // figure reaches anyone's books. A total ABOVE the product is ordinary —
+  // the receipt had more on it than fuel — and says nothing.
+  if (result.amount !== undefined && result.litres !== undefined && result.pricePerLitre !== undefined) {
+    const product = Math.round(result.litres * result.pricePerLitre * 100) / 100;
+    if (Math.abs(product - result.amount) <= 0.02) {
+      result.amountConfidence = 100;
+      const bare = (result.amountReason ?? '').replace(/^Unsicher: /, '');
+      result.amountReason = bare === ''
+        ? `+Liter×Preis bestätigt (${product.toFixed(2)})`
+        : `${bare}; +Liter×Preis bestätigt (${product.toFixed(2)})`;
+    } else if (result.amount < product - 0.02) {
+      result.amountConfidence = Math.min(result.amountConfidence ?? 0, 40);
+      if (result.amountReason?.startsWith('Unsicher') !== true) {
+        result.amountReason =
+          `Unsicher: ${result.amountReason ?? ''}; Liter×Preis=${product.toFixed(2)} liegt über dem Betrag`;
+      }
+    }
+  }
 
   // Debug: include rejected candidates too (up to 8 total per field)
   result.plzCandidates = plzCandidates
