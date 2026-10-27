@@ -19,6 +19,7 @@ import {
   PageHeader,
 } from '../components/ui';
 import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
+import { mapReceiptEditRow, type ReceiptEditEntry } from '../utils/receiptEditHistory';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { buildBelegeExportOptions, type ReceiptExportFilters } from '../utils/belegeExport';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -55,6 +56,10 @@ const BelegePage: React.FC = () => {
   const [userDisplayNames, setUserDisplayNames] = useState<Map<string, string>>(new Map());
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
+  // The Beleg's edit log (receipt_edits, 20261027160000), loaded when the edit
+  // modal opens. undefined = loading, null = the read failed — said in the
+  // modal, never drawn as an empty history.
+  const [editHistory, setEditHistory] = useState<ReceiptEditEntry[] | null | undefined>(undefined);
   // CLAUDE.md, "A figure whose load failed is not shown": one state, cleared
   // where the load starts and set in its existing catch, and the export withheld
   // while it is set. Without it a failed read wrote a workbook whose totals row
@@ -202,9 +207,44 @@ const BelegePage: React.FC = () => {
     });
   };
 
+  const loadEditHistory = useCallback(async (receiptId: string) => {
+    const { data, error } = await supabase
+      .from('receipt_edits')
+      .select('id, action, field, old_value, new_value, edited_by, edited_at')
+      .eq('receipt_id', receiptId)
+      .order('edited_at', { ascending: false })
+      .limit(200);
+    setEditHistory(error ? null : (data ?? []).map(mapReceiptEditRow));
+  }, []);
+
   const handleEditReceipt = (receipt: Receipt) => {
     setEditingReceipt(receipt);
+    setEditHistory(undefined);
     setIsReceiptModalOpen(true);
+    void loadEditHistory(receipt.id);
+  };
+
+  /**
+   * The reviewer vouches for the Beleg as shown: one `confirm` row, the only
+   * client-writable shape of receipt_edits — `change` rows are the trigger's.
+   * A refusal (a role without the receipts edit right, a view context) comes
+   * back as an error and is reported by the modal's toast, never swallowed.
+   */
+  const handleConfirmValues = async (): Promise<boolean> => {
+    if (!editingReceipt || !user || !effectiveCompanyId) return false;
+    const { error } = await supabase.from('receipt_edits').insert({
+      company_id: effectiveCompanyId,
+      receipt_id: editingReceipt.id,
+      action: 'confirm',
+      field: 'receipt',
+      edited_by: user.id,
+    });
+    if (error) {
+      console.error('Error confirming receipt values:', error);
+      return false;
+    }
+    await loadEditHistory(editingReceipt.id);
+    return true;
   };
 
   /*
@@ -387,6 +427,13 @@ const BelegePage: React.FC = () => {
           title={editingReceipt ? t('belege.edit') : t('belege.new')}
           drivers={drivers}
           existingReceipts={receipts}
+          editHistory={editingReceipt ? editHistory : undefined}
+          editorNames={userDisplayNames}
+          // Offered only to a caller the page would let edit, like the row
+          // actions: a refused action is not offered at all (plan 3.4b).
+          onConfirmValues={editingReceipt && canEditReceipt(editingReceipt)
+            ? handleConfirmValues
+            : undefined}
         />
       )}
 

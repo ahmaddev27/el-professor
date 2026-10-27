@@ -21,10 +21,32 @@ export function clockTime(value: string | undefined): string | null {
   return match === null ? null : `${match[1]}:${match[2]}`;
 }
 
-/** Merchant, city and printed time, in that order, whichever of them exist. */
+/** Merchant, street, city and printed time, in that order, whichever exist. */
 export function receiptSourceParts(receipt: Receipt): string[] {
-  return [receipt.merchantName, receipt.city, clockTime(receipt.receiptTime)]
+  return [receipt.merchantName, receipt.street, receipt.city, clockTime(receipt.receiptTime)]
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '');
+}
+
+/**
+ * The station cell, stacked (20261027150000): the brand half when the header
+ * split, otherwise the whole merchant name; the operator only when the name
+ * line does not already carry it (old rows keep "JET Tankstelle Morten
+ * Jürgensmeier" in merchantName alone); the street beneath.
+ */
+export interface StationCell {
+  name: string | null;
+  operator: string | null;
+  street: string | null;
+}
+
+export function receiptStationCell(receipt: Receipt): StationCell {
+  const name = textOrNull(receipt.stationName) ?? textOrNull(receipt.merchantName);
+  const operator = textOrNull(receipt.operatorName);
+  return {
+    name,
+    operator: operator !== null && (name === null || !name.includes(operator)) ? operator : null,
+    street: textOrNull(receipt.street),
+  };
 }
 
 /** A text datum trimmed, or null when it is absent or blank. */
