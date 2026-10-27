@@ -149,7 +149,9 @@ async function recordSubmission(
     // So the payload is stored MINUS the photo's bytes and their declared
     // type, and nothing else is touched. `ocr_text`/`ocr_meta` never arrive:
     // Reidey keeps them out of the payload it serves, by its own design.
-    const { document: _documentBytes, content_type: _contentType, ...rawPayload } = payload
+    const rawPayload: Record<string, unknown> = { ...payload }
+    delete rawPayload.document
+    delete rawPayload.content_type
 
     const put = await admin.rpc('partner_receipt_submission_record', {
       p_company_id: companyId,
