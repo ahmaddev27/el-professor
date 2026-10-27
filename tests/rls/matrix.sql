@@ -1421,9 +1421,21 @@ INSERT INTO _mx_spec VALUES
 -- Both statements name a module that `app_private.company_module_keys()` has.
 -- An invented key would be refused by the column's CHECK for the owner too and
 -- the cell would measure the constraint instead of the policy.
+--
+-- `enabled` MUST stay true in both statements, and this is not cosmetic.
+-- Since 20261027120000 a module switched off closes its page's writes through
+-- `current_role_permits()`, so a fixture row of `('werkstatt', false)` switches
+-- the Werkstatt module OFF for both tenants for the rest of the run — and the
+-- four `werkstatt_checks` cells below then record "what a role may do while
+-- this table's module is off", which is not what any other table's line in
+-- this file means. It was `false` when slice 1 wrote it, where the value was
+-- inert; the kit caught the change on the release that gave it a meaning, with
+-- `werkstatt_checks` D/I/M/U all moving at once. Flip it back and they move
+-- again. The behaviour itself — a module off closing its page — is probed in
+-- tests/rls/company-module-write-gate.sql, which is the file that may do it.
 (82, 'company_modules', $q$company_id = {co} AND module_key = 'werkstatt'$q$,
-  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'werkstatt', false)$q$, NULL,
-  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'notes', false)$q$,
+  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'werkstatt', true)$q$, NULL,
+  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'notes', true)$q$,
   $q$enabled = enabled$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────

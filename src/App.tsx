@@ -7,6 +7,12 @@ import { SuperAdminProvider, useSuperAdmin } from './contexts/SuperAdminContext'
 import { PlanProvider, usePlan, FeatureKey } from './contexts/PlanContext';
 import AppLayout from './components/AppLayout';
 import LockedFeaturePage from './components/LockedFeaturePage';
+import ModuleOffPage from './components/ModuleOffPage';
+import {
+  moduleDefinition,
+  moduleEnabled,
+  type CompanyModuleKey,
+} from './lib/companyModules';
 import LoginForm from './components/LoginForm';
 import LandingPage from './pages/LandingPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -117,6 +123,49 @@ const PlanGate: React.FC<{ feature: FeatureKey; children: React.ReactNode }> = (
       requiredPlan={minPlanFor(feature)}
     />
   );
+};
+
+/*
+  ─── Module-gated route wrapper (slice 2 of Docs/design/per-company-modules.md)
+
+  A module a platform operator switched off for this company must not render its
+  page. Before this existed, `Sidebar.renderNavItem` was the **only** caller of
+  `moduleEnabledForRoute` in the tree: the link disappeared and the route
+  answered, fully working, to anyone who typed the address — which is how the
+  defect was found on production (`/fahrtenbuch` with the module off).
+
+  **Nested inside `PlanGate`, never beside it**, which is the message precedence
+  of section 7: the plan is the outer boundary, so a company whose plan does not
+  include the feature is told *that* and is never told a module was switched off.
+  The converse would be a false statement — with the plan forbidding it, the
+  module row is inert and nobody switched anything off. Anyone who reaches
+  `ModuleOffPage` therefore has a plan that does include the feature.
+
+  Two fail-open answers, both deliberate and both matching the registry's header:
+
+    - a module **key this build does not know** renders the page. The registry is
+      the newer half of the pair in a rolled-back release, and a gate that closed
+      on an unknown key would close a screen because its own definition was
+      missing.
+    - a **map that could not be read** renders the page, because `PlanContext`
+      hands out `NO_MODULE_DECISIONS` on a failed read and absence means on. Safe
+      because the browser is not the boundary: slice 3 puts the write term in
+      `current_role_permits()`, so a module shown after a failed read can still
+      write nothing. This is `UNRESOLVED_PLAN_STATE`'s rule, for its reason — a
+      restrictive placeholder would flash a refusal over every page load.
+
+  It takes the module **key** rather than the path. The path is what the sidebar
+  has and `moduleEnabledForRoute` is right for it; a route element does not know
+  its own path, and naming the key makes the coverage checkable — which is what
+  `src/App.moduleGate.test.ts` does, so a new toggleable route cannot ship
+  ungated.
+*/
+const ModuleGate: React.FC<{ module: CompanyModuleKey; children: React.ReactNode }> = ({ module, children }) => {
+  const { companyModules } = usePlan();
+  const { t } = useTranslation();
+  const definition = moduleDefinition(module);
+  if (!definition || moduleEnabled(companyModules, module)) return <>{children}</>;
+  return <ModuleOffPage moduleName={t(definition.labelKey)} />;
 };
 
 // ─── Must-change-password guard (must live inside BrowserRouter) ────────────
@@ -634,29 +683,48 @@ function App() {
                 {/* Activation routes — inside AppLayout so sidebar is visible */}
                 <Route path="abo-aktivieren" element={<ActivationPage />} />
                 <Route path="aktivierung"    element={<ActivationPage />} />
-                {/* Basic features — always accessible */}
+                {/* Basic features — always accessible.
+
+                    `ModuleGate` with no `PlanGate` around it is not an omission:
+                    these routes have no plan gate today and slice 2 does not add
+                    one (a new FeatureKey needs a migration seeding
+                    `plan_features`, and a feature the stored map does not name
+                    reads as premium for everyone). `/mein-konto` and `/overview`
+                    carry no module gate — `/mein-konto` belongs to no module and
+                    `overview` is a locked one, so no row can ever switch it off
+                    and the gate would be unreachable code. */}
                 <Route path="mein-konto"     element={<AccountPage />} />
                 <Route path="overview"       element={<OverviewPage />} />
-                <Route path="belege"         element={<BelegePage />} />
-                <Route path="fahrer"         element={<FahrerPage />} />
-                <Route path="datenimport"    element={<DataImportPage />} />
-                <Route path="cars"           element={<CarsPage />} />
-                <Route path="umsaetze"       element={<UmsaetzePage />} />
-                <Route path="fixkosten"      element={<FixkostenPage />} />
-                <Route path="bargeldbestand" element={<BargeldbestandPage />} />
+                <Route path="belege"         element={<ModuleGate module="belege"><BelegePage /></ModuleGate>} />
+                <Route path="fahrer"         element={<ModuleGate module="fahrer"><FahrerPage /></ModuleGate>} />
+                <Route path="datenimport"    element={<ModuleGate module="datenimport"><DataImportPage /></ModuleGate>} />
+                <Route path="cars"           element={<ModuleGate module="cars"><CarsPage /></ModuleGate>} />
+                <Route path="umsaetze"       element={<ModuleGate module="umsaetze"><UmsaetzePage /></ModuleGate>} />
+                <Route path="fixkosten"      element={<ModuleGate module="fixkosten"><FixkostenPage /></ModuleGate>} />
+                <Route path="bargeldbestand" element={<ModuleGate module="bargeldbestand"><BargeldbestandPage /></ModuleGate>} />
                 {/* Advanced features */}
-                <Route path="werkstatt"  element={<PlanGate feature="werkstatt"><WerkstattPage /></PlanGate>} />
-                <Route path="abrechnung" element={<PlanGate feature="abrechnung"><AbrechnungPage /></PlanGate>} />
-                <Route path="notes"              element={<PlanGate feature="notizen"><NotesPage /></PlanGate>} />
-                <Route path="benachrichtigungen" element={<PlanGate feature="benachrichtigungen"><NotificationsPage /></PlanGate>} />
+                <Route path="werkstatt"  element={<PlanGate feature="werkstatt"><ModuleGate module="werkstatt"><WerkstattPage /></ModuleGate></PlanGate>} />
+                <Route path="abrechnung" element={<PlanGate feature="abrechnung"><ModuleGate module="abrechnung"><AbrechnungPage /></ModuleGate></PlanGate>} />
+                <Route path="notes"              element={<PlanGate feature="notizen"><ModuleGate module="notes"><NotesPage /></ModuleGate></PlanGate>} />
+                <Route path="benachrichtigungen" element={<PlanGate feature="benachrichtigungen"><ModuleGate module="benachrichtigungen"><NotificationsPage /></ModuleGate></PlanGate>} />
                 {/* Premium features */}
-                <Route path="salaries"       element={<PlanGate feature="gehaelter"><SalariesPage /></PlanGate>} />
-                <Route path="dokumente"              element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
-                <Route path="dokumente/:id"          element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
-                <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
-                <Route path="fahrtenbuch" element={<PlanGate feature="dokumente"><FahrtenbuchPage /></PlanGate>} />
+                <Route path="salaries"       element={<PlanGate feature="gehaelter"><ModuleGate module="salaries"><SalariesPage /></ModuleGate></PlanGate>} />
+                <Route path="dokumente"              element={<PlanGate feature="dokumente"><ModuleGate module="dokumente"><DocumentsPage /></ModuleGate></PlanGate>} />
+                <Route path="dokumente/:id"          element={<PlanGate feature="dokumente"><ModuleGate module="dokumente"><DocumentsPage /></ModuleGate></PlanGate>} />
+                <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><ModuleGate module="dokumente"><DocumentsPage /></ModuleGate></PlanGate>} />
+                <Route path="fahrtenbuch" element={<PlanGate feature="dokumente"><ModuleGate module="fahrtenbuch"><FahrtenbuchPage /></ModuleGate></PlanGate>} />
+                {/* `/stundennachweis` and `/fahrtenanalyse` carry NO module gate,
+                    and that is the registry's rule rather than an oversight: both
+                    belong to no module (`moduleForRoute` answers null, pinned by
+                    companyModules.test.ts), so no operator decision names them
+                    and a gate here would have to invent an owner. Giving one of
+                    the four `documents` entries these two routes is a product
+                    decision — it would mean switching off Fahrtenbuch closes the
+                    Stundennachweis screen — and it is named as an open question
+                    in the PR rather than taken here. Their *writes* are closed
+                    with the rest of the `documents` page by slice 3 either way. */}
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
-                <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
+                <Route path="company-planner" element={<PlanGate feature="dokumente"><ModuleGate module="company_planner"><CompanyPlannerPage /></ModuleGate></PlanGate>} />
                 {/* The monthly plan of the §1 requirement: four screens over the
                     engine in src/utils/monthlyPlan/. Gated on `dokumente`, the
                     same feature as the planner it sits beside and the same
@@ -664,7 +732,7 @@ function App() {
                     its own would need a migration seeding `plan_features`, and a
                     feature the stored map does not name reads as premium for
                     every plan. */}
-                <Route path="monatsplan" element={<PlanGate feature="dokumente"><MonthlyPlanEntryPage /></PlanGate>} />
+                <Route path="monatsplan" element={<PlanGate feature="dokumente"><ModuleGate module="monatsplan"><MonthlyPlanEntryPage /></ModuleGate></PlanGate>} />
                 {/* Fahrtenanalyse reads the Fahrtenbuch a company imported under
                     Dokumente, so it is gated on the same feature rather than on
                     a key of its own: a new FeatureKey would need a migration

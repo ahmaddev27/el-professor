@@ -7142,4 +7142,10 @@ export const en: PartialDictionary = {
   'admin.plans.rule.perCar':              'Billing is per car and month. Fleet discounts, the yearly discount and the first-month price are under Settings.',
   'admin.plans.subtitle':                 'Price per car and included features of each plan. Changes affect prices, invoices and what each plan unlocks.',
   'admin.plans.title':                    'Plans',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'moduleOff.body':           'This module has been switched off for your company. This is not a question of your plan — your existing data is kept unchanged.',
+  'moduleOff.contactSupport': 'Contact support',
+  'moduleOff.hint':           'Contact support to have the module switched back on.',
+  'moduleOff.title':          '{module} is not activated for your company',
 };
