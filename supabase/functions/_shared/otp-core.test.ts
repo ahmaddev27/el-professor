@@ -22,7 +22,8 @@ import {
   parseEmail,
   parseOtpRequest,
   parseOtpVerify,
-  passwordAmrAgeSeconds,
+  REAUTH_PROOF_METHODS,
+  reauthProofAgeSeconds,
   pickSession,
   readBodyText,
   scrubForLog,
@@ -270,7 +271,7 @@ describe('tokens', () => {
   );
 });
 
-describe('passwordAmrAgeSeconds', () => {
+describe('reauthProofAgeSeconds', () => {
   it('measures the newest password sign-in', () => {
     const payload = {
       amr: [
@@ -279,19 +280,68 @@ describe('passwordAmrAgeSeconds', () => {
         { method: 'password', timestamp: 1200 },
       ],
     };
-    expect(passwordAmrAgeSeconds(payload, 1800)).toBe(600);
-    expect(passwordAmrAgeSeconds(payload, 1800.9)).toBe(600);
+    expect(reauthProofAgeSeconds(payload, 1800)).toBe(600);
+    expect(reauthProofAgeSeconds(payload, 1800.9)).toBe(600);
   });
 
-  it('does not count a session made by /verify', () => {
-    expect(passwordAmrAgeSeconds({ amr: [{ method: 'otp', timestamp: 1789416052 }] }, 1789416060)).toBeNull();
+  it('counts a passkey sign-in exactly as it counts a password one', () => {
+    // The owner's decision of 27.10.2026. Without this, a platform operator who
+    // signed in with a passkey could not change their own address at all, and
+    // one who had only ever enrolled a passkey would have nothing to
+    // re-authenticate with.
+    expect(reauthProofAgeSeconds({ amr: [{ method: 'passkey', timestamp: 1000 }] }, 1600)).toBe(600);
+    expect(reauthProofAgeSeconds({ amr: [{ method: 'passkey', timestamp: 1000 }] }, 1000)).toBe(0);
+  });
+
+  it('takes the newest proof whichever method it was', () => {
+    const payload = {
+      amr: [
+        { method: 'password', timestamp: 1000 },
+        { method: 'passkey', timestamp: 1500 },
+      ],
+    };
+    expect(reauthProofAgeSeconds(payload, 1600)).toBe(100);
+  });
+
+  it('is exactly the method set the database permits', () => {
+    // The two lists are one decision. Widening one alone is the defect this
+    // pins: the database would admit a session the proof rule refused, or the
+    // other way round.
+    expect([...REAUTH_PROOF_METHODS]).toEqual(['password', 'passkey']);
+  });
+
+  it('does not count a session made by /verify, nor any non-proof method', () => {
+    for (const method of [
+      'otp', 'oauth', 'sso/saml', 'anonymous', 'totp', 'mfa/webauthn',
+      'mfa/phone', 'mfa/recovery_code', 'magiclink', 'recovery', 'invite',
+      'email/signup', 'email_change', 'token_refresh', 'web3',
+      // A near-miss that must not be read as a passkey: `webauthn` is not a
+      // method GoTrue writes, and `mfa/webauthn` is a second factor.
+      'webauthn',
+    ]) {
+      expect(
+        reauthProofAgeSeconds({ amr: [{ method, timestamp: 1789416052 }] }, 1789416060),
+        `expected ${method} not to be a proof`,
+      ).toBeNull();
+    }
+  });
+
+  it('ignores a bare-string entry, because it carries no timestamp', () => {
+    // From GoTrue v2.185.0 a custom access-token hook may return `amr` as bare
+    // strings. The SQL twin reads those (it asks which methods, never when);
+    // this one must not, because a proof of freshness made from no timestamp is
+    // a proof made of nothing.
+    expect(reauthProofAgeSeconds({ amr: ['password'] }, 100)).toBeNull();
+    expect(reauthProofAgeSeconds({ amr: ['passkey'] }, 100)).toBeNull();
   });
 
   it('is null without a usable claim and never negative', () => {
-    expect(passwordAmrAgeSeconds({}, 100)).toBeNull();
-    expect(passwordAmrAgeSeconds({ amr: 'password' }, 100)).toBeNull();
-    expect(passwordAmrAgeSeconds({ amr: [{ method: 'password', timestamp: '90' }] }, 100)).toBeNull();
-    expect(passwordAmrAgeSeconds({ amr: [{ method: 'password', timestamp: 200 }] }, 100)).toBe(0);
+    expect(reauthProofAgeSeconds({}, 100)).toBeNull();
+    expect(reauthProofAgeSeconds({ amr: 'password' }, 100)).toBeNull();
+    expect(reauthProofAgeSeconds({ amr: [{ method: 'password', timestamp: '90' }] }, 100)).toBeNull();
+    expect(reauthProofAgeSeconds({ amr: [{ method: 'passkey', timestamp: '90' }] }, 100)).toBeNull();
+    expect(reauthProofAgeSeconds({ amr: [{ method: 'password', timestamp: 200 }] }, 100)).toBe(0);
+    expect(reauthProofAgeSeconds({ amr: [{ method: 'passkey', timestamp: 200 }] }, 100)).toBe(0);
   });
 });
 

@@ -55,10 +55,12 @@ const receiptAnswer = {
     description: null,
     payment_method: 'bar',
     postal_code: '10115',
-    // The five of 11.10.2026 and the two of 12.10.2026, all strings: this
-    // payload is merged VERBATIM (`array_merge((array) $row->payload, ...)`),
-    // so whatever shape their validator admits is the shape we read. Theirs
-    // pins a string on all seven.
+    // The five of 11.10.2026, the two of 12.10.2026 and the five of
+    // 27.10.2026, all strings: this payload is merged VERBATIM
+    // (`array_merge((array) $row->payload, ...)`), so whatever shape their
+    // validator admits is the shape we read. Theirs pins a string on all
+    // twelve (`station_name`/`operator_name`/`street`/`receipt_number` as
+    // bounded strings, `tse_time` as `date_format:H:i:s`).
     merchant_name: 'ARAL Tankstelle',
     city: 'Berlin',
     receipt_time: '14:32',
@@ -66,6 +68,11 @@ const receiptAnswer = {
     price_per_litre: '1.789',
     odometer_km: '25382',
     range_km: '277',
+    station_name: 'ARAL Tankstelle',
+    operator_name: 'Morten Jürgensmeier',
+    street: 'Hauptstrasse 12',
+    receipt_number: '90521',
+    tse_time: '14:33:05',
     // merged by submission()
     kind: 'receipt',
     subject: 'receipt',
@@ -120,6 +127,25 @@ describe("Reidey's receipt answer, through our parser", () => {
     expect(parsed.value.price_per_litre).toBe('1.789')
     expect(parsed.value.odometer_km).toBe('25382')
     expect(parsed.value.range_km).toBe('277')
+    // The letterhead split, the printed Bon and the TSE clock (27.10.2026).
+    // `receipt_number` on the wire is the number the TILL printed, never a
+    // Reidey id and never our BEL- Belegnummer; `tse_time` is not the sale time.
+    expect(parsed.value.station_name).toBe('ARAL Tankstelle')
+    expect(parsed.value.operator_name).toBe('Morten Jürgensmeier')
+    expect(parsed.value.street).toBe('Hauptstrasse 12')
+    expect(parsed.value.receipt_number).toBe('90521')
+    expect(parsed.value.tse_time).toBe('14:33:05')
+  })
+
+  // Their validator pins `date_format:H:i:s` on the TSE clock; a sender that
+  // starts dropping the seconds is a drifted sender, not a time to guess onto.
+  it('breaks if the TSE time ever arrives without its seconds', () => {
+    const drifted = { data: { ...receiptAnswer.data, tse_time: '14:33' } }
+    const unwrapped = readSubmissionAnswer(drifted, 'receipt')
+    expect(unwrapped.ok).toBe(true)
+    if (!unwrapped.ok) return
+    expect(parseReceiptSubmission(unwrapped.payload))
+      .toEqual({ ok: false, problem: 'invalid_tse_time' })
   })
 
   // The odometer is the one MANDATORY figure on a refuel, and the one whose

@@ -36,6 +36,7 @@ import {
 } from './companyModules';
 import { PAGE_DEFINITIONS } from '../types/role';
 import { SEED_PLAN_FEATURES } from './appConfigSeed';
+import { ROLE_EDIT_ENFORCED_PAGES } from './rolePermissionEnforcement';
 
 const read = (relative: string): string =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
@@ -114,6 +115,30 @@ const lockedInMigration = (): string[] => {
   if (defining.length === 0) throw new Error('no migration defines app_private.company_module_locked_keys()');
   const body = defining[defining.length - 1].match(LOCKED_IN_ARRAY)!;
   return [...body[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map(match => match[1]);
+};
+
+const PAGES_IN_VALUES = /FUNCTION app_private\.company_module_pages\(\)[\s\S]*?FROM \(VALUES([\s\S]*?)\n {4}\) AS t\(/;
+
+/**
+ * `module_key -> page_key` out of the newest migration defining the mapping —
+ * slice 3's half of the registry, read the same way as the two key lists above.
+ *
+ * This is the pair that decides which **tables** a module closes, so the two
+ * halves drifting is not a cosmetic defect: a page the TypeScript claims and the
+ * SQL does not is a module that hides a screen and closes nothing, with the
+ * panel row saying "schließt Daten" beside it.
+ */
+const pagesInMigration = (): [string, string][] => {
+  const dir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
+  const defining = readdirSync(dir)
+    .filter(file => file.endsWith('.sql'))
+    .sort()
+    .map(file => readFileSync(dir + file, 'utf8'))
+    .filter(sql => PAGES_IN_VALUES.test(sql));
+  if (defining.length === 0) throw new Error('no migration defines app_private.company_module_pages()');
+  const body = defining[defining.length - 1].match(PAGES_IN_VALUES)!;
+  return [...body[1].matchAll(/\(\s*'([a-z][a-z0-9_]*)'\s*,\s*'([a-z][a-z0-9-]*)'\s*\)/g)]
+    .map(match => [match[1], match[2]] as [string, string]);
 };
 
 // ─── 1. the registry covers the sidebar, exactly once each ───────────────────
@@ -218,6 +243,53 @@ describe('the keys the database accepts are the keys this build knows', () => {
     // Order is the design's section 6 (the two deadlocks first), not the
     // registry's, so the sets are compared rather than the sequences.
     expect([...lockedInMigration()].sort()).toEqual([...LOCKED_MODULE_KEYS].sort());
+  });
+
+  it('company_module_pages() names exactly the registry\'s pageKeys', () => {
+    // Both sides as a sorted "module:page" list, so the comparison is of the
+    // relation and not of the order either file happens to write it in.
+    const fromRegistry = MODULE_DEFINITIONS
+      .flatMap(m => m.pageKeys.map(page => `${m.key}:${page}`))
+      .sort();
+    const fromMigration = pagesInMigration().map(([key, page]) => `${key}:${page}`).sort();
+    expect(fromMigration).toEqual(fromRegistry);
+  });
+
+  it('four modules claim `documents`, which is what stops one of them closing it', () => {
+    /*
+      The defect this pins is a quantifier. The database half's rule is "a page
+      is closed if and only if NO enabled module claims it", so switching
+      Fahrtenbuch off — the production case — closes nothing, because
+      /dokumente, /company-planner and /monatsplan still claim `documents` and
+      still need its 24 tables. Written the other way round ("close the page
+      when this module is off"), switching Fahrtenbuch off would have emptied
+      Monatsplanung and the Stundennachweis, which produce a statutory document.
+    */
+    const claimants = pagesInMigration().filter(([, page]) => page === 'documents').map(([key]) => key);
+    expect(claimants.sort()).toEqual(['company_planner', 'dokumente', 'fahrtenbuch', 'monatsplan']);
+  });
+
+  it('no page is claimed only by locked modules', () => {
+    // The migration's self-check 4 asserts this against the pages the live
+    // policies actually gate; here it is the whole mapping, because a page that
+    // becomes gated later must not have to re-derive the argument.
+    const locked = new Set<string>(LOCKED_MODULE_KEYS);
+    const byPage = new Map<string, string[]>();
+    for (const [key, page] of pagesInMigration()) {
+      byPage.set(page, [...(byPage.get(page) ?? []), key]);
+    }
+    const onlyLocked = [...byPage.entries()]
+      .filter(([, claimants]) => claimants.every(key => locked.has(key)))
+      .map(([page]) => page)
+      .sort();
+    // `overview`, `users`, `roles` and `settings` are claimed only by locked
+    // modules — and none of them is gated by `current_role_permits`: the first
+    // is named by no policy at all and the other three by `is_company_admin()`.
+    // So they can never close, and that is what makes them safe here.
+    expect(onlyLocked).toEqual(['overview', 'roles', 'settings', 'users']);
+    for (const page of onlyLocked) {
+      expect(ROLE_EDIT_ENFORCED_PAGES as readonly string[]).not.toContain(page);
+    }
   });
 
   it('there are six locked modules, and they are the design\'s six', () => {

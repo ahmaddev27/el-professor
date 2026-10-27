@@ -5,20 +5,24 @@
  * `parseReceiptText` used to be the back half of `extractReceiptData`, reachable
  * only through tesseract and a canvas. It is a pure function now, so the same
  * German rules can read text from a phone's own OCR engine as well as from the
- * browser's. That makes these assertions load-bearing in a new way: the driver
- * app carries a copy of this module, and this file is the fixture both sides are
- * measured against.
+ * browser's. That makes these assertions load-bearing in a new way: Reidey's
+ * driver app carries a copy of this module, and this file is the fixture set
+ * both sides are measured against — its copy is
+ * `tests/receipt-text-parse.test.mjs` in that repository, and a change made on
+ * one side and not the other fails here rather than disagreeing in silence.
  *
  * **These are characterization tests, not specifications.** They record what the
- * rules do today so that a change becomes visible. Two of the recorded answers
- * are not what anyone would design:
+ * rules do today so that a change becomes visible. One recorded answer is not
+ * what anyone would design:
  *
  * - the fuel receipt's amount is CORRECT (74,24, the Gesamtbetrag) and is still
  *   marked `Unsicher`, because `mwst` appears nearby and costs it 80 points.
  *   That is the case the driver app's "confirm this field" marker exists for.
- * - the workshop receipt reports a `receiptNumber` of `'datum'` — the word, not
- *   a number. A latent defect; it is pinned here rather than fixed, so that
- *   fixing it is a deliberate act with its own diff.
+ *
+ * A second such answer was retired deliberately on 27.10.2026: the workshop
+ * receipt used to report a `receiptNumber` of `'datum'` — the word, cut out of
+ * `Belegdatum` — and the bare `Bon|Beleg|Quittung` patterns now require a word
+ * boundary, so no number on that invoice means none is reported.
  *
  * Do not update a failing expectation without reading why it moved. The amount
  * reaches a driver's balance and the Tankenquote.
@@ -74,6 +78,12 @@ describe('a fuel receipt', () => {
     expect(r.merchantName).toBe('ARAL Tankstelle')
   })
 
+  it('reads the street and the station from the header, and no operator', () => {
+    expect(r.street).toBe('Hauptstrasse 12')
+    expect(r.stationName).toBe('ARAL Tankstelle')
+    expect(r.operatorName).toBeUndefined()
+  })
+
   it('reads the postal code and resolves the city', () => {
     expect(r.postalCode).toBe('10115')
     expect(r.city).toBe('Berlin')
@@ -126,10 +136,12 @@ describe('an invoice over a thousand euros', () => {
     expect(r.date).toBe('2026-02-15')
   })
 
-  it('reports the word "datum" as a receipt number — a pinned defect', () => {
-    // Recorded, not endorsed. Fixing it is its own change, and this line is what
-    // will fail and make that change visible.
-    expect(r.receiptNumber).toBe('datum')
+  it('reports no receipt number rather than a word', () => {
+    // Fixed deliberately on 27.10.2026: `Bon|Beleg|Quittung` now require a word
+    // boundary, so `Belegdatum` no longer yields the word "datum" as a number.
+    // No number on this invoice means none is reported. (The old pinned defect
+    // asserted `'datum'` here; it is retired, not forgotten.)
+    expect(r.receiptNumber).toBeUndefined()
   })
 })
 
@@ -174,6 +186,150 @@ TOTAL 55,11 EUR`)
 
   it('does not take a fraction of a litre for a fill', () => {
     expect(parseReceiptText('0,41 L').litres).toBeUndefined()
+  })
+})
+
+// ── The JET Hagen receipt, 20.10.2026 ────────────────────────────────────────
+//
+// A real receipt that exposed four misreadings at once: the TSE Anmeldezeit
+// (08:46:19) was reported as the sale time instead of the printed `Datum Zeit`
+// 08:45; `Summe Netto` outscored `Summe` through the position bonus and 34,52
+// was reported as the total with full confidence; the printed Bon number
+// (90521) was not read at all; and on a tilted photo the city came out as
+// "Hagen Tei.Nr." and the merchant as the street plus the garbled name. Values
+// asserted here are what the PAPER prints — the fixture is the receipt, not
+// the bug.
+
+/** The rows as printed: name, street, PLZ, contact block, items, totals,
+ *  TSE block, and the columnar `Datum Zeit Bon` trailer. */
+const JET = `JET Tankstelle Morten Jürgensmeier
+Eckeseyer Straße 113-115
+58089 Hagen
+Tel.Nr. 0 23 31- 2 24 88
+Fax.Nr.0 23 31-92 45 07
+Steuer-Nr. 321/5125/2808
+www.JET.de
+* 19,95 Liter #  08 *  EUR  41,08*A
+Super E10
+2,059 EUR / Liter
+Z-Summe  EUR  41,08
+19,00 % MWST. A  EUR  6,56
+Summe  EUR  41,08
+Bar Indoor  EUR  41,08
+19,00 % MWST. A  EUR  6,56
+Summe Netto  EUR  34,52
+POS S/N: NAMOS-4314-002
+TSE S/N: B81779BAB235100F610722F9D42C171
+Transaktionsnummer: 1142170
+Anmeldezeit (Start): 20.10.2026 08:46:19
+Anmeldezeit (Ende): 20.10.2026 08:46:19
+Signaturzähler: 2659248
+Datum  Zeit  Bon  POS KNo Schicht
+20.10.26  08:45  90521  02 0005  848
+Wir bedanken uns für Ihren Einkauf und w`
+
+/** The same receipt as a tilted photo yields it: the first two rows merged
+ *  left-first, the PLZ row merged with the Tel row, OCR misreads kept. */
+const JET_TILTED = `Eckeseyer Straße 113-115  JET Tankstel le Morten Jtirgensmeier
+58089 Hagen  Tei.Nr. 0 23 31- 2 24 88
+Fax.Nr.0 23 31-92 45 07
+Steuer-Nr. 321/5125/2808
+www.JET.de
+* 19,95 Liter #  08 *  EUR  41,08*A
+Super E10
+2,059 EUR / Liter
+Z-Summe  EUR  41,08
+19,00 % MWST. A  EUR  6,56
+Summe  EUR  41,08
+Bar Indoor  EUR  41,08
+19,00 % MWST. A  EUR  6,56
+Summe Netto  EUR  34,52
+Transaktionsnummer: 1142170
+Anmeldezeit (Start): 20.10.2026 08:46:19
+Anmeldezeit (Ende): 20.10.2026 08:46:19
+Datum  Zeit  Bon  POS KNo Schicht
+20.10.26  08:45  90521  02 0005  848
+Wir bedanken uns für Ihren Einkauf und w`
+
+describe('the JET Hagen receipt', () => {
+  it('reads the printed sale time, not the TSE Anmeldezeit', () => {
+    const r = parseReceiptText(JET)
+    expect(r.time).toBe('08:45')
+    expect(r.tseTime).toBe('08:46:19')
+    expect(r.date).toBe('2026-10-20')
+  })
+
+  it('takes the Summe, never the Summe Netto, the MWST or the tendered cash', () => {
+    expect(parseReceiptText(JET).amount).toBe(41.08)
+  })
+
+  it('reads the printed Bon number from the columnar trailer', () => {
+    expect(parseReceiptText(JET).bonNumber).toBe('90521')
+  })
+
+  it('reads station, operator and street as separate fields, umlauts intact', () => {
+    const r = parseReceiptText(JET)
+    expect(r.merchantName).toBe('JET Tankstelle Morten Jürgensmeier')
+    expect(r.stationName).toBe('JET Tankstelle')
+    expect(r.operatorName).toBe('Morten Jürgensmeier')
+    expect(r.street).toBe('Eckeseyer Straße 113-115')
+    expect(r.postalCode).toBe('58089')
+    expect(r.city).toBe('Hagen')
+  })
+
+  it('reads the fuel figures with the third decimal, and the product confirms the total', () => {
+    const r = parseReceiptText(JET)
+    expect(r.litres).toBe(19.95)
+    expect(r.pricePerLitre).toBe(2.059)
+    // 19,95 × 2,059 = 41,077 ≈ the printed 41,08, so the total is confirmed
+    // rather than flagged.
+    expect(r.amountReason?.startsWith('Unsicher')).toBe(false)
+  })
+})
+
+describe('the JET receipt as a tilted photo', () => {
+  it('does not read the phone number into the city', () => {
+    const r = parseReceiptText(JET_TILTED)
+    expect(r.city).toBe('Hagen')
+    expect(r.postalCode).toBe('58089')
+  })
+
+  it('does not let the street contaminate the merchant', () => {
+    const r = parseReceiptText(JET_TILTED)
+    expect(r.street).toBe('Eckeseyer Straße 113-115')
+    expect(r.merchantName?.includes('Straße')).toBe(false)
+    expect(r.merchantName?.includes('113')).toBe(false)
+  })
+
+  it('keeps the sale time and the total through the tilt', () => {
+    const r = parseReceiptText(JET_TILTED)
+    expect(r.time).toBe('08:45')
+    expect(r.amount).toBe(41.08)
+  })
+})
+
+// ── Guard rails the JET case exposed, as their own minimal fixtures ──────────
+
+describe('the guards the JET case exposed', () => {
+  it('never lets Summe Netto beat a labelled total, whatever its position', () => {
+    const r = parseReceiptText(`Tankstelle Test
+Gesamtbetrag  EUR  50,00
+19,00 % MWST  EUR  7,98
+Summe Netto  EUR  42,02`)
+    expect(r.amount).toBe(50)
+  })
+
+  it('flags a total below litres times price for review, and never replaces it', () => {
+    // 30 l × 1,80 = 54,00, yet the only total line says 42,02: on a fuel
+    // receipt the total cannot undercut the fuel line alone, so the figure is
+    // kept (discounts exist) but marked for the driver to confirm.
+    const r = parseReceiptText(`Tankstelle Test
+Diesel
+30,00 Liter
+1,800 EUR / Liter
+Gesamtbetrag  EUR  42,02`)
+    expect(r.amount).toBe(42.02)
+    expect(r.amountReason?.startsWith('Unsicher')).toBe(true)
   })
 })
 

@@ -958,12 +958,48 @@ delete are untouched — with section 6's reason for leaving them.
 a `CREATE OR REPLACE`, so "revert" is a forward migration, not a rollback —
 which is exactly why it is its own slice and not folded into slice 1.
 
-### Slice 4 — reads: **not recommended; needs its own approval**
+### Slice 4 — reads: **approved by the owner on 27.10.2026, and in progress**
 
-Section 5 is the argument and the minimum safe form. It is listed so it is not
-forgotten, not so it is scheduled. If approved it is at least three PRs on its own:
-retrain every reading screen, then the policies, then the kit — in that order, and
-with an epoch bump.
+Section 5 is the argument and the minimum safe form. The owner overruled the
+recommendation — *"اقفل كل اشي لو الموديول مقفول"* — and accepted the epoch bump
+and the rollback cliff, so the minimum safe form is what governs: retrain every
+reading screen **first**, then the policies, then the kit, with `documents`
+excluded regardless and the export path kept open.
+
+**4a — the measurement (`src/lib/moduleReadScope.test.ts`, 27.10.2026).** 32
+cross-module read crossings, pinned as a gate. Not one of the 16 modules could
+close reads, and two blockers were structural: `overview`, which is
+`lockable: false` and reads five toggleable modules' tables; and the
+Stundennachweis, which reads `drivers` and `driver_notes`.
+
+**4b — the Overview, per panel (`src/utils/overviewModuleScope.ts`,
+27.10.2026).** Its 20 figure-bearing panels declare the modules their numbers
+come from, and a panel whose module is off states that rather than rendering a
+figure. All five of its crossings are cleared; the blocking count went 32 → 27.
+
+**4c — THE SECOND BLOCKER, found in 4b and still open.** `src/utils/backup.ts`
+reads `from(table)` with the name taken from `BACKUP_TABLES`, so no scan over
+`from('<literal>')` can see it. That list is **49 tables and contains every one
+of the 11 the gate reaches**; its module is `datensicherung`, `lockable: false`,
+which this document calls the company's own way to get its own data out. A
+closed read answers 200 with no rows, which `createBackup` records as
+`status: 'complete', rows: 0` — so the customer downloads an archive marked
+complete, with no INCOMPLETE marker in its filename, that is missing every row
+of every switched-off module.
+
+**And this section's own carve-out cannot be implemented where the gate lives.**
+"The export path stays open" needs a policy to tell a backup from a screen, and
+it is the same role, the same token and the same PostgREST request. So the two
+possible answers are both the owner's:
+
+- the backup reports a switched-off module's tables as `skipped`,
+  `complete: false`, INCOMPLETE in the filename — honest, and the company loses
+  the ability to export that data while the module is off; or
+- reads stay open and the wall stays at A + B + C.
+
+Until one is chosen **no SELECT policy may gain a module term**, and section 7 of
+`moduleReadScope.test.ts` is the gate: it fails on that combination alone, so
+either answer passes and only the truncated-archive release fails.
 
 ---
 

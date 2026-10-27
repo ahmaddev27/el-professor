@@ -19,7 +19,7 @@ import {
   noAccount,
   notPlatformAccount,
   parseEmailChangeBody,
-  passwordProofState,
+  reauthProofState,
   rateLimited,
   sameEmail,
   type CheckResult,
@@ -91,14 +91,14 @@ describe('parseEmailChangeBody', () => {
   });
 });
 
-describe('passwordProofState', () => {
+describe('reauthProofState', () => {
   it('is fresh for a password sign-in inside the window', () => {
-    expect(passwordProofState(passwordAmr(NOW), NOW)).toBe('fresh');
-    expect(passwordProofState(passwordAmr(NOW - PASSWORD_PROOF_MAX_AGE_SECONDS), NOW)).toBe('fresh');
+    expect(reauthProofState(passwordAmr(NOW), NOW)).toBe('fresh');
+    expect(reauthProofState(passwordAmr(NOW - PASSWORD_PROOF_MAX_AGE_SECONDS), NOW)).toBe('fresh');
   });
 
   it('is stale one second past the window', () => {
-    expect(passwordProofState(passwordAmr(NOW - PASSWORD_PROOF_MAX_AGE_SECONDS - 1), NOW)).toBe('stale');
+    expect(reauthProofState(passwordAmr(NOW - PASSWORD_PROOF_MAX_AGE_SECONDS - 1), NOW)).toBe('stale');
   });
 
   it('reads the same window otp-request enforces', () => {
@@ -107,16 +107,39 @@ describe('passwordProofState', () => {
     expect(PASSWORD_PROOF_MAX_AGE_SECONDS).toBe(600);
   });
 
-  it('is absent for a session no password established', () => {
+  it('is absent for a session no re-authentication established', () => {
     // A code-minted session (issueSession uses GoTrue's magiclink /verify) and
-    // a Google one carry no password method at all.
-    expect(passwordProofState({ amr: [{ method: 'otp', timestamp: NOW }] }, NOW)).toBe('absent');
-    expect(passwordProofState({ amr: [{ method: 'oauth', timestamp: NOW }] }, NOW)).toBe('absent');
-    expect(passwordProofState({ amr: [] }, NOW)).toBe('absent');
-    expect(passwordProofState({}, NOW)).toBe('absent');
-    expect(passwordProofState({ amr: 'password' }, NOW)).toBe('absent');
-    expect(passwordProofState({ amr: [{ method: 'password' }] }, NOW)).toBe('absent');
-    expect(passwordProofState({ amr: [{ method: 'password', timestamp: 'now' }] }, NOW)).toBe('absent');
+    // a Google one carry no proof method at all.
+    expect(reauthProofState({ amr: [{ method: 'otp', timestamp: NOW }] }, NOW)).toBe('absent');
+    expect(reauthProofState({ amr: [{ method: 'oauth', timestamp: NOW }] }, NOW)).toBe('absent');
+    expect(reauthProofState({ amr: [] }, NOW)).toBe('absent');
+    expect(reauthProofState({}, NOW)).toBe('absent');
+    expect(reauthProofState({ amr: 'password' }, NOW)).toBe('absent');
+    expect(reauthProofState({ amr: [{ method: 'password' }] }, NOW)).toBe('absent');
+    expect(reauthProofState({ amr: [{ method: 'password', timestamp: 'now' }] }, NOW)).toBe('absent');
+  });
+
+  it('accepts a fresh passkey sign-in, and ages it on the same window', () => {
+    // The owner's decision of 27.10.2026: a passkey is a password for this
+    // purpose. Both directions, because admitting it is only half the rule —
+    // an expired passkey proof must still be refused.
+    expect(reauthProofState({ amr: [{ method: 'passkey', timestamp: NOW }] }, NOW)).toBe('fresh');
+    expect(
+      reauthProofState({ amr: [{ method: 'passkey', timestamp: NOW - PASSWORD_PROOF_MAX_AGE_SECONDS }] }, NOW),
+    ).toBe('fresh');
+    expect(
+      reauthProofState({ amr: [{ method: 'passkey', timestamp: NOW - PASSWORD_PROOF_MAX_AGE_SECONDS - 1 }] }, NOW),
+    ).toBe('stale');
+    // A passkey beside a stale password is fresh on the passkey, and the other
+    // way round: the rule reads the newest proof, not the first entry.
+    expect(
+      reauthProofState({
+        amr: [
+          { method: 'password', timestamp: NOW - 10_000 },
+          { method: 'passkey', timestamp: NOW - 5 },
+        ],
+      }, NOW),
+    ).toBe('fresh');
   });
 
   it('takes the newest password entry when a session names several', () => {
@@ -126,11 +149,11 @@ describe('passwordProofState', () => {
         { method: 'password', timestamp: NOW - 5 },
       ],
     };
-    expect(passwordProofState(claims, NOW)).toBe('fresh');
+    expect(reauthProofState(claims, NOW)).toBe('fresh');
   });
 
   it('never reads a clock skew as an aged proof', () => {
-    expect(passwordProofState(passwordAmr(NOW + 120), NOW)).toBe('fresh');
+    expect(reauthProofState(passwordAmr(NOW + 120), NOW)).toBe('fresh');
   });
 });
 

@@ -1027,6 +1027,17 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO plans (slug, name, rank, price_per_car_cents) VALUES ('mx_{s}', 'MX {s}', CASE '{s}' WHEN 'a' THEN 900 ELSE 901 END, 100)$q$, NULL,
   $q$INSERT INTO plans (slug, name, rank, price_per_car_cents) VALUES ('mx_new_{s}', 'MX new {s}', CASE '{s}' WHEN 'a' THEN 910 ELSE 911 END, 100)$q$,
   $q$name = name$q$),
+(84, 'receipt_edits', $q$id = {id}$q$,
+  -- 20261027160000: the Beleg edit log. The fixture and the probe are a
+  -- reviewer's confirm — the one client-writable shape — and the probe's
+  -- edited_by is the caller's own id, which the INSERT policy pins (the
+  -- fahrtenbuch_imports.imported_by rule); the owner's validity pass, which
+  -- has no session, falls back to the admin id.
+  $q$INSERT INTO receipt_edits (id, company_id, receipt_id, action, field, edited_by)
+     VALUES ({id}, {co}, {ref:receipts}, 'confirm', 'receipt', {admin})$q$, NULL,
+  $q$INSERT INTO receipt_edits (company_id, receipt_id, action, field, edited_by)
+     VALUES ({co}, {ref:receipts}, 'confirm', 'receipt', coalesce(auth.uid(), {admin}))$q$,
+  $q$field = field$q$),
 (42, 'subscription_plans', $q$id = {id}$q$,
   $q$INSERT INTO subscription_plans (id, name, monthly_price, included_cars) VALUES ({id}, 'MX plan {s}', 20, 1)$q$, NULL,
   $q$INSERT INTO subscription_plans (name, monthly_price, included_cars) VALUES ('MX plan new {s}', 20, 1)$q$,
@@ -1421,9 +1432,21 @@ INSERT INTO _mx_spec VALUES
 -- Both statements name a module that `app_private.company_module_keys()` has.
 -- An invented key would be refused by the column's CHECK for the owner too and
 -- the cell would measure the constraint instead of the policy.
+--
+-- `enabled` MUST stay true in both statements, and this is not cosmetic.
+-- Since 20261027120000 a module switched off closes its page's writes through
+-- `current_role_permits()`, so a fixture row of `('werkstatt', false)` switches
+-- the Werkstatt module OFF for both tenants for the rest of the run — and the
+-- four `werkstatt_checks` cells below then record "what a role may do while
+-- this table's module is off", which is not what any other table's line in
+-- this file means. It was `false` when slice 1 wrote it, where the value was
+-- inert; the kit caught the change on the release that gave it a meaning, with
+-- `werkstatt_checks` D/I/M/U all moving at once. Flip it back and they move
+-- again. The behaviour itself — a module off closing its page — is probed in
+-- tests/rls/company-module-write-gate.sql, which is the file that may do it.
 (82, 'company_modules', $q$company_id = {co} AND module_key = 'werkstatt'$q$,
-  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'werkstatt', false)$q$, NULL,
-  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'notes', false)$q$,
+  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'werkstatt', true)$q$, NULL,
+  $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'notes', true)$q$,
   $q$enabled = enabled$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
@@ -1594,6 +1617,10 @@ INSERT INTO _mx_move VALUES
 -- file that reaches a WITH CHECK clause at all. The pin would buy nothing and
 -- cost the measurement.
 ('conflict_reviews',                     $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20261027160000: no pin trigger and no client UPDATE privilege at all, so
+-- every principal's move dies on the FOR UPDATE's missing privilege; for the
+-- owner it is an ordinary UPDATE that succeeds.
+('receipt_edits',                        $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 -- 20261025120000: the key is (company_id, module_key) and the fixture holds the
 -- same module on both sides, so the target tenant's row is cleared first, the
 -- way company_settings' is. No pin trigger and no write policy, so for the
@@ -2032,6 +2059,18 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('receipts',                          'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('receipts',                          'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('receipts',                          'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20261027160000: the Beleg edit log. SELECT is the tenant shape; the one
+-- client write is the reviewer's confirm on the receipts page (editor and up,
+-- own id only — a 'change' row can only be written by the AFTER UPDATE trigger
+-- on receipts, as the owner). anon holds no privilege at all, and UPDATE and
+-- DELETE are unprivileged for every API role: the history is append-only and
+-- ends only with its Beleg's cascade, so U, D and M die on the privilege, not
+-- on a policy.
+('receipt_edits',                      'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('receipt_edits',                      'I', 'PP', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('receipt_edits',                      'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('receipt_edits',                      'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('receipt_edits',                      'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('referrals',                          'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('referrals',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('referrals',                          'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -2420,7 +2459,12 @@ UPDATE _mx_expected x
      -- 20261023200000: the same shape and the same two triggers. Its write cells
      -- are PP for D only, which the WHERE above skips, so what this adds there is
      -- nothing and what it adds for S, I, U and M is the rule.
-     'conflict_reviews');
+     'conflict_reviews',
+     -- 20261027160000: the same shape and the same two triggers. U, D and M are
+     -- PP (no privilege), which the WHERE above skips, so what this adds is the
+     -- SELECT inside a context and the confirm INSERT: refused in a view
+     -- context, the supported company's own in a support session.
+     'receipt_edits');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),

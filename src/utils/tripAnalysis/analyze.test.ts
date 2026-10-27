@@ -239,6 +239,42 @@ describe('travel between consecutive trips', () => {
     expect(result.checks.travelGap.passed).toBe(0);
   });
 
+  it('an estimate that is not a number → unverifiable, and never a pass', () => {
+    /*
+      Audit round 2 (27.10.2026) asks that a routing failure never become
+      zero. The `unavailable` branch above is that rule for a service that
+      says it failed. This is the rule for one that does not: an estimator
+      answering `estimated` with a value that is not a minute count.
+
+      Unguarded it would read as a PASS, not as a zero, which is worse.
+      `requiredMinutes = NaN + margin` is NaN, `shortByMinutes` is NaN, and
+      `shortByMinutes > 0` is FALSE for NaN — so `status` would resolve to
+      'passed' and a broken router would certify the gap it could not
+      measure. A negative minute count passes the same way by arithmetic.
+      `usableEstimate` is the guard (Number.isFinite and >= 0) and
+      `invalid_estimate` is the reason it records; before this test the
+      reason appeared nowhere but the one line that writes it.
+    */
+    for (const minutes of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      const broken: TravelTimeEstimator = {
+        source: 'osrm',
+        estimate: () => ({ kind: 'estimated', minutes, source: 'osrm', confidence: 'high' }),
+      };
+      const result = analyzeTrips({ ...pair(), travelEstimator: broken });
+      expect(issuesOf(result, 'travel_gap')[0]).toMatchObject({
+        status: 'unverifiable',
+        confidence: 'low',
+        values: {
+          reason: 'invalid_estimate',
+          estimateMinutes: null,
+          requiredMinutes: null,
+          shortByMinutes: null,
+        },
+      });
+      expect(result.checks.travelGap).toEqual({ passed: 0, conflict: 0, unverifiable: 1 });
+    }
+  });
+
   it('without an estimate, a gap below the margin is only a weak signal', () => {
     const result = analyzeTrips(pair(15));
     expect(issuesOf(result, 'travel_gap')[0]).toMatchObject({

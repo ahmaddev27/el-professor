@@ -201,6 +201,7 @@ auth_settings_problems() {
   python3 -c '
 import json, sys
 on = sys.argv[1] == "true"
+passkey_on = len(sys.argv) > 2 and sys.argv[2] == "true"
 try:
     settings = json.load(sys.stdin)
     external = settings["external"]
@@ -210,12 +211,20 @@ try:
 except (ValueError, KeyError, TypeError):
     print("no settings answer")
     sys.exit(1)
+# Read with a default, never as a required key: GoTrue only began reporting
+# passkeys_enabled in v2.188.0, and on the version this stack pins the key is
+# absent. Requiring it would refuse every release; defaulting it to False means
+# an absent key reads as "passkeys off", which is exactly what it is -- and when
+# the switch is on, that same default is what catches an image too old to know
+# the variable, a second wall behind the version refusal in passkey_guard.
+actual["passkeys_enabled"] = settings.get("passkeys_enabled", False) if isinstance(settings, dict) else False
 expected = {name: False for name in external if name not in ("email", "google")}
 expected.update({"google": on, "disable_signup": not on, "mailer_autoconfirm": not on, "saml_enabled": False})
+expected["passkeys_enabled"] = passkey_on
 wrong = ["%s=%s" % (name, str(actual.get(name)).lower()) for name in sorted(expected) if actual.get(name) is not expected[name]]
 print(" ".join(wrong))
 sys.exit(1 if wrong else 0)
-' "$1"
+' "$1" "${2:-false}"
 }
 
 # The kong service as compose renders it (JSON on stdin), for the throwaway Kong
@@ -266,6 +275,293 @@ sys.stdout.write(text)
 }
 
 # <<< google-signin checks
+
+# -- Passkey (WebAuthn) sign-in checks ----------------------------------------
+# Everything between the two marker lines is also sourced on its own by
+# tests/deploy/passkey-config.test.ts and run against fake .env, compose and
+# migration fixtures, so it may use only its arguments, fail, env_value (from
+# the google-signin block above), grep, awk and python3.
+# >>> passkey checks
+
+# The lowest supabase/gotrue this switch may run on, and why this number rather
+# than the first one that carries the feature at all:
+#
+#   v2.188.0  adds passkeys (GOTRUE_PASSKEY_ENABLED and the WEBAUTHN_RP_*
+#             block) -- but its release workflow failed and no image was ever
+#             published under that tag, so it cannot be pulled.
+#   v2.188.1  the first pullable passkey build, code-identical to 2.188.0.
+#   v2.189.0  changes the passkey request and response shapes, so browser code
+#             written against 2.188.x breaks here.
+#   v2.190.0  makes GOTRUE_WEBAUTHN_RP_* authoritative on the MFA WebAuthn path
+#             too (before it, that path took rpId/rpOrigins from the request
+#             body), and downgrades an incomplete WebAuthn config from a startup
+#             error to a warning -- so a half-written .env degrades to
+#             "passkeys off" instead of a container that will not boot.
+#
+# 2.190.0 is the first version where this switch means exactly one thing and
+# cannot take the auth service down by being half-configured.
+PASSKEY_MIN_GOTRUE=2.190.0
+
+# The GoTrue version the compose file pins, as bare X.Y.Z; empty when the auth
+# service names no recognisable supabase/gotrue or supabase/auth tag. Both
+# namespaces are published in lockstep and the upstream self-hosting compose
+# still says supabase/gotrue, so either is read here.
+gotrue_image_version() {
+  awk '
+    { sub(/\r$/, "") }
+    /^[^ \t#]/ { inside = 0 }
+    /^  auth:/ { inside = 1 }
+    inside && /^[ \t]*image:[ \t]*supabase\/(gotrue|auth):v[0-9]/ {
+      line = $0
+      sub(/^.*:v/, "", line)
+      sub(/[ \t].*$/, "", line)
+      print line
+      exit
+    }
+  ' "$1" 2>/dev/null
+}
+
+# Is version $1 at least $2? Both bare X.Y.Z. A version carrying a suffix (an
+# -rc) compares on its numbers alone, deliberately: running a release candidate
+# high enough to know passkeys is the owner's decision, not a release blocker.
+version_at_least() {
+  python3 -c '
+import re, sys
+def parts(text):
+    found = re.match(r"^(\d+)\.(\d+)\.(\d+)", text or "")
+    return tuple(int(g) for g in found.groups()) if found else None
+have, want = parts(sys.argv[1]), parts(sys.argv[2])
+sys.exit(0 if have is not None and want is not None and have >= want else 1)
+' "$1" "$2"
+}
+
+# What is wrong with one WebAuthn origin for this relying-party ID, as one line;
+# empty when nothing is. The RP ID must be a registrable domain suffix of every
+# origin's effective domain, which is why the host has to equal the RP ID or sit
+# under it -- otherwise the browser refuses the credential at use time, not at
+# configuration time, and the refusal reaches the user and not the release.
+# HTTPS only, because a passkey is a credential; and no path, query, fragment or
+# credentials, because an origin is scheme, host and port and nothing else.
+passkey_origin_problem() {
+  local origin="$1" rp_id="$2" host
+  case "$origin" in
+    https://*) ;;
+    http://*) printf 'origin %s is not https' "$origin"; return 0 ;;
+    *) printf 'origin %s has no https:// scheme' "$origin"; return 0 ;;
+  esac
+  host="${origin#https://}"
+  case "$host" in
+    */*) printf 'origin %s carries a path; an origin is scheme, host and port only' "$origin"; return 0 ;;
+    *\?*|*\#*) printf 'origin %s carries a query or fragment' "$origin"; return 0 ;;
+    *@*) printf 'origin %s carries credentials' "$origin"; return 0 ;;
+  esac
+  host="${host%%:*}"
+  [ -n "$host" ] || { printf 'origin %s has no host' "$origin"; return 0; }
+  [ "$host" != "$rp_id" ] || return 0
+  [ "${host%".$rp_id"}" = "$host" ] || return 0
+  printf 'origin %s is not %s or a subdomain of it' "$origin" "$rp_id"
+}
+
+# PASSKEY_SIGNIN_ENABLED is empty, true or false and nothing else, like the
+# Google switch: GoTrue parses GOTRUE_PASSKEY_ENABLED as a Go bool, so "TRUE"
+# or "1" would turn passkeys on while every guard here read the value as off.
+#
+# Switched on it needs the whole relying-party block, because GoTrue's own
+# WebAuthnConfiguration.Validate() requires all three of RP ID, display name and
+# origins whenever passkeys are enabled.
+#
+# Two of the refusals are not about shape, and they are why this is a guard
+# rather than a paragraph in .env.example:
+#
+#   1. The image must actually know the variable. On a GoTrue older than
+#      PASSKEY_MIN_GOTRUE the passkey values are simply unread:
+#      /auth/v1/settings keeps answering without passkeys_enabled, every
+#      /auth/v1/passkeys/* route stays 404, and the switch is on in .env and off
+#      in the product with nothing anywhere saying so.
+#
+#   2. The database must admit `passkey` in the platform amr allow-list.
+#      app_private.session_amr_permits_platform() requires the session's amr to
+#      name `password`. A passkey sign-in records exactly one method, `passkey`,
+#      on a brand-new session -- GoTrue issues it through IssueRefreshToken,
+#      which creates the session and adds that single claim, and does not append
+#      to an existing password session the way MFA verification does. So with
+#      this switch on and that function unchanged, a platform operator who signs
+#      in with a passkey holds no platform capability at all: platform_can,
+#      platform_whoami, is_user_super_admin, the read models and every write RPC
+#      refuse together, and the admin panel comes up empty with no error
+#      anywhere. Whether a passkey session *should* carry platform rights is a
+#      decision about authority and not a shape to validate, so this guard does
+#      not take it -- it refuses the switch until a migration has, and names
+#      what is missing.
+passkey_guard() {
+  local env_file="$1" compose_file="$2" migrations_dir="$3"
+  local flag rp_id display_name origins image_version problem origin candidate found
+  flag="$(env_value "$env_file" PASSKEY_SIGNIN_ENABLED)"
+  case "$flag" in
+    ''|true|false) ;;
+    *) fail "PASSKEY_SIGNIN_ENABLED must be empty, true or false; .env holds something else" ;;
+  esac
+
+  rp_id="$(env_value "$env_file" PASSKEY_RP_ID)"
+  origins="$(env_value "$env_file" PASSKEY_RP_ORIGINS)"
+  display_name="$(env_value "$env_file" PASSKEY_RP_DISPLAY_NAME)"
+
+  # The RP ID's shape is checked whenever it is written and not only when the
+  # switch is on, because it is written before the switch is flipped -- and
+  # because it is the one value here that cannot be corrected afterwards:
+  # changing it invalidates every passkey already registered against it.
+  if [ -n "$rp_id" ]; then
+    [[ "$rp_id" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
+      || fail "PASSKEY_RP_ID must be one bare lowercase domain with no scheme, port, path or trailing dot; .env holds something else"
+  fi
+
+  [ "$flag" = true ] || return 0
+
+  [ -n "$rp_id" ] \
+    || fail "PASSKEY_SIGNIN_ENABLED=true needs PASSKEY_RP_ID, one bare domain. It cannot be changed later without invalidating every registered passkey"
+  [ -n "$display_name" ] \
+    || fail "PASSKEY_SIGNIN_ENABLED=true needs PASSKEY_RP_DISPLAY_NAME, the name a browser shows when a passkey is created"
+  [ -n "$origins" ] \
+    || fail "PASSKEY_SIGNIN_ENABLED=true needs PASSKEY_RP_ORIGINS, a comma-separated list of https origins under PASSKEY_RP_ID"
+
+  while IFS= read -r origin; do
+    [ -n "$origin" ] || continue
+    problem="$(passkey_origin_problem "$origin" "$rp_id")"
+    [ -z "$problem" ] || fail "PASSKEY_RP_ORIGINS: $problem"
+  done < <(printf '%s' "$origins" | awk 'BEGIN { RS = "," } { gsub(/^[ \t]+|[ \t]+$/, ""); if ($0 != "") print }')
+
+  image_version="$(gotrue_image_version "$compose_file")"
+  [ -n "$image_version" ] \
+    || fail "PASSKEY_SIGNIN_ENABLED=true, but the auth service in ${compose_file##*/} pins no readable supabase/gotrue version, so nothing here can tell whether it knows passkeys"
+  version_at_least "$image_version" "$PASSKEY_MIN_GOTRUE" \
+    || fail "PASSKEY_SIGNIN_ENABLED=true needs supabase/gotrue v$PASSKEY_MIN_GOTRUE or newer; the auth service pins v$image_version, which does not read GOTRUE_PASSKEY_ENABLED. Every /auth/v1/passkeys/* route would stay 404 and the switch would be on in .env and off in the product. A GoTrue upgrade is its own release, not part of turning this on"
+
+  # MEASURED LIMIT, so nobody mistakes this for the boundary: the test is
+  # "some migration defines that function AND mentions 'passkey'". It is
+  # deliberately coarse, because the question a release gate can answer is
+  # "has this decision been taken", not "is the rule correct" -- deploy.sh
+  # cannot read the post-migration catalogue before the migrations run, and a
+  # text match on the array's exact spelling would refuse a legitimate
+  # restatement that merely formatted it differently.
+  #
+  # So a migration that narrowed the permitted list while still naming
+  # 'passkey' in a comment or a self-check would satisfy THIS check. Proved by
+  # mutation. Three gates are precise where this one is not:
+  #   * 20261027140000's own self-check, which refuses to APPLY a body that has
+  #     lost either permitted name or any of the three refusals. Measured
+  #     through the kit with the list narrowed to password alone:
+  #       migration failed: 20261027140000_platform_amr_admits_passkey.sql
+  #       ERROR: self-check 2: ... no longer names 'passkey'
+  #     so the release stops at the migration, not at this grep. (Check 2 fires
+  #     before 2b, which pins the array's exact spelling.)
+  #   * tests/rls/platform-amr.sql section 9, which probes the real seam;
+  #   * tests/deploy/passkey-config.test.ts, which pins both the permitted list
+  #     and the three refusals as text.
+  found=""
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    if grep -qF "'passkey'" "$candidate" 2>/dev/null; then found="$candidate"; break; fi
+  done < <({ grep -rlF 'session_amr_permits_platform' "$migrations_dir" 2>/dev/null || true; } | sort)
+  [ -n "$found" ] \
+    || fail "PASSKEY_SIGNIN_ENABLED=true, but no migration admits 'passkey' in app_private.session_amr_permits_platform(). That function requires the session's amr to name 'password', and a passkey sign-in records only 'passkey', so every platform operator signing in with a passkey would hold no platform capability and the admin panel would come up empty. Decide that in a migration first"
+}
+
+# <<< passkey checks
+
+# -- GoTrue upgrade checks (v2.170.0 -> v2.190.0) ------------------------------
+# Two settings the upgrade brought that must not be switched on from .env.
+# Everything between the two marker lines is also sourced on its own by
+# tests/deploy/gotrue-upgrade.test.ts and run against fake .env files, so it may
+# use only its arguments, fail, env_value (from the google-signin block above)
+# and grep.
+# >>> gotrue upgrade checks
+
+# The seven "something about your account changed" mails GoTrue gained between
+# v2.170.0 and v2.190.0, as the .env keys docker-compose.yml interpolates, each
+# paired with the GOTRUE_ variable it feeds. Defined once here so the guard, the
+# test and the error message cannot drift from each other.
+GOTRUE_NOTIFICATION_SWITCHES='
+NOTIFY_PASSWORD_CHANGED GOTRUE_MAILER_NOTIFICATIONS_PASSWORD_CHANGED_ENABLED
+NOTIFY_EMAIL_CHANGED GOTRUE_MAILER_NOTIFICATIONS_EMAIL_CHANGED_ENABLED
+NOTIFY_PHONE_CHANGED GOTRUE_MAILER_NOTIFICATIONS_PHONE_CHANGED_ENABLED
+NOTIFY_IDENTITY_LINKED GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_LINKED_ENABLED
+NOTIFY_IDENTITY_UNLINKED GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_UNLINKED_ENABLED
+NOTIFY_MFA_FACTOR_ENROLLED GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_ENROLLED_ENABLED
+NOTIFY_MFA_FACTOR_UNENROLLED GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_UNENROLLED_ENABLED
+'
+
+# Every notification mail stays off, and the release says so rather than
+# trusting GoTrue's default.
+#
+# Measured in v2.190.0's source: all seven fields of NotificationsConfiguration
+# are default:"false", no production code assigns to them (only _test.go does),
+# and there is no master switch -- so the upgrade itself mails nothing new. That
+# is a fact about one version, and an upstream default flip is not a change this
+# project's changelog would mark. docker-compose.yml therefore passes an
+# explicit false, and this refuses the other direction: a .env that asks for one.
+#
+# The refusal is not about mail volume. These mails have no template of ours, so
+# turning one on sends GoTrue's stock ENGLISH wording to a German fleet
+# operator, in a product whose five existing templates are pinned byte for byte.
+# Turning one on means writing a German template and pointing
+# GOTRUE_MAILER_TEMPLATES_*_NOTIFICATION at it, and editing this guard is
+# deliberately part of that -- the same shape as GOOGLE_CLIENT_SHARED, where the
+# decision has to be written down somewhere a reviewer sees it.
+mailer_notifications_guard() {
+  local env_file="$1" key gotrue_key value
+  while read -r key gotrue_key; do
+    [ -n "$key" ] || continue
+    value="$(env_value "$env_file" "$key")"
+    case "$value" in
+      ''|false) ;;
+      *) fail "$key=$value in ${env_file##*/}, but it must be empty or false. It feeds $gotrue_key, and GoTrue has no German template for that mail -- it would send its own English wording to a German fleet operator, beside five templates this repository pins byte for byte. Write the German template first and change this guard in the same commit" ;;
+    esac
+  done <<EOF
+$GOTRUE_NOTIFICATION_SWITCHES
+EOF
+
+  # A GOTRUE_MAILER_NOTIFICATIONS_* key written straight into .env reaches
+  # nothing: compose passes only the variables named in its own environment
+  # block, and those read the NOTIFY_ keys above. Refused anyway, because the
+  # failure is silent in the worst direction -- someone writes `true`, sees a
+  # successful release, and believes the mail is on.
+  local stray
+  stray="$(grep -oE '^GOTRUE_MAILER_NOTIFICATIONS_[A-Z_]+' "$env_file" 2>/dev/null | head -n 1)" || true
+  [ -z "$stray" ] \
+    || fail "${env_file##*/} sets $stray directly. That has no effect: compose hands GoTrue only the variables it names itself, and those read the NOTIFY_* keys. Use the NOTIFY_* key, or the setting is silently ignored"
+}
+
+# Sb-Forwarded-For (GoTrue v2.185.0) stays off, and this is the guard that keeps
+# a one-line .env edit from removing every rate limit in the stack.
+#
+# Measured in sbff.go at v2.190.0: with the flag on, GoTrue takes the leftmost
+# comma-separated value of the `sb-forwarded-for` request header and accepts it
+# if net.ParseIP succeeds. That is the entire check -- no proxy allow-list, no
+# shared secret, no trusted-CIDR test. Caddy overwrites X-Client-IP on every API
+# host and nothing else, so this header arrives from the client untouched, and a
+# caller that rotated it per request would get a fresh budget each time:
+# /token's password-guessing limit, /verify, /otp, all of them. It would also
+# put a client-chosen address in GoTrue's own audit rows.
+#
+# And it does not merely add a key -- middleware.go limits by the sbff address
+# and returns, so GOTRUE_RATE_LIMIT_HEADER is never consulted once this is on.
+# The measured limit of X-Client-IP (one budget per source IP, shared between
+# password sign-in and token refresh) is the thing being protected here; this
+# would replace it with no limit at all.
+#
+# There is no topology in which this stack wants it: Caddy already knows the
+# connecting address. If one ever arises, the proxy must strip the header first,
+# and that is the change to make rather than this value.
+sb_forwarded_for_guard() {
+  local env_file="$1" value
+  value="$(env_value "$env_file" GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED)"
+  case "$value" in
+    ''|false) ;;
+    *) fail "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED=$value in ${env_file##*/}. It must be empty or false. GoTrue would key every rate limit on the sb-forwarded-for header, which it validates only as an IP -- no proxy allow-list and no shared secret -- so any client could rotate it and defeat /token's password-guessing limit along with every other limit here. Caddy overwrites X-Client-IP, not this header" ;;
+  esac
+}
+
+# <<< gotrue upgrade checks
 
 # ── Compose profile and routing-data checks ──────────────────────────────────
 # Everything between the markers is also sourced on its own by
@@ -467,6 +763,23 @@ google_signin_guard .env "$PEER_ENV" "$PEER_NAME"
 kong_closed_block_guard kong.yml
 GOOGLE_SIGNIN="$(env_value .env GOOGLE_SIGNIN_ENABLED)"
 
+# Passkey (WebAuthn) sign-in. Ships off, and cannot be switched on by editing
+# .env alone: passkey_guard refuses the switch on a GoTrue that does not know
+# the variable, and refuses it while no migration admits `passkey` in the
+# platform amr allow-list -- which is what would otherwise take the admin panel
+# away from every platform operator who used one. The migrations are read from
+# $ROOT, the same directory the migration runner below reads.
+passkey_guard .env docker-compose.yml "$ROOT/supabase/migrations"
+PASSKEY_SIGNIN="$(env_value .env PASSKEY_SIGNIN_ENABLED)"
+
+# The GoTrue upgrade of 27.10.2026 (v2.170.0 -> v2.190.0). Both of these are
+# settings the upgrade made available and nothing in the product wants: seven
+# notification mails that have no German template, and a rate-limit key taken
+# from a header the client controls. compose passes an explicit false for each;
+# these refuse the .env that would ask for them.
+mailer_notifications_guard .env
+sb_forwarded_for_guard .env
+
 # Both stacks share the CPU with each other and with ridy, and nothing is capped.
 # Staging is where load tests run, so it must yield under contention; production
 # must never be the one yielding. See cpu_shares in docker-compose.yml.
@@ -509,6 +822,7 @@ fi
 render_problems="$(docker compose config --format json < /dev/null | python3 -c '
 import json, sys
 on = sys.argv[1] == "true"
+passkey_on = sys.argv[2] == "true"
 services = json.load(sys.stdin).get("services", {})
 env = (services.get("auth", {}) or {}).get("environment", {}) or {}
 expected = {
@@ -519,6 +833,7 @@ expected = {
     "GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED": "false",
     "GOTRUE_SAML_ENABLED": "false",
     "GOTRUE_SECURITY_MANUAL_LINKING_ENABLED": "false",
+    "GOTRUE_PASSKEY_ENABLED": "true" if passkey_on else "false",
 }
 problems = [name for name in sorted(expected) if str(env.get(name)).lower() != expected[name]]
 problems += [name for name in sorted(env) if name.startswith("GOTRUE_EXTERNAL_") and name.endswith("_ENABLED")
@@ -527,7 +842,7 @@ plugins = str(((services.get("kong", {}) or {}).get("environment", {}) or {}).ge
 if "request-termination" not in plugins.split(","):
     problems.append("KONG_PLUGINS")
 print(" ".join(problems))
-' "$GOOGLE_SIGNIN")" || fail "could not render docker-compose.yml to check the sign-in settings"
+' "$GOOGLE_SIGNIN" "$PASSKEY_SIGNIN")" || fail "could not render docker-compose.yml to check the sign-in settings"
 [ -z "$render_problems" ] || fail "docker-compose.yml does not render the sign-in settings this release relies on: $render_problems"
 
 # kong.yml as the new Kong will load it, parsed first by a throwaway copy of the
@@ -842,11 +1157,11 @@ fi
 # fails here too.
 auth_problems="no settings answer"
 for i in $(seq 1 15); do
-  auth_problems="$(curl -s --max-time 10 "$PUBLIC_URL/auth/v1/settings" | auth_settings_problems "$GOOGLE_SIGNIN")" && break
+  auth_problems="$(curl -s --max-time 10 "$PUBLIC_URL/auth/v1/settings" | auth_settings_problems "$GOOGLE_SIGNIN" "$PASSKEY_SIGNIN")" && break
   sleep 2
 done
 echo "  $PUBLIC_URL/auth/v1/settings -> ${auth_problems:-as .env says (Google sign-in ${GOOGLE_SIGNIN:-false})}"
-[ -z "$auth_problems" ] || fail "GoTrue's settings do not match GOOGLE_SIGNIN_ENABLED: $auth_problems"
+[ -z "$auth_problems" ] || fail "GoTrue's settings do not match GOOGLE_SIGNIN_ENABLED / PASSKEY_SIGNIN_ENABLED: $auth_problems"
 
 # And the closed routes from outside: nothing in front of Kong may route
 # around the block.

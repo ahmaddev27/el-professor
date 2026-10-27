@@ -252,9 +252,9 @@ DECLARE v_n int;
 BEGIN
   PERFORM _ra_rec(26, 'the door is not executable by anon or authenticated',
     (has_function_privilege('anon',
-       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text)', 'EXECUTE')::int
+       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text,text,text,text,text,text)', 'EXECUTE')::int
      + has_function_privilege('authenticated',
-       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text)', 'EXECUTE')::int)::text,
+       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text,text,text,text,text,text)', 'EXECUTE')::int)::text,
     '0');
 
   -- 20260920100000 refuses a database where a policy names a company bucket
@@ -367,6 +367,61 @@ BEGIN
        FROM partner_receipt_submissions
       WHERE company_id = v_co::uuid AND external_submission_id = 'ra-nofuel'),
     'null / null');
+END $$;
+
+-- ─── 8. the letterhead split, the printed Bon and the TSE clock ─────────────
+--
+--  Five more on 27.10.2026 (20261027150000), read off a real JET Hagen receipt
+--  by the shared parser: the station, the operator, the street, the number the
+--  till itself printed (90521, beside `Bon`) and the TSE clock. Probe 44 is
+--  the one that keeps the two numbers apart: the Belegnummer stays the server
+--  draw, whatever digits the paper carries.
+
+DO $$
+DECLARE
+  v_co constant text := 'c0000000-0000-4000-8000-00000000000a';
+  v_id uuid;
+BEGIN
+  PERFORM _ra_rec(41, 'a Beleg carrying the five header fields is recorded and accepted',
+    _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-jet', 'ra-1',
+      '2026-10-20', 'Tanken', NULL, '41.08', 'bar', '58089', NULL,
+      NULL, true, false, NULL,
+      'JET Tankstelle Morten Jürgensmeier', '08:45', '19.95', '2.059', '25382', '277', 'Hagen',
+      'JET Tankstelle', 'Morten Jürgensmeier', 'Eckeseyer Straße 113-115', '90521', '08:46:19') ->> 'status'$q$, v_co)),
+    'accepted');
+
+  SELECT id INTO v_id FROM partner_receipt_submissions
+   WHERE company_id = v_co::uuid AND external_submission_id = 'ra-jet';
+
+  PERFORM _ra_rec(42, 'the submission row holds all five',
+    (SELECT station_name || ' / ' || operator_name || ' / ' || street || ' / '
+            || printed_receipt_number || ' / ' || tse_time::text
+       FROM partner_receipt_submissions WHERE id = v_id),
+    'JET Tankstelle / Morten Jürgensmeier / Eckeseyer Straße 113-115 / 90521 / 08:46:19');
+
+  PERFORM _ra_rec(43, 'and the receipts row carries all five',
+    (SELECT r.station_name || ' / ' || r.operator_name || ' / ' || r.street || ' / '
+            || r.printed_receipt_number || ' / ' || r.tse_time::text
+       FROM receipts r JOIN partner_receipt_submissions s ON s.receipt_id = r.id
+      WHERE s.id = v_id),
+    'JET Tankstelle / Morten Jürgensmeier / Eckeseyer Straße 113-115 / 90521 / 08:46:19');
+
+  PERFORM _ra_rec(44, 'the Belegnummer stays the server draw, not the printed number',
+    (SELECT CASE WHEN r.receipt_number LIKE 'BEL-%' AND r.receipt_number <> r.printed_receipt_number
+                 THEN 'server draw' ELSE r.receipt_number END
+       FROM receipts r JOIN partner_receipt_submissions s ON s.receipt_id = r.id
+      WHERE s.id = v_id),
+    'server draw');
+
+  -- An older app's call names none of the five; appended-with-defaults is what
+  -- keeps that call valid, and NULL — not '' — is what the columns read.
+  PERFORM _ra_rec(45, 'an older build''s call leaves all five NULL',
+    (SELECT coalesce(station_name, 'null') || ' / ' || coalesce(operator_name, 'null') || ' / '
+            || coalesce(street, 'null') || ' / ' || coalesce(printed_receipt_number, 'null')
+            || ' / ' || coalesce(tse_time::text, 'null')
+       FROM partner_receipt_submissions
+      WHERE company_id = v_co::uuid AND external_submission_id = 'ra-nofuel'),
+    'null / null / null / null / null');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────
