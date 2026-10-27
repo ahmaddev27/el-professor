@@ -7213,4 +7213,10 @@ export const de = {
   'admin.plans.rule.perCar':              'Abgerechnet wird je Fahrzeug und Monat. Staffelrabatte, Jahresrabatt und der Preis des ersten Monats stehen unter Einstellungen.',
   'admin.plans.subtitle':                 'Preis je Fahrzeug und enthaltene Funktionen jedes Plans. Änderungen wirken auf Preise, Rechnungen und Freischaltungen.',
   'admin.plans.title':                    'Pläne',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'moduleOff.body':           'Dieses Modul wurde für Ihr Unternehmen deaktiviert. Das hat nichts mit Ihrem Plan zu tun — Ihre vorhandenen Daten bleiben unverändert erhalten.',
+  'moduleOff.contactSupport': 'Support kontaktieren',
+  'moduleOff.hint':           'Wenden Sie sich an den Support, um das Modul wieder aktivieren zu lassen.',
+  'moduleOff.title':          '{module} ist für Ihr Unternehmen nicht aktiviert',
 } as const;
