@@ -637,12 +637,12 @@ describe('the migration derives what the browser derives', () => {
 
   it('reads a status word by the same three lists, in the newest migration that says so', () => {
     // `fahrtenbuch_map_status` is the second list here that a LATER migration
-    // redefines: `20261027140000` taught it `abgelehnt`. So this assertion
+    // redefines: `20261027170000` taught it `abgelehnt`. So this assertion
     // reads the NEWEST definition, like the `review_reasons` one below — and
     // it is named, so a failure says which file was read instead of leaving
     // the next reader to guess whether the list moved or the parser did.
     const newest = newestDefining('FUNCTION app_private.fahrtenbuch_map_status');
-    expect(newest.file).toBe('20261027140000_declined_trip_status.sql');
+    expect(newest.file).toBe('20261027170000_declined_trip_status.sql');
     const listIn = (name: string) => {
       const m = newest.text.match(new RegExp(`${name} CONSTANT text\\[\\] := ARRAY\\[([^\\]]*)\\]`));
       if (!m) throw new Error(`${name} not found in ${newest.file}`);

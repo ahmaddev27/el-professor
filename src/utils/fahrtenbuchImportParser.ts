@@ -71,7 +71,7 @@ export interface ColMap {
 }
 
 /**
- * `declined` since `20261027140000`: an order the driver turned down, which is
+ * `declined` since `20261027170000`: an order the driver turned down, which is
  * not the same event as a cancelled ride and must not be counted as one. It is
  * never `is_canceled` — the table's check pins `(trip_status = 'cancelled') =
  * is_canceled` — so every reader that counts cancellations by that boolean is
@@ -449,7 +449,7 @@ export const CANCELLED_STATUS_WORDS: readonly string[] = [
 ];
 /**
  * An order the driver turned down. Both spellings read as `unknown` before
- * `20261027140000`, so this list moves words **out of `unknown`** only: no word
+ * `20261027170000`, so this list moves words **out of `unknown`** only: no word
  * that read as completed or cancelled reads differently, and no stored row
  * changes meaning. That is what makes widening safe here where widening the
  * cancelled list would not be.

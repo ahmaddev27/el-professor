@@ -1,6 +1,6 @@
 /*
   The monthly revenue share (external audit, section 4; migration
-  20261027150000), public.company_monthly_revenue_share.
+  20261027180000), public.company_monthly_revenue_share.
 
   Runs after the files before it, against the same throwaway database, as
   supabase_admin. Every check raises on failure; a silent run is a pass. The

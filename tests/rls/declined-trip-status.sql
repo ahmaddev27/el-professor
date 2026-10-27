@@ -1,5 +1,5 @@
 /*
-  The declined trip status and its fee column (migration 20261027140000).
+  The declined trip status and its fee column (migration 20261027170000).
 
   Runs after the files before it, against the same throwaway database, as
   supabase_admin. Every check raises on failure; a silent run is a pass. The

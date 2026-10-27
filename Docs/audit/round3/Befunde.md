@@ -178,8 +178,8 @@ hätte für eine abgelehnte Fahrt kein Etikett gehabt. Schlüssel
 | Abschnitt | Status | Belegt durch |
 |---|---|---|
 | 2 — voller Kalendermonat, Nulltage, echte Verfügbarkeit | **FIXED** | `fullMonth.test.ts` (28/29/30/31 Tage, Nulltage, keine Fahrt in einer Sperre, Determinismus, Herkunft); Lieferung zeigt 31 Tage mit 9 Nulltagen und 261 durch Notiz gesperrte Versuche |
-| 3 — DECLINED mit 6,00 €, getrenntes Feld, kein Doppelzählen | **FIXED** | Migration `20261027140000` (dritter `trip_status`, eigene Spalte, CHECK gegen eine Gebühr auf abgeschlossener Fahrt), `revenue.test.ts`, Kit-Datei, Export-und-Rückimport über `mapTripStatus` |
-| 4 — ein Monatssatz 30–33 %, PRNG mit Seed, genaue Cent-Rechnung | **FIXED** für den Simulator; **PARTIALLY FIXED** für das Produkt | `monthlyRate.test.ts` (Beispiel des Auftrags, BigInt-Gegenrechnung, 2000 Seeds), `monthlyRevenueShare.test.ts`, Migration `20261027150000`; **kein Eingabeformular**, also im Produkt noch nicht bedienbar |
+| 3 — DECLINED mit 6,00 €, getrenntes Feld, kein Doppelzählen | **FIXED** | Migration `20261027170000` (dritter `trip_status`, eigene Spalte, CHECK gegen eine Gebühr auf abgeschlossener Fahrt), `revenue.test.ts`, Kit-Datei, Export-und-Rückimport über `mapTripStatus` |
+| 4 — ein Monatssatz 30–33 %, PRNG mit Seed, genaue Cent-Rechnung | **FIXED** für den Simulator; **PARTIALLY FIXED** für das Produkt | `monthlyRate.test.ts` (Beispiel des Auftrags, BigInt-Gegenrechnung, 2000 Seeds), `monthlyRevenueShare.test.ts`, Migration `20261027180000`; **kein Eingabeformular**, also im Produkt noch nicht bedienbar |
 | 5 — Notizen bindend nach Beweiskraft, Entscheidungsprotokoll | **FIXED** | `constraintDecisionLog.test.ts` (80 Tests, Raster 7×8×7 gegen `findBlockingNote`), `Einschraenkungen.md` |
 
 **Zu Abschnitt 4, ausdrücklich:** Der Satz ist ein Anteil an **bereits

@@ -125,7 +125,7 @@ DECLARE
     'storno', 'storniert', 'storniertfahrt', 'stornierung',
     'cancelled', 'canceled', 'abgebrochen', 'nichtdurchgefuhrt'];
   -- DECLINED_STATUS_WORDS: an order the driver turned down. Both spellings
-  -- read as 'unknown' before 20261027140000, so nothing is reclassified.
+  -- read as 'unknown' before 20261027170000, so nothing is reclassified.
   c_declined_words CONSTANT text[] := ARRAY['abgelehnt', 'declined'];
   v_norm text := app_private.fahrtenbuch_norm(p_text);
 BEGIN

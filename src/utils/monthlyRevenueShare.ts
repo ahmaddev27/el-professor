@@ -8,7 +8,7 @@ import { PRODUCT_RATE_RANGE, applyMonthlyShare, maxBasisCentsFor, type ShareResu
  * (`simulatedRides/monthlyRate.ts`) draws a rate at random in 30.00 %..33.00 %
  * from a saved seed so an auditor can reproduce it. The product reads the rate
  * an operator configured for the company and the month
- * (`company_monthly_revenue_share`, migration 20261027150000). Both turn
+ * (`company_monthly_revenue_share`, migration 20261027180000). Both turn
  * `basis x rate` into cents with the same rule: integers only, one rounding,
  * halves away from zero.
  *

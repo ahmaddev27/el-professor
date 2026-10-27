@@ -71,7 +71,7 @@ Entscheidung „sie berührt es nicht“ lautet.
 
 ```
 RLS TEST FAILED
-migration failed: 20261027140000_declined_trip_status.sql
+migration failed: 20261027170000_declined_trip_status.sql
 ERROR:  declined status self-check 2: columns neither protected nor known to be mutable: is_simulated
 ```
 

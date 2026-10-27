@@ -80,7 +80,7 @@ export interface TripImportFacts {
   source_row_key_basis: SourceRowKeyBasis | null;
   /**
    * The fee a declined order earned, in integer cents, or null when none is
-   * recorded (`20261027140000`). Never a fare: the table's
+   * recorded (`20261027170000`). Never a fare: the table's
    * `fahrtenbuch_trips_declined_fee_check` refuses it on a completed trip,
    * which is what keeps the two from being counted as one.
    */

@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS public.company_monthly_revenue_share (
 COMMENT ON TABLE public.company_monthly_revenue_share IS
   'The monthly revenue share rate a company configured for one month, in whole '
   'basis points (0..10000). One row per company and month, so editing a month '
-  'never rewrites another (20261027150000).';
+  'never rewrites another (20261027180000).';
 
 -- ─── 2. Who wrote it, stamped by the database ───────────────────────────────
 
@@ -106,7 +106,7 @@ $$;
 
 COMMENT ON FUNCTION app_private.company_monthly_revenue_share_stamp() IS
   'Stamps created_by/updated_by from auth.uid() and the timestamps, whatever the '
-  'client sent (20261027150000).';
+  'client sent (20261027180000).';
 
 DROP TRIGGER IF EXISTS company_monthly_revenue_share_stamp ON public.company_monthly_revenue_share;
 CREATE TRIGGER company_monthly_revenue_share_stamp
