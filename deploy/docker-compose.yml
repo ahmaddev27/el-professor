@@ -141,15 +141,45 @@ services:
 
   # ── Auth ───────────────────────────────────────────────────────────────────
   auth:
-    image: supabase/gotrue:v2.170.0
+    # Upgraded from v2.170.0 on 27.10.2026. Why this version and not the newest:
+    #
+    #   v2.188.0  adds passkeys, but its release workflow failed and no image
+    #             was published under that tag, so it cannot be pulled.
+    #   v2.188.1  the first pullable passkey build, code-identical to 2.188.0.
+    #   v2.189.0  changes the passkey request and response shapes.
+    #   v2.190.0  downgrades an incomplete WebAuthn config from a startup error
+    #             to a warning, so a half-written .env degrades to "passkeys
+    #             off" rather than an auth container that will not boot
+    #             (configuration.go:1192, `logrus...Warn`). This is the floor
+    #             deploy.sh's passkey_guard enforces, and the reason it is 2.190
+    #             rather than 2.188.1.
+    #   v2.191.0 and up are deliberately NOT taken: 2.191-2.197 add further
+    #             auth-schema migrations (2.197 adds one_time_tokens.expires_at
+    #             and the scim_* tables), and each one is a forward-only step
+    #             away from a database this stack has ever run. Moving further
+    #             is its own release.
+    #
+    # 23 releases separate 2.170.0 from 2.190.0 (24 changelog entries, 2.188.0
+    # having no image). Between the two tags there are 15 new auth migrations.
+    # They add sso_providers/oauth_*/custom_oauth_providers/webauthn_* tables
+    # and nullable columns on sessions, mfa_factors and flow_state. Measured at
+    # both tags: NO migration alters auth.users. The migration directory holds
+    # only *.up.sql -- there are no down migrations, so the schema step is
+    # one-way and the way back is the pg_dump deploy.sh takes before it runs.
+    image: supabase/gotrue:v2.190.0
     restart: unless-stopped
     cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
     # GoTrue's own signup follows the Google switch, and it is decided here
-    # because compose interpolation cannot negate a variable. GoTrue v2.170.0
-    # refuses to create a new Google account while GOTRUE_DISABLE_SIGNUP is true,
-    # so signup opens exactly when GOTRUE_EXTERNAL_GOOGLE_ENABLED is the string
+    # because compose interpolation cannot negate a variable. GoTrue refuses to
+    # create a new Google account while GOTRUE_DISABLE_SIGNUP is true -- probed
+    # against v2.170.0, and re-read in v2.190.0's source on 27.10.2026, where
+    # external.go's models.CreateAccount branch still answers
+    # ErrorCodeSignupDisabled ("Signups not allowed for this instance"). That is
+    # a source reading of the upgrade, not a second probe of it; the probe on
+    # the new image is the first item of the owner's runbook in HANDOFF.md.
+    # So signup opens exactly when GOTRUE_EXTERNAL_GOOGLE_ENABLED is the string
     # `true` in the environment GoTrue is about to read, and stays closed for an
     # empty value or `false`. Any other value stops the container with exit code
     # 64 before GoTrue starts. GoTrue parses the variable as a Go bool, so TRUE,
@@ -197,6 +227,20 @@ services:
       # TOKEN, VERIFY and OTP count requests per client per 5 minutes;
       # EMAIL_SENT counts mails per hour across the whole instance. Staging can
       # raise RATE_LIMIT_TOKEN in its .env for a load test.
+      #
+      # v2.185.0 began reading this header's value as a comma-separated list and
+      # keying on the first entry, trimmed. That changes nothing here: Caddy
+      # *overwrites* X-Client-IP with the connecting address on every API host,
+      # so the value GoTrue sees is always a single address and a client cannot
+      # prepend one. A limiter whose header is missing or empty logs a warning
+      # and does not limit, which is why Caddy writing it unconditionally is
+      # load-bearing rather than a convenience.
+      #
+      # All four variables below are still read at v2.190.0 with the same units
+      # (apilimiter.go builds TOKEN and VERIFY as rate/(60*5), the same
+      # expression 2.170.0's options.go used). GoTrue's own default for
+      # TOKEN_REFRESH rose from 30 to 150 across these releases; this stack
+      # passes RATE_LIMIT_TOKEN explicitly, so the default never applies.
       GOTRUE_RATE_LIMIT_HEADER: X-Client-IP
       GOTRUE_RATE_LIMIT_TOKEN_REFRESH: ${RATE_LIMIT_TOKEN:-60}
       GOTRUE_RATE_LIMIT_VERIFY: ${RATE_LIMIT_VERIFY:-30}
@@ -204,8 +248,8 @@ services:
       GOTRUE_RATE_LIMIT_EMAIL_SENT: ${RATE_LIMIT_EMAIL_SENT:-60}
 
       # No identity provider may ever be enabled that does not verify the email
-      # addresses it reports. With autoconfirm on, GoTrue v2.170.0 treats every
-      # provider address as verified: it confirms a new account with it
+      # addresses it reports. With autoconfirm on, GoTrue treats every provider
+      # address as verified: it confirms a new account with it
       # (internal/api/external.go) and links the identity to the existing account
       # with that address (internal/models/linking.go), so an unverified address
       # would sign in as whoever owns it here. Google says per account whether it
@@ -226,6 +270,14 @@ services:
       # 15.09.2026), so an owner signs in only after otp-verify has confirmed the
       # address with a code. ci-release.sh compares this value and the entrypoint
       # too: changing either blocks a rollback across the change.
+      #
+      # Re-read at v2.190.0 on 27.10.2026: linking.go still gates linking on
+      # `email.Verified || config.Mailer.Autoconfirm`, so the paragraph above
+      # still describes the code. The only change between the tags is the
+      # experimental per-provider linking domains, which are opt-in and unset
+      # here. Startup still refuses autoconfirm together with
+      # GOTRUE_MAILER_ALLOW_UNVERIFIED_EMAIL_SIGN_INS, which this stack leaves
+      # at its default of false.
       GOTRUE_MAILER_AUTOCONFIRM: 'true'
 
       # GoTrue's own link mail. Nothing in the app asks for one any more: the
@@ -269,6 +321,39 @@ services:
       GOTRUE_MAILER_SUBJECTS_CONFIRMATION: "E-Mail-Adresse bestätigen – El-Professor"
       GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: "Neue E-Mail-Adresse bestätigen – El-Professor"
       GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: "Ihr Anmeldelink – El-Professor"
+
+      # The seven notification mails GoTrue gained between v2.170.0 and
+      # v2.190.0 (v2.180.0 brought the first, v2.181.0 the rest). Each one mails
+      # the account when something about it changes. All seven are off.
+      #
+      # They are written out rather than left to GoTrue's own default, and the
+      # distinction matters: every one of them declares default:"false" in
+      # NotificationsConfiguration today, no production code assigns to them
+      # (only _test.go files do), and there is no master switch -- so upgrading
+      # with an untouched .env sends zero new mail. That is a fact about
+      # v2.190.0's source, not a property of the feature, and an upstream
+      # default flip is exactly the kind of change a changelog does not mark as
+      # breaking. Passing an explicit false is the wall against that; the
+      # mailer_notifications_guard in deploy.sh is the wall against someone
+      # writing true into .env.
+      #
+      # Why they must stay off rather than merely default off: this product's
+      # entire mail estate is German and byte-pinned (email-layout.test.ts pins
+      # five templates to their exact bytes), and these mails have no template
+      # of ours. Turning one on sends GoTrue's stock English wording to a German
+      # fleet operator. There is a GOTRUE_MAILER_TEMPLATES_*_NOTIFICATION family
+      # to override them, so turning one on is a slice that writes a German
+      # template first -- not an .env edit.
+      #
+      # Do NOT reach for the send-email hook instead: it is all-or-nothing and
+      # would take over the five mails that are already pinned.
+      GOTRUE_MAILER_NOTIFICATIONS_PASSWORD_CHANGED_ENABLED: ${NOTIFY_PASSWORD_CHANGED:-false}
+      GOTRUE_MAILER_NOTIFICATIONS_EMAIL_CHANGED_ENABLED: ${NOTIFY_EMAIL_CHANGED:-false}
+      GOTRUE_MAILER_NOTIFICATIONS_PHONE_CHANGED_ENABLED: ${NOTIFY_PHONE_CHANGED:-false}
+      GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_LINKED_ENABLED: ${NOTIFY_IDENTITY_LINKED:-false}
+      GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_UNLINKED_ENABLED: ${NOTIFY_IDENTITY_UNLINKED:-false}
+      GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_ENROLLED_ENABLED: ${NOTIFY_MFA_FACTOR_ENROLLED:-false}
+      GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_UNENROLLED_ENABLED: ${NOTIFY_MFA_FACTOR_UNENROLLED:-false}
 
       # Google sign-in (plan step 1.6). Off unless GOOGLE_SIGNIN_ENABLED=true in
       # .env; the entrypoint above opens signup and turns autoconfirm off with it.
@@ -334,6 +419,44 @@ services:
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: 'false'
       GOTRUE_SAML_ENABLED: 'false'
       GOTRUE_SECURITY_MANUAL_LINKING_ENABLED: 'false'
+
+      # Four more literals, all new between v2.170.0 and v2.190.0, and the first
+      # two are the reason this upgrade needed reading rather than bumping.
+      #
+      # Sb-Forwarded-For (v2.185.0) makes GoTrue key EVERY rate limit on a
+      # header the client sends. Measured in sbff.go at v2.190.0: when enabled
+      # it takes the leftmost comma-separated value of `sb-forwarded-for` and
+      # accepts it if net.ParseIP succeeds -- and that is the whole check. There
+      # is no proxy allow-list, no shared secret and no trusted-CIDR test. Caddy
+      # overwrites X-Client-IP and nothing else, so this header arrives from the
+      # client untouched: any caller could rotate it per request and defeat
+      # every GoTrue rate limit in the stack, /token included, as well as forge
+      # the address in GoTrue's own audit rows. It also SUPPLEMENTS rather than
+      # replaces GOTRUE_RATE_LIMIT_HEADER -- middleware.go limits by the sbff
+      # address and returns, so X-Client-IP is never consulted once this is on.
+      # There is no topology in which we want it: Caddy already knows the
+      # connecting address. deploy.sh refuses a .env that sets it.
+      GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED: 'false'
+
+      # Custom OAuth providers (v2.188.0) is the one new surface that ships
+      # default:"true" upstream, and the one the release probe cannot see:
+      # /auth/v1/settings reports 26 fixed provider keys under `external` and
+      # has no key for custom providers, so auth_settings_problems above is
+      # blind to it however it is set. With no rows in custom_oauth_providers no
+      # provider is usable, but the admin routes that create those rows become
+      # reachable, and our edge functions hold the service-role key that reaches
+      # them. Off as a literal, like the four above, so that neither a .env
+      # value nor an upstream default opens it.
+      GOTRUE_CUSTOM_OAUTH_ENABLED: 'false'
+
+      # The index worker (v2.183.0) runs CREATE INDEX CONCURRENTLY on auth.users
+      # from inside the auth container at boot -- four indexes, outside the
+      # migration ledger and outside deploy.sh's pg_dump ordering. Both halves
+      # default to off, and both are pinned anyway, because the cost of the
+      # default moving is DDL on the live auth schema during a release. Note
+      # that the threshold is the sneaky one: any value above 0 arms the worker.
+      GOTRUE_INDEX_WORKER_ENSURE_USER_SEARCH_INDEXES_EXIST: 'false'
+      GOTRUE_INDEX_WORKER_MAX_USERS_THRESHOLD: '0'
     expose:
       - '9999'
     deploy:

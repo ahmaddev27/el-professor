@@ -468,6 +468,101 @@ passkey_guard() {
 
 # <<< passkey checks
 
+# -- GoTrue upgrade checks (v2.170.0 -> v2.190.0) ------------------------------
+# Two settings the upgrade brought that must not be switched on from .env.
+# Everything between the two marker lines is also sourced on its own by
+# tests/deploy/gotrue-upgrade.test.ts and run against fake .env files, so it may
+# use only its arguments, fail, env_value (from the google-signin block above)
+# and grep.
+# >>> gotrue upgrade checks
+
+# The seven "something about your account changed" mails GoTrue gained between
+# v2.170.0 and v2.190.0, as the .env keys docker-compose.yml interpolates, each
+# paired with the GOTRUE_ variable it feeds. Defined once here so the guard, the
+# test and the error message cannot drift from each other.
+GOTRUE_NOTIFICATION_SWITCHES='
+NOTIFY_PASSWORD_CHANGED GOTRUE_MAILER_NOTIFICATIONS_PASSWORD_CHANGED_ENABLED
+NOTIFY_EMAIL_CHANGED GOTRUE_MAILER_NOTIFICATIONS_EMAIL_CHANGED_ENABLED
+NOTIFY_PHONE_CHANGED GOTRUE_MAILER_NOTIFICATIONS_PHONE_CHANGED_ENABLED
+NOTIFY_IDENTITY_LINKED GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_LINKED_ENABLED
+NOTIFY_IDENTITY_UNLINKED GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_UNLINKED_ENABLED
+NOTIFY_MFA_FACTOR_ENROLLED GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_ENROLLED_ENABLED
+NOTIFY_MFA_FACTOR_UNENROLLED GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_UNENROLLED_ENABLED
+'
+
+# Every notification mail stays off, and the release says so rather than
+# trusting GoTrue's default.
+#
+# Measured in v2.190.0's source: all seven fields of NotificationsConfiguration
+# are default:"false", no production code assigns to them (only _test.go does),
+# and there is no master switch -- so the upgrade itself mails nothing new. That
+# is a fact about one version, and an upstream default flip is not a change this
+# project's changelog would mark. docker-compose.yml therefore passes an
+# explicit false, and this refuses the other direction: a .env that asks for one.
+#
+# The refusal is not about mail volume. These mails have no template of ours, so
+# turning one on sends GoTrue's stock ENGLISH wording to a German fleet
+# operator, in a product whose five existing templates are pinned byte for byte.
+# Turning one on means writing a German template and pointing
+# GOTRUE_MAILER_TEMPLATES_*_NOTIFICATION at it, and editing this guard is
+# deliberately part of that -- the same shape as GOOGLE_CLIENT_SHARED, where the
+# decision has to be written down somewhere a reviewer sees it.
+mailer_notifications_guard() {
+  local env_file="$1" key gotrue_key value
+  while read -r key gotrue_key; do
+    [ -n "$key" ] || continue
+    value="$(env_value "$env_file" "$key")"
+    case "$value" in
+      ''|false) ;;
+      *) fail "$key=$value in ${env_file##*/}, but it must be empty or false. It feeds $gotrue_key, and GoTrue has no German template for that mail -- it would send its own English wording to a German fleet operator, beside five templates this repository pins byte for byte. Write the German template first and change this guard in the same commit" ;;
+    esac
+  done <<EOF
+$GOTRUE_NOTIFICATION_SWITCHES
+EOF
+
+  # A GOTRUE_MAILER_NOTIFICATIONS_* key written straight into .env reaches
+  # nothing: compose passes only the variables named in its own environment
+  # block, and those read the NOTIFY_ keys above. Refused anyway, because the
+  # failure is silent in the worst direction -- someone writes `true`, sees a
+  # successful release, and believes the mail is on.
+  local stray
+  stray="$(grep -oE '^GOTRUE_MAILER_NOTIFICATIONS_[A-Z_]+' "$env_file" 2>/dev/null | head -n 1)" || true
+  [ -z "$stray" ] \
+    || fail "${env_file##*/} sets $stray directly. That has no effect: compose hands GoTrue only the variables it names itself, and those read the NOTIFY_* keys. Use the NOTIFY_* key, or the setting is silently ignored"
+}
+
+# Sb-Forwarded-For (GoTrue v2.185.0) stays off, and this is the guard that keeps
+# a one-line .env edit from removing every rate limit in the stack.
+#
+# Measured in sbff.go at v2.190.0: with the flag on, GoTrue takes the leftmost
+# comma-separated value of the `sb-forwarded-for` request header and accepts it
+# if net.ParseIP succeeds. That is the entire check -- no proxy allow-list, no
+# shared secret, no trusted-CIDR test. Caddy overwrites X-Client-IP on every API
+# host and nothing else, so this header arrives from the client untouched, and a
+# caller that rotated it per request would get a fresh budget each time:
+# /token's password-guessing limit, /verify, /otp, all of them. It would also
+# put a client-chosen address in GoTrue's own audit rows.
+#
+# And it does not merely add a key -- middleware.go limits by the sbff address
+# and returns, so GOTRUE_RATE_LIMIT_HEADER is never consulted once this is on.
+# The measured limit of X-Client-IP (one budget per source IP, shared between
+# password sign-in and token refresh) is the thing being protected here; this
+# would replace it with no limit at all.
+#
+# There is no topology in which this stack wants it: Caddy already knows the
+# connecting address. If one ever arises, the proxy must strip the header first,
+# and that is the change to make rather than this value.
+sb_forwarded_for_guard() {
+  local env_file="$1" value
+  value="$(env_value "$env_file" GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED)"
+  case "$value" in
+    ''|false) ;;
+    *) fail "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED=$value in ${env_file##*/}. It must be empty or false. GoTrue would key every rate limit on the sb-forwarded-for header, which it validates only as an IP -- no proxy allow-list and no shared secret -- so any client could rotate it and defeat /token's password-guessing limit along with every other limit here. Caddy overwrites X-Client-IP, not this header" ;;
+  esac
+}
+
+# <<< gotrue upgrade checks
+
 # ── Compose profile and routing-data checks ──────────────────────────────────
 # Everything between the markers is also sourced on its own by
 # tests/deploy/osrm.test.ts, so it may use only its arguments and docker.
@@ -676,6 +771,14 @@ GOOGLE_SIGNIN="$(env_value .env GOOGLE_SIGNIN_ENABLED)"
 # $ROOT, the same directory the migration runner below reads.
 passkey_guard .env docker-compose.yml "$ROOT/supabase/migrations"
 PASSKEY_SIGNIN="$(env_value .env PASSKEY_SIGNIN_ENABLED)"
+
+# The GoTrue upgrade of 27.10.2026 (v2.170.0 -> v2.190.0). Both of these are
+# settings the upgrade made available and nothing in the product wants: seven
+# notification mails that have no German template, and a rate-limit key taken
+# from a header the client controls. compose passes an explicit false for each;
+# these refuse the .env that would ask for them.
+mailer_notifications_guard .env
+sb_forwarded_for_guard .env
 
 # Both stacks share the CPU with each other and with ridy, and nothing is capped.
 # Staging is where load tests run, so it must yield under contention; production
