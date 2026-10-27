@@ -142,6 +142,17 @@ async function recordSubmission(
       if (stored.error) return { status: 500, body: { ok: false, reason: 'storage_failed' } }
     }
 
+    // What arrived, kept verbatim for a later dispute — the note door has done
+    // this since 20261007110000, and the asymmetry was only ever about size:
+    // an older app still sends the photo as base64 inside this same payload,
+    // which would store a multi-MiB copy of a file the bucket already holds.
+    // So the payload is stored MINUS the photo's bytes and their declared
+    // type, and nothing else is touched. `ocr_text`/`ocr_meta` never arrive:
+    // Reidey keeps them out of the payload it serves, by its own design.
+    const rawPayload: Record<string, unknown> = { ...payload }
+    delete rawPayload.document
+    delete rawPayload.content_type
+
     const put = await admin.rpc('partner_receipt_submission_record', {
       p_company_id: companyId,
       p_partner: receipt.partner,
@@ -167,7 +178,14 @@ async function recordSubmission(
       p_captured_at: receipt.captured_at,
       p_confirmed_by_driver: receipt.confirmed_by_driver,
       p_read_by_agent: receipt.read_by_agent,
-      p_raw_payload: null,
+      p_raw_payload: rawPayload,
+      // The letterhead split, the printed Bon number and the TSE clock
+      // (20261027150000). Older apps send none of them.
+      p_station_name: receipt.station_name,
+      p_operator_name: receipt.operator_name,
+      p_street: receipt.street,
+      p_printed_receipt_number: receipt.receipt_number,
+      p_tse_time: receipt.tse_time,
     })
     if (put.error) {
       const answer = answerForHint(put.error.hint)

@@ -286,10 +286,13 @@ BEGIN
       WHERE polrelid = 'public.receipts'::regclass),
     'receipts_delete, receipts_insert, receipts_select, receipts_update');
 
-  PERFORM _rd_rec(7, 'both platform context triggers are untouched',
+  -- 20261027160000 added record_receipt_edit (the Beleg edit log's writer);
+  -- the pin moves with it so a release that LOSES one of the three is still
+  -- caught here by name.
+  PERFORM _rd_rec(7, 'both platform context triggers are untouched, plus the edit log''s writer',
     (SELECT string_agg(tgname, ', ' ORDER BY tgname) FROM pg_trigger
       WHERE tgrelid = 'public.receipts'::regclass AND NOT tgisinternal),
-    'record_support_write, refuse_read_only_context_write');
+    'record_receipt_edit, record_support_write, refuse_read_only_context_write');
 
   -- The sibling plausibility CHECKs this migration joined. Named so a release
   -- that drops one while adding ours is caught here.
