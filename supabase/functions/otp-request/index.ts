@@ -29,7 +29,7 @@ import {
   parseClientIp,
   parseOtpRequest,
   PASSWORD_PROOF_MAX_AGE_SECONDS,
-  passwordAmrAgeSeconds,
+  reauthProofAgeSeconds,
   PUBLIC_RESPONSE_FLOOR_MS,
   readBodyText,
   reauthRequired,
@@ -99,9 +99,9 @@ async function requestAuthenticatedCode(
     let sessionId: string | null = null;
     if (input.purpose === 'email_change') {
       // A browser left signed in must not be able to move the account to
-      // another address: the change needs a password sign-in from the last ten
-      // minutes, which the client produces right before asking.
-      const age = passwordAmrAgeSeconds(caller.claims, Math.floor(Date.now() / 1000));
+      // another address: the change needs a password or passkey sign-in from
+      // the last ten minutes, which the client produces right before asking.
+      const age = reauthProofAgeSeconds(caller.claims, Math.floor(Date.now() / 1000));
       if (age === null || age > PASSWORD_PROOF_MAX_AGE_SECONDS) return reauthRequired();
       newEmail = input.newEmail;
     } else {

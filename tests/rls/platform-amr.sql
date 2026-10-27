@@ -52,6 +52,10 @@
                          anonymous, and password beside oauth
     8. the guard         an oauth session cannot clear its own is_super_admin:
                          the profile guard reads the account, not the session
+    9. the passkey       a passkey session reaches the role, the capabilities,
+                         a read model and a write RPC as a password session
+                         does (the owner's decision of 27.10.2026,
+                         20261027140000) - and every refusal still refuses
 */
 
 \set ON_ERROR_STOP on
@@ -191,6 +195,19 @@ CREATE OR REPLACE FUNCTION _amr_oauth()     RETURNS text LANGUAGE sql IMMUTABLE 
 CREATE OR REPLACE FUNCTION _amr_otp()       RETURNS text LANGUAGE sql IMMUTABLE AS
   $$ SELECT '[{"method": "otp", "timestamp": 1789416052}]' $$;
 
+/**
+  A passkey session, as GoTrue >= v2.188.0 mints one.
+
+  The string is `passkey` (internal/models/factor.go, `case PasskeyLogin`),
+  it is the session's ONLY entry -- PasskeyAuthenticationVerify issues
+  through IssueRefreshToken, which creates a new session and adds one claim
+  rather than appending to a password session -- and it carries a real
+  timestamp, read from mfa_amr_claims.updated_at by the same line that
+  writes a password's.
+*/
+CREATE OR REPLACE FUNCTION _amr_passkey()   RETURNS text LANGUAGE sql IMMUTABLE AS
+$$ SELECT '[{"method": "passkey", "timestamp": 1789416052}]' $$;
+
 -- ─── 1. the rule on its own ─────────────────────────────────────────────────
 
 DO $$
@@ -198,11 +215,17 @@ DECLARE
   owner CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
   v_case  record;
 BEGIN
-  -- Every method GoTrue v2.170.0 can write (internal/models/factor.go:59-91),
-  -- in both claim forms. Only `password` admits.
+  -- Every method GoTrue can write, in both claim forms: the fourteen of
+  -- v2.170.0 (internal/models/factor.go:59-91) plus the four added since, and
+  -- one string GoTrue never writes. Only `password` and `passkey` admit.
   FOR v_case IN
     SELECT * FROM (VALUES
       ('password',     true),
+      -- The owner's decision of 27.10.2026 (20261027140000): a passkey is a
+      -- password for every platform right. It is device-bound and
+      -- phishing-resistant, so it satisfies the same rule rather than relaxing
+      -- it; the three refusals are untouched.
+      ('passkey',      true),
       ('oauth',        false),
       ('otp',          false),
       ('totp',         false),
@@ -215,7 +238,15 @@ BEGIN
       ('email/signup', false),
       ('email_change', false),
       ('token_refresh',false),
-      ('anonymous',    false)
+      ('anonymous',    false),
+      -- Added to GoTrue after v2.170.0, so the list was complete when it was
+      -- written and is not any more. None of them is a permitted method.
+      ('mfa/recovery_code',                 false),
+      ('web3',                              false),
+      ('oauth_provider/authorization_code', false),
+      -- Not a method GoTrue writes at all. A rule matching on a prefix or a
+      -- substring would read this as a passkey; this one matches whole strings.
+      ('webauthn',     false)
     ) AS t(method, admits)
   LOOP
     PERFORM _amr_claims(owner,
@@ -799,6 +830,147 @@ BEGIN
   PERFORM _amr_reset();
   PERFORM _amr_ok('guard: the flag is still set',
     (SELECT is_super_admin FROM user_profiles WHERE user_id = owner));
+END $$;
+
+-- ─── 9. a passkey session, end to end and in both directions ────────────────
+
+/*
+  20261027140000, the owner's decision of 27.10.2026: a passkey is like a
+  password, for platform admins, for companies, for everything.
+
+  Section 1 pins the rule function. This section pins the **seam** — that a
+  passkey session actually reaches the role, the capabilities, the helpers, a
+  read model and a write RPC, exactly as a password session does — and that
+  every refusal the rule had before is still a refusal. Both halves matter: a
+  file that only proved the admission would pass a body with the refusal list
+  deleted.
+
+  Why this is the rule applied rather than weakened is in the migration's
+  header, and the short version is that each refused method is refused for a
+  reason about what it proves (a third party controls the identity; a code
+  proves a mailbox; there is no identity at all), and none of those reaches a
+  device-bound, phishing-resistant WebAuthn credential.
+*/
+
+DO $$
+DECLARE
+  owner CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
+  co_a  CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+BEGIN
+  -- ── the admission ────────────────────────────────────────────────────────
+  -- An app_private helper is reached with _amr_claims and called directly, as
+  -- sections 1 and 2 do: _amr_try becomes `authenticated`, which holds no USAGE
+  -- on app_private, so calling one through it answers ERR 42501 and a
+  -- comparison against the expected value would read as an ordinary failure.
+  -- The kit caught exactly that in the first draft of this section.
+  PERFORM _amr_claims(owner, _amr_passkey(), true);
+  PERFORM _amr_ok('passkey: the rule admits a passkey session',
+    app_private.session_amr_permits_platform());
+
+  PERFORM _amr_ok('passkey: the gated seam answers it',
+    app_private.platform_staff_role_of(owner) = 'owner');
+
+  PERFORM _amr_ok('passkey: the account fact is unchanged underneath it',
+    app_private.platform_staff_role_of_account(owner) = 'owner');
+  PERFORM _amr_reset();
+
+  -- Everything below is a `public` function, so it goes through _amr_try as
+  -- `authenticated` — the role a real caller holds.
+  PERFORM _amr_ok('passkey: it holds the account''s role',
+    _amr_try(owner, _amr_passkey(), 'SELECT platform_staff_role()') = 'owner');
+
+  PERFORM _amr_ok('passkey: is_user_super_admin is true for it',
+    _amr_try(owner, _amr_passkey(), 'SELECT is_user_super_admin()::text') = 'true');
+
+  PERFORM _amr_ok('passkey: platform_whoami names the role',
+    _amr_try(owner, _amr_passkey(), 'SELECT platform_whoami() ->> ''role''') = 'owner');
+
+  -- Every capability the owner role holds, not just one: a rule that admitted
+  -- the session but lost a capability lookup would pass a single probe.
+  PERFORM _amr_ok('passkey: it holds every capability the owner role has',
+    _amr_try(owner, _amr_passkey(),
+      'SELECT bool_and(platform_can(c))::text FROM unnest(ARRAY['
+      '''companies.read'',''companies.lifecycle'',''companies.hard_delete'','
+      '''business.read'',''billing.manage'',''pricing.manage'',''settings.read'','
+      '''settings.manage'',''company_users.manage'',''staff.manage'','
+      '''codes.manage'',''audit.read'']) AS t(c)') = 'true');
+
+  PERFORM _amr_ok('passkey: platform_can_manage_account answers it',
+    _amr_try(owner, _amr_passkey(),
+      format('SELECT public.platform_can_manage_account(%L)::text', owner)) = 'true');
+
+  -- An audited read model and a settings read, in section 5's exact idiom:
+  -- these answer jsonb, so the probe casts ::text out of _amr_try and back to
+  -- ::jsonb. The first draft called platform_companies_list(1, 0) -- the wrong
+  -- arity -- and the kit refused it, which is the second defect of mine this
+  -- section has caught.
+  PERFORM _amr_ok('passkey: an audited read model answers it',
+    (_amr_try(owner, _amr_passkey(), 'SELECT platform_companies_list()::text')::jsonb ->> 'ok') = 'true');
+  PERFORM _amr_ok('passkey: a settings read answers it',
+    (_amr_try(owner, _amr_passkey(), 'SELECT platform_settings_get(''price_book'')::text')::jsonb ->> 'ok') = 'true');
+
+  -- A platform write, through the same door the panel uses. The claim is only
+  -- about the SESSION: a passkey session must not be refused the way a Google
+  -- one is (`denied`). What the RPC then decides about its argument is that
+  -- RPC's own business and is covered by its own file.
+  PERFORM _amr_ok('passkey: a platform write does not refuse it as denied',
+    _amr_reason(_amr_try(owner, _amr_passkey(),
+      format('SELECT platform_company_set_status(%L, ''active'')::text', co_a))) IS DISTINCT FROM 'denied');
+
+  -- ── the refusals, all of which must still refuse ────────────────────────
+  PERFORM _amr_ok('passkey: oauth beside passkey still holds no role',
+    _amr_try(owner, '[{"method": "passkey", "timestamp": 1}, {"method": "oauth", "timestamp": 2}]',
+             'SELECT platform_staff_role()') = '<null>');
+  PERFORM _amr_ok('passkey: and in the other order',
+    _amr_try(owner, '[{"method": "oauth", "timestamp": 1}, {"method": "passkey", "timestamp": 2}]',
+             'SELECT platform_staff_role()') = '<null>');
+  PERFORM _amr_ok('passkey: sso/saml beside passkey still holds no role',
+    _amr_try(owner, '[{"method": "passkey", "timestamp": 1}, {"method": "sso/saml", "timestamp": 2}]',
+             'SELECT platform_staff_role()') = '<null>');
+  PERFORM _amr_ok('passkey: anonymous beside passkey still holds no role',
+    _amr_try(owner, '[{"method": "passkey", "timestamp": 1}, {"method": "anonymous", "timestamp": 2}]',
+             'SELECT platform_staff_role()') = '<null>');
+
+  -- The methods that were refused before and are not passkeys. If any of these
+  -- moved, the change admitted more than one name.
+  PERFORM _amr_ok('passkey: a code-minted session is still refused',
+    _amr_try(owner, _amr_otp(), 'SELECT platform_staff_role()') = '<null>');
+  PERFORM _amr_ok('passkey: a Google session is still refused',
+    _amr_try(owner, _amr_oauth(), 'SELECT platform_staff_role()') = '<null>');
+  PERFORM _amr_ok('passkey: mfa/webauthn alone is NOT a passkey',
+    _amr_try(owner, '[{"method": "mfa/webauthn", "timestamp": 1}]',
+             'SELECT platform_staff_role()') = '<null>');
+  PERFORM _amr_ok('passkey: the bare string "webauthn" is not a passkey either',
+    _amr_try(owner, '["webauthn"]', 'SELECT platform_staff_role()') = '<null>');
+
+  -- MFA appends to a session's amr, so a second factor neither makes nor
+  -- breaks a passkey session.
+  PERFORM _amr_ok('passkey: passkey plus totp keeps the role',
+    _amr_try(owner, '[{"method": "passkey", "timestamp": 1}, {"method": "totp", "timestamp": 2}]',
+             'SELECT platform_staff_role()') = 'owner');
+
+  -- Both claim forms, like section 1, and the bare-string entry form: the rule
+  -- asks which methods are named and never when, so a string is legible here
+  -- (unlike the browser's freshness reader, which needs the timestamp).
+  PERFORM _amr_claims(owner, _amr_passkey(), true);
+  PERFORM _amr_ok('passkey: the claims-JSON form admits it too',
+    app_private.session_amr_permits_platform());
+  PERFORM _amr_claims(owner, '["passkey"]', true);
+  PERFORM _amr_ok('passkey: a bare-string passkey entry is read',
+    app_private.session_amr_permits_platform());
+  PERFORM _amr_reset();
+
+  -- ── the shape, so a later restatement cannot lose it ────────────────────
+  PERFORM _amr_ok('passkey: the permitted list is exactly password and passkey',
+    (SELECT position('ARRAY[''password'', ''passkey'']' IN pg_get_functiondef(p.oid)) > 0
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'app_private' AND p.proname = 'session_amr_permits_platform'));
+  PERFORM _amr_ok('passkey: all three refusals are still named in the body',
+    (SELECT position('''oauth''' IN pg_get_functiondef(p.oid)) > 0
+        AND position('''sso/saml''' IN pg_get_functiondef(p.oid)) > 0
+        AND position('''anonymous''' IN pg_get_functiondef(p.oid)) > 0
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'app_private' AND p.proname = 'session_amr_permits_platform'));
 END $$;
 
 ROLLBACK;
