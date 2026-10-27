@@ -7,9 +7,10 @@ import type { TranslationKey } from '../i18n';
  * one place a WebAuthn credential is encoded or decoded. Nothing here decides
  * whether passkeys are on: that is `lib/authProviderSettings`, and every screen
  * asks it first — `GET /auth/v1/settings` reports `passkeys_enabled` from
- * v2.188.0 onward, and on an older GoTrue the key is simply absent, which reads
- * as off. So this module is unreachable on today's server, exactly as
- * `googleSignIn.ts` was unreachable while `GOOGLE_SIGNIN_ENABLED` was false.
+ * v2.188.0 onward, and both "reported false" and "absent on an older image"
+ * read as off. So this module is unreachable while `PASSKEY_SIGNIN_ENABLED` is
+ * false, exactly as `googleSignIn.ts` was unreachable while
+ * `GOOGLE_SIGNIN_ENABLED` was false.
  *
  * ## Why these are raw `fetch` calls and not supabase-js
  *

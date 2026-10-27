@@ -62,10 +62,11 @@ afterEach(() => {
 
 describe('PasskeyButton, with the browser able', () => {
   it.each([
-    // The first row is the server this ships against: GoTrue v2.170.0 predates
-    // passkeys_enabled, so its answer simply has no such key.
-    ['v2.170.0, which has no such field', { external: { google: true }, disable_signup: false }],
-    ['the switch off', { external: { google: true }, passkeys_enabled: false }],
+    // The first row is the state this ships into: PR #341 pins v2.190.0, which
+    // knows passkeys_enabled and reports it false while PASSKEY_SIGNIN_ENABLED
+    // is false. The second is an older image, and a rollback across #341.
+    ['the switch off on v2.190.0', { external: { google: true }, passkeys_enabled: false }],
+    ['no such field at all, as before #341', { external: { google: true }, disable_signup: false }],
     ['the string "true" rather than true', { passkeys_enabled: 'true' }],
     ['nothing usable at all', null],
   ])('draws nothing when the server reports %s', async (_label, body) => {

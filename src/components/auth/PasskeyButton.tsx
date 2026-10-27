@@ -12,12 +12,13 @@ import type { TranslationKey } from '../../i18n';
  *
  * It renders **nothing at all** until GoTrue has said passkeys are enabled
  * (`lib/authProviderSettings`, which reads `passkeys_enabled` out of
- * `GET /auth/v1/settings`). The image this stack pins, v2.170.0, predates that
- * field, so the key is absent, absent reads as off, and this returns null —
- * which is how the slice ships and why it is safe to merge before the GoTrue
- * upgrade. `PasskeyButton.render.test.ts` is the proof, and it measures the
- * settings gate with the browser capability stubbed on, so the two cannot cover
- * for one another.
+ * `GET /auth/v1/settings`). The stack pins v2.190.0 since PR #341, so the field
+ * exists and is `false` while `PASSKEY_SIGNIN_ENABLED` is false — which is how
+ * it ships — and on an older image, or a rollback across that upgrade, the field
+ * is absent instead. Either way this returns null.
+ * `PasskeyButton.render.test.ts` is the proof, and it measures the settings gate
+ * with the browser capability stubbed on, so the two cannot cover for one
+ * another.
  *
  * It is `GoogleButton`'s shape deliberately, down to owning its own top margin:
  * a wrapper on the screen would still occupy its spacing while this returns

@@ -54,11 +54,12 @@ describe('parseAuthProviderSettings', () => {
   });
 
   it.each([
-    // This first row is the server this slice ships against: GoTrue v2.170.0
-    // predates the field, so its /settings answer simply has no such key. The
-    // whole passkey UI is off because of this line.
-    ['the field is absent, as on v2.170.0', { external: { google: true }, disable_signup: false }],
-    ['the field is false', { external: { google: true }, passkeys_enabled: false }],
+    // The two rows that are live cases, in the order they matter. Since PR #341
+    // the stack pins v2.190.0, which knows the field and reports it `false`
+    // while PASSKEY_SIGNIN_ENABLED is false — the state this slice ships into.
+    // The absent case is an older image, and a rollback across that upgrade.
+    ['the field is false, as on v2.190.0 with the switch off', { external: { google: true }, passkeys_enabled: false }],
+    ['the field is absent, as before the v2.190.0 upgrade', { external: { google: true }, disable_signup: false }],
     ['the field is the string "true"', { external: { google: true }, passkeys_enabled: 'true' }],
     ['the field is 1', { external: { google: true }, passkeys_enabled: 1 }],
     ['the field is nested under external', { external: { google: true, passkeys_enabled: true } }],

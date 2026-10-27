@@ -25,15 +25,20 @@ export interface AuthProviderSettings {
   /**
    * Whether GoTrue serves the `/auth/v1/passkeys/*` routes right now.
    *
-   * The same argument as `google`, with one extra turn that makes this slice
-   * safe to merge before the GoTrue upgrade it needs. GoTrue reports
-   * `passkeys_enabled` from v2.188.0 onward; the image this stack pins is
-   * v2.170.0, which does not know the field at all, so the key is **absent** —
-   * and absent reads as off, which is exactly what it is. `requirePasskeyEnabled`
-   * wraps the whole route group, so on that server every passkey path is a 404
-   * as well. There is deliberately no build-time flag beside this: a flag of our
-   * own could only get out of step with the server, in one direction or the
-   * other, and the server's own answer is right in both.
+   * The same argument as `google`: only the server knows, so only the server is
+   * asked. GoTrue reports `passkeys_enabled` from v2.188.0 onward.
+   *
+   * **Two different answers mean off, and both are live cases.** The stack pins
+   * v2.190.0 since PR #341 (merged 27.10.2026, while this slice was being
+   * written), so GoTrue knows the field and reports it `false` while
+   * `PASSKEY_SIGNIN_ENABLED` is false — which is how `.env.example` ships it.
+   * Before that upgrade, and on any rollback across it, the field is **absent**
+   * instead. `=== true` reads both as off without caring which, and
+   * `requirePasskeyEnabled` makes every passkey path a 404 in either case.
+   *
+   * There is deliberately no build-time flag beside this: a flag of our own
+   * could only get out of step with the server, in one direction or the other,
+   * and the server's own answer is right in both.
    */
   passkeys: boolean;
 }

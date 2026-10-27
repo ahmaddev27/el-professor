@@ -8,10 +8,12 @@ import { passkeysUsable } from '../lib/passkeyClient';
  * Two conditions, and both have to hold:
  *
  *  - **GoTrue serves the routes.** `GET /auth/v1/settings` reports
- *    `passkeys_enabled` from v2.188.0 onward. The image this stack pins is
- *    v2.170.0, which does not know the field, so it is absent — and absent reads
- *    as off. That is what keeps this whole slice dark until the GoTrue upgrade
- *    lands, with no flag of our own to get out of step with the server.
+ *    `passkeys_enabled` from v2.188.0 onward. The stack pins v2.190.0 since
+ *    PR #341, so the field exists and is `false` while
+ *    `PASSKEY_SIGNIN_ENABLED` is false — which is how it ships; before that
+ *    upgrade, and on a rollback across it, the field is absent instead. Both
+ *    read as off, and there is no flag of our own to get out of step with
+ *    either.
  *  - **The browser can run a ceremony.** Without `navigator.credentials` a
  *    passkey control could only fail, and the password form beside it is
  *    already the way in.

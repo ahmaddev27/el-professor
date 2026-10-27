@@ -16,7 +16,9 @@ import type { TranslationKey } from '../../i18n';
  * It renders **nothing at all** until GoTrue has said passkeys are enabled, and
  * nothing on a browser with no WebAuthn — the same gate as `PasskeyButton`, for
  * the same reasons, and `PasskeyCard.render.test.ts` measures it with the
- * browser capability stubbed on so neither half can cover for the other.
+ * browser capability stubbed on so neither half can cover for the other. With
+ * `PASSKEY_SIGNIN_ENABLED` false, which is how it ships, GoTrue v2.190.0
+ * reports the field as false and this draws nothing and reads no list.
  *
  * It is a card of its own rather than a section inside `AccountPage` because
  * that page is one of the six phase 5 never converted: it draws its own legacy
