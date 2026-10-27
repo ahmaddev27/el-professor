@@ -13,13 +13,24 @@
  * deploy.sh does on the host. Where they are missing the tests are skipped,
  * never passed.
  *
- * Two of these tests are about the repository's own state rather than about the
+ * Some of these tests are about the repository's own state rather than about the
  * guard's logic, and they are the ones that make "this slice ships the switch
- * off" a fact instead of a claim: today the switch cannot be turned on at all,
- * because the pinned GoTrue does not know the variable and no migration admits
- * `passkey` in the platform amr allow-list. Each is asserted separately so that
- * when one of those two preconditions is met, only that test fails and its
- * message names which half moved.
+ * off" a fact instead of a claim. Each is asserted separately so that when one
+ * precondition moves, only that test fails and its message names which half.
+ *
+ * Both of those preconditions have now moved, and the header says so rather
+ * than leaving a reader to find out from the assertions:
+ *
+ *   * The amr half went with `20261027140000` (the owner's decision of
+ *     27.10.2026 that a passkey carries platform rights as a password does).
+ *   * The image half went with the GoTrue upgrade to v2.190.0 on 27.10.2026,
+ *     which is PASSKEY_MIN_GOTRUE exactly.
+ *
+ * So the guard's two technical walls are down, and PASSKEY_SIGNIN_ENABLED=false
+ * in .env is what keeps passkeys off -- together with there being no UI. The
+ * guard's remaining teeth are the RP configuration checks (an RP ID that is not
+ * a bare domain, an origin that is not https or not under it) and the version
+ * floor itself, which is still asserted against v2.170.0 and v2.189.0.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -306,7 +317,7 @@ describe.skipIf(!hasBash)('passkey_guard: the origins', () => {
 });
 
 describe.skipIf(!hasPython)('passkey_guard: the image must know the variable', () => {
-  it('refuses the switch on the GoTrue this stack pins today', () => {
+  it('refuses the switch on v2.170.0, the GoTrue this stack pinned before 27.10.2026', () => {
     const { output, status } = guard(env(ON), compose('gotrue:v2.170.0'), migrations(true));
     expect(status).toBe(1);
     expect(output).toContain('needs supabase/gotrue v2.190.0 or newer');
@@ -403,13 +414,28 @@ describe.skipIf(!hasPython)("the repository's own state: the switch ships off an
     expect(example).toContain('\nPASSKEY_RP_ORIGINS=\n');
   });
 
-  it('pins a GoTrue that does not know passkeys, so the switch is refused on the image alone', () => {
-    // Fails on purpose once the owner upgrades GoTrue: at that point this slice's
-    // claim "the switch cannot be turned on" is half gone, and the change should
-    // be read rather than discovered. The amr half is the next test.
-    const { output, status } = guard(env(ON), REAL_COMPOSE, migrations(true));
-    expect(status).toBe(1);
-    expect(output).toContain('needs supabase/gotrue v2.190.0 or newer');
+  it('no longer refuses on the image either: v2.190.0 is pinned, so .env is the only wall left', () => {
+    // This test was the inverse, and it was written to fail on purpose once
+    // GoTrue was upgraded -- "the change should be read rather than discovered".
+    // The upgrade landed on 27.10.2026, so this is that reading.
+    //
+    // What changed: passkey_guard's floor is PASSKEY_MIN_GOTRUE=2.190.0 and the
+    // auth service now pins exactly that, so the version refusal no longer
+    // fires. The amr refusal went with `20261027140000` in the slice before.
+    // Both of this guard's technical walls are therefore down, and what keeps
+    // passkeys off is PASSKEY_SIGNIN_ENABLED=false in .env and nothing else.
+    //
+    // That is a real narrowing of this slice's claim, and it is deliberate: the
+    // upgrade release's job is to make the owner's decision *possible*, not to
+    // take it. Passkeys are still off in both environments, no UI exists, and
+    // the guard still refuses a half-written RP configuration (the tests above).
+    // The release probe's passkeys_enabled check is the second wall at runtime.
+    expect(guard(env(ON), REAL_COMPOSE, REAL_MIGRATIONS).output).toBe('PASSED');
+    // The floor itself still has teeth -- only the image it is compared against
+    // moved. Without this line the assertion above could pass because the guard
+    // stopped checking rather than because the image rose. The dedicated
+    // version tests are in "passkey_guard: the image must know the variable".
+    expect(guard(env(ON), compose('gotrue:v2.189.0'), REAL_MIGRATIONS).status).toBe(1);
   });
 
   it('no longer refuses on the amr rule, because the migration is in the tree', () => {

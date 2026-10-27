@@ -58,7 +58,28 @@ describe('docker-compose.yml: auth', () => {
   it('runs the GoTrue version whose behaviour the comments and the entrypoint were checked against', () => {
     // A new version must be re-read for DetermineAccountLinking, the
     // DisableSignup check on external accounts, and /settings' field names.
-    expect(auth.image).toBe('supabase/gotrue:v2.170.0');
+    //
+    // Moved v2.170.0 -> v2.190.0 on 27.10.2026, and this test failing is how
+    // the upgrade was made to prove it had done that reading. All three were
+    // re-read in v2.190.0's source:
+    //
+    //   * linking.go still gates linking on `email.Verified ||
+    //     config.Mailer.Autoconfirm`. The only change between the tags is the
+    //     experimental per-provider linking domains, which are opt-in and unset.
+    //   * external.go's models.CreateAccount branch still answers
+    //     ErrorCodeSignupDisabled while DISABLE_SIGNUP is true, so the
+    //     entrypoint's coupling holds.
+    //   * /settings still answers `external` (26 fixed provider keys),
+    //     disable_signup, mailer_autoconfirm, phone_autoconfirm, sms_provider
+    //     and saml_enabled, and ADDS `passkeys_enabled`, which
+    //     auth_settings_problems already reads with a default of False. There
+    //     is no key for custom OAuth providers, which is why
+    //     GOTRUE_CUSTOM_OAUTH_ENABLED has to be a literal in compose rather
+    //     than something the release probe could catch.
+    //
+    // That is a source reading, not a probe of the running image; the probe is
+    // the owner's runbook in HANDOFF.md.
+    expect(auth.image).toBe('supabase/gotrue:v2.190.0');
     expect(auth.command).toBeUndefined();
   });
 
