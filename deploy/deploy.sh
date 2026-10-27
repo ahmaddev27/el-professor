@@ -436,6 +436,27 @@ passkey_guard() {
   version_at_least "$image_version" "$PASSKEY_MIN_GOTRUE" \
     || fail "PASSKEY_SIGNIN_ENABLED=true needs supabase/gotrue v$PASSKEY_MIN_GOTRUE or newer; the auth service pins v$image_version, which does not read GOTRUE_PASSKEY_ENABLED. Every /auth/v1/passkeys/* route would stay 404 and the switch would be on in .env and off in the product. A GoTrue upgrade is its own release, not part of turning this on"
 
+  # MEASURED LIMIT, so nobody mistakes this for the boundary: the test is
+  # "some migration defines that function AND mentions 'passkey'". It is
+  # deliberately coarse, because the question a release gate can answer is
+  # "has this decision been taken", not "is the rule correct" -- deploy.sh
+  # cannot read the post-migration catalogue before the migrations run, and a
+  # text match on the array's exact spelling would refuse a legitimate
+  # restatement that merely formatted it differently.
+  #
+  # So a migration that narrowed the permitted list while still naming
+  # 'passkey' in a comment or a self-check would satisfy THIS check. Proved by
+  # mutation. Three gates are precise where this one is not:
+  #   * 20261027140000's own self-check, which refuses to APPLY a body that has
+  #     lost either permitted name or any of the three refusals. Measured
+  #     through the kit with the list narrowed to password alone:
+  #       migration failed: 20261027140000_platform_amr_admits_passkey.sql
+  #       ERROR: self-check 2: ... no longer names 'passkey'
+  #     so the release stops at the migration, not at this grep. (Check 2 fires
+  #     before 2b, which pins the array's exact spelling.)
+  #   * tests/rls/platform-amr.sql section 9, which probes the real seam;
+  #   * tests/deploy/passkey-config.test.ts, which pins both the permitted list
+  #     and the three refusals as text.
   found=""
   while IFS= read -r candidate; do
     [ -n "$candidate" ] || continue

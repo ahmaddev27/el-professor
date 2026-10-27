@@ -412,12 +412,17 @@ describe.skipIf(!hasPython)("the repository's own state: the switch ships off an
     expect(output).toContain('needs supabase/gotrue v2.190.0 or newer');
   });
 
-  it('carries the migration admitting passkey, so the amr half is satisfied', () => {
-    // This assertion is the inverse of the one shipped first, and the inversion
-    // is the owner's decision of 27.10.2026 ("a passkey is like a password")
-    // landing as `20261027140000`. Before it, the guard refused the switch here
-    // too; now the IMAGE is the only thing left refusing, which the test above
-    // pins. If this ever goes back to refusing, the migration has been lost.
+  it('no longer refuses on the amr rule, because the migration is in the tree', () => {
+    // The inverse of the assertion shipped first, and the inversion is the
+    // owner's decision of 27.10.2026 landing as `20261027140000`. Before it the
+    // guard refused here too; now the IMAGE is the only thing left refusing,
+    // which the test above pins.
+    //
+    // What this proves is exactly "the guard no longer fires", and NOT "the
+    // rule is right": the guard asks whether some migration defines the
+    // function and mentions `passkey`, which a migration that narrowed the
+    // permitted list while still naming it in a self-check would also satisfy.
+    // Measured by mutation. The next test is the precise one.
     expect(guard(env(ON), GOOD_COMPOSE(), REAL_MIGRATIONS).output).toBe('PASSED');
   });
 
