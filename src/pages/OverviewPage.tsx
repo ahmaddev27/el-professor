@@ -481,16 +481,7 @@ const OverviewPage: React.FC = () => {
   };
   /** What a KPI card shows in place of a figure. Not '0,00 €', which is a claim. */
   const WITHHELD = '—';
-  /*
-    The two cards that colour themselves by sign read neutral when withheld. A
-    red icon beside a `—` is a claim one step quieter than a figure: it says the
-    company made a loss, off a profit computed without its Fixkosten. Written as
-    a boolean rather than a second colour literal at each call site, because the
-    style ratchet counts occurrences and a duplicated `rgba(...)` would raise its
-    baseline — which is a regression, not a conversion.
-  */
-  const profitReadsPositive = offSub('kpiProfit') !== null || currentMetrics.profit >= 0;
-  const marginReadsPositive = offSub('kpiMargin') !== null || currentMetrics.profitMargin >= 0;
+
 
   // ── Derived data ─────────────────────────────────────────────────────────
   const { start: monthStart, end: monthEnd } = getMonthRange(selectedMonth);
@@ -513,6 +504,23 @@ const OverviewPage: React.FC = () => {
   const profitDelta   = calcDeltaPct(currentMetrics.profit, prevMetrics.profit);
   const marginDelta   = prevMetrics.profitMargin !== 0
     ? currentMetrics.profitMargin - prevMetrics.profitMargin : null;
+
+  /*
+    The two cards that colour themselves by sign read neutral when withheld. A
+    red icon beside a `—` is a claim one step quieter than a figure: it says the
+    company made a loss, off a profit computed without its Fixkosten. Written as
+    a boolean rather than a second colour literal at each call site, because the
+    style ratchet counts occurrences and a duplicated `rgba(...)` would raise its
+    baseline — which is a regression, not a conversion.
+
+    BELOW `currentMetrics`, not up with the other panel helpers, and the
+    typecheck ratchet is what insisted: up there these two read a `const` still
+    in its temporal dead zone, so for a company with every module on — where
+    `offSub` answers null and the `||` does not short-circuit — the Overview
+    threw a ReferenceError on every render. Four errors, all of them real.
+  */
+  const profitReadsPositive = offSub('kpiProfit') !== null || currentMetrics.profit >= 0;
+  const marginReadsPositive = offSub('kpiMargin') !== null || currentMetrics.profitMargin >= 0;
 
   // Each of these is emptied rather than computed when its panel is withheld,
   // so no helper runs over a set a closed module left short. `insights` is the
