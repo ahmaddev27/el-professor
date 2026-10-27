@@ -2,23 +2,31 @@
  * The Overview's per-panel module awareness: the decision as a pure function,
  * and the coverage check that the page actually asks it.
  *
- * Two halves, for the reason `App.moduleGate.test.ts` gives for itself. The
- * decision is a pure map and is unit-tested here against every state the
- * registry admits. Whether the **page** asks it cannot be unit-tested at all:
- * this project's vitest runs `environment: 'node'` with no jsdom and no
- * testing-library, and `src/**\/*.test.ts` does not even match `.tsx`, so there
- * is no renderer to mount `OverviewPage` in. The claim is also coverage over a
- * list — that no panel in the map is left unguarded at its render site — which
- * is the shape a renderer answers worst anyway. So the second half reads
- * `OverviewPage.tsx` as text, exactly as `App.moduleGate.test.ts` reads
+ * Two halves. The decision is a pure map, unit-tested here against every state
+ * the registry admits; the second half reads `OverviewPage.tsx` as **text** to
+ * check coverage over the panel list, exactly as `App.moduleGate.test.ts` reads
  * `App.tsx` and `companyModules.test.ts` reads `Sidebar.tsx`.
  *
- * Being lexical, the second half says nothing about how the page *looks*. What
- * it does say is that a panel cannot be added to `OVERVIEW_PANEL_MODULES` and
- * then forgotten in the markup, and that no one of the Overview's seven reads
- * can lose its module term — which is how every defect in this feature so far
- * has got in (slice 1 gated the link and nothing else; slice 2's gate was
- * missing on seven routes).
+ * **A correction worth leaving in place, because it is the mistake this slice
+ * made about its own tools.** The first version of this header said the page
+ * *could not* be rendered — *"no jsdom, no testing-library, and
+ * `src/**\/*.test.ts` does not even match `.tsx`"* — and concluded that a
+ * lexical check was the only option available. That was **wrong**: nine screens
+ * already render with `react-test-renderer` and `src/test-utils/tree.ts`
+ * (`*.writeRefusal.test.ts`), which needs no DOM at all. The claim was made from
+ * the absence of one library instead of from a search for the pattern, which is
+ * the same error as reading an empty result as a finding. `src/pages/
+ * OverviewPage.moduleAware.test.ts` now renders it, and that file carries the
+ * behavioural claims: no request issued, the reason in words, no zero.
+ *
+ * So the division of labour is a choice and no longer an excuse. A renderer
+ * answers *what one configuration does*; it answers **coverage over a list**
+ * badly — "no panel in the map is unguarded" is a claim about 20 declarations
+ * and would need 20 mounts. That is what stays here, and what it buys is that a
+ * panel cannot be added to `OVERVIEW_PANEL_MODULES` and then forgotten in the
+ * markup, and that none of the Overview's seven reads can lose its module term —
+ * which is how every defect in this feature has got in so far (slice 1 gated the
+ * link and nothing else; slice 2's gate was missing on seven routes).
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -330,6 +338,15 @@ describe('OverviewPage.tsx asks the question it is given', () => {
       `NO_MODULE_DECISIONS` — every module on — and only replaces it once the
       `company_modules` read answers, so a load that ran first would fetch all
       seven tables on the old terms and leave a disabled module's rows on screen.
+
+      **This is the one claim the renderer cannot make**, measured: deleting both
+      the condition and the dependency fails here and `OverviewPage.moduleAware.
+      test.ts` stays green, because that file's `usePlan` fake answers
+      `loading: false` from the first render and so has no loading phase for the
+      race to happen in. Giving it one would mean a fake that re-renders with a
+      different module map mid-flight, which is a harness for one assertion. So
+      this line is why the lexical half is kept rather than retired once the page
+      became renderable.
     */
     expect(PAGE).toContain('if (!dbLoading && !planLoading) loadData();');
     expect(PAGE).toContain('}, [dbLoading, planLoading, companyModules]);');
