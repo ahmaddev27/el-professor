@@ -855,7 +855,7 @@ END $$;
 DO $$
 DECLARE
   owner CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
-  v_out text;
+  co_a  CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
 BEGIN
   -- ── the admission ────────────────────────────────────────────────────────
   -- An app_private helper is reached with _amr_claims and called directly, as
@@ -899,17 +899,23 @@ BEGIN
     _amr_try(owner, _amr_passkey(),
       format('SELECT public.platform_can_manage_account(%L)::text', owner)) = 'true');
 
-  -- A read model: authenticated-only, VOLATILE, writes its own audit row.
-  v_out := _amr_do(owner, _amr_passkey(), 'SELECT platform_companies_list(1, 0) ->> ''ok''');
-  PERFORM _amr_ok('passkey: an audited read model answers it', v_out = 'true');
+  -- An audited read model and a settings read, in section 5's exact idiom:
+  -- these answer jsonb, so the probe casts ::text out of _amr_try and back to
+  -- ::jsonb. The first draft called platform_companies_list(1, 0) -- the wrong
+  -- arity -- and the kit refused it, which is the second defect of mine this
+  -- section has caught.
+  PERFORM _amr_ok('passkey: an audited read model answers it',
+    (_amr_try(owner, _amr_passkey(), 'SELECT platform_companies_list()::text')::jsonb ->> 'ok') = 'true');
+  PERFORM _amr_ok('passkey: a settings read answers it',
+    (_amr_try(owner, _amr_passkey(), 'SELECT platform_settings_get(''price_book'')::text')::jsonb ->> 'ok') = 'true');
 
-  -- A write RPC, through the same door the panel uses. The point is only that
-  -- it is not refused for the session's sake; whatever it then says about its
-  -- argument is that RPC's business and is covered by its own file.
-  v_out := _amr_reason(_amr_do(owner, _amr_passkey(),
-    'SELECT platform_staff_add(''00000000-0000-4000-8000-0000000000ff'', ''read_only'', ''kit'')::text'));
-  PERFORM _amr_ok('passkey: a write RPC does not refuse it as not_authorized',
-    v_out IS DISTINCT FROM 'not_authorized');
+  -- A platform write, through the same door the panel uses. The claim is only
+  -- about the SESSION: a passkey session must not be refused the way a Google
+  -- one is (`denied`). What the RPC then decides about its argument is that
+  -- RPC's own business and is covered by its own file.
+  PERFORM _amr_ok('passkey: a platform write does not refuse it as denied',
+    _amr_reason(_amr_try(owner, _amr_passkey(),
+      format('SELECT platform_company_set_status(%L, ''active'')::text', co_a))) IS DISTINCT FROM 'denied');
 
   -- ── the refusals, all of which must still refuse ────────────────────────
   PERFORM _amr_ok('passkey: oauth beside passkey still holds no role',
