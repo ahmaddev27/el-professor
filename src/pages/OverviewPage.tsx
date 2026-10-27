@@ -32,6 +32,13 @@ import {
   getTopExpenses, generateInsights, buildRevenueComposition,
 } from '../utils/overviewHelpers';
 import { getTuevStatus } from '../types/car';
+import ModuleOffNotice from '../components/ModuleOffNotice';
+import {
+  overviewPanelOffModules,
+  overviewReadEnabled,
+  type OverviewPanelKey,
+} from '../utils/overviewModuleScope';
+import { moduleDefinition } from '../lib/companyModules';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { ADMIN_BASE } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -258,7 +265,7 @@ const OverviewPage: React.FC = () => {
     // And the own company only while the database still admits it.
     ownCompanyReadable,
   });
-  const { planState, effectivePlan } = usePlan();
+  const { planState, effectivePlan, companyModules, loading: planLoading } = usePlan();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -276,17 +283,41 @@ const OverviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  /*
+    `planLoading` is in the condition, not only in the dependency list, and
+    without it this slice would not work at all. `PlanContext` starts at
+    `NO_MODULE_DECISIONS` — every module on, the fail-open value — and only
+    replaces it once the `company_modules` read answers. A load that ran before
+    that would fetch all seven tables on the old terms and fill the panels with
+    a disabled module's rows, and would then be the state the user sees until
+    something else re-renders. `loading` there is false only after **both** the
+    company row and the module map have arrived, so it is the right gate.
+
+    `companyModules` is a dependency so a module switched off in another tab —
+    which `PlanContext.refresh` picks up — re-reads rather than leaving the
+    figures of a module that is now gone on screen.
+  */
   useEffect(() => {
-    if (!dbLoading) loadData();
-  }, [dbLoading]);
+    if (!dbLoading && !planLoading) loadData();
+  }, [dbLoading, planLoading, companyModules]);
 
   const loadData = async () => {
     setLoading(true);
     setLoadError(null);
     try {
+      /*
+        Belege and Fahrer come through `useDatabase`, which four screens share
+        and which falls back to local storage, so nothing inside the hook may be
+        changed on the Overview's behalf. The **call site** is the Overview's
+        own, though, so a module that is off is simply not fetched here: no
+        request, no rows, and the other three screens untouched. The measurement
+        in `src/lib/moduleReadScope.test.ts` still records `shared reads
+        receipts` and `shared reads drivers` as crossings, because the hook's
+        other callers remain.
+      */
       const [receiptsData, driversData] = await Promise.all([
-        receiptActions.get(),
-        driverActions.get(),
+        overviewReadEnabled(companyModules, 'receipts') ? receiptActions.get() : Promise.resolve([]),
+        overviewReadEnabled(companyModules, 'drivers') ? driverActions.get() : Promise.resolve([]),
       ]);
       setReceipts(receiptsData);
       setDrivers(driversData);
@@ -310,7 +341,23 @@ const OverviewPage: React.FC = () => {
   // reporting it, so past that point the dashboard's Umsatz and Gewinn figures
   // were simply wrong — computed from a partial income table. They also dropped
   // their error, turning a failed query into a plausible-looking zero.
+  // ── The module term on each of the Overview's own five reads ──────────────
+  //
+  // `overview` is `lockable: false` and reads five toggleable modules' tables,
+  // which `src/lib/moduleReadScope.test.ts` measured and named as the first of
+  // two structural blockers on closing reads. The panels are withheld by
+  // `overviewPanelOffModules` either way, so skipping the request moves no
+  // figure — what it changes is that the rows of a module this company does not
+  // have never arrive, so a panel added later cannot quietly compute from them.
+  //
+  // Two of the seven reads carry no term, and the reason is in
+  // `OVERVIEW_OWN_READS`' header: `user_profiles` belongs to `users`, which can
+  // never be off, and `cash_movements` belongs to no module at all.
   const loadFixedCosts = async () => {
+    if (!overviewReadEnabled(companyModules, 'fixed_costs')) {
+      setFixedCosts([]);
+      return;
+    }
     setFixedCosts(await fetchAllPaginated<any>(
       (from, to) => supabase
         .from('fixed_costs')
@@ -326,6 +373,10 @@ const OverviewPage: React.FC = () => {
     ));
   };
   const loadIncomes = async () => {
+    if (!overviewReadEnabled(companyModules, 'income')) {
+      setIncomes([]);
+      return;
+    }
     setIncomes(await fetchAllPaginated<Income>(
       (from, to) => supabase
         .from('income')
@@ -337,6 +388,10 @@ const OverviewPage: React.FC = () => {
     ));
   };
   const loadSalaries = async () => {
+    if (!overviewReadEnabled(companyModules, 'salaries')) {
+      setSalaries([]);
+      return;
+    }
     setSalaries(await fetchAllPaginated<any>(
       (from, to) => supabase
         .from('salaries')
@@ -348,6 +403,10 @@ const OverviewPage: React.FC = () => {
     ));
   };
   const loadWerkstattChecks = async () => {
+    if (!overviewReadEnabled(companyModules, 'werkstatt_checks')) {
+      setWerkstattChecks([]);
+      return;
+    }
     const { data } = await supabase
       .from('werkstatt_checks')
       .select('id, car_id, status, check_date, notes, car:cars(kennzeichen)')
@@ -364,6 +423,10 @@ const OverviewPage: React.FC = () => {
     setUserProfiles(data || []);
   };
   const loadCars = async () => {
+    if (!overviewReadEnabled(companyModules, 'cars')) {
+      setCars([]);
+      return;
+    }
     const { data } = await supabase
       .from('cars')
       .select('id, kennzeichen, tuev_gueltig_bis')
@@ -389,6 +452,36 @@ const OverviewPage: React.FC = () => {
     ));
   };
 
+  // ── Which panels may speak ───────────────────────────────────────────────
+  //
+  // `panelOff(panel)` is the modules that panel's figures are computed from and
+  // this company does not have; empty means it renders them. The map is
+  // `OVERVIEW_PANEL_MODULES` and the reasoning is that file's header. Two rules
+  // the call sites below all follow:
+  //
+  //   - **a withheld figure is stated, never rendered as 0 and never hidden.**
+  //     An empty list and a 0,00 € are claims about the customer's money, and
+  //     the three composite panels are worse than a zero: `profit` subtracts
+  //     salaries, Belege and Fixkosten, so a missing cost term **overstates**
+  //     it, `totalCosts` understates, and the till understates what went out.
+  //     None of them goes to zero, so none of them looks wrong.
+  //   - **the input is emptied as well as the panel withheld**, wherever a
+  //     helper would otherwise compute over a partial set. `generateInsights`
+  //     is the sharp case: it compares this month with last and would write a
+  //     confident sentence about a collapse that is only a closed read.
+  const panelOff = (panel: OverviewPanelKey) => overviewPanelOffModules(companyModules, panel);
+  const panelOn = (panel: OverviewPanelKey) => panelOff(panel).length === 0;
+  /** The KPI cards' one-line reason: short, because it sits under a figure. */
+  const offSub = (panel: OverviewPanelKey): string | null => {
+    const off = panelOff(panel);
+    if (off.length === 0) return null;
+    return t('overview.moduleOff.short', {
+      modules: off.map(key => t(moduleDefinition(key)!.labelKey)).join(', '),
+    });
+  };
+  /** What a KPI card shows in place of a figure. Not '0,00 €', which is a claim. */
+  const WITHHELD = '—';
+
   // ── Derived data ─────────────────────────────────────────────────────────
   const { start: monthStart, end: monthEnd } = getMonthRange(selectedMonth);
   const prevMonthStr = getPrevMonthString(selectedMonth);
@@ -411,12 +504,20 @@ const OverviewPage: React.FC = () => {
   const marginDelta   = prevMetrics.profitMargin !== 0
     ? currentMetrics.profitMargin - prevMetrics.profitMargin : null;
 
-  const driverPerformance = calcDriverPerformance(driverRecords, incomes, salaries, receipts, monthStart, monthEnd);
-  const salaryAlerts      = calcSalaryAlerts(salaries, driverRecords);
+  // Each of these is emptied rather than computed when its panel is withheld,
+  // so no helper runs over a set a closed module left short. `insights` is the
+  // one that must be emptied rather than merely not rendered: it compares two
+  // months, and a month whose cost terms were not read is a comparison that
+  // reads as a collapse.
+  const driverPerformance = panelOn('driverChart')
+    ? calcDriverPerformance(driverRecords, incomes, salaries, receipts, monthStart, monthEnd) : [];
+  const salaryAlerts      = panelOn('alertsSalaries') ? calcSalaryAlerts(salaries, driverRecords) : [];
   const cashSummary       = calcCashSummary(incomes, receipts, monthStart, monthEnd, cashMovements);
   const trendData         = buildTrendData(selectedMonth, incomes, salaries, receipts, fixedCosts, t);
-  const topExpenses       = getTopExpenses(receipts, fixedCosts, monthStart, monthEnd, 5);
-  const insights          = generateInsights(currentMetrics, prevMetrics, driverPerformance, salaryAlerts, werkstattChecks);
+  const topExpenses       = panelOn('topExpenses')
+    ? getTopExpenses(receipts, fixedCosts, monthStart, monthEnd, 5) : [];
+  const insights          = panelOn('insights')
+    ? generateInsights(currentMetrics, prevMetrics, driverPerformance, salaryAlerts, werkstattChecks) : [];
   // overviewHelpers writes German and names a key beside it; translating here
   // covers the legend and the chart tooltip, which reads `name` off the datum.
   const revenueComposition = buildRevenueComposition(currentMetrics)
@@ -542,7 +643,13 @@ const OverviewPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Smart insights ── */}
+      {/* ── Smart insights ──
+          `insights` is `[]` unless all six of its modules are on, and the block
+          is conditional on being non-empty, so this is the alerts case again.
+          What matters is that it was **not computed**: `generateInsights`
+          compares this month with last, and over a term that was not read it
+          writes a confident German sentence about a collapse that never
+          happened. */}
       {insights.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {insights.map((ins, i) => (
@@ -556,34 +663,59 @@ const OverviewPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── KPI Cards ── */}
+      {/* ── KPI Cards ──
+          A withheld card keeps its label and its place and shows `—` with the
+          reason underneath, rather than a 0,00 € or an empty grid cell. The
+          `delta` goes with the figure: a percentage change against a month
+          whose term was not read is the same false statement one level down. */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <KpiCard label={t('overview.kpi.umsatz')} value={`${fmt(currentMetrics.umsatz)} €`} sub={t('overview.kpi.vsPrevMonth')}
+        <KpiCard label={t('overview.kpi.umsatz')}
+          value={offSub('kpiUmsatz') ? WITHHELD : `${fmt(currentMetrics.umsatz)} €`}
+          sub={offSub('kpiUmsatz') ?? t('overview.kpi.vsPrevMonth')}
           icon={<TrendingUp size={18} />} iconBg="rgba(16,185,129,0.12)" iconColor="#10b981"
-          delta={umsatzDelta} higherIsBetter />
-        <KpiCard label={t('overview.kpi.bargeld')} value={`${fmt(currentMetrics.bargeld)} €`} sub={t('overview.kpi.vsPrevMonth')}
+          delta={offSub('kpiUmsatz') ? undefined : umsatzDelta} higherIsBetter />
+        <KpiCard label={t('overview.kpi.bargeld')}
+          value={offSub('kpiBargeld') ? WITHHELD : `${fmt(currentMetrics.bargeld)} €`}
+          sub={offSub('kpiBargeld') ?? t('overview.kpi.vsPrevMonth')}
           icon={<Wallet size={18} />} iconBg="rgba(20,184,166,0.12)" iconColor="#14b8a6"
-          delta={bargeldDelta} higherIsBetter />
-        <KpiCard label={t('overview.load.gehaelter')} value={`${fmt(currentMetrics.salaries)} €`} sub={t('overview.kpi.vsPrevMonth')}
+          delta={offSub('kpiBargeld') ? undefined : bargeldDelta} higherIsBetter />
+        <KpiCard label={t('overview.load.gehaelter')}
+          value={offSub('kpiSalaries') ? WITHHELD : `${fmt(currentMetrics.salaries)} €`}
+          sub={offSub('kpiSalaries') ?? t('overview.kpi.vsPrevMonth')}
           icon={<Users size={18} />} iconBg="rgba(245,158,11,0.12)" iconColor="#f59e0b"
-          delta={salariesDelta} higherIsBetter={false} />
-        <KpiCard label={t('overview.kpi.gesamtkosten')} value={`${fmt(currentMetrics.totalCosts)} €`} sub={t('overview.kpi.costBasis')}
+          delta={offSub('kpiSalaries') ? undefined : salariesDelta} higherIsBetter={false} />
+        <KpiCard label={t('overview.kpi.gesamtkosten')}
+          value={offSub('kpiTotalCosts') ? WITHHELD : `${fmt(currentMetrics.totalCosts)} €`}
+          sub={offSub('kpiTotalCosts') ?? t('overview.kpi.costBasis')}
           icon={<TrendingDown size={18} />} iconBg="rgba(239,68,68,0.12)" iconColor="#ef4444"
-          delta={costsDelta} higherIsBetter={false} />
-        <KpiCard label={t('overview.kpi.firmengewinn')} value={`${fmt(currentMetrics.profit)} €`} sub={t('overview.kpi.vsPrevMonth')}
+          delta={offSub('kpiTotalCosts') ? undefined : costsDelta} higherIsBetter={false} />
+        <KpiCard label={t('overview.kpi.firmengewinn')}
+          value={offSub('kpiProfit') ? WITHHELD : `${fmt(currentMetrics.profit)} €`}
+          sub={offSub('kpiProfit') ?? t('overview.kpi.vsPrevMonth')}
           icon={<DollarSign size={18} />}
           iconBg={currentMetrics.profit >= 0 ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)'}
           iconColor={currentMetrics.profit >= 0 ? '#3b82f6' : '#ef4444'}
-          delta={profitDelta} higherIsBetter />
+          delta={offSub('kpiProfit') ? undefined : profitDelta} higherIsBetter />
         <KpiCard label={t('overview.kpi.gewinnmarge')}
-          value={`${currentMetrics.profitMargin.toFixed(1)}%`}
-          sub={marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : t('overview.kpi.profitability')}
+          value={offSub('kpiMargin') ? WITHHELD : `${currentMetrics.profitMargin.toFixed(1)}%`}
+          sub={offSub('kpiMargin')
+            ?? (marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : t('overview.kpi.profitability'))}
           icon={<Target size={18} />}
           iconBg={currentMetrics.profitMargin >= 0 ? 'rgba(14,165,233,0.12)' : 'rgba(239,68,68,0.12)'}
           iconColor={currentMetrics.profitMargin >= 0 ? '#0ea5e9' : '#ef4444'} />
       </div>
 
-      {/* ── Action alerts ── */}
+      {/* ── Action alerts ──
+          The rows here are the one place silence is right, and it is reasoned
+          rather than convenient: each row renders **only when there is
+          something to report** (`unpaidCount > 0`, `fleetIssues > 0`,
+          `tuevAbgelaufen.length > 0`), so absence is this panel's normal state
+          and withholding a row claims nothing. Nothing is left to infer a zero
+          from either — the KPI card above each of these shows `—` with the
+          module named, so the reason is on screen in the place a figure would
+          have been. The inputs are emptied upstream (`salaryAlerts`,
+          `werkstattChecks`, `cars`), so no row is drawn from a partial set.
+          `pendingInvites` is ungated: `users` can never be off. */}
       {hasAlerts && (
         <Panel>
           <SectionHeader title={t('overview.alerts.title')} sub={t('overview.alerts.sub')} icon={<AlertTriangle size={16} />} />
@@ -628,7 +760,16 @@ const OverviewPage: React.FC = () => {
                 </Link>
               </div>
             )}
-            {fleetIssues > 0 && (
+            {/*
+              `panelOn` here is not redundant with the emptied input, and the
+              coverage test in `overviewModuleScope.test.ts` is what insists on
+              it: `fleetIssues` is 0 today because `werkstatt_checks` was not
+              fetched, which couples this row to a *fetch* decision taken two
+              hundred lines away. Naming the panel is what keeps the row tied to
+              its own declared dependency list, so a later change to either side
+              is visible rather than silently load-bearing.
+            */}
+            {panelOn('alertsFleet') && fleetIssues > 0 && (
               <div
                 className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}
@@ -647,7 +788,7 @@ const OverviewPage: React.FC = () => {
                 </Link>
               </div>
             )}
-            {tuevAbgelaufen.length > 0 && (
+            {panelOn('alertsTuev') && tuevAbgelaufen.length > 0 && (
               <div
                 className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}
@@ -668,7 +809,7 @@ const OverviewPage: React.FC = () => {
                 </Link>
               </div>
             )}
-            {tuevBaldAblaufend.length > 0 && (
+            {panelOn('alertsTuev') && tuevBaldAblaufend.length > 0 && (
               <div
                 className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(245,158,11,0.2)' }}
@@ -716,6 +857,11 @@ const OverviewPage: React.FC = () => {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <Panel className="xl:col-span-2">
           <SectionHeader title={t('overview.trend.title')} sub={t('overview.trend.sub')} icon={<BarChart3 size={16} />} />
+          {/* A six-month chart drawn over a closed term is the worst of the lot:
+              it does not look empty, it looks like a trend. */}
+          {!panelOn('trend') ? (
+            <ModuleOffNotice moduleKeys={panelOff('trend')} />
+          ) : (
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={trendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <defs>
@@ -739,11 +885,16 @@ const OverviewPage: React.FC = () => {
               <Area type="monotone" dataKey={t('overview.chart.kosten')}   stroke={C.kosten}   strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </Panel>
 
         <Panel>
           <SectionHeader title={t('overview.mix.title')} sub={t('overview.mix.sub')} icon={<DollarSign size={16} />} />
-          {revenueComposition.length > 0 ? (
+          {!panelOn('revenueMix') ? (
+            // Not the existing "Keine Einnahmen" empty state: that sentence says
+            // the company earned nothing this month, which is a different claim.
+            <ModuleOffNotice moduleKeys={panelOff('revenueMix')} />
+          ) : revenueComposition.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={140}>
                 <PieChart>
@@ -798,6 +949,13 @@ const OverviewPage: React.FC = () => {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <Panel className="flex flex-col">
           <SectionHeader title={t('overview.profit.title')} sub={format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: de })} icon={<Target size={16} />} />
+          {/* The breakdown is the one panel that shows the subtraction itself —
+              Netto, Aktionen, minus Gehälter, Belege, Fixkosten — so a missing
+              term here is a row of 0,00 € beside four real ones, which reads as
+              a figure that was measured. */}
+          {!panelOn('profitBreakdown') ? (
+            <ModuleOffNotice moduleKeys={panelOff('profitBreakdown')} />
+          ) : (
           <div className="flex-1 flex flex-col gap-2">
             {[
               { label: t('overview.profit.netFare'), value: currentMetrics.nettoFahrpreis, sign: '+', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', icon: <TrendingUp size={13} /> },
@@ -844,10 +1002,18 @@ const OverviewPage: React.FC = () => {
               <DeltaBadge delta={profitDelta} higherIsBetter />
             </div>
           </div>
+          )}
         </Panel>
 
         <Panel className="flex flex-col">
           <SectionHeader title={t('overview.cash.title')} sub={t('overview.cash.sub')} icon={<Wallet size={16} />} />
+          {/* The till is `Bargeld − Belege − (GQ − Stornos)`, so Belege off
+              **understates what left the till** and Umsätze off understates what
+              came in. Either way the balance is wrong, not zero, and this is the
+              figure a fleet owner counts the cash box against. */}
+          {!panelOn('cash') ? (
+            <ModuleOffNotice moduleKeys={panelOff('cash')} />
+          ) : (
           <div className="flex flex-col gap-3 flex-1">
             <div className="grid grid-cols-2 gap-3">
               <div className="p-4 rounded-xl" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
@@ -935,6 +1101,7 @@ const OverviewPage: React.FC = () => {
               <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} />
             </Link>
           </div>
+          )}
         </Panel>
       </div>
 
@@ -942,7 +1109,11 @@ const OverviewPage: React.FC = () => {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <Panel className="xl:col-span-2">
           <SectionHeader title={t('overview.drivers.title')} sub={t('overview.drivers.sub')} icon={<Users size={16} />} />
-          {driverPerformance.filter(d => d.umsatz > 0).length > 0 ? (
+          {!panelOn('driverChart') ? (
+            // Not "Keine Fahrerdaten für diesen Monat", which says the drivers
+            // drove nothing.
+            <ModuleOffNotice moduleKeys={panelOff('driverChart')} />
+          ) : driverPerformance.filter(d => d.umsatz > 0).length > 0 ? (
             <ResponsiveContainer width="100%" height={Math.max(180, driverPerformance.filter(d => d.umsatz > 0).length * 40)}>
               <BarChart
                 /* The series key is the <Bar> dataKey, so both come from the same
@@ -976,7 +1147,9 @@ const OverviewPage: React.FC = () => {
 
         <Panel>
           <SectionHeader title={t('overview.drivers.ranking')} sub={t('overview.drivers.rankingSub')} icon={<Target size={16} />} />
-          {driverPerformance.length > 0 ? (
+          {!panelOn('driverRanking') ? (
+            <ModuleOffNotice moduleKeys={panelOff('driverRanking')} />
+          ) : driverPerformance.length > 0 ? (
             <div className="space-y-2.5">
               {driverPerformance.map((driver, idx) => {
                 const maxUmsatz = Math.max(...driverPerformance.map(d => d.umsatz), 1);
@@ -1039,7 +1212,11 @@ const OverviewPage: React.FC = () => {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <Panel>
           <SectionHeader title={t('overview.costs.title')} sub={t('overview.costs.sub')} icon={<TrendingDown size={16} />} />
-          {topExpenses.length > 0 ? (
+          {!panelOn('topExpenses') ? (
+            // Its footer prints `currentMetrics.totalCosts`, so the empty state
+            // would come with a cost total that is missing a whole category.
+            <ModuleOffNotice moduleKeys={panelOff('topExpenses')} />
+          ) : topExpenses.length > 0 ? (
             <div className="space-y-2">
               {topExpenses.map((item, i) => (
                 <div
@@ -1085,6 +1262,12 @@ const OverviewPage: React.FC = () => {
               </Link>
             }
           />
+          {/* Three counts of 0 beside "OK / Probleme / Repariert" reads as a
+              clean fleet, which is a claim about roadworthiness. */}
+          {!panelOn('fleet') ? (
+            <ModuleOffNotice moduleKeys={panelOff('fleet')} />
+          ) : (
+          <>
           <div className="grid grid-cols-3 gap-3 mb-4">
             {[
               { label: 'OK', value: fleetOk, color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)' },
@@ -1128,11 +1311,19 @@ const OverviewPage: React.FC = () => {
               {t('overview.fleet.noChecks')}
             </div>
           )}
+          </>
+          )}
         </Panel>
       </div>
 
-      {/* ── Unpaid salaries ── */}
-      {salaryAlerts.length > 0 && (
+      {/* ── Unpaid salaries ──
+          `salaryAlerts` is already `[]` when Gehälter or Fahrer is off, and this
+          table only exists when it is non-empty, so it is the action-alerts
+          case: nothing is withheld, because nothing was ever claimed. The panel
+          is still named here rather than left to ride on `salaryAlerts`, for the
+          reason the Werkstatt alert row gives: its dependency list is declared
+          separately and a later change to either side has to be visible. */}
+      {panelOn('unpaidSalaries') && salaryAlerts.length > 0 && (
         <Panel>
           <SectionHeader
             title={t('overview.salaries.title')} sub={t('overview.salaries.sub')} icon={<CreditCard size={16} />}
@@ -1213,7 +1404,10 @@ const OverviewPage: React.FC = () => {
               </Link>
             }
           />
-          {recentReceipts.length === 0 ? (
+          {!panelOn('recentReceipts') ? (
+            // "Keine Belege" would say the company filed none this month.
+            <ModuleOffNotice moduleKeys={panelOff('recentReceipts')} />
+          ) : recentReceipts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 gap-2" style={{ color: 'var(--text-tertiary)' }}>
               <FileText size={24} style={{ color: 'var(--border)' }} />
               <span className="text-sm">{t('overview.receipts.none')}</span>
