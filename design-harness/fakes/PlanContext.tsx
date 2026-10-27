@@ -9,6 +9,7 @@
  *     default), so the car limit is set to make it equal the active drivers.
  */
 import { PREVIEW_CAR_LIMIT, PREVIEW_VEHICLES } from '../../src/design-preview/sampleData';
+import { NO_MODULE_DECISIONS } from '../../src/lib/companyModules';
 import { ACTIVE_DRIVER_COUNT } from '../fixtures-batch1b';
 import { scenario } from '../scenario';
 
@@ -32,6 +33,18 @@ const value = {
     billingCycle: 'monthly',
   },
   loading: false,
+  /*
+    No stored decision for any module, which is what an untouched company has
+    and what `company_modules` reads as every module ON (`src/lib/
+    companyModules.ts`). The real `usePlan()` has carried this field since
+    slice 1 and **two** harness-rendered things now read it: `Sidebar.
+    renderNavItem` through `moduleEnabledForRoute`, and `OverviewPage` through
+    `overviewReadEnabled` / `overviewPanelOffModules`. Without it the readers
+    get `undefined[key]` and the harness dies on the frame, before any screen
+    renders — `design-harness/batch4/fakes/PlanContext.tsx` already carried this
+    line for the first of the two and this file was simply missed.
+  */
+  companyModules: NO_MODULE_DECISIONS,
   can: () => true,
   minPlanFor: () => 'basic',
   effectivePlan: 'premium',

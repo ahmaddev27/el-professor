@@ -5542,6 +5542,14 @@ export const de = {
   'overview.fleet.noChecks':               'Keine Checks diesen Monat',
   'overview.fleet.noNegative':             'Keine negativen Checks diesen Monat',
   'overview.mix.none':                     'Keine Einnahmen',
+  // A panel whose module is off. The figure is withheld, never shown as 0 — eine
+  // 0,00 € wäre eine Aussage über das Geld des Kunden, und bei Gewinn, Kosten und
+  // Kasse wäre sie nicht einmal null, sondern falsch.
+  'overview.moduleOff.kept':               'Ihre vorhandenen Daten bleiben unverändert erhalten.',
+  'overview.moduleOff.many':               'Diese Module sind für Ihr Unternehmen nicht aktiviert: {modules}. Deshalb wird diese Zahl nicht berechnet.',
+  'overview.moduleOff.one':                '{module} ist für Ihr Unternehmen nicht aktiviert. Deshalb wird diese Zahl nicht berechnet.',
+  'overview.moduleOff.short':              '{modules} nicht aktiviert',
+  'overview.moduleOff.title':              'Nicht berechnet',
   'overview.plan.named':                   'Plan: {plan}',
   'overview.profit.margin':                '{value}% Marge',
   'overview.profit.prevMonth':             'Vormonat: {amount}',
