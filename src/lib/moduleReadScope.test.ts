@@ -56,9 +56,18 @@
  * fails and says so.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { LOCKED_MODULE_KEYS, MODULE_DEFINITIONS } from './companyModules';
+import {
+  BACKUP_CHILD_TABLES,
+  BACKUP_TABLES,
+  backupFilename,
+  createBackup,
+  type BackupClient,
+  type BackupFilterBuilder,
+} from '../utils/backup';
 
 // ─── the tables the gate reaches, and the page that owns each ────────────────
 
@@ -174,8 +183,15 @@ const READER_MODULE: Readonly<Record<string, string | null>> = {
  *     no page, so the gate does not reach them — but `cashLedger.ts` reads them
  *     for the till on the Overview and Bargeldbestand.
  *   - **Edge functions and the export service** are not scanned.
+ *   - **A reader that passes the table name as a variable**, `from(table)`, which
+ *     is the gap section 7 below closes and which turned out to hold the second
+ *     structural blocker. Added 27.10.2026, after the first attempt to act on
+ *     this measurement.
  */
-const UNSEEN_BY_THIS_FILE = ['cash_transactions via the four Abrechnung RPCs'] as const;
+const UNSEEN_BY_THIS_FILE = [
+  'cash_transactions via the four Abrechnung RPCs',
+  'from(table) readers, now derived in section 7',
+] as const;
 
 // ─── the scan ────────────────────────────────────────────────────────────────
 
@@ -193,8 +209,21 @@ const walk = (dir: string, out: string[] = []): string[] => {
 const relative = (full: string): string =>
   'src/' + full.slice(SRC.length).replace(/\\/g, '/');
 
+/*
+  Both derivations below are memoized. They are pure over the working tree, which
+  nothing in this file writes, so the answer cannot change inside one run — and
+  section 4 made them hot: `blockingCrossings()` asks per crossing, and the file
+  went from 16 s to 63 s before this cache. That matters here beyond patience,
+  because this repository's standing rule is that a red local build may be
+  starvation and that parallel gates belong capped at two; a 63 s file is a
+  contributor to exactly that.
+*/
+let readersCache: Map<string, string[]> | null = null;
+let crossingsCache: string[] | null = null;
+
 /** `table -> the files that read it`, measured. */
 const readersByTable = (): Map<string, string[]> => {
+  if (readersCache) return readersCache;
   const found = new Map<string, string[]>();
   for (const table of Object.keys(TABLE_PAGE)) found.set(table, []);
   for (const file of walk(SRC)) {
@@ -204,11 +233,13 @@ const readersByTable = (): Map<string, string[]> => {
     }
   }
   for (const list of found.values()) list.sort();
+  readersCache = found;
   return found;
 };
 
 /** `"<reader module> reads <table> (owned by <modules>)"`, for every crossing. */
 const crossModuleReads = (): string[] => {
+  if (crossingsCache) return crossingsCache;
   const out: string[] = [];
   for (const [table, files] of readersByTable()) {
     const owners = owningModules(TABLE_PAGE[table]);
@@ -218,7 +249,8 @@ const crossModuleReads = (): string[] => {
       out.push(`${reader ?? 'no module'} reads ${table} (owned by ${owners.join('+') || 'nobody'})`);
     }
   }
-  return [...new Set(out)].sort();
+  crossingsCache = [...new Set(out)].sort();
+  return crossingsCache;
 };
 
 // ─── 1. the declarations cover what is there ─────────────────────────────────
@@ -436,5 +468,415 @@ describe('why read-closing is blocked, asserted rather than written down', () =>
     // reads would move the Abrechnung's money figures with nothing here to find.
     expect(readersByTable().get('cash_transactions')).toEqual([]);
     expect(UNSEEN_BY_THIS_FILE.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── 4. Which crossings are now GUARDED, and which still block ───────────────
+
+/*
+  Added 27.10.2026, acting on sections 2 and 3.
+
+  Section 2's set does **not** shrink when a reader is taught, and expecting it
+  to was the first mistake made in acting on this file. The scan is lexical: a
+  guarded read still contains `from('fixed_costs')`, inside a conditional. Nor
+  *should* it shrink — the Overview genuinely still reads `fixed_costs` whenever
+  Fixkosten is on, so the crossing is a true statement about the product.
+
+  What changes when a reader is taught is not whether the crossing exists but
+  whether it **blocks**. So the partition this section adds is the one that can
+  move, and the number to watch is the blocking count, not the crossing count.
+*/
+
+/**
+ * `file -> the tables it fetches only after asking the module state`.
+ *
+ * A declaration whose every line is proved against the source below, so it
+ * cannot claim a guard that is not there. The test for "guarded" is the one
+ * thing a lexical check can establish honestly: the file names a module-scope
+ * helper **for that table**, so the fetch cannot happen for a module that is
+ * off. Whether the *panels* are also taught is asserted exhaustively in
+ * `src/utils/overviewModuleScope.test.ts`, which is the right place for it —
+ * this file's business is the dependency graph.
+ */
+const MODULE_AWARE_READS: Readonly<Record<string, readonly string[]>> = {
+  // The Overview, taught per panel. Seven reads: the five it queries itself and
+  // the two it takes from `useDatabase` at its own call site.
+  'src/pages/OverviewPage.tsx': [
+    'cars', 'fixed_costs', 'income', 'salaries', 'werkstatt_checks', 'receipts', 'drivers',
+  ],
+};
+
+/** The helper call that makes a read module-aware, per file. */
+const GUARD_CALL: Readonly<Record<string, (table: string) => string>> = {
+  'src/pages/OverviewPage.tsx': table => `overviewReadEnabled(companyModules, '${table}')`,
+};
+
+const sourceOf = (file: string): string =>
+  readFileSync(fileURLToPath(new URL('../../' + file, import.meta.url)), 'utf8').replace(/\r/g, '');
+
+describe('a crossing is guarded only when the source says so', () => {
+  it('every declared guard is in the file, for that exact table', () => {
+    for (const [file, tables] of Object.entries(MODULE_AWARE_READS)) {
+      const source = sourceOf(file);
+      for (const table of tables) {
+        expect(source, `${file} claims a guard on ${table} and has none`)
+          .toContain(GUARD_CALL[file](table));
+      }
+    }
+  });
+
+  it('and a guarded file reads nothing gated that it does not guard', () => {
+    // Half a taught screen is worse than an untaught one: the panels that were
+    // withheld make the ones that were not look deliberate.
+    for (const [file, tables] of Object.entries(MODULE_AWARE_READS)) {
+      const source = sourceOf(file);
+      const unguarded = Object.keys(TABLE_PAGE)
+        .filter(table => source.includes(`from('${table}')`))
+        .filter(table => !tables.includes(table));
+      expect(unguarded, `${file} reads these without a module term`).toEqual([]);
+    }
+  });
+});
+
+/** The crossings that still stop their owner's reads being closed. */
+const blockingCrossings = (): string[] =>
+  crossModuleReads().filter(line => {
+    const table = line.match(/ reads (\w+) \(/)![1];
+    const reader = line.replace(/ reads .*/, '');
+    // A crossing is cleared only when EVERY file that produces it is guarded for
+    // that table. The reader module is what the line names, so the files are
+    // those declared with that module in READER_MODULE.
+    const files = Object.entries(READER_MODULE)
+      .filter(([, module]) => (module ?? 'no module') === reader)
+      .map(([file]) => file)
+      .filter(file => sourceOf(file).includes(`from('${table}')`));
+    if (files.length === 0) return true;
+    return !files.every(file => (MODULE_AWARE_READS[file] ?? []).includes(table));
+  });
+
+describe('the Overview is no longer one of the blockers', () => {
+  /*
+    This is the slice's whole visible result, and it is the number that moved:
+    32 crossings, unchanged, of which five are now cleared.
+  */
+  it('all five of the Overview\'s crossings are cleared', () => {
+    expect(crossModuleReads().filter(l => l.startsWith('overview reads '))).toHaveLength(5);
+    expect(blockingCrossings().filter(l => l.startsWith('overview reads '))).toEqual([]);
+  });
+
+  it('the crossing count is unchanged and the blocking count is five lower', () => {
+    // Pinned as a pair so neither can move alone. If the crossing count changes
+    // a read was added or removed; if only the blocking count changes, a reader
+    // was taught or untaught.
+    expect(crossModuleReads()).toHaveLength(32);
+    expect(blockingCrossings()).toHaveLength(27);
+  });
+
+  it('`shared reads receipts` and `shared reads drivers` are NOT cleared', () => {
+    /*
+      The honest limit of what the Overview could do. Its own call site skips
+      `receiptActions.get()` and `driverActions.get()` for a module that is off,
+      but `useDatabase` has three other callers and falls back to local storage,
+      so the hook itself is untouched and the crossing stands. Teaching it is
+      its own slice.
+    */
+    expect(blockingCrossings()).toContain('shared reads receipts (owned by belege)');
+    expect(blockingCrossings()).toContain('shared reads drivers (owned by fahrer)');
+  });
+});
+
+// ─── 5. Which modules would now be free, by this file's lexical measure ──────
+
+describe('three modules have no lexically visible blocker left', () => {
+  /*
+    `fixkosten`, `salaries` and `werkstatt` each had exactly one crossing and it
+    was the Overview's — which is why this slice chose the Overview: one reader,
+    three modules.
+
+    This describe block is deliberately **not** the conclusion. Section 7 is,
+    and it says the opposite. Both are kept because the difference between them
+    is the finding: a measure that looks only at `from('<literal>')` says these
+    three are free, and it is wrong.
+  */
+  const tablesOf = (module: { pageKeys: readonly string[] }): string[] =>
+    Object.entries(TABLE_PAGE)
+      .filter(([, page]) => module.pageKeys.includes(page))
+      .map(([table]) => table);
+
+  const freeByLiteralScan = (): string[] =>
+    MODULE_DEFINITIONS
+      .filter(m => m.lockable && tablesOf(m).length > 0)
+      .filter(m => tablesOf(m).some(t => readersByTable().get(t)!.length > 0))
+      .filter(m => !blockingCrossings().some(line =>
+        tablesOf(m).some(table => line.includes(` reads ${table} (`))))
+      .map(m => m.key)
+      .sort();
+
+  it('and they are exactly these three', () => {
+    expect(freeByLiteralScan()).toEqual(['fixkosten', 'salaries', 'werkstatt']);
+  });
+
+  it('`salaries` owns two tables and both had to come clear, not just one', () => {
+    // `salary_payments` shares the `salaries` page. Its readers are
+    // SalaryDetailsModal, SalaryPeriodsModal and salaryCashReceipts.ts, all of
+    // them the salaries module's own, so it had no crossing to begin with —
+    // asserted rather than assumed, because a module with two tables is exactly
+    // where "I checked the obvious one" goes wrong.
+    expect(TABLE_PAGE['salary_payments']).toBe('salaries');
+    expect(readersByTable().get('salary_payments')!.length).toBeGreaterThan(0);
+    expect(blockingCrossings().filter(l => l.includes(' reads salary_payments ('))).toEqual([]);
+  });
+
+  it('`cars` and `umsaetze` are NOT free, although the Overview no longer blocks them', () => {
+    // The other two of the Overview's five. Both are read by several other
+    // modules' screens, so clearing the Overview was necessary and nowhere near
+    // sufficient — which is why this slice does not claim them.
+    expect(freeByLiteralScan()).not.toContain('cars');
+    expect(freeByLiteralScan()).not.toContain('umsaetze');
+    expect(blockingCrossings().filter(l => l.includes(' reads cars (')).length).toBeGreaterThan(0);
+    expect(blockingCrossings().filter(l => l.includes(' reads income (')).length).toBeGreaterThan(0);
+  });
+});
+
+// ─── 6. The readers a `from('<literal>')` scan cannot see ────────────────────
+
+/*
+  The gap, and what was in it. Sections 1–5 all rest on
+  `source.includes("from('<table>')")`, and a reader that passes the table name
+  as a **variable** — `from(table)` — is invisible to every one of them. That is
+  not hypothetical: the first attempt to act on this measurement was about to
+  close reads on `fixed_costs`, `salaries`, `salary_payments` and
+  `werkstatt_checks` on the strength of section 5, and the reader that forbids it
+  is of exactly this kind.
+
+  So the sweep below finds every `from(<identifier>)` call site under `src/` and
+  requires each one to be declared with the tables it can be called with —
+  **imported from the real list**, never re-typed here, because a copy of a
+  43-entry array is a copy that goes stale.
+*/
+
+/**
+ * `file -> why its variable table name is or is not a crossing`.
+ *
+ * Four files reach `from()` with a variable. Only one of them touches a table
+ * the gate reaches, and that one is the finding.
+ */
+const VARIABLE_TABLE_READERS: Readonly<Record<string, string>> = {
+  // THE BLOCKER. `BACKUP_TABLES` + `BACKUP_CHILD_TABLES`, 49 tables, every one
+  // of the gated ones among them. Module `datensicherung` — `lockable: false`.
+  'src/utils/backup.ts': 'backup',
+  // `drivers` and `cars`, as a literal union type, for the two head counts that
+  // decide whether the fleet-import shortcut is offered. Mounted ON the
+  // Overview, so it is a second Overview-mounted reader of `cars` and `drivers`
+  // — but both modules have other blockers anyway, and what it reads is a
+  // `count`, never a row. Left for the slice that takes on `cars`.
+  'src/components/partner/FleetImportPrompt.tsx': 'counts drivers and cars',
+  // `fahrtenbuch_trips`, `fahrtenbuch_imports`, `monthly_plan_blocks` and
+  // `monthly_plan_block_trips`: all `documents` or unpaged, so outside
+  // TABLE_PAGE by the same decision as the other 24.
+  'src/utils/monthlyPlanFahrtenbuchExport.ts': 'documents tables only',
+  // `partner_note_submissions` / `partner_receipt_submissions`: module
+  // `datenimport`, which claims no page at all.
+  'src/components/partner/PartnerLinkProposals.tsx': 'partner tables, no page',
+  // Writes, not reads: `deleteChecked` / `updateChecked`.
+  'src/lib/writeOutcome.ts': 'writes only',
+};
+
+describe('every variable-table reader is accounted for', () => {
+  it('the sweep finds exactly the declared files', () => {
+    /*
+      `.from(<identifier>)`, with two kinds of false positive filtered out by
+      name rather than by a stacked lookbehind — the first version used one and
+      reported five files that have no PostgREST read in them at all:
+
+        - the standard library's own `from`: `Array.from(set)` appears in five
+          files here, and `Buffer.from` / `Object.fromEntries` are the same
+          shape;
+        - **storage**: `supabase.storage.from(BUCKET)` is a bucket, not a table.
+          It needs BOTH filters and the second was added after the first still
+          reported two files: when the call is on one line the receiver captured
+          is literally `storage`, and when it is split over two
+          (`salaryCashReceipts.ts`, `driverNoteProvenance.ts`) the `.storage` is
+          behind the match instead. So `storage` is a non-table receiver *and*
+          the window behind the match is checked.
+    */
+    const NOT_A_TABLE = /^(Array|Object|Buffer|Date|String|Promise|Set|Map|storage|Int\d*Array|Uint\d*Array|Float\d*Array)$/;
+    const found: string[] = [];
+    for (const file of walk(SRC)) {
+      const source = readFileSync(file, 'utf8');
+      for (const match of source.matchAll(/([\w$]*)\.from\(\s*[A-Za-z_$][\w$.]*\s*\)/g)) {
+        if (NOT_A_TABLE.test(match[1])) continue;
+        const before = source.slice(Math.max(0, match.index - 80), match.index);
+        if (before.includes('.storage')) continue;
+        found.push(relative(file));
+        break;
+      }
+    }
+    expect([...new Set(found)].sort(), 'declare these in VARIABLE_TABLE_READERS').toEqual(
+      Object.keys(VARIABLE_TABLE_READERS).sort(),
+    );
+  });
+
+  it('the backup reads every table the gate reaches, including all eleven here', () => {
+    /*
+      Imported, not transcribed. `BACKUP_TABLES` is the list the backup actually
+      iterates, so this cannot drift from the thing it describes.
+    */
+    const carried = [...BACKUP_TABLES, ...BACKUP_CHILD_TABLES.map(c => c.table)];
+    expect(carried.length).toBe(49);
+    expect(Object.keys(TABLE_PAGE).filter(table => !carried.includes(table))).toEqual([]);
+  });
+
+  it('and its module can never be switched off', () => {
+    // Which is what makes it the same shape of blocker as `overview`, not a
+    // screen that could simply be closed along with its module.
+    expect(LOCKED_MODULE_KEYS).toContain('datensicherung');
+    const definition = MODULE_DEFINITIONS.find(m => m.key === 'datensicherung')!;
+    expect(definition.pageKeys).toEqual([]);
+    expect(definition.routes).toEqual(['/datensicherung']);
+  });
+});
+
+// ─── 7. The conclusion: no module may close reads, and why ───────────────────
+
+/** The smallest `BackupClient` that answers every table with 200 and no rows. */
+const emptyClient = (): { client: BackupClient; tables: string[] } => {
+  const tables: string[] = [];
+  const client: BackupClient = {
+    from(table: string) {
+      tables.push(table);
+      const builder = {
+        eq: () => builder,
+        in: () => builder,
+        order: () => builder,
+        range: () => Promise.resolve({ data: [] as unknown[], error: null }),
+      } as unknown as BackupFilterBuilder;
+      return { select: () => builder };
+    },
+  };
+  return { client, tables };
+};
+
+describe('THE BLOCKER: a closed read makes the company\'s own backup lie', () => {
+  /*
+    This is the section that overrules section 5, and it is a behavioural proof
+    rather than a lexical one — `backup.ts` is written against a structural
+    client interface precisely so that it can be run with no renderer, and its
+    own header says so.
+
+    The mechanism: a SELECT a policy hides answers **200 with an empty array**.
+    `readTenantTable` has no way to tell that from a company that owns no rows,
+    so it records the table as `complete` with `rows: 0`, and `createBackup`
+    then marks the whole file `complete: true` with an empty `incompleteTables`.
+    The customer downloads `backup-<date>.json` — no INCOMPLETE marker in the
+    filename, which is the one signal the design says survives being filed away
+    — and it is missing every row of every switched-off module.
+
+    So closing reads would not merely blank a screen. It would hand a German
+    fleet operator an archive that says it is complete and is not, of payroll and
+    compliance records held under a retention obligation. `datensicherung` is
+    `lockable: false` and the design document names it as *"the company's own way
+    to get its own data out"*; section 5 of that document makes the carve-out
+    explicit: *"the export path stays open — a company must always be able to get
+    its own statutory records out."*
+
+    **And the carve-out is not implementable where the gate lives.** A SELECT
+    policy sees a role and a JWT. The backup is the same `authenticated` role,
+    the same token and the same PostgREST request as the screen beside it; there
+    is nothing in the request to distinguish them. So "close reads but keep the
+    export open" cannot be written as a policy at all. The alternatives are both
+    decisions the owner has to take, not a shape a migration can choose:
+
+      (a) the backup reports each switched-off module's tables as `skipped`,
+          `complete: false`, INCOMPLETE in the filename — honest, and the company
+          loses the ability to export that data while the module is off; or
+      (b) reads stay open for these tables, and the module wall stays at walls
+          A, B and C (link, route, writes), which is where slice 3 left it.
+
+    This PR takes neither. It reports, which is what this file exists for.
+  */
+  it('a closed read is recorded as a COMPLETE table with zero rows', async () => {
+    const { client } = emptyClient();
+    const backup = await createBackup('company-1', client);
+    for (const table of ['fixed_costs', 'salaries', 'salary_payments', 'werkstatt_checks']) {
+      const report = backup.tableReports.find(r => r.table === table);
+      expect(report, `${table} was not attempted`).toBeDefined();
+      expect(report!.status, `${table} would be reported as`).toBe('complete');
+      expect(report!.rows).toBe(0);
+      expect(report!.error).toBeUndefined();
+    }
+  });
+
+  it('and the whole file is marked complete, with no marker in its name', () => {
+    // The two signals a person actually sees. Both say the archive is whole.
+    const { client } = emptyClient();
+    return createBackup('company-1', client).then(backup => {
+      expect(backup.complete).toBe(true);
+      expect(backup.incompleteTables).toEqual([]);
+      expect(backupFilename(backup, new Date('2026-10-27T10:00:00Z'))).toBe('backup-2026-10-27.json');
+    });
+  });
+
+  it('the backup has no module awareness at all today, and that is deliberate', () => {
+    /*
+      Not an oversight left for later: teaching it means choosing (a) above,
+      which withdraws a company's export of its own rows. That is a product and
+      retention decision and it is the owner's. Asserted so that the day someone
+      adds a module term here, this line fails and the decision is named.
+    */
+    const source = sourceOf('src/utils/backup.ts');
+    expect(source).not.toContain('companyModules');
+    expect(source).not.toContain('moduleEnabled');
+  });
+
+  it('so NOT ONE module may close reads — including the three of section 5', () => {
+    /*
+      The partition section 5 computes is over `from('<literal>')` readers only.
+      Adding the backup puts one unguarded reader on every gated table at once,
+      and its module can never be off, so the true free set is empty.
+    */
+    const carried = [...BACKUP_TABLES, ...BACKUP_CHILD_TABLES.map(c => c.table)];
+    for (const key of ['fixkosten', 'salaries', 'werkstatt']) {
+      const tables = Object.entries(TABLE_PAGE)
+        .filter(([, page]) => (MODULE_DEFINITIONS.find(m => m.key === key)!.pageKeys as readonly string[]).includes(page))
+        .map(([table]) => table);
+      expect(tables.length, key).toBeGreaterThan(0);
+      for (const table of tables) {
+        expect(carried, `${key}'s ${table} is read by the backup`).toContain(table);
+      }
+    }
+  });
+
+  it('no SELECT policy has gained a module term while that is true', () => {
+    /*
+      The coupling assertion, and the only gate that can hold this decision:
+      it is a cross-language one, so it cannot live in the RLS kit — SQL cannot
+      read `backup.ts`. It fails on the **unsafe combination** and on nothing
+      else, so it blocks neither of the owner's two answers: teach the backup and
+      it passes, leave reads open and it passes. Only "close reads with the
+      backup untaught" fails, which is the release that would hand out a
+      truncated archive marked complete.
+    */
+    const migrations = join(SRC, '..', 'supabase', 'migrations');
+    const offenders: string[] = [];
+    for (const file of readdirSync(migrations)) {
+      const source = readFileSync(join(migrations, file), 'utf8').replace(/\r/g, '');
+      /*
+        The thing to look for is the **predicate**, not the words
+        `company_module`: `20261025120000` creates `company_modules_select` on
+        the module table itself, and a window around `FOR SELECT` catches that
+        policy's own name — the first version of this check reported it, which
+        would have made the assertion fail on a clean head.
+
+        `current_role_permits(…, true)` is the WRITE gate and is deliberately
+        not this: `p_need_edit AND` inside that function is the line between
+        wall C and wall D, and `20261027120000`'s header says why the conjunct
+        must stay.
+      */
+      if (/FOR SELECT[\s\S]{0,600}?company_module_page_closed/i.test(source)) offenders.push(file);
+    }
+    expect(offenders,
+      'a SELECT policy now carries a module term; teach src/utils/backup.ts first, or the ' +
+      'company\'s own backup reports a truncated archive as complete').toEqual([]);
   });
 });

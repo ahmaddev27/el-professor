@@ -17,8 +17,17 @@
  *     about this design rather than reassurance. Switching a module off writes
  *     one row in `company_modules` and nothing else — no delete, no archive, no
  *     cascade — so `on → off → on` is the identity (section 5's prohibition).
- *     Reads are not closed either, so the customer's own figures are still
- *     readable by every screen that was reading them.
+ *
+ * **"Kept unchanged" is about the rows, not about every screen, and since
+ * 27.10.2026 that distinction is real.** No read is closed, so nothing has
+ * become unreadable — but the Overview, which can never be switched off, now
+ * **withholds** each figure it would have computed from a disabled module's
+ * rows and says so in its place (`ModuleOffNotice`,
+ * `src/utils/overviewModuleScope.ts`). So a customer whose Fixkosten module is
+ * off still owns every fixed-cost row and still gets every one of them in a
+ * backup; what they no longer see is a Gewinn figure that silently subtracted
+ * them. Do not relax this page's copy into "nothing changes": the rows do not
+ * change, the dashboard does.
  *
  * Tokens and primitives only, no inline style and no hard-coded colour: the
  * file has no entry in `style-baseline.json` and the ratchet reads a missing
