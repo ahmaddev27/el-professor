@@ -25,6 +25,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 const repoFile = (path: string) =>
@@ -144,8 +145,13 @@ function migrations(admits: boolean): string {
   return posix(path);
 }
 
-const REAL_COMPOSE = posix(new URL('../../deploy/docker-compose.yml', import.meta.url).pathname.replace(/^\//, ''));
-const REAL_MIGRATIONS = posix(new URL('../../supabase/migrations', import.meta.url).pathname.replace(/^\//, ''));
+// `fileURLToPath`, never `url.pathname`: on Windows `pathname` is `/C:/x`, so
+// stripping the leading slash happens to give an absolute path, but on Linux it
+// is `/home/x` and stripping it yields a **relative** path. That version passed
+// here and would have failed in CI on exactly the two tests that read the real
+// repository.
+const REAL_COMPOSE = posix(fileURLToPath(new URL('../../deploy/docker-compose.yml', import.meta.url)));
+const REAL_MIGRATIONS = posix(fileURLToPath(new URL('../../supabase/migrations', import.meta.url)));
 
 /** A fully configured .env for the apex-domain choice, switched on. */
 const ON = [
