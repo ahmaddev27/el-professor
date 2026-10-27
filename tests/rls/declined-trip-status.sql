@@ -187,40 +187,84 @@ END $$;
 
 -- ─── 5. Tenancy is the same as any other trip ───────────────────────────────
 
+/*
+  The claims are the **singular** `request.jwt.claim.*` settings, as every other
+  file in this kit sets them. The JSON `request.jwt.claims` form does not work
+  here: `auth.uid()` in the supabase/postgres image reads the singular claim
+  only, and its body differs from the live databases'. The first version of this
+  section set the JSON and the company's own administrator saw nothing — a
+  refusal that was measuring the fixture, not the policy.
+
+  `DISCARD PLANS` before each principal, for the reason the matrix's own guard
+  exists: schema USAGE and an inlinable callee are checked when a statement is
+  **parsed**, and plpgsql caches the parsed form, so a probe run after the owner
+  has run the same path reuses the owner's plan and reads as allowed.
+*/
+CREATE OR REPLACE FUNCTION _dc_as(p_user uuid) RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  EXECUTE 'SET LOCAL ROLE NONE';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
+  EXECUTE 'DISCARD PLANS';
+  IF p_user IS NULL THEN
+    PERFORM set_config('request.jwt.claim.role', 'anon', true);
+    EXECUTE 'SET LOCAL ROLE anon';
+    RETURN;
+  END IF;
+  PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+END $$;
+
 DO $$
 DECLARE
   c_admin_a CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
   c_admin_b CONSTANT uuid := 'b0000000-0000-4000-8000-000000000001';
-  v_seen int;
+  c_viewer_a CONSTANT uuid := 'a0000000-0000-4000-8000-000000000003';
+  v_owner int;
+  v_seen  int;
 BEGIN
-  PERFORM set_config('request.jwt.claims',
-    json_build_object('sub', c_admin_a, 'role', 'authenticated',
-                      'amr', json_build_array(json_build_object('method', 'password')))::text, true);
-  SET LOCAL ROLE authenticated;
-  SELECT count(*) INTO v_seen FROM fahrtenbuch_trips WHERE trip_status = 'declined';
-  IF v_seen = 0 THEN
-    RAISE EXCEPTION 'declined 5: the company''s own administrator cannot see its declined rows';
+  -- The owner control first. Without it a zero below cannot be told from
+  -- "there were never any rows", and the whole section would pass vacuously.
+  SELECT count(*) INTO v_owner FROM fahrtenbuch_trips WHERE trip_status = 'declined';
+  IF v_owner = 0 THEN
+    RAISE EXCEPTION 'declined 5: the owner sees no declined row, so section 2 wrote none and 5 would measure nothing';
   END IF;
-  RESET ROLE;
 
-  PERFORM set_config('request.jwt.claims',
-    json_build_object('sub', c_admin_b, 'role', 'authenticated',
-                      'amr', json_build_array(json_build_object('method', 'password')))::text, true);
-  SET LOCAL ROLE authenticated;
+  PERFORM _dc_as(c_admin_a);
+  SELECT count(*) INTO v_seen FROM fahrtenbuch_trips WHERE trip_status = 'declined';
+  IF v_seen <> v_owner THEN
+    RAISE EXCEPTION 'declined 5a: the company''s own administrator sees % of % declined rows', v_seen, v_owner;
+  END IF;
+
+  -- SELECT carries no role term on a business table — 3.3's shape has none —
+  -- so a viewer of the same company reads them too.
+  PERFORM _dc_as(c_viewer_a);
+  SELECT count(*) INTO v_seen FROM fahrtenbuch_trips WHERE trip_status = 'declined';
+  IF v_seen <> v_owner THEN
+    RAISE EXCEPTION 'declined 5b: a viewer of the same company sees % of % declined rows', v_seen, v_owner;
+  END IF;
+
+  PERFORM _dc_as(c_admin_b);
   SELECT count(*) INTO v_seen FROM fahrtenbuch_trips WHERE trip_status = 'declined';
   IF v_seen <> 0 THEN
-    RAISE EXCEPTION 'declined 5: another company''s administrator sees % declined rows', v_seen;
+    RAISE EXCEPTION 'declined 5c: another company''s administrator sees % declined rows', v_seen;
   END IF;
-  RESET ROLE;
 
-  PERFORM set_config('request.jwt.claims', NULL, true);
-  SET LOCAL ROLE anon;
+  PERFORM _dc_as(NULL);
   SELECT count(*) INTO v_seen FROM fahrtenbuch_trips WHERE trip_status = 'declined';
   IF v_seen <> 0 THEN
-    RAISE EXCEPTION 'declined 5: anon sees % declined rows', v_seen;
+    RAISE EXCEPTION 'declined 5d: anon sees % declined rows', v_seen;
   END IF;
-  RESET ROLE;
-  RAISE NOTICE 'declined 5: tenancy holds for a declined row';
+
+  EXECUTE 'SET LOCAL ROLE NONE';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
+  RAISE NOTICE 'declined 5: tenancy holds for a declined row (% rows, own company only)', v_owner;
 END $$;
 
 -- ─── 6. The fee is immutable, and the trigger is not a blanket refusal ──────
