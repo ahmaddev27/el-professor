@@ -286,6 +286,46 @@ services:
       GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/auth/v1/callback
 
+      # Passkey (WebAuthn) sign-in. Off unless PASSKEY_SIGNIN_ENABLED=true in
+      # .env. deploy.sh refuses any value but empty, true or false, refuses an
+      # RP ID that is not a bare domain, and refuses an origin that is not
+      # https or not under that RP ID.
+      #
+      # Unlike the Google switch this one does NOT open GoTrue's signup, and
+      # the entrypoint above is deliberately untouched. Measured in GoTrue's
+      # source: no passkey handler calls NewUser, signupNewUser or CreateUser,
+      # and /signup has no passkey branch. Registration takes the user from an
+      # already-authenticated context (requireAuthentication plus
+      # requireNotAnonymous), and authentication only ever resolves an existing
+      # user through FindUserByID, erroring when the user handle matches
+      # nothing. So enabling passkeys creates no account-creation path and
+      # weakens GOTRUE_DISABLE_SIGNUP not at all.
+      #
+      # The RP ID is effectively permanent: changing it invalidates every
+      # passkey already registered against it. The origins are a comma-
+      # separated list, and each one's host must equal the RP ID or be a
+      # subdomain of it, because the RP ID has to be a registrable domain
+      # suffix of the origin's effective domain.
+      #
+      # Empty values while the switch is off are harmless rather than merely
+      # tolerated: GoTrue runs WebAuthnConfiguration.Validate() only when
+      # passkeys (or MFA WebAuthn) are enabled, so an unset RP block is never
+      # read. Compose interpolation cannot negate a variable, which is why
+      # these are passed unconditionally and gated by the switch itself.
+      #
+      # The rate limit covers /auth/v1/passkeys/authentication/options. Note
+      # what it does not cover: .../authentication/verify, the route that mints
+      # the session, carries neither a limiter nor a captcha in GoTrue's own
+      # router. Caddy's X-Client-IP still identifies the client for every limit
+      # GoTrue does apply.
+      GOTRUE_PASSKEY_ENABLED: ${PASSKEY_SIGNIN_ENABLED:-false}
+      GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER: ${PASSKEY_MAX_PER_USER:-10}
+      GOTRUE_WEBAUTHN_RP_ID: ${PASSKEY_RP_ID:-}
+      GOTRUE_WEBAUTHN_RP_DISPLAY_NAME: ${PASSKEY_RP_DISPLAY_NAME:-}
+      GOTRUE_WEBAUTHN_RP_ORIGINS: ${PASSKEY_RP_ORIGINS:-}
+      GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION: ${PASSKEY_CHALLENGE_EXPIRY:-5m}
+      GOTRUE_RATE_LIMIT_PASSKEY: ${RATE_LIMIT_PASSKEY:-30}
+
       # Every other way GoTrue can create or attach an account, off as literals
       # so that no .env value and no change of a GoTrue default can open one:
       # phone signups, anonymous users, SAML single sign-on, and linking a

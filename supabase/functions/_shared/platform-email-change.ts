@@ -10,11 +10,15 @@
  * control of that mailbox and nothing about the account — an attacker at an
  * unattended signed-in browser chooses the new address and reads their own
  * code. What stops that attacker is the other half, `otp-request`'s rule that
- * the session's `amr` claim must name a **password** sign-in no older than
- * `PASSWORD_PROOF_MAX_AGE_SECONDS`. `passwordProofState` below is that same
- * rule, reading the same constant and the same `passwordAmrAgeSeconds`, and it
- * is now the only proof that the person at the keyboard knows the password.
- * Loosening it turns this route into account takeover from an open tab.
+ * the session's `amr` claim must name a **re-authentication** no older than
+ * `PASSWORD_PROOF_MAX_AGE_SECONDS`. `reauthProofState` below is that same rule,
+ * reading the same constant and the same `reauthProofAgeSeconds`, and it is now
+ * the only proof that the person at the keyboard holds the account's own
+ * secret. Loosening it turns this route into account takeover from an open tab.
+ *
+ * Since 27.10.2026 a **passkey** sign-in is such a proof, as a password is
+ * (`REAUTH_PROOF_METHODS` in otp-core.ts, and `c_permitted` in the database).
+ * Both lists are one decision; do not widen one of them alone.
  *
  * This route is deliberately **not** a row in `PLATFORM_STAFF_ROUTES`. That
  * table pairs a route with a capability and an action the database accepts in
@@ -30,7 +34,7 @@ import {
   parseEmail,
   parseJsonObject,
   PASSWORD_PROOF_MAX_AGE_SECONDS,
-  passwordAmrAgeSeconds,
+  reauthProofAgeSeconds,
   type HttpReply,
 } from './otp-core.ts';
 
@@ -76,21 +80,21 @@ export function parseEmailChangeBody(text: string): EmailChangeInput | null {
   return newEmail ? { newEmail } : null;
 }
 
-export type PasswordProofState = 'fresh' | 'stale' | 'absent';
+export type ReauthProofState = 'fresh' | 'stale' | 'absent';
 
 /**
  * How the caller's session was established, as this route cares about it.
  *
- * `absent` — no password sign-in in the token's `amr` at all (an OTP session
+ * `absent` — no re-authentication in the token's `amr` at all (an OTP session
  * from a password reset, or a session Google minted).
- * `stale`  — a password sign-in older than the window.
- * `fresh`  — a password sign-in inside the window; the only state that passes.
+ * `stale`  — a password or passkey sign-in older than the window.
+ * `fresh`  — one inside the window; the only state that passes.
  *
  * Both failures are reported as `reauth_required`: telling them apart would
  * tell a holder of a stolen token which kind it holds.
  */
-export function passwordProofState(claims: Record<string, unknown>, nowSec: number): PasswordProofState {
-  const age = passwordAmrAgeSeconds(claims, nowSec);
+export function reauthProofState(claims: Record<string, unknown>, nowSec: number): ReauthProofState {
+  const age = reauthProofAgeSeconds(claims, nowSec);
   if (age === null) return 'absent';
   return age <= PASSWORD_PROOF_MAX_AGE_SECONDS ? 'fresh' : 'stale';
 }
