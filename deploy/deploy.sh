@@ -651,9 +651,9 @@ GOOGLE_SIGNIN="$(env_value .env GOOGLE_SIGNIN_ENABLED)"
 # .env alone: passkey_guard refuses the switch on a GoTrue that does not know
 # the variable, and refuses it while no migration admits `passkey` in the
 # platform amr allow-list -- which is what would otherwise take the admin panel
-# away from every platform operator who used one. The migrations directory is
-# read from the release archive, beside this script.
-passkey_guard .env docker-compose.yml "$HERE/../supabase/migrations"
+# away from every platform operator who used one. The migrations are read from
+# $ROOT, the same directory the migration runner below reads.
+passkey_guard .env docker-compose.yml "$ROOT/supabase/migrations"
 PASSKEY_SIGNIN="$(env_value .env PASSKEY_SIGNIN_ENABLED)"
 
 # Both stacks share the CPU with each other and with ridy, and nothing is capped.
