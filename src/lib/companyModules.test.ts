@@ -117,7 +117,7 @@ const lockedInMigration = (): string[] => {
   return [...body[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map(match => match[1]);
 };
 
-const PAGES_IN_VALUES = /FUNCTION app_private\.company_module_pages\(\)[\s\S]*?FROM \(VALUES([\s\S]*?)\n    \) AS t\(/;
+const PAGES_IN_VALUES = /FUNCTION app_private\.company_module_pages\(\)[\s\S]*?FROM \(VALUES([\s\S]*?)\n {4}\) AS t\(/;
 
 /**
  * `module_key -> page_key` out of the newest migration defining the mapping —
