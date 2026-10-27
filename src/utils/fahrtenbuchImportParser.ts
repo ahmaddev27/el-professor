@@ -70,7 +70,15 @@ export interface ColMap {
   description: string;
 }
 
-export type TripStatus = 'completed' | 'cancelled' | 'unknown';
+/**
+ * `declined` since `20261027170000`: an order the driver turned down, which is
+ * not the same event as a cancelled ride and must not be counted as one. It is
+ * never `is_canceled` — the table's check pins `(trip_status = 'cancelled') =
+ * is_canceled` — so every reader that counts cancellations by that boolean is
+ * unaffected, and every reader that counts completed rides by
+ * `trip_status = 'completed'` is too.
+ */
+export type TripStatus = 'completed' | 'cancelled' | 'unknown' | 'declined';
 export const TRIP_STATUSES: readonly TripStatus[] = ['completed', 'cancelled', 'unknown'];
 
 export type TimeSource =
@@ -439,11 +447,34 @@ export const CANCELLED_STATUS_WORDS: readonly string[] = [
   'storno', 'storniert', 'storniertfahrt', 'stornierung',
   'cancelled', 'canceled', 'abgebrochen', 'nichtdurchgefuhrt',
 ];
+/**
+ * An order the driver turned down. Both spellings read as `unknown` before
+ * `20261027170000`, so this list moves words **out of `unknown`** only: no word
+ * that read as completed or cancelled reads differently, and no stored row
+ * changes meaning. That is what makes widening safe here where widening the
+ * cancelled list would not be.
+ */
+export const DECLINED_STATUS_WORDS: readonly string[] = ['abgelehnt', 'declined'];
 
 const STATUS_MAP: ReadonlyMap<string, TripStatus> = new Map<string, TripStatus>([
   ...COMPLETED_STATUS_WORDS.map(w => [normalise(w), 'completed'] as const),
   ...CANCELLED_STATUS_WORDS.map(w => [normalise(w), 'cancelled'] as const),
+  ...DECLINED_STATUS_WORDS.map(w => [normalise(w), 'declined'] as const),
 ]);
+
+/**
+ * True for a status that says **no journey took place**, so the row carries no
+ * clock times and is not missing them.
+ *
+ * It is not `is_canceled`: a declined order has no times either, and reading
+ * the boolean would have flagged every declined row `missing_start` and
+ * `missing_end` — a review queue nothing can ever clear. `unknown` is
+ * deliberately **not** on this list: an unreadable status with no times is
+ * exactly the row a person has to look at.
+ */
+export function statusImpliesNoJourney(status: TripStatus): boolean {
+  return status === 'cancelled' || status === 'declined';
+}
 
 export function mapTripStatus(raw: CellValue): TripStatus {
   if (isMissingCell(raw)) return 'unknown';
@@ -872,6 +903,12 @@ export interface BuildContext {
   orderTransmissionCol: string;
   driverMatches: ReadonlyMap<string, DriverMatchInfo>;
   carMatches: ReadonlyMap<string, CarMatchInfo>;
+  /**
+   * The tenant's decline fee in **integer cents**, written onto every declined
+   * order. Optional: a caller that does not know the tenant's setting leaves
+   * the column null rather than recording a zero fee.
+   */
+  declinedFeeCents?: number | null;
 }
 
 export interface BuiltRow {
@@ -928,6 +965,10 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
     const sourceStatus = isMissingCell(statusCell) ? null : String(statusCell).trim();
     const status = mapTripStatus(statusCell);
     const cancelled = status === 'cancelled';
+    // A declined order has no clock times either, and no revenue. `cancelled`
+    // stays exactly `is_canceled`; this is the wider question of whether a
+    // journey happened. See `statusImpliesNoJourney`.
+    const noJourney = statusImpliesNoJourney(status);
     const reasons = new Set<ReviewReason>();
 
     let tripDate = parseDate(rawDate);
@@ -943,16 +984,17 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
       reasons.add('missing_trip_date');
     }
 
-    // A cancelled ride keeps no clock times, as it always has.
-    const startTime = cancelled ? null : parseTime(rawStart);
-    const endTime = cancelled ? null : parseTime(rawEnd);
-    if (!cancelled && !startTime) {
+    // A ride that did not happen keeps no clock times, as a cancelled one
+    // always has. A declined order joins it: it was never driven.
+    const startTime = noJourney ? null : parseTime(rawStart);
+    const endTime = noJourney ? null : parseTime(rawEnd);
+    if (!noJourney && !startTime) {
       reasons.add(isMissingCell(rawStart) ? 'missing_start' : 'unreadable_start');
       if (!isMissingCell(rawStart) && stats.sampleUnreadableStart.length < 5) {
         stats.sampleUnreadableStart.push(rawStart);
       }
     }
-    if (!cancelled && !endTime) {
+    if (!noJourney && !endTime) {
       reasons.add(isMissingCell(rawEnd) ? 'missing_end' : 'unreadable_end');
     }
     if (!driverName) reasons.add('missing_driver');
@@ -1034,8 +1076,11 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
         route_end: text(colMap.route_end),
         description: text(colMap.description),
         price_amount: price,
-        cash_amount: cancelled ? 0 : (isBar ? price : 0),
-        online_amount: cancelled ? 0 : (isBar ? 0 : price),
+        // A journey that did not happen earns no revenue, cash or online. A
+        // declined order's own fee is `declined_fee_cents`, a column of its
+        // own, precisely so that it is never one of these two.
+        cash_amount: noJourney ? 0 : (isBar ? price : 0),
+        online_amount: noJourney ? 0 : (isBar ? 0 : price),
         tip_amount: tip,
         action_amount: 0,
         raw_data_json: Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v ?? null])),
@@ -1054,6 +1099,11 @@ export function buildTripRows(ctx: BuildContext): { built: BuiltRow[]; stats: Bu
         currency_source: 'assumed',
         source_row_key: null,
         source_row_key_basis: key?.basis ?? null,
+        // The tenant's configured fee, applied only to a declined order. Null
+        // when the caller passed none, which says "no fee is recorded" where a
+        // zero would claim the order earned nothing.
+        declined_fee_cents:
+          status === 'declined' && typeof ctx.declinedFeeCents === 'number' ? ctx.declinedFeeCents : null,
       },
     });
   });
@@ -1097,6 +1147,8 @@ export function withoutStoredKeys(
 export interface ImportSummary {
   completed: number;
   cancelled: number;
+  /** Orders the driver turned down. Counted apart from cancellations. */
+  declined: number;
   unknown: number;
   needsReview: number;
   reasons: Record<ReviewReason, number>;
@@ -1107,10 +1159,11 @@ export interface ImportSummary {
 export function summariseRows(rows: readonly TripInsertRow[]): ImportSummary {
   const reasons = Object.fromEntries(REVIEW_REASONS.map(r => [r, 0])) as Record<ReviewReason, number>;
   const timeSources = Object.fromEntries(TIME_SOURCES.map(s => [s, 0])) as Record<TimeSource, number>;
-  const summary: ImportSummary = { completed: 0, cancelled: 0, unknown: 0, needsReview: 0, reasons, timeSources };
+  const summary: ImportSummary = { completed: 0, cancelled: 0, declined: 0, unknown: 0, needsReview: 0, reasons, timeSources };
   for (const r of rows) {
     if (r.trip_status === 'completed') summary.completed++;
     else if (r.trip_status === 'cancelled') summary.cancelled++;
+    else if (r.trip_status === 'declined') summary.declined++;
     else summary.unknown++;
     if (r.needs_review) summary.needsReview++;
     for (const reason of r.review_reasons) reasons[reason]++;

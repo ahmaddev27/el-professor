@@ -7229,6 +7229,7 @@ export const de = {
   'moduleOff.title':          '{module} ist für Ihr Unternehmen nicht aktiviert',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.status.declined': 'Abgelehnt',
   'rec.confirmFailed':      'Bestätigung fehlgeschlagen',
   'rec.confirmSaved':       'Bestätigung erfasst',
   'rec.confirmValues':      'Werte bestätigen',

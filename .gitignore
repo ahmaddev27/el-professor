@@ -90,3 +90,11 @@ SIMULIERT_*.xlsx
 # ignored, not the file type.
 corection/
 w/
+# The external auditor's own packages, as they arrive. Round 3's holds the
+# reply under review plus the round's reports; the earlier rounds' evidence
+# carried four drivers' names and 222 real street addresses, and nothing in
+# such a package has been checked for customer data before it lands in the
+# checkout. Ignored as a folder, for the reason above: a ride export is
+# customer data whatever extension it is pasted into.
+FleetBook_Round*/
+FleetBook_*_Package/

@@ -6,6 +6,7 @@ import { ACTUAL_END_TOKENS, ACTUAL_START_TOKENS } from './planningQualityChecks'
 import {
   CANCELLED_STATUS_WORDS,
   COMPLETED_STATUS_WORDS,
+  DECLINED_STATUS_WORDS,
   DATETIME_RE,
   GERMAN_DATETIME_RE,
   REVIEW_REASONS,
@@ -634,7 +635,25 @@ describe('the migration derives what the browser derives', () => {
     expect(sqlConstant('c_reject_fragments')).toEqual(quoted((m as RegExpMatchArray)[1]));
   });
 
-  it('reads a status word by the same two lists', () => {
+  it('reads a status word by the same three lists, in the newest migration that says so', () => {
+    // `fahrtenbuch_map_status` is the second list here that a LATER migration
+    // redefines: `20261027170000` taught it `abgelehnt`. So this assertion
+    // reads the NEWEST definition, like the `review_reasons` one below — and
+    // it is named, so a failure says which file was read instead of leaving
+    // the next reader to guess whether the list moved or the parser did.
+    const newest = newestDefining('FUNCTION app_private.fahrtenbuch_map_status');
+    expect(newest.file).toBe('20261027170000_declined_trip_status.sql');
+    const listIn = (name: string) => {
+      const m = newest.text.match(new RegExp(`${name} CONSTANT text\\[\\] := ARRAY\\[([^\\]]*)\\]`));
+      if (!m) throw new Error(`${name} not found in ${newest.file}`);
+      return quoted(m[1]);
+    };
+    expect(listIn('c_completed_words')).toEqual([...COMPLETED_STATUS_WORDS]);
+    expect(listIn('c_cancelled_words')).toEqual([...CANCELLED_STATUS_WORDS]);
+    expect(listIn('c_declined_words')).toEqual([...DECLINED_STATUS_WORDS]);
+    // The list that introduced them is still the list it introduced: a
+    // restatement that dropped a word would pass the three above only by
+    // dropping it on both sides, and this is what catches that.
     expect(sqlConstant('c_completed_words')).toEqual([...COMPLETED_STATUS_WORDS]);
     expect(sqlConstant('c_cancelled_words')).toEqual([...CANCELLED_STATUS_WORDS]);
     // The old importer's CANCELED_STATUSES, minus the one normalisation made

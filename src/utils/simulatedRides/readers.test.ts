@@ -56,6 +56,11 @@ const INVENTORY: Record<string, Disposition> = {
   'utils/returnCheck/parse.ts': 'counts', // pure row reader, no document
   'utils/shiftRecommendation/types.ts': 'counts', // types only; ShiftRecommendationPage drops simulated rides before learning
   'utils/shiftRecommendationReference.ts': 'counts', // pure statistics over rows the page already filtered
+  // Names the table only in prose — it is a settings object and reads no trip.
+  // The line is written down rather than the prose reworded, because this
+  // inventory is deliberately textual: a file that mentions the Fahrtenbuch
+  // should need a decision, even when the decision is "it does not touch it".
+  'utils/simulatedRides/tenantSettings.ts': 'counts',
   'utils/tripAnalysis/adapter.ts': 'counts', // pure adapter, no document
   'utils/tripAnalysis/types.ts': 'marks',
 };

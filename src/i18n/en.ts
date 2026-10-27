@@ -7155,6 +7155,7 @@ export const en: PartialDictionary = {
   'moduleOff.title':          '{module} is not activated for your company',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.status.declined': 'Declined',
   'rec.confirmFailed':      'Confirmation failed',
   'rec.confirmSaved':       'Confirmation recorded',
   'rec.confirmValues':      'Confirm values',

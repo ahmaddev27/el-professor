@@ -1,0 +1,90 @@
+FINANZBERICHT — SIMULIERTER MONAT
+========================================================================
+
+SIMULIERT – Diese Fahrten wurden vom Fahrtengenerator erzeugt. Es sind keine echten Fahrten. Nicht als Nachweis, Fahrtenbuch oder Lohngrundlage verwenden.
+
+Die Zahlen stammen aus einem Generator mit erfundenen Eingaben.
+Sie sind keine Messung eines Unternehmens und kein Zahlungsnachweis.
+
+Zeitraum: 10/2026   Seed: 20261027   Generator: full-month/1.0.0
+Zeitzone: Europe/Berlin   Betriebstagsbeginn: 04:00
+Datenquelle: period_driven (der Zeitraum kommt aus dem Kalender, die Umsätze sind erzeugt)
+
+1. AUFTRÄGE
+------------------------------------------------------------------------
+Aufträge insgesamt.......................... 725
+davon abgeschlossen......................... 697
+davon abgelehnt (DECLINED).................. 18
+davon storniert (CANCELLED)................. 10
+
+2. ERLÖSE
+------------------------------------------------------------------------
+Fahrpreise abgeschlossener Fahrten.......... 8.144,76 EUR
+  davon per App............................. 5.494,80 EUR
+  davon Bargeld............................. 2.649,96 EUR
+Trinkgelder................................. 169,00 EUR
+Ablehnungsgebühren.......................... 108,00 EUR
+Stornogebühren nach Firmenregel............. 0,00 EUR
+Kilometer abgeschlossener Fahrten........... 3038,41 km
+
+   Nicht gezählt, nur ausgewiesen:
+   Fahrpreisspalte stornierter Fahrten...... 68,10 EUR
+   (Diese Spalte ist eine andere, ältere Größe des Exports und
+    geht in keine Bemessungsgrundlage ein — sonst würde eine
+    Stornierung zweimal zählen.)
+
+3. BEMESSUNGSGRUNDLAGE
+------------------------------------------------------------------------
+Fahrpreise.................................. 8.144,76 EUR
+Trinkgelder einbezogen: nein................ 0,00 EUR
+Ablehnungsgebühren einbezogen: ja........... 108,00 EUR
+Bemessungsgrundlage......................... 8.252,76 EUR
+
+4. MONATLICHER ANTEIL
+------------------------------------------------------------------------
+Gewählter Satz.............................. 32,01 %
+  Seed des Satzes........................... 20261027
+  Zufallsstrom des Satzes................... 1597479438
+Bemessungsgrundlage x Satz.................. 2.641,71 EUR
+Verbleibend (bei Behandlung als Abzug)...... 5.611,05 EUR
+
+   Der Satz ist ein Anteil an bereits vorhandenem Umsatz. Er ist
+   keine Steuer und keine Provision, er verändert keinen Fahrpreis,
+   und er wird nirgends gebucht.
+Kontrolle: Anteil + Rest.................... 8.252,76 EUR (stimmt)
+
+5. ABSTIMMUNG DER TEILSUMMEN
+------------------------------------------------------------------------
+Auftraege je Tag............................ 725 gegen 725 -> OK
+Fahrpreise (Cent) je Tag.................... 814476 gegen 814476 -> OK
+Trinkgeld (Cent) je Tag..................... 16900 gegen 16900 -> OK
+Ablehnungsgebuehren (Cent) je Tag........... 10800 gegen 10800 -> OK
+Kilometer (Hundertstel) je Tag.............. 303841 gegen 303841 -> OK
+Auftraege je Fahrer......................... 725 gegen 725 -> OK
+Fahrpreise (Cent) je Fahrer................. 814476 gegen 814476 -> OK
+Trinkgeld (Cent) je Fahrer.................. 16900 gegen 16900 -> OK
+Ablehnungsgebuehren (Cent) je Fahrer........ 10800 gegen 10800 -> OK
+Stornogebuehren (Cent) je Fahrer............ 0 gegen 0 -> OK
+Kilometer (Hundertstel) je Fahrer........... 303841 gegen 303841 -> OK
+Auftraege je Fahrzeug....................... 725 gegen 725 -> OK
+Fahrpreise (Cent) je Fahrzeug............... 814476 gegen 814476 -> OK
+Trinkgeld (Cent) je Fahrzeug................ 16900 gegen 16900 -> OK
+Ablehnungsgebuehren (Cent) je Fahrzeug...... 10800 gegen 10800 -> OK
+Stornogebuehren (Cent) je Fahrzeug.......... 0 gegen 0 -> OK
+Kilometer (Hundertstel) je Fahrzeug......... 303841 gegen 303841 -> OK
+
+6. ZEITRAUM UND BETRIEBSFÄHIGKEIT
+------------------------------------------------------------------------
+Kalendertage im Zeitraum.................... 31
+Tage ohne jede Fahrt........................ 9
+Schichten insgesamt......................... 65
+Verworfene Schichtversuche.................. 121
+Aufgezeichnete Ablehnungsgründe............. 5635
+  davon durch eine Fahrernotiz gesperrt..... 261
+  betroffene Fahrer......................... 2
+  Tage ohne gültigen Betriebstagsbeginn (Zeitumstellung) 0
+
+7. PRÜFUNGEN
+------------------------------------------------------------------------
+Keine Regelverletzung im erzeugten Monat.
+Kein unlesbarer Betrag.
