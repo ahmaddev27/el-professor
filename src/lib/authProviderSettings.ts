@@ -22,21 +22,43 @@
 export interface AuthProviderSettings {
   /** Whether GoTrue accepts `provider=google` right now. */
   google: boolean;
+  /**
+   * Whether GoTrue serves the `/auth/v1/passkeys/*` routes right now.
+   *
+   * The same argument as `google`, with one extra turn that makes this slice
+   * safe to merge before the GoTrue upgrade it needs. GoTrue reports
+   * `passkeys_enabled` from v2.188.0 onward; the image this stack pins is
+   * v2.170.0, which does not know the field at all, so the key is **absent** —
+   * and absent reads as off, which is exactly what it is. `requirePasskeyEnabled`
+   * wraps the whole route group, so on that server every passkey path is a 404
+   * as well. There is deliberately no build-time flag beside this: a flag of our
+   * own could only get out of step with the server, in one direction or the
+   * other, and the server's own answer is right in both.
+   */
+  passkeys: boolean;
 }
 
 /** What every failure and every unrecognised answer resolves to. */
-export const AUTH_PROVIDERS_OFF: AuthProviderSettings = { google: false };
+export const AUTH_PROVIDERS_OFF: AuthProviderSettings = { google: false, passkeys: false };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * Reads GoTrue's `/settings` body. Only `external.google === true` counts as
- * on; anything else, including a missing field or a truthy string, is off.
+ * Reads GoTrue's `/settings` body. Only `external.google === true` and
+ * `passkeys_enabled === true` count as on; anything else, including a missing
+ * field or a truthy string, is off.
+ *
+ * The two are read independently — `passkeys_enabled` is a top-level field, not
+ * a provider under `external`, which is where GoTrue puts it and what
+ * `deploy.sh` reads back when it verifies a release.
  */
 export function parseAuthProviderSettings(body: unknown): AuthProviderSettings {
-  if (!isRecord(body) || !isRecord(body.external)) return AUTH_PROVIDERS_OFF;
-  return { google: body.external.google === true };
+  if (!isRecord(body)) return AUTH_PROVIDERS_OFF;
+  return {
+    google: isRecord(body.external) && body.external.google === true,
+    passkeys: body.passkeys_enabled === true,
+  };
 }
 
 /** One uncached read. Exported for the tests; screens use `loadAuthProviderSettings`. */

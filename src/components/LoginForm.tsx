@@ -4,6 +4,8 @@ import { LogIn, Mail, Lock, Eye, EyeOff, MailCheck } from 'lucide-react';
 import { useAuth, BLOCK_MESSAGE_KEYS } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import GoogleButton from './auth/GoogleButton';
+import PasskeyButton from './auth/PasskeyButton';
+import { usePasskeysEnabled } from '../hooks/usePasskeysEnabled';
 import { LegalLinks } from './legal/LegalLinks';
 import AuthShell from './auth/AuthShell';
 import { authFieldIconClass, authFieldWithIconClass, authLinkClass } from './auth/authStyles';
@@ -48,6 +50,10 @@ const LoginForm: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // Only so the "or" rule is drawn once when both alternatives are on. With
+  // passkeys off — today's server — this is false and Google keeps the rule it
+  // has now, so the screen is byte-identical.
+  const passkeysOn = usePasskeysEnabled();
   const [error, setError] = useState('');
   const [needsVerification, setNeedsVerification] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -183,12 +189,20 @@ const LoginForm: React.FC = () => {
         </Button>
       </form>
 
-      {/* Renders nothing until GoTrue reports Google as enabled — its own
-          spacing included, so the card is unchanged while it is off. */}
+      {/* Both render nothing until GoTrue reports the method as enabled — their
+          own spacing included, so the card is unchanged while they are off. The
+          passkey button carries the "or" rule and Google follows it, so with
+          passkeys off and Google on the card looks exactly as it does today.
+
+          Platform staff are deliberately NOT refused a passkey the way they are
+          refused Google: the owner's decision of 27.10.2026 is that a passkey
+          counts as a password does, and 20261027140000 admits it in the
+          database's own allow-list. */}
+      <PasskeyButton divider onError={key => setError(t(key))} />
       <GoogleButton
         from="login"
         labelKey="auth.google.signIn"
-        divider
+        divider={!passkeysOn}
         onError={key => setError(t(key))}
       />
     </AuthShell>

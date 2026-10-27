@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { User, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Building2, ShieldCheck } from 'lucide-react';
+import { User, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Building2, ShieldCheck, KeyRound } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -13,8 +13,11 @@ import {
   type OtpVerifyFailure,
 } from '../lib/otpClient';
 import { changePlatformEmail, platformEmailChangeMessageKey } from '../lib/platformEmailChange';
+import { proveWithPasskey, proveWithPassword, type ReauthProof } from '../lib/reauthProof';
+import { usePasskeysEnabled } from '../hooks/usePasskeysEnabled';
 import EmphasizedText from '../components/auth/EmphasizedText';
 import OtpChallenge from '../components/auth/OtpChallenge';
+import PasskeyCard from '../components/account/PasskeyCard';
 
 const MIN_LEN = 8;
 
@@ -52,6 +55,7 @@ type EmailChallenge = { newEmail: string; accessToken: string; cooldownSeconds: 
 const AccountPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const { user, profile, isSuperAdmin } = useAuth();
+  const passkeysOn = usePasskeysEnabled();
 
   const [companyName, setCompanyName] = useState<string | null>(null);
 
@@ -113,17 +117,27 @@ const AccountPage: React.FC = () => {
   };
 
   /**
-   * The current password, spent on a sign-in against the *current* address.
+   * How the re-authentication proof is produced, and by which method.
    *
-   * That call is what proves the password to GoTrue and mints the session whose
+   * The call is what proves the secret to GoTrue and mints the session whose
    * `amr` claim both servers then read: otp-request for the code path, and
    * platform-staff/email-change for the direct one. It is not a browser-side
    * check — the browser only carries the resulting token.
+   *
+   * There are two methods now and they are interchangeable here by design. A
+   * fresh passkey assertion mints a session whose single `amr` entry is stamped
+   * now, by the same `AddClaimToSession` line that stamps a password one, and
+   * `REAUTH_PROOF_METHODS` in otp-core.ts names both. So the 600-second window
+   * is unchanged and un-relaxed; what changed is that an operator who signs in
+   * with a passkey can now satisfy it. Without this the platform email change
+   * was reachable only with a password — which is why this slice closes it
+   * rather than leaving it to the first passkey-only operator to discover.
    */
-  const provePassword = async (): Promise<string | null> => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: signInEmail, password: emailPw });
-    return error || !data.session ? null : data.session.access_token;
-  };
+  type Prover = () => Promise<ReauthProof>;
+  const withPassword: Prover = () => proveWithPassword(signInEmail, emailPw);
+  // `user!.id` is safe inside the guard below: nothing draws this page without a
+  // session, and the button that uses it is drawn only when `user?.id` is set.
+  const withPasskey: Prover = () => proveWithPasskey(user!.id);
 
   /** The address as typed, or null with the message already shown. */
   const validatedNewEmail = (): string | null => {
@@ -133,19 +147,19 @@ const AccountPage: React.FC = () => {
     return next;
   };
 
-  const requestEmailChange = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const requestEmailChange = async (prove: Prover) => {
     setEmailMsg(null);
     const next = validatedNewEmail();
     if (!next) return;
 
     setEmailBusy(true);
-    const accessToken = await provePassword();
-    if (!accessToken) {
+    const proof = await prove();
+    if (!proof.ok) {
       setEmailBusy(false);
-      setEmailMsg({ ok: false, text: t('account.error.pwCurrentWrong') });
+      setEmailMsg({ ok: false, text: t(proof.messageKey) });
       return;
     }
+    const accessToken = proof.accessToken;
 
     const result = await requestOtp({ purpose: 'email_change', newEmail: next, accessToken });
     setEmailBusy(false);
@@ -165,19 +179,19 @@ const AccountPage: React.FC = () => {
    * row (`not_platform_account`) and that the token's password proof is fresh
    * (`reauth_required`), so nothing here is the control.
    */
-  const changeEmailDirectly = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const changeEmailDirectly = async (prove: Prover) => {
     setEmailMsg(null);
     const next = validatedNewEmail();
     if (!next) return;
 
     setEmailBusy(true);
-    const accessToken = await provePassword();
-    if (!accessToken) {
+    const proof = await prove();
+    if (!proof.ok) {
       setEmailBusy(false);
-      setEmailMsg({ ok: false, text: t('account.error.pwCurrentWrong') });
+      setEmailMsg({ ok: false, text: t(proof.messageKey) });
       return;
     }
+    const accessToken = proof.accessToken;
 
     const result = await changePlatformEmail({ newEmail: next, accessToken });
     if (!result.ok) {
@@ -372,7 +386,14 @@ const AccountPage: React.FC = () => {
           </div>
         </section>
       ) : (
-        <form onSubmit={isSuperAdmin ? changeEmailDirectly : requestEmailChange} className="rounded-xl p-5" style={card}>
+        <form
+          onSubmit={e => {
+            e.preventDefault();
+            void (isSuperAdmin ? changeEmailDirectly : requestEmailChange)(withPassword);
+          }}
+          className="rounded-xl p-5"
+          style={card}
+        >
           {emailHeading}
           <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
             {isSuperAdmin ? t('account.email.platformHint') : t('account.email.hint')}
@@ -407,6 +428,28 @@ const AccountPage: React.FC = () => {
               ? (isSuperAdmin ? t('common.saving') : t('otp.verifying'))
               : (isSuperAdmin ? t('account.email.changeNow') : t('account.email.sendCode'))}
           </button>
+
+          {/* The same change, proved with a passkey instead of the password.
+              `type="button"`, so the password field's `required` does not block
+              it — which is the whole point: an operator who holds no password
+              they can type must still be able to move their address, and for a
+              platform account that proof is the only control there is. It is
+              drawn only once GoTrue reports passkeys, so this is absent on
+              today's server. */}
+          {passkeysOn && user?.id && (
+            <div className="mt-3 font-ui">
+              <button
+                type="button"
+                disabled={emailBusy}
+                onClick={() => { void (isSuperAdmin ? changeEmailDirectly : requestEmailChange)(withPasskey); }}
+                className="inline-flex h-9 items-center gap-2 rounded-control border border-line bg-raised px-3.5 text-sm font-semibold text-fg transition-colors hover:bg-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:pointer-events-none disabled:opacity-50 [@media(pointer:coarse)]:h-11"
+              >
+                <KeyRound size={16} aria-hidden />
+                {t('passkey.reauth.useInstead')}
+              </button>
+              <p className="mt-1.5 text-xs text-fg-subtle">{t('passkey.reauth.hint')}</p>
+            </div>
+          )}
         </form>
       )}
 
@@ -468,6 +511,12 @@ const AccountPage: React.FC = () => {
           {pwBusy ? t('common.saving') : t('account.password.submit')}
         </button>
       </form>
+
+      {/* Renders nothing until GoTrue reports passkeys, so this page is
+          unchanged on today's server. It is a separate file on the design
+          system: this page is one of the six phase 5 never converted and sits
+          at 33 in style-baseline.json, which must not move. */}
+      <PasskeyCard />
     </div>
   );
 };
