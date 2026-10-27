@@ -100,7 +100,7 @@ describe('PasskeyButton, with the browser able', () => {
     // would still occupy its margin while this returns null.
     serverSettings({ passkeys_enabled: true });
     const tree = await draw();
-    const root = tree.toJSON() as { props: { className: string } };
+    const root = tree.toJSON() as unknown as { props: { className: string } };
     expect(root.props.className).toContain('mt-5');
   });
 });
