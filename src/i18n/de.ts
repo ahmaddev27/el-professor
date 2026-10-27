@@ -7219,4 +7219,7 @@ export const de = {
   'moduleOff.contactSupport': 'Support kontaktieren',
   'moduleOff.hint':           'Wenden Sie sich an den Support, um das Modul wieder aktivieren zu lassen.',
   'moduleOff.title':          '{module} ist für Ihr Unternehmen nicht aktiviert',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.status.declined': 'Abgelehnt',
 } as const;

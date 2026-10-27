@@ -7148,4 +7148,7 @@ export const en: PartialDictionary = {
   'moduleOff.contactSupport': 'Contact support',
   'moduleOff.hint':           'Contact support to have the module switched back on.',
   'moduleOff.title':          '{module} is not activated for your company',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'imp.status.declined': 'Declined',
 };

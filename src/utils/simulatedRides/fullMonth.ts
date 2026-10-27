@@ -276,7 +276,6 @@ export function generateFullMonth(
           driverLastEnd,
           refusals,
           shiftId: `S${nextShift}`,
-          settings,
         });
         if (!placed) {
           month.droppedShifts += 1;
@@ -369,7 +368,6 @@ interface PlaceArgs {
   driverLastEnd: Map<string, number>;
   refusals: CapacityRefusal[];
   shiftId: string;
-  settings: SimulationTenantSettings;
 }
 
 /**
@@ -383,7 +381,7 @@ interface PlaceArgs {
  * place a ride the planner would refuse.
  */
 function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[] } | null {
-  const { ctx, day, dayStartMs, dayEndMs, vehicle, pool, notes, refusals, settings } = args;
+  const { ctx, day, dayStartMs, dayEndMs, vehicle, pool, notes, refusals } = args;
   const { rng, opts } = ctx;
   const vehicleGap = opts.minVehicleGapMinutes * 60_000;
   const restMs = opts.minDriverRestMinutes * 60_000;

@@ -1,7 +1,6 @@
 import { SOURCE_TIME_ZONE, formatWall, wallAt, wallTimeToInstant } from '../fahrtenbuchImportParser';
 import { operatingDayIn } from './period';
 
-const HOUR_MS = 3_600_000;
 const OPERATING_DAY_START_HOUR = 4;
 
 export function localHour(ms: number): number {

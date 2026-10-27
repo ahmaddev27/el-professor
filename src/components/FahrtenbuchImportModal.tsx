@@ -148,6 +148,7 @@ const STATUS_LABEL_KEYS: Record<TripStatus, TranslationKey> = {
   completed: 'imp.status.completed',
   cancelled: 'imp.status.cancelled',
   unknown:   'imp.status.unknown',
+  declined:  'imp.status.declined',
 };
 
 const REASON_LABEL_KEYS: Record<ReviewReason, TranslationKey> = {
