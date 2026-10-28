@@ -81,6 +81,24 @@ describe('clockSeconds', () => {
       expect(clockSeconds(value as string | undefined)).toBeNull();
     }
   });
+
+  /**
+   * The one shape where the sort could disagree with the cell about whether a
+   * row HAS a time. `clockTime` matches `\d{2}`, so it draws nothing for a
+   * one-digit hour; ranking such a row at 05:26 would wedge a blank-looking
+   * cell into the middle of the ranking. Both halves read two digits, which is
+   * also what the form's own validator accepts (`([01]\d|2[0-3])`).
+   */
+  it('reads the hour as two digits, exactly as the cell and the form do', async () => {
+    const { clockTime } = await import('./receiptDisplay');
+    for (const value of ['5:26', '5:26:00', '0:00']) {
+      expect(clockTime(value), value).toBeNull();
+      expect(clockSeconds(value), value).toBeNull();
+    }
+    // And the zero-padded form every real row carries is read by both.
+    expect(clockTime('05:26:00')).toBe('05:26');
+    expect(clockSeconds('05:26:00')).toBe(5 * 3600 + 26 * 60);
+  });
 });
 
 describe('measuredSortValue', () => {

@@ -5,8 +5,9 @@
  * (27.10.2026) for the sort control on five more columns — the printed time, the
  * litres, the price per litre, the odometer and the range left — and the
  * comparator that was in the component could not have carried them correctly.
- * It read `a[field]` and compared with `<` / `>`, which is right for the seven
- * fields it already had and wrong for these five in two ways:
+ * It read `a[field]` and compared with `<` / `>`, which is right for the five
+ * columns that already offered the control — Belegnummer, date, Buchungstext,
+ * Fahrer and Ausgabe — and wrong for these five in two ways:
  *
  *   1. `receiptTime` is a Postgres `time` column, so it arrives as the string
  *      `"05:26:00"`. A plain string compare happens to order zero-padded clock
@@ -57,19 +58,23 @@
 import type { Receipt } from '../types/receipt';
 
 /**
- * The seven fields that sorted before 27.10.2026. `income` and `balance` are
- * not columns on this table and no header offers them; they are kept because
- * the component's state may still hold them and dropping a member of this union
- * would change what `handleSort` accepts.
+ * The fields that sorted before 27.10.2026, compared as they are stored: four
+ * strings and one number (`expense`, which `<` / `>` already ranked correctly,
+ * being a `number` on every row — the mapper writes `parseFloat(…) || 0`).
+ *
+ * The union the component declared also carried `income` and `balance`. Both
+ * are dropped here: neither is a property of `Receipt`, no header offers them,
+ * and `handleSort` is reached only from `sortHeader`, so nothing could ever set
+ * them. Keeping them would have let a future `sortHeader('income', …)` compile
+ * and then silently return 0 for every pair — the exact hole this module was
+ * written to close. Removing them makes that a compile error instead.
  */
-export type ReceiptTextSortField =
+export type ReceiptPlainSortField =
   | 'receiptNumber'
   | 'date'
   | 'description'
   | 'driverName'
-  | 'income'
-  | 'expense'
-  | 'balance';
+  | 'expense';
 
 /** The five the owner marked on 27.10.2026. Each is a measured quantity, not text. */
 export const MEASURED_SORT_FIELDS = [
@@ -82,7 +87,7 @@ export const MEASURED_SORT_FIELDS = [
 
 export type MeasuredSortField = (typeof MEASURED_SORT_FIELDS)[number];
 
-export type ReceiptSortField = ReceiptTextSortField | MeasuredSortField;
+export type ReceiptSortField = ReceiptPlainSortField | MeasuredSortField;
 export type ReceiptSortDirection = 'asc' | 'desc';
 
 function isMeasured(field: ReceiptSortField): field is MeasuredSortField {
@@ -98,17 +103,28 @@ function isMeasured(field: ReceiptSortField): field is MeasuredSortField {
  * only in their seconds print the same two digits either way — and throwing
  * them away would turn a real difference into a tie.
  *
+ * **The hour is two digits, as it is everywhere else that reads this column:**
+ * `clockTime` and `clockToInput` both match `\d{2}`, and the form's own
+ * validator is `([01]\d|2[0-3])`. A one-digit hour would be the one shape where
+ * the sort and the cell disagree about whether the row HAS a time — `"5:26"`
+ * would be ranked at 05:26 while `clockTime` returned null and the cell drew
+ * blank, wedging an empty-looking row into the middle of the ranking. "Sort on
+ * the value, not on the rendered text" does not license disagreeing with the
+ * cell about whether there is a value at all. Nothing produces such a value
+ * today — `receipt_time` is a Postgres `time`, and the form's input is
+ * `type="time"` — so this is a shape the two halves are held to, not a bug
+ * being fixed.
+ *
  * A value that does not parse is `null`, never `NaN`: `NaN` compares false
  * against everything and would put such a row back in the gap this module
  * exists to close.
  */
 export function clockSeconds(value: string | undefined): number | null {
   if (typeof value !== 'string') return null;
-  const match = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d(?:\.\d+)?))?$/.exec(value.trim());
+  const match = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d(?:\.\d+)?))?$/.exec(value.trim());
   if (match === null) return null;
-  const hours = Number(match[1]);
-  if (hours > 23) return null;
-  return hours * 3600 + Number(match[2]) * 60 + (match[3] === undefined ? 0 : Number(match[3]));
+  return Number(match[1]) * 3600 + Number(match[2]) * 60
+    + (match[3] === undefined ? 0 : Number(match[3]));
 }
 
 /** One of the five as the number it is, or null when the Beleg does not carry it. */
@@ -134,8 +150,12 @@ export function compareReceipts(
     if (aValue > bValue) return direction === 'asc' ? 1 : -1;
     return 0;
   }
-  // The seven older fields, compared exactly as the component compared them, so
-  // adding the five above cannot move a column that already worked.
+  // The five older fields, compared exactly as the component compared them, so
+  // adding the five above cannot move a column that already worked. The `any`
+  // is the component's: `a[field]` is `string | number` across this union and
+  // `<` needs both sides the same type. Codepoint order on the three text
+  // fields is unchanged too, umlauts included — the owner named five columns,
+  // and a collator here would quietly reorder the three that already worked.
   let aValue: any = a[field];
   let bValue: any = b[field];
   if (field === 'date') {
