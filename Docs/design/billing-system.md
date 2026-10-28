@@ -123,7 +123,7 @@ Not a judgement — a column count. Measured:
 | §14 Abs. 4 UStG requires | where it would come from | production today |
 |---|---|---|
 | Nr. 1 seller's full name and address | the `seller` platform setting | `{"name": "El-Professor"}` and **every other field the empty string** — no street, no postal code, no city |
-| Nr. 1 buyer's full name and address | `companies.address` / `postal_code` / `city` | **2 of 18** companies have any address at all (Y&A Mobility, Customer A). `company_settings` is no better: **0 of 17** rows carry a `legal_company_name`, 2 carry a street |
+| Nr. 1 buyer's full name and address | `companies.address` / `postal_code` / `city` | **2 of 18** companies have any address at all (Customer H, Customer A). `company_settings` is no better: **0 of 17** rows carry a `legal_company_name`, 2 carry a street |
 | Nr. 2 seller's Steuernummer **or** USt-IdNr | the `seller` setting's `tax_number` / `vat_id` | both `""` |
 | Nr. 3 Ausstellungsdatum | — | **no such column.** `subscription_invoices` has `created_at`, `due_date`, `invoice_month`, `invoice_year` and nothing that is the invoice date. The PDF prints `Erstellt am <now>` (`src/utils/subscriptionPdf.ts:220`) — the *print* date, which changes every time the file is downloaded |
 | Nr. 4 fortlaufende, einmalige Nummer | `generate_invoice_number` | exists, with two defects — see §5 |
@@ -1320,7 +1320,7 @@ notify about:
 | Customer C | suspended | expired | 2026-07-22 | **0** | 1 |
 | Customer D | suspended | expired | 2026-08-19 | **0** | 1 |
 | tester | suspended | active | 2026-10-13 | **0** | 1 |
-| Y&A Mobility | active | active | 2027-08-22 | 0 | 1 |
+| Customer H | active | active | 2027-08-22 | 0 | 1 |
 | Customer G | active | active | 2027-09-17 | 0 | 1 |
 | Customer B | active | active | 2027-10-25 | 0 | 1 |
 

@@ -202,7 +202,7 @@ TOTAL 55,11 EUR`)
 
 /** The rows as printed: name, street, PLZ, contact block, items, totals,
  *  TSE block, and the columnar `Datum Zeit Bon` trailer. */
-const JET = `JET Tankstelle Morten Jürgensmeier
+const JET = `JET Tankstelle Detlev Wüstenfelder
 Eckeseyer Straße 113-115
 58089 Hagen
 Tel.Nr. 0 23 31- 2 24 88
@@ -230,7 +230,7 @@ Wir bedanken uns für Ihren Einkauf und w`
 
 /** The same receipt as a tilted photo yields it: the first two rows merged
  *  left-first, the PLZ row merged with the Tel row, OCR misreads kept. */
-const JET_TILTED = `Eckeseyer Straße 113-115  JET Tankstel le Morten Jtirgensmeier
+const JET_TILTED = `Eckeseyer Straße 113-115  JET Tankstel le Detlev Wtistenfelder
 58089 Hagen  Tei.Nr. 0 23 31- 2 24 88
 Fax.Nr.0 23 31-92 45 07
 Steuer-Nr. 321/5125/2808
@@ -269,9 +269,9 @@ describe('the JET Hagen receipt', () => {
 
   it('reads station, operator and street as separate fields, umlauts intact', () => {
     const r = parseReceiptText(JET)
-    expect(r.merchantName).toBe('JET Tankstelle Morten Jürgensmeier')
+    expect(r.merchantName).toBe('JET Tankstelle Detlev Wüstenfelder')
     expect(r.stationName).toBe('JET Tankstelle')
-    expect(r.operatorName).toBe('Morten Jürgensmeier')
+    expect(r.operatorName).toBe('Detlev Wüstenfelder')
     expect(r.street).toBe('Eckeseyer Straße 113-115')
     expect(r.postalCode).toBe('58089')
     expect(r.city).toBe('Hagen')

@@ -386,8 +386,8 @@ BEGIN
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-jet', 'ra-1',
       '2026-10-20', 'Tanken', NULL, '41.08', 'bar', '58089', NULL,
       NULL, true, false, NULL,
-      'JET Tankstelle Morten Jürgensmeier', '08:45', '19.95', '2.059', '25382', '277', 'Hagen',
-      'JET Tankstelle', 'Morten Jürgensmeier', 'Eckeseyer Straße 113-115', '90521', '08:46:19') ->> 'status'$q$, v_co)),
+      'JET Tankstelle Detlev Wüstenfelder', '08:45', '19.95', '2.059', '25382', '277', 'Hagen',
+      'JET Tankstelle', 'Detlev Wüstenfelder', 'Eckeseyer Straße 113-115', '90521', '08:46:19') ->> 'status'$q$, v_co)),
     'accepted');
 
   SELECT id INTO v_id FROM partner_receipt_submissions
@@ -397,14 +397,14 @@ BEGIN
     (SELECT station_name || ' / ' || operator_name || ' / ' || street || ' / '
             || printed_receipt_number || ' / ' || tse_time::text
        FROM partner_receipt_submissions WHERE id = v_id),
-    'JET Tankstelle / Morten Jürgensmeier / Eckeseyer Straße 113-115 / 90521 / 08:46:19');
+    'JET Tankstelle / Detlev Wüstenfelder / Eckeseyer Straße 113-115 / 90521 / 08:46:19');
 
   PERFORM _ra_rec(43, 'and the receipts row carries all five',
     (SELECT r.station_name || ' / ' || r.operator_name || ' / ' || r.street || ' / '
             || r.printed_receipt_number || ' / ' || r.tse_time::text
        FROM receipts r JOIN partner_receipt_submissions s ON s.receipt_id = r.id
       WHERE s.id = v_id),
-    'JET Tankstelle / Morten Jürgensmeier / Eckeseyer Straße 113-115 / 90521 / 08:46:19');
+    'JET Tankstelle / Detlev Wüstenfelder / Eckeseyer Straße 113-115 / 90521 / 08:46:19');
 
   PERFORM _ra_rec(44, 'the Belegnummer stays the server draw, not the printed number',
     (SELECT CASE WHEN r.receipt_number LIKE 'BEL-%' AND r.receipt_number <> r.printed_receipt_number
