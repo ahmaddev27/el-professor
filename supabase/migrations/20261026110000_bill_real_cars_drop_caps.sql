@@ -21,12 +21,12 @@
   for 16 of 18 companies and wrong in one direction only, always too high:
 
     company                 plan      billed   active cars
-    Smooth Fahrt GmbH       advanced      10             2
-    Asznee                  premium        5             0
-    AT Autovermietung GmbH  premium        5             4
+    Customer B              advanced      10             2
+    Customer E              premium        5             0
+    Customer C              premium        5             4
     Y&A Mobility            premium        5             4
-    MoveNow Fahrdienst      premium        5             5
-    Dinari Transport        premium        3             3
+    Customer A              premium        5             5
+    Customer G              premium        3             3
     (12 others)             —           1–8             0
 
   So the two halves ship together: the cap goes, and the quantity stops being a
@@ -80,7 +80,7 @@
   Unchanged, and it lives where it already lived: `greatest(coalesce(cars,1),1)`
   inside `app_private.price_book_price`, which is the single SQL site. A company
   with no cars is quoted one car, not 0,00 €. Twelve companies have no cars, so
-  this is not hypothetical: Asznee goes from 350,00 € to 70,00 €, not to zero.
+  this is not hypothetical: Customer E goes from 350,00 € to 70,00 €, not to zero.
   This is NOT the 200 € minimum the owner rejected ("فش ارضيات، التسعير على
   الخطط التزم فيه") — that was a floor under the whole invoice; this is a guard
   against a zero quantity. The TypeScript twin gains the same guard in one named
@@ -134,8 +134,8 @@
   fact is recorded at each site. Retiring the reason code and its two dictionary
   entries is a follow-up.
 
-  Two companies could not add a car before this file: MoveNow Fahrdienst (5
-  active of 5) and Dinari Transport (3 of 3). Their next INSERT raised P0001
+  Two companies could not add a car before this file: Customer A (5
+  active of 5) and Customer G (3 of 3). Their next INSERT raised P0001
   with a German sentence no screen explained — `DriversManagement.tsx` has
   carried a comment since 21.10.2026 saying the driver cap "lived ONLY here, in
   the browser: no policy, trigger or constraint enforced it", which was false
