@@ -806,7 +806,7 @@ function parseStationHeader(lines: string[]): StationHeader {
   const name = nameParts[0];
   if (name !== undefined) {
     out.merchantName = name;
-    // "JET Tankstelle Morten Jürgensmeier": the station word ends the brand,
+    // "JET Tankstelle Detlev Wüstenfelder": the station word ends the brand,
     // and what follows is the operator — when it reads like a person's name
     // and not like more branding or a legal form.
     const stationM = name.match(STATION_WORD_RE);

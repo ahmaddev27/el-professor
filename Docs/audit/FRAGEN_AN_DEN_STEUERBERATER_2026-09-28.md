@@ -1,6 +1,6 @@
 # Fragen an den Steuerberater — Lohnermittlung aus dem Fahrtenbuch
 
-**Stand 28.09.2026 · Y&A Mobility · Betriebsstätte Nordrhein-Westfalen**
+**Stand 28.09.2026 · Customer H · Betriebsstätte Nordrhein-Westfalen**
 
 Unsere Software ermittelt die Arbeitszeiten der Fahrer aus dem importierten
 Fahrtenbuch und erstellt daraus den Stundennachweis. Bei einer Prüfung der

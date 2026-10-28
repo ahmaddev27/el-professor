@@ -403,7 +403,7 @@ describe('the letterhead split, the printed number and the TSE clock (27.10.2026
   it('reads all five and keeps the two clocks apart', () => {
     const r = parseReceiptSubmission(withHeader({
       station_name: 'JET Tankstelle',
-      operator_name: 'Morten Jürgensmeier',
+      operator_name: 'Detlev Wüstenfelder',
       street: 'Eckeseyer Straße 113-115',
       receipt_number: '90521',
       receipt_time: '08:45',
@@ -412,7 +412,7 @@ describe('the letterhead split, the printed number and the TSE clock (27.10.2026
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value.station_name).toBe('JET Tankstelle')
-    expect(r.value.operator_name).toBe('Morten Jürgensmeier')
+    expect(r.value.operator_name).toBe('Detlev Wüstenfelder')
     expect(r.value.street).toBe('Eckeseyer Straße 113-115')
     expect(r.value.receipt_number).toBe('90521')
     // The sale time and the fiscal clock are different claims about the same

@@ -30,8 +30,8 @@ export function receiptSourceParts(receipt: Receipt): string[] {
 /**
  * The station cell, stacked (20261027150000): the brand half when the header
  * split, otherwise the whole merchant name; the operator only when the name
- * line does not already carry it (old rows keep "JET Tankstelle Morten
- * Jürgensmeier" in merchantName alone); the street beneath.
+ * line does not already carry it (old rows keep "JET Tankstelle Detlev
+ * Wüstenfelder" in merchantName alone); the street beneath.
  */
 export interface StationCell {
   name: string | null;

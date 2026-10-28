@@ -24,7 +24,7 @@
     Customer B              advanced      10             2
     Customer E              premium        5             0
     Customer C              premium        5             4
-    Y&A Mobility            premium        5             4
+    Customer H              premium        5             4
     Customer A              premium        5             5
     Customer G              premium        3             3
     (12 others)             —           1–8             0
