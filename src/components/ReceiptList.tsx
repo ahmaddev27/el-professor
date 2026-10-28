@@ -16,6 +16,12 @@ import {
   textOrNull,
 } from '../utils/receiptDisplay';
 import {
+  sortReceipts,
+  type MeasuredSortField,
+  type ReceiptSortDirection,
+  type ReceiptSortField,
+} from '../utils/receiptSort';
+import {
   Badge,
   Button,
   Card,
@@ -70,16 +76,29 @@ export interface PdfFilterInfo {
   companyName: string;
 }
 
-type SortField = 'receiptNumber' | 'date' | 'description' | 'driverName' | 'income' | 'expense' | 'balance';
-type SortDirection = 'asc' | 'desc';
+type SortField = ReceiptSortField;
+type SortDirection = ReceiptSortDirection;
 
 // Values hold TranslationKeys: this map is module-level and t() is a hook value,
 // so the table header resolves it at the call site.
-const SORTABLE_COLUMN_LABELS: Record<'receiptNumber' | 'date' | 'driverName' | 'description', TranslationKey> = {
+//
+// The five measured columns (owner, 27.10.2026) are here beside the four text
+// ones so that "which columns offer the control" is one list rather than a grep
+// of the column array. Their labels already existed in both dictionaries — they
+// were the plain headers of those columns — so this slice adds no key.
+const SORTABLE_COLUMN_LABELS: Record<
+  'receiptNumber' | 'date' | 'driverName' | 'description' | MeasuredSortField,
+  TranslationKey
+> = {
   receiptNumber: 'rec.receiptNumber',
   date:          'common.date',
   driverName:    'common.driver',
   description:   'rec.bookingText',
+  receiptTime:   'common.time',
+  litres:        'rec.litres',
+  pricePerLitre: 'rec.pricePerLitre',
+  odometerKm:    'rec.odometer',
+  rangeKm:       'rec.rangeLeft',
 };
 
 interface Filters {
@@ -213,19 +232,14 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     });
   }, [receipts, searchTerm, activeDateKeys, filters.driver]);
 
-  const sortedReceipts = useMemo(() => {
-    return [...filteredReceipts].sort((a, b) => {
-      let aValue: any = a[sortField];
-      let bValue: any = b[sortField];
-      if (sortField === 'date') {
-        aValue = new Date(aValue);
-        bValue = new Date(bValue);
-      }
-      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [filteredReceipts, sortField, sortDirection]);
+  // utils/receiptSort.ts, which carries the comparison that used to be here
+  // unchanged for the seven older fields and the measured one for the five the
+  // owner added. Its header states what each of those five stores and why an
+  // empty sorts last in both directions.
+  const sortedReceipts = useMemo(
+    () => sortReceipts(filteredReceipts, sortField, sortDirection),
+    [filteredReceipts, sortField, sortDirection],
+  );
 
   const calculateVat19FromGross = (gross: number): number =>
     Math.round((gross * 19 / 119) * 100) / 100;
@@ -441,16 +455,21 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       hideBelow: 'lg',
       className: 'px-3',
     },
+    // The five the owner marked on 27.10.2026. The cells are untouched — each
+    // still prints the German-formatted figure, and an absent one is still an
+    // empty cell — and only the header gained the control. All five are
+    // `hideBelow: 'lg'`, so none of the new buttons is drawn on a phone and the
+    // 375 px width the table already fits into cannot move.
     {
       id: 'receiptTime',
-      header: t('common.time'),
+      header: sortHeader('receiptTime', t(SORTABLE_COLUMN_LABELS.receiptTime)),
       cell: receipt => clockTime(receipt.receiptTime),
       hideBelow: 'lg',
       className: 'px-3',
     },
     {
       id: 'litres',
-      header: t('rec.litres'),
+      header: sortHeader('litres', t(SORTABLE_COLUMN_LABELS.litres)),
       kind: 'number',
       cell: receipt => receiptFuelFigures(receipt).litres,
       hideBelow: 'lg',
@@ -458,7 +477,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     },
     {
       id: 'pricePerLitre',
-      header: t('rec.pricePerLitre'),
+      header: sortHeader('pricePerLitre', t(SORTABLE_COLUMN_LABELS.pricePerLitre)),
       kind: 'number',
       cell: receipt => receiptFuelFigures(receipt).pricePerLitre,
       hideBelow: 'lg',
@@ -466,7 +485,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     },
     {
       id: 'odometerKm',
-      header: t('rec.odometer'),
+      header: sortHeader('odometerKm', t(SORTABLE_COLUMN_LABELS.odometerKm)),
       kind: 'number',
       cell: receipt => withKm(receiptFuelFigures(receipt).odometerKm),
       hideBelow: 'lg',
@@ -474,7 +493,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     },
     {
       id: 'rangeKm',
-      header: t('rec.rangeLeft'),
+      header: sortHeader('rangeKm', t(SORTABLE_COLUMN_LABELS.rangeKm)),
       kind: 'number',
       cell: receipt => withKm(receiptFuelFigures(receipt).rangeKm),
       hideBelow: 'lg',
