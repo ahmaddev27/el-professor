@@ -9,7 +9,7 @@
 --  arrival record:
 --
 --    station_name            the brand half of the letterhead ("JET Tankstelle")
---    operator_name           the franchise operator after it ("Morten Jürgensmeier")
+--    operator_name           the franchise operator after it ("Detlev Wüstenfelder")
 --    street                  street and house number ("Eckeseyer Straße 113-115")
 --    printed_receipt_number  the number PRINTED on the paper (beside `Bon`)
 --    tse_time                the fiscal TSE clock's time of day, HH:MM:SS

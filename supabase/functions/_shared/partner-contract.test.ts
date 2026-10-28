@@ -69,7 +69,7 @@ const receiptAnswer = {
     odometer_km: '25382',
     range_km: '277',
     station_name: 'ARAL Tankstelle',
-    operator_name: 'Morten Jürgensmeier',
+    operator_name: 'Detlev Wüstenfelder',
     street: 'Hauptstrasse 12',
     receipt_number: '90521',
     tse_time: '14:33:05',
@@ -131,7 +131,7 @@ describe("Reidey's receipt answer, through our parser", () => {
     // `receipt_number` on the wire is the number the TILL printed, never a
     // Reidey id and never our BEL- Belegnummer; `tse_time` is not the sale time.
     expect(parsed.value.station_name).toBe('ARAL Tankstelle')
-    expect(parsed.value.operator_name).toBe('Morten Jürgensmeier')
+    expect(parsed.value.operator_name).toBe('Detlev Wüstenfelder')
     expect(parsed.value.street).toBe('Hauptstrasse 12')
     expect(parsed.value.receipt_number).toBe('90521')
     expect(parsed.value.tse_time).toBe('14:33:05')

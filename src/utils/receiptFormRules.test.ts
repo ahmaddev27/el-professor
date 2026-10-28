@@ -198,8 +198,8 @@ describe('the letterhead split, the printed number and the TSE clock (27.10.2026
   const stored: Receipt = {
     id: '2', receiptNumber: 'BEL-2', date: '2026-10-20', description: 'Tanken',
     driverName: 'Omar', expense: 41.08,
-    merchantName: 'JET Tankstelle Morten Jürgensmeier',
-    stationName: 'JET Tankstelle', operatorName: 'Morten Jürgensmeier',
+    merchantName: 'JET Tankstelle Detlev Wüstenfelder',
+    stationName: 'JET Tankstelle', operatorName: 'Detlev Wüstenfelder',
     street: 'Eckeseyer Straße 113-115', printedReceiptNumber: '90521',
     receiptTime: '08:45:00', tseTime: '08:46:19',
   };
@@ -207,7 +207,7 @@ describe('the letterhead split, the printed number and the TSE clock (27.10.2026
   it('round-trips all five through the form', () => {
     const fields = detailsFieldsFromReceipt(stored);
     expect(fields.stationName).toBe('JET Tankstelle');
-    expect(fields.operatorName).toBe('Morten Jürgensmeier');
+    expect(fields.operatorName).toBe('Detlev Wüstenfelder');
     expect(fields.street).toBe('Eckeseyer Straße 113-115');
     expect(fields.printedNumber).toBe('90521');
     // The TSE clock keeps its seconds — unlike the sale time, it is the
@@ -217,7 +217,7 @@ describe('the letterhead split, the printed number and the TSE clock (27.10.2026
 
     const values = receiptDetailsValues('Tanken', fields);
     expect(values.stationName).toBe('JET Tankstelle');
-    expect(values.operatorName).toBe('Morten Jürgensmeier');
+    expect(values.operatorName).toBe('Detlev Wüstenfelder');
     expect(values.street).toBe('Eckeseyer Straße 113-115');
     expect(values.printedReceiptNumber).toBe('90521');
     expect(values.tseTime).toBe('08:46:19');

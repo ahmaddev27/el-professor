@@ -115,7 +115,7 @@ BEGIN
   INSERT INTO drivers (id, company_id, name, status) VALUES
     ('2f000000-0000-4000-8000-0000000000d1', co_a, 'Maria  Existing', 'active'),
     ('2f000000-0000-4000-8000-0000000000d2', co_a, 'Held Name', 'active'),
-    ('2f000000-0000-4000-8000-0000000000d3', co_b, 'Tatiana Capota', 'inactive');
+    ('2f000000-0000-4000-8000-0000000000d3', co_b, 'Sofia Reinhardt', 'inactive');
 
   INSERT INTO partner_driver_links (company_id, partner, external_driver_id, driver_id, proposed_name, status)
   VALUES (co_a, 'reidey', '3010', '2f000000-0000-4000-8000-0000000000d2', 'Held Name', 'linked');
@@ -149,7 +149,7 @@ DECLARE
   susp_a   constant uuid := '2f000000-0000-4000-8000-0000000000e3';
   nocomp   constant uuid := '50000000-0000-4000-8000-000000000001';
   v_drivers integer := (SELECT count(*) FROM drivers);
-  v_call    text := _fi_resolve(jsonb_build_array(_fi_earner('3002', 'Tatiana Capota')));
+  v_call    text := _fi_resolve(jsonb_build_array(_fi_earner('3002', 'Sofia Reinhardt')));
 BEGIN
   PERFORM _fi_rec(1, 'a viewer is refused by the administrator gate',
     _fi_call(viewer_a, v_call), 'ERR 42501 not_authorized');
@@ -195,16 +195,16 @@ DECLARE
   co_b constant uuid := 'c0000000-0000-4000-8000-00000000000b';
   v_b_before integer := (SELECT count(*) FROM drivers WHERE company_id = co_b);
 BEGIN
-  PERFORM _fi_rec(11, 'Maria links to her existing row, Tatiana and Pia are created, six are named in the answer',
+  PERFORM _fi_rec(11, 'Maria links to her existing row, Sofia and Pia are created, six are named in the answer',
     _fi_call(admin_a, _fi_resolve(jsonb_build_array(
       _fi_earner('3001', ' MARIA  existing '),
-      _fi_earner('3002', 'Tatiana Capota'),
+      _fi_earner('3002', 'Sofia Reinhardt'),
       _fi_earner('3003', 'Unbekannter Fahrer'),
       _fi_earner('3004', 'held name'),
       _fi_earner('3005', 'Rita Rejected'),
       _fi_earner('3006', 'Pia Pending'),
       _fi_earner('3010', 'Held Name')))),
-    '[{"name": "Tatiana Capota", "external_driver_id": "3002"}, {"name": "Pia Pending", "external_driver_id": "3006"}]'
+    '[{"name": "Sofia Reinhardt", "external_driver_id": "3002"}, {"name": "Pia Pending", "external_driver_id": "3006"}]'
     || '/[{"name": "Maria  Existing", "external_driver_id": "3001"}]/1/'
     || '[{"name": "Unbekannter Fahrer", "reason": "name_missing", "external_driver_id": "3003"}, '
     || '{"name": "held name", "reason": "name_taken", "external_driver_id": "3004"}, '
@@ -218,13 +218,13 @@ BEGIN
        FROM partner_driver_links WHERE company_id = co_a AND external_driver_id = '3001'),
     'linked true');
   PERFORM _fi_rec(14, 'a created driver is INACTIVE and has the partner''s name, trimmed',
-    (SELECT status || ' | ' || name FROM drivers WHERE company_id = co_a AND lower(name) = 'tatiana capota'),
-    'inactive | Tatiana Capota');
-  PERFORM _fi_rec(15, 'the other company''s Tatiana was neither matched nor touched, and gained nothing',
+    (SELECT status || ' | ' || name FROM drivers WHERE company_id = co_a AND lower(name) = 'sofia reinhardt'),
+    'inactive | Sofia Reinhardt');
+  PERFORM _fi_rec(15, 'the other company''s Sofia was neither matched nor touched, and gained nothing',
     (SELECT count(*)::text FROM drivers WHERE company_id = co_b), v_b_before::text);
   PERFORM _fi_rec(16, 'her link is confirmed and points at the created row',
     (SELECT l.status || ' ' || (l.driver_id = d.id)::text || ' ' || l.linked_by::text
-       FROM partner_driver_links l JOIN drivers d ON d.company_id = co_a AND d.name = 'Tatiana Capota'
+       FROM partner_driver_links l JOIN drivers d ON d.company_id = co_a AND d.name = 'Sofia Reinhardt'
       WHERE l.company_id = co_a AND l.external_driver_id = '3002'),
     'linked true ' || admin_a::text);
   PERFORM _fi_rec(17, 'a pending proposal was confirmed in place: one link row for 3006, not two',
@@ -251,7 +251,7 @@ DECLARE
 BEGIN
   PERFORM _fi_rec(21, 'the same earners again: nothing created, the linked ones are already done',
     _fi_call(admin_a, _fi_resolve(jsonb_build_array(
-      _fi_earner('3001', 'Maria Existing'), _fi_earner('3002', 'Tatiana Capota'), _fi_earner('3006', 'Pia Pending')))),
+      _fi_earner('3001', 'Maria Existing'), _fi_earner('3002', 'Sofia Reinhardt'), _fi_earner('3006', 'Pia Pending')))),
     '[]/[]/3/[]');
   PERFORM _fi_rec(22, 'no driver and no link row was added',
     (SELECT count(*)::text FROM drivers) || '/' || (SELECT count(*)::text FROM partner_driver_links),
@@ -280,7 +280,7 @@ BEGIN
     (SELECT count(*)::text || ' ' || sum(i.amount)::text
        FROM income i JOIN drivers d ON d.company_id = i.company_id AND d.name = i.driver_name
       WHERE i.company_id = co_a AND i.source = 'uber' AND i.source_driver_key = '3002'
-        AND i.driver_name = 'Tatiana Capota'  -- the earner's own spelling, which is what anyone searches for
+        AND i.driver_name = 'Sofia Reinhardt'  -- the earner's own spelling, which is what anyone searches for
         AND d.id = (SELECT driver_id FROM partner_driver_links WHERE company_id = co_a AND external_driver_id = '3002')),
     '1 120.50');
   PERFORM _fi_rec(25, 'no income row of this company names a driver that does not exist',

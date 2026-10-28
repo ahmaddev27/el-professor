@@ -42,11 +42,11 @@ dated obligation on the horizon. See §4.3.
 
 ```
 === invoices, every company, every year ===
-INV-2026-0001 | 2026-06 | 200 | open | cash | due 2026-05-31 | created 2026-06-07 | MoveNow Fahrdienst
-INV-2026-0002 | 2026-05 | 200 | open | cash | due 2026-04-30 | created 2026-06-07 | MoveNow Fahrdienst
+INV-2026-0001 | 2026-06 | 200 | open | cash | due 2026-05-31 | created 2026-06-07 | Customer A
+INV-2026-0002 | 2026-05 | 200 | open | cash | due 2026-04-30 | created 2026-06-07 | Customer A
 
 === company_subscriptions (the billing contract) ===
-MoveNow Fahrdienst | active | starts 2026-06-07 | billing_day 1 | 200 | cash | plan row "Premium"
+Customer A | active | starts 2026-06-07 | billing_day 1 | 200 | cash | plan row "Premium"
 
 === subscription_payment_audit ===
 0 rows
@@ -87,12 +87,12 @@ nothing else.
 
 ### 1.2 The intervention this document exists to retire, caught in the act
 
-The first pass of §1.1 was run at 18:52 and showed `Smooth Fahrt GmbH` with
+The first pass of §1.1 was run at 18:52 and showed `Customer B` with
 `subscription_status = 'expired'`, expiry 2026-09-16 — locked out. A second pass
 at 19:15 showed it `active` to 2027-10-25. Between the two:
 
 ```
-2026-10-25 19:04:26 | Smooth Fahrt GmbH | manual | active | grants | 2026-10-25 → 2027-10-25 | advanced
+2026-10-25 19:04:26 | Customer B | manual | active | grants | 2026-10-25 → 2027-10-25 | advanced
                     | note: "reopened 25.10.2026 on the owner's instruction"
 ```
 
@@ -106,10 +106,10 @@ After that intervention the locked-out set is:
 
 | company | why refused by `get_active_company_id()` |
 |---|---|
-| AT Autovermietung GmbH | `status = 'suspended'` **and** `subscription_status = 'expired'` (2026-07-22) |
-| AK 95 GmbH# | `status = 'suspended'` **and** `subscription_status = 'expired'` (2026-08-19) |
+| Customer C | `status = 'suspended'` **and** `subscription_status = 'expired'` (2026-07-22) |
+| Customer D | `status = 'suspended'` **and** `subscription_status = 'expired'` (2026-08-19) |
 | tester | `status = 'suspended'`, expired 2026-10-13 |
-| Asznee, Jaber, k, test ×3, testtesttest | `status = 'suspended'`, subscription still `active` |
+| Customer E, Customer F, k, test ×3, testtesttest | `status = 'suspended'`, subscription still `active` |
 | ergehrt, tester, نن | `approval_status = 'rejected'` |
 
 Two of the real companies are therefore locked out for **two independent
@@ -123,7 +123,7 @@ Not a judgement — a column count. Measured:
 | §14 Abs. 4 UStG requires | where it would come from | production today |
 |---|---|---|
 | Nr. 1 seller's full name and address | the `seller` platform setting | `{"name": "El-Professor"}` and **every other field the empty string** — no street, no postal code, no city |
-| Nr. 1 buyer's full name and address | `companies.address` / `postal_code` / `city` | **2 of 18** companies have any address at all (Y&A Mobility, MoveNow). `company_settings` is no better: **0 of 17** rows carry a `legal_company_name`, 2 carry a street |
+| Nr. 1 buyer's full name and address | `companies.address` / `postal_code` / `city` | **2 of 18** companies have any address at all (Customer H, Customer A). `company_settings` is no better: **0 of 17** rows carry a `legal_company_name`, 2 carry a street |
 | Nr. 2 seller's Steuernummer **or** USt-IdNr | the `seller` setting's `tax_number` / `vat_id` | both `""` |
 | Nr. 3 Ausstellungsdatum | — | **no such column.** `subscription_invoices` has `created_at`, `due_date`, `invoice_month`, `invoice_year` and nothing that is the invoice date. The PDF prints `Erstellt am <now>` (`src/utils/subscriptionPdf.ts:220`) — the *print* date, which changes every time the file is downloaded |
 | Nr. 4 fortlaufende, einmalige Nummer | `generate_invoice_number` | exists, with two defects — see §5 |
@@ -242,7 +242,7 @@ decision** (§12).
 ### 2.4 A fleet change mid-period
 
 The price is computed from `companies.subscription_car_limit`, **not** from the
-cars actually in the fleet. Measured: Smooth Fahrt GmbH has 2 cars and a limit of
+cars actually in the fleet. Measured: Customer B has 2 cars and a limit of
 10; `tester` has a limit of 8 and no cars; the default is 5 and most companies sit
 on it. So the figure the customer is billed on is an operator-typed allowance, not
 a count.
@@ -279,7 +279,7 @@ every planning RPC refuse. The account shell stays readable so
 
 Coming back is where today's model is wrong in a way §1.2 shows. Two things can
 refuse a company independently — `companies.status = 'suspended'` and
-`subscription_status = 'expired'` — and AT Autovermietung and AK 95 are both.
+`subscription_status = 'expired'` — and Customer C and Customer D are both.
 Marking an invoice paid lifts the second and leaves the first. So **reactivation
 must be one act**: a payment recorded against an invoice should, for a company
 suspended *for non-payment*, also clear the suspension. It must **not** clear a
@@ -883,7 +883,7 @@ every other company |                                                  same
 **One** company would move, from `active` with a past expiry to `expired` with the
 same past expiry — and `get_active_company_id()` already refuses it on the expiry
 clause, so **no access changes**. The invoice sweep would create coverage rows for
-the two open `MoveNow` invoices, both ending in the past, and MoveNow holds an
+the two open `Customer A` invoices, both ending in the past, and Customer A holds an
 open-ended `migration` row that outranks them — again no access change.
 
 So:
@@ -1181,10 +1181,10 @@ production, with his explicit yes each time. The measured blast radius is one
 company moving from `active` with a past expiry to `expired` with the same past
 expiry, and **no access change** (§8.2).
 
-**Q9 — the two companies still locked out** (AT Autovermietung GmbH, AK 95 GmbH#).
+**Q9 — the two companies still locked out** (Customer C, Customer D).
 Both are suspended *and* expired, so lifting the subscription alone will not
 readmit them. Whether to readmit, invoice retrospectively, or close the accounts
-is his call — and it is the same question he answered for Smooth Fahrt by hand at
+is his call — and it is the same question he answered for Customer B by hand at
 19:04 today.
 
 **Q10 — monthly or yearly, honestly labelled? (§2.3)** Rename the choice to
@@ -1279,7 +1279,7 @@ used where the quoting limit on the primary blocked the full list):**
 **Production, read-only, 25.10.2026 18:50–19:16 CEST**, via
 `ssh elprofessor` → `docker exec ya-mobility-db-1 psql -U postgres`. Every query
 in §1 and §8.2 is `SELECT` only; the one write visible in the data
-(Smooth Fahrt's 19:04:26 coverage row) was somebody else's and is reported, not
+(Customer B's 19:04:26 coverage row) was somebody else's and is reported, not
 made.
 
 ---
@@ -1317,12 +1317,12 @@ notify about:
 
 | company | status | subscription_status | expires | invoices | active admins |
 |---|---|---|---|---|---|
-| AT Autovermietung GmbH | suspended | expired | 2026-07-22 | **0** | 1 |
-| AK 95 GmbH# | suspended | expired | 2026-08-19 | **0** | 1 |
+| Customer C | suspended | expired | 2026-07-22 | **0** | 1 |
+| Customer D | suspended | expired | 2026-08-19 | **0** | 1 |
 | tester | suspended | active | 2026-10-13 | **0** | 1 |
-| Y&A Mobility | active | active | 2027-08-22 | 0 | 1 |
-| Dinari Transport | active | active | 2027-09-17 | 0 | 1 |
-| Smooth Fahrt GmbH | active | active | 2027-10-25 | 0 | 1 |
+| Customer H | active | active | 2027-08-22 | 0 | 1 |
+| Customer G | active | active | 2027-09-17 | 0 | 1 |
+| Customer B | active | active | 2027-10-25 | 0 | 1 |
 
 Three expiries are in the past. Nobody was told about any of them. And
 `notification_deliveries` holds **one row in its entire history** — a TÜV
@@ -1488,7 +1488,7 @@ WHERE c.approval_status = 'approved'
   AND c.status IN ('active', 'trial')
 ```
 
-**AT Autovermietung and AK 95 are `suspended`. So the claim returns NULL for
+**Customer C and Customer D are `suspended`. So the claim returns NULL for
 exactly the two companies this section exists for.** Decision 3's reasoning for
 that boundary is sound and is about mail *to the customer* — *"Suspension in
 particular is an administrative block, and mailing through it would undo it"* —
@@ -1592,8 +1592,8 @@ re-measuring when slice 2 fills in the seventeen missing contracts.
 
 ### 14.9 How this relates to dunning — two mechanisms, settled by measurement
 
-**The measurement that settles it: AT Autovermietung has 0 invoices. AK 95 has
-0 invoices.** Production holds two invoices in total and both belong to MoveNow
+**The measurement that settles it: Customer C has 0 invoices. Customer D has
+0 invoices.** Production holds two invoices in total and both belong to Customer A
 (§1.1). §7.2's schedule counts every stage from an invoice's `due_date` — so
 **there is no invoice to count from for either company this section exists for**,
 and dunning alone would have left both cases exactly as they were. That is the
@@ -1643,7 +1643,7 @@ The cheapest test of whether this design solves the problem it was written for.
 Every date below is arithmetic over the measured expiry and the installed 07:10
 run.
 
-**Smooth Fahrt GmbH — expired 16.09.2026, unnoticed for five weeks.** It was
+**Customer B — expired 16.09.2026, unnoticed for five weeks.** It was
 `approval_status = 'approved'` with `companies.status = 'active'` throughout
 (§1.2 shows `subscription_status = 'expired'` beside an unchanged `status`), so
 it is inside the customer boundary and **both** halves fire:
@@ -1658,7 +1658,7 @@ it is inside the customer boundary and **both** halves fire:
 
 Five weeks becomes seven days of warning and one day of notice.
 
-**AT Autovermietung GmbH — expired 22.07.2026, unnoticed for three months.**
+**Customer C — expired 22.07.2026, unnoticed for three months.**
 `suspended` and `expired`, 0 invoices:
 
 | date | what fires | to whom |
@@ -1685,7 +1685,7 @@ is unanswerable for any company today. It is a second argument for §2.6's
 
 **Two cases the brief did not name, which the same mechanism catches:**
 
-- **AK 95 GmbH# — expired 19.08.2026**, same shape, 0 invoices: the operator is
+- **Customer D — expired 19.08.2026**, same shape, 0 invoices: the operator is
   told on 20.08.2026 instead of two months later.
 - **`tester` — `subscription_status = 'active'` with an expiry of 2026-10-13,
   twelve days in the past today.** It is §8.2's one company, and `suspended`, so

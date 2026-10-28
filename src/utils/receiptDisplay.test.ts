@@ -121,13 +121,13 @@ describe('receiptStationCell (27.10.2026)', () => {
   it('stacks the split header: brand, operator, street', () => {
     expect(receiptStationCell({
       ...BASE,
-      merchantName: 'JET Tankstelle Morten Jürgensmeier',
+      merchantName: 'JET Tankstelle Detlev Wüstenfelder',
       stationName: 'JET Tankstelle',
-      operatorName: 'Morten Jürgensmeier',
+      operatorName: 'Detlev Wüstenfelder',
       street: 'Eckeseyer Straße 113-115',
     })).toEqual({
       name: 'JET Tankstelle',
-      operator: 'Morten Jürgensmeier',
+      operator: 'Detlev Wüstenfelder',
       street: 'Eckeseyer Straße 113-115',
     });
   });
@@ -137,10 +137,10 @@ describe('receiptStationCell (27.10.2026)', () => {
     // cell must not print the same person twice.
     expect(receiptStationCell({
       ...BASE,
-      merchantName: 'JET Tankstelle Morten Jürgensmeier',
-      operatorName: 'Morten Jürgensmeier',
+      merchantName: 'JET Tankstelle Detlev Wüstenfelder',
+      operatorName: 'Detlev Wüstenfelder',
     })).toEqual({
-      name: 'JET Tankstelle Morten Jürgensmeier',
+      name: 'JET Tankstelle Detlev Wüstenfelder',
       operator: null,
       street: null,
     });
