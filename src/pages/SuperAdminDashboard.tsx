@@ -1236,7 +1236,7 @@ export default function SuperAdminDashboard() {
                         This mattered inside one cell. The monthly figure comes
                         from the quote, which the database priced on the fleet,
                         while `bp` fed the yearly sub-line below and was priced
-                        on the stored allowance — so for Smooth Fahrt (billed
+                        on the stored allowance — so for Customer B (billed
                         10, runs 2) the same cell would have read 80,00 € a
                         month and ten cars' worth a year. Both halves take the
                         same count now.

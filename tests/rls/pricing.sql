@@ -766,11 +766,11 @@ UPDATE companies
 
     f2  5 active            the fleet MATCHES the stored 5 -> the amount must
                             not move at all (29700, as before this migration)
-    f4  2 active + 1 INACTIVE   the Smooth Fahrt shape (billed 5, runs 2) and the
+    f4  2 active + 1 INACTIVE   the Customer B shape (billed 5, runs 2) and the
                             all-versus-active decision in one row: 2 cars are
                             billed, the deactivated one is not, and the amount
                             moves off 37125
-    f6  none                the Asznee shape (billed 5, runs 0) -> the floor,
+    f6  none                the Customer E shape (billed 5, runs 0) -> the floor,
                             one car, never 0,00
     f1, f3, f5              left without cars on purpose: every assertion about
                             them is a FIRST invoice (flat) or an absent item, so

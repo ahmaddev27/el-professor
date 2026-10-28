@@ -180,7 +180,7 @@ describe('invoiceAmountCents is the twin of app_private.invoice_amount_cents', (
   const premiumFive = (book: PriceBook, cycle: BillingCycle, first: boolean) =>
     invoiceAmountCents(book, 'premium', 5, cycle, first);
 
-  it("today's book: MoveNow's case, premium with five cars", () => {
+  it("today's book: the live production case, premium with five cars", () => {
     expect(premiumFive(SEED_PRICE_BOOK, 'monthly', true)).toBe(20000);   // the first invoice
     expect(premiumFive(SEED_PRICE_BOOK, 'monthly', false)).toBe(35000);  // the second
     expect(premiumFive(SEED_PRICE_BOOK, 'yearly', true)).toBe(20000);

@@ -11,7 +11,7 @@
     trg_enforce_driver_limit on drivers -> 'Fahrerlimit erreicht...'      (P0001)
 
   Measured on production 26.10.2026, two companies could not add a car:
-  MoveNow Fahrdienst (5 active cars of 5) and Dinari Transport (3 of 3).
+  Customer A (5 active cars of 5) and Customer G (3 of 3).
 
   ## What is claimed
 
