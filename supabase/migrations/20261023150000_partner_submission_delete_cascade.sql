@@ -34,7 +34,7 @@
 --    partner_receipt_submissions_receipt_id_fkey   confdeltype = 'n'
 --    accepted submissions naming a Beleg           20   (of 1126 receipts)
 --      Y&A Mobility   18
---      Customer G 2
+--      Customer G      2
 --    dangling receipt references                    0
 --
 --  ── The owner's decision, 23.10.2026 ──────────────────────────────────────
