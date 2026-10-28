@@ -258,11 +258,13 @@ describe('collectAllPages', () => {
 
 describe('parseInvoiceQuotes', () => {
   const item = (over: Record<string, unknown> = {}) => ({
-    subscription_id: 's1', company_id: 'c1', company_name: 'MoveNow', plan: 'premium',
+    subscription_id: 's1', company_id: 'c1', company_name: 'Taxi Nord', plan: 'premium',
     // `car_limit` is still in the answer and is still the stored allowance;
     // `active_cars` is the quantity the amount is computed from since
-    // 20261026110000. MoveNow is the one production company where the two
-    // agree, which is why the fixture uses its name and its figures.
+    // 20261026110000. The figures are the one production company's where the
+    // two agree — a stored allowance of 5 against a fleet of 5 — which is why
+    // the fixture carries them. (`company_name` is inert here: the parser
+    // never reads it, so the value is a placeholder like the rest of the file's.)
     car_limit: 5, active_cars: 5, billing_cycle: 'monthly', first_invoice: true,
     amount_cents: 20000, ...over,
   });
