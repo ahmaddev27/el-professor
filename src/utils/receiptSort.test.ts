@@ -60,6 +60,21 @@ const order = (field: MeasuredSortField, direction: 'asc' | 'desc'): string[] =>
 /** The two rows that carry no figure for any of the four fuel columns. */
 const NO_FUEL = ['BEL-0003', 'BEL-0006'];
 
+/**
+ * Whether a row carries a figure at all, read **off the row and not through
+ * `measuredSortValue`**.
+ *
+ * A mutation control is what put this here. The empty-value probe below first
+ * asked `measuredSortValue(row, field) === null` which rows were empty, and an
+ * implementation that returns `0` for an absent figure then has no empty rows
+ * by its own account — so the probe passed on exactly the defect it exists to
+ * catch (measured: with `?? 0` spliced into `measuredSortValue`, ten assertions
+ * in these two files failed and that one still passed). The probe now defines
+ * "empty" from the stored shape, independently of the function under test.
+ */
+const carriesFigure = (row: Receipt, field: MeasuredSortField): boolean =>
+  field === 'receiptTime' ? typeof row.receiptTime === 'string' : typeof row[field] === 'number';
+
 describe('clockSeconds', () => {
   it('reads a Postgres time column, with or without its seconds', () => {
     // receipt_time is `time` (20261011100000), so PostgREST sends "05:26:00".
@@ -202,8 +217,12 @@ describe('the empty-value rule', () => {
       for (const direction of ['asc', 'desc'] as const) {
         const sorted = sortReceipts(ROWS, field, direction);
         const empties = sorted
-          .map((row, index) => (measuredSortValue(row, field) === null ? index : -1))
+          .map((row, index) => (carriesFigure(row, field) ? -1 : index))
           .filter(index => index >= 0);
+        // How many rows are empty is a fact about the fixture, not about the
+        // sort: counted here so a run cannot pass by finding none.
+        expect(empties.length, `${field} ${direction}`)
+          .toBe(ROWS.filter(row => !carriesFigure(row, field)).length);
         const ranked = sorted.length - empties.length;
         expect(empties, `${field} ${direction}`).toEqual(
           Array.from({ length: empties.length }, (_, i) => ranked + i),
