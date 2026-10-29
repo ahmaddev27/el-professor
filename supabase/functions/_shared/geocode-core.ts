@@ -188,8 +188,14 @@ export const geocodeRefusalStatus = (reason: GeocodeRefusalReason): number => RE
 export interface ParsedAddress {
   /** The street without its number. */
   readonly street: string;
-  /** As written, without spaces inside: "12", "127B", "12-14". */
+  /** The first number asked for, as written, without spaces inside: "12", "127B", "12-14". */
   readonly houseNumber: string;
+  /**
+   * Every number the cell lists ("25;27", "30, 32"), normalized, the first one first;
+   * `[houseNumber]` for a single number. A building with several numbers is tagged
+   * with the list in OpenStreetMap, so any of them identifies it.
+   */
+  readonly houseNumbers: readonly string[];
   readonly postcode: string;
   readonly city: string;
 }
@@ -198,8 +204,13 @@ export type AddressProblem = 'unparseable' | 'no_house_number';
 
 const COUNTRY_PARTS: ReadonlySet<string> = new Set(['deutschland', 'germany']);
 const POSTCODE_PART = /^(\d{5})\s+(\S.*)$/u;
-/** The street part ends in a number: "12", "12a", "12 a", "12-14", "12/1". */
-const TRAILING_NUMBER = /^(.+?)\s+(\d+\s?[A-Za-z]?(?:\s?[-/]\s?\d+\s?[A-Za-z]?)?)$/u;
+/** One house number: "12", "12a", "12 a", "12-14", "12/1". */
+const NUMBER = String.raw`\d+\s?[A-Za-z]?(?:\s?[-/]\s?\d+\s?[A-Za-z]?)?`;
+const LIST_SEPARATOR = String.raw`\s*[;,]\s*`;
+/** The street part ends in a number, or in a list of them: "12", "25;27", "3; 5". */
+const TRAILING_NUMBER = new RegExp(String.raw`^(.+?)\s+(${NUMBER}(?:${LIST_SEPARATOR}${NUMBER})*)$`, 'u');
+/** A part that is nothing but numbers: what the comma split off "Straße 30, 32". */
+const NUMBERS_ONLY = new RegExp(`^${NUMBER}(?:${LIST_SEPARATOR}${NUMBER})*$`, 'u');
 
 function addressParts(text: string): string[] {
   const parts = text
@@ -229,15 +240,32 @@ export function parseSheetAddress(text: string): ParsedAddress | AddressProblem 
   const at = lastPostcodePart(parts);
   if (at < 1) return 'unparseable';
   const place = POSTCODE_PART.exec(parts[at]);
-  const numbered = TRAILING_NUMBER.exec(parts[at - 1]);
   if (place === null) return 'unparseable';
+  const streetPart = joinNumberParts(parts, at);
+  const numbered = streetPart === null ? null : TRAILING_NUMBER.exec(streetPart);
   if (numbered === null) return 'no_house_number';
+  const listed = numbered[2].split(new RegExp(LIST_SEPARATOR, 'u')).map((number) => number.replace(/\s+/gu, ''));
   return {
     street: numbered[1],
-    houseNumber: numbered[2].replace(/\s+/gu, ''),
+    houseNumber: listed[0],
+    houseNumbers: listed.map(normalizeHouseNumber),
     postcode: place[1],
     city: place[2],
   };
+}
+
+/**
+ * The street part before the postal code, with the numbers the comma split off it
+ * put back: "Straße 30", "32" is "Straße 30;32". Only a part that is nothing but
+ * house numbers is merged; a part with a word in it ("Hinterhaus") is a name and
+ * stays out. Null when nothing but numbers lies before the postal code.
+ */
+function joinNumberParts(parts: readonly string[], postcodeAt: number): string | null {
+  let first = postcodeAt - 1;
+  while (first > 0 && NUMBERS_ONLY.test(parts[first])) first -= 1;
+  if (first === postcodeAt - 1) return parts[first];
+  if (NUMBERS_ONLY.test(parts[first])) return null;
+  return [parts[first], ...parts.slice(first + 1, postcodeAt)].join(';');
 }
 
 /**
@@ -357,8 +385,9 @@ function reasonForStatus(status: number): UnlocatedReason | null {
 }
 
 function decide(candidates: readonly Candidate[], expected: ParsedAddress): Interpretation {
-  const wanted = normalizeHouseNumber(expected.houseNumber);
-  const houses = candidates.filter((c) => c.rank >= HOUSE_RANK && c.houseNumbers.includes(wanted));
+  // Any listed number identifies the building: OSM tags "25;27" on one object.
+  const wanted = expected.houseNumbers.map(normalizeHouseNumber);
+  const houses = candidates.filter((c) => c.rank >= HOUSE_RANK && c.houseNumbers.some((n) => wanted.includes(n)));
   if (houses.length === 0) return unlocated('too_coarse');
   // A house that says which postal code it is in must say the one that was asked for.
   const inside = houses.filter((c) => c.postcodes.length === 0 || c.postcodes.includes(expected.postcode));

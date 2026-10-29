@@ -90,6 +90,12 @@ export interface SimRide {
    * are different statements, and no construction site had to change.
    */
   declinedFeeCents?: number;
+  /**
+   * The rule that made a declined order fee-eligible (`idle_in_shift`): the
+   * audit asks that a decline record why it earns its fee, and a fee whose
+   * rule is not on the row cannot be checked.
+   */
+  declineRule?: string;
   orderReceivedMs: number;
   orderTransmittedMs: number;
   plannedPickupMs: number | null;

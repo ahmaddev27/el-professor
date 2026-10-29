@@ -25,7 +25,7 @@ import {
   type ParsedAddress,
 } from './geocode-core';
 
-const solingen: ParsedAddress = { street: 'Hauptstraße', houseNumber: '12', postcode: '42651', city: 'Solingen' };
+const solingen: ParsedAddress = { street: 'Hauptstraße', houseNumber: '12', houseNumbers: ['12'], postcode: '42651', city: 'Solingen' };
 
 describe('parseSheetAddress', () => {
   it('reads the shape of the Uber sheet: street and number, postal code and city, the country last', () => {
@@ -53,13 +53,13 @@ describe('parseSheetAddress', () => {
 
   it('drops the name in front of the street and takes the street before the postal code', () => {
     expect(parseSheetAddress('Hotel Kaiserhof, Kölner Straße 5, 40211 Düsseldorf, Deutschland')).toEqual({
-      street: 'Kölner Straße', houseNumber: '5', postcode: '40211', city: 'Düsseldorf',
+      street: 'Kölner Straße', houseNumber: '5', houseNumbers: ['5'], postcode: '40211', city: 'Düsseldorf',
     });
   });
 
   it('takes the number from the end of a street name that has a number in it', () => {
     expect(parseSheetAddress('Straße des 17. Juni 5, 10623 Berlin')).toEqual({
-      street: 'Straße des 17. Juni', houseNumber: '5', postcode: '10623', city: 'Berlin',
+      street: 'Straße des 17. Juni', houseNumber: '5', houseNumbers: ['5'], postcode: '10623', city: 'Berlin',
     });
   });
 
@@ -82,6 +82,65 @@ describe('parseSheetAddress', () => {
 
   it('does not take a number out of the city', () => {
     expect(parseSheetAddress('Hauptstraße, 42651 Solingen 2')).toBe('no_house_number');
+  });
+
+  // The audit of 29.10.2026: OSM and the sheet both write several numbers for one building.
+  const at = (street: string, numbers: string[], postcode: string, city: string): ParsedAddress => ({
+    street, houseNumber: numbers[0], houseNumbers: numbers, postcode, city,
+  });
+  it.each([
+    ['Hauptstraße 25;27, 42349 Wuppertal, Deutschland', at('Hauptstraße', ['25', '27'], '42349', 'Wuppertal')],
+    ['Neuenhofer Straße 4;6, 42657 Solingen, Deutschland', at('Neuenhofer Straße', ['4', '6'], '42657', 'Solingen')],
+    ['Scheidter Straße 30, 32, 42653 Solingen, Deutschland', at('Scheidter Straße', ['30', '32'], '42653', 'Solingen')],
+    ['Konrad-Adenauer-Straße 20, 20a, 42651 Solingen, Deutschland', at('Konrad-Adenauer-Straße', ['20', '20a'], '42651', 'Solingen')],
+    ['Vieringhausen 73,75, 42857 Remscheid, Deutschland', at('Vieringhausen', ['73', '75'], '42857', 'Remscheid')],
+    ['Schloßbergstraße 24, 26, 42659 Solingen, Deutschland', at('Schloßbergstraße', ['24', '26'], '42659', 'Solingen')],
+    ['Burger Landstraße 3; 5, 42659 Solingen, Deutschland', at('Burger Landstraße', ['3', '5'], '42659', 'Solingen')],
+    ['Tersteegenstraße 1-5, 42857 Remscheid, Deutschland', at('Tersteegenstraße', ['1-5'], '42857', 'Remscheid')],
+    ['Stockder Straße 31, 42857 Remscheid, Deutschland', at('Stockder Straße', ['31'], '42857', 'Remscheid')],
+    ['A 3 5, 42697 Solingen, Deutschland', at('A 3', ['5'], '42697', 'Solingen')],
+  ])('reads a list of house numbers: "%s"', (text, expected) => {
+    expect(parseSheetAddress(text)).toEqual(expected);
+  });
+
+  it('never lets a street name end in a separator', () => {
+    const parsed = parseSheetAddress('Burger Landstraße 3; 5, 42659 Solingen') as ParsedAddress;
+    expect(parsed.street).not.toMatch(/[;,]$/u);
+  });
+
+  it('does not merge a part with a word in it: that is a name, not a house number', () => {
+    expect(parseSheetAddress('Hauptstraße 5, Hinterhaus, 42651 Solingen')).toBe('no_house_number');
+    expect(parseSheetAddress('Hauptstraße, 12, 42651 Solingen')).toBe('no_house_number');
+  });
+
+  it('keeps the name in front of a street whose numbers the comma split', () => {
+    expect(parseSheetAddress('Teststraße 30, 32, 42653 Demostadt')).toEqual(at('Teststraße', ['30', '32'], '42653', 'Demostadt'));
+    expect(parseSheetAddress('Hotel Test, Teststraße 30, 32, 42653 Demostadt')).toEqual(at('Teststraße', ['30', '32'], '42653', 'Demostadt'));
+  });
+});
+
+describe('interpretNominatimAnswer: a building with several house numbers', () => {
+  const asked = (...numbers: string[]): ParsedAddress => ({ ...solingen, houseNumber: numbers[0], houseNumbers: numbers });
+
+  it('places a building tagged with the same list', () => {
+    expect(interpretNominatimAnswer(200, [hit({}, { house_number: '25;27' })], asked('25', '27')).kind).toBe('located');
+  });
+
+  it('places a building tagged with only one of the listed numbers', () => {
+    expect(interpretNominatimAnswer(200, [hit({}, { house_number: '27' })], asked('25', '27')).kind).toBe('located');
+  });
+
+  it('does not place a building with none of the listed numbers', () => {
+    expect(interpretNominatimAnswer(200, [hit({}, { house_number: '29' })], asked('25', '27')))
+      .toEqual({ kind: 'unlocated', reason: 'too_coarse' });
+  });
+
+  it('still refuses another postal code and houses more than 100 m apart', () => {
+    expect(interpretNominatimAnswer(200, [hit({}, { house_number: '25;27', postcode: '42699' })], asked('25', '27')))
+      .toEqual({ kind: 'unlocated', reason: 'postcode_mismatch' });
+    const far = hit({ osm_id: 2, lat: metersNorth('51.1722', 300) }, { house_number: '27' });
+    expect(interpretNominatimAnswer(200, [hit({}, { house_number: '25' }), far], asked('25', '27')))
+      .toEqual({ kind: 'unlocated', reason: 'ambiguous' });
   });
 });
 
@@ -111,7 +170,7 @@ describe('searchPath', () => {
   });
 
   it('encodes what would otherwise end a value or start another', () => {
-    const path = searchPath({ street: 'Rath & Söhne/Weg #1', houseNumber: '5', postcode: '42651', city: 'Solingen' });
+    const path = searchPath({ street: 'Rath & Söhne/Weg #1', houseNumber: '5', houseNumbers: ['5'], postcode: '42651', city: 'Solingen' });
     expect(path).not.toMatch(/[ #]/);
     expect(path.split('&')).toHaveLength(3);
     expect(path).toContain('street=5%20Rath%20%26%20S%C3%B6hne%2FWeg%20%231');
@@ -155,7 +214,7 @@ describe('interpretNominatimAnswer', () => {
   });
 
   it('compares house numbers without regard to case, spaces and dashes, and by every number a list holds', () => {
-    const parsed = (houseNumber: string): ParsedAddress => ({ ...solingen, houseNumber });
+    const parsed = (houseNumber: string): ParsedAddress => ({ ...solingen, houseNumber, houseNumbers: [houseNumber.toLowerCase()] });
     expect(interpretNominatimAnswer(200, [hit({}, { house_number: '127b' })], parsed('127B')).kind).toBe('located');
     expect(interpretNominatimAnswer(200, [hit({}, { house_number: '12 A' })], parsed('12a')).kind).toBe('located');
     expect(interpretNominatimAnswer(200, [hit({}, { house_number: '12–14' })], parsed('12-14')).kind).toBe('located');
