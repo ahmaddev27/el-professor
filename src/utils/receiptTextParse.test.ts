@@ -333,6 +333,89 @@ Gesamtbetrag  EUR  42,02`)
   })
 })
 
+// Station-header hygiene, 29.10.2026: four misreadings off one production
+// screenshot — `Esso)` with a stray bracket, `Sol ingen` as the city,
+// `JET TANKSTELLE 318` with the branch number glued into the name, and
+// `JET Tankstel le …` where the OCR space inside the station word defeated
+// the split entirely. General rules; the fixtures are shapes, not that
+// screenshot.
+describe('the station header hygiene', () => {
+  it('strips an unbalanced bracket around the name and heals the city', () => {
+    const r = parseReceiptText(`Esso)
+Hauptstraße 5
+42651 Sol ingen
+Summe  EUR  20,00`)
+    expect(r.merchantName).toBe('Esso')
+    // "ingen" starts lower-case and is no connector word, so it continues
+    // the word before it. The PLZ stays untouched beside it.
+    expect(r.city).toBe('Solingen')
+    expect(r.postalCode).toBe('42651')
+  })
+
+  it('keeps balanced brackets as part of the name', () => {
+    const r = parseReceiptText(`Tank (24h) Center GmbH
+Industriestraße 2
+44787 Bochum
+Summe  EUR  15,00`)
+    expect(r.merchantName).toBe('Tank (24h) Center GmbH')
+  })
+
+  it('does not glue real multi-word cities together', () => {
+    const frankfurt = parseReceiptText(`Waschpark Mitte
+Mainzer Landstraße 50
+60311 Frankfurt am Main
+Summe  EUR  10,00`)
+    expect(frankfurt.city).toBe('Frankfurt am Main')
+    const bergisch = parseReceiptText(`Autohaus Nord
+Kölner Straße 100
+51465 Bergisch Gladbach
+Summe  EUR  12,00`)
+    expect(bergisch.city).toBe('Bergisch Gladbach')
+  })
+
+  it('recognises the split station word on the tilted photo, operator kept as read', () => {
+    // `Tankstel le` is the OCR's space, not two words. The keyword itself is
+    // repaired — it is a recognised vocabulary word — but the operator's NAME
+    // is kept exactly as read (`Wtistenfelder`): a person's spelling is never
+    // guessed without the paper.
+    const r = parseReceiptText(JET_TILTED)
+    expect(r.stationName).toBe('JET Tankstelle')
+    expect(r.operatorName).toBe('Detlev Wtistenfelder')
+  })
+
+  it('reads a branch number after the station word as its own field', () => {
+    const r = parseReceiptText(`JET TANKSTELLE 318
+Kölner Str. 8
+42651 Solingen
+Summe  EUR  30,00`)
+    expect(r.stationName).toBe('JET TANKSTELLE')
+    expect(r.stationNumber).toBe('318')
+    // The full printed line survives untouched beside the split.
+    expect(r.merchantName).toBe('JET TANKSTELLE 318')
+    // A branch number before the operator leaves the operator intact.
+    const withOperator = parseReceiptText(`ARAL Station 77 Hans Meier
+Bahnhofstraße 1
+50667 Köln
+Summe  EUR  25,00`)
+    expect(withOperator.stationName).toBe('ARAL Station')
+    expect(withOperator.stationNumber).toBe('77')
+    expect(withOperator.operatorName).toBe('Hans Meier')
+  })
+
+  it('leaves digits inside an ordinary merchant name alone', () => {
+    const r = parseReceiptText(`Autoteile 24 GmbH
+Bahnhofstraße 1
+50667 Köln
+Summe  EUR  9,99`)
+    expect(r.merchantName).toBe('Autoteile 24 GmbH')
+    expect(r.stationNumber).toBeUndefined()
+  })
+
+  it('reports no branch number as no field, not an empty one', () => {
+    expect(parseReceiptText(JET).stationNumber).toBeUndefined()
+  })
+})
+
 describe('text with nothing in it', () => {
   it('answers an empty result rather than throwing', () => {
     const r = parseReceiptText('')

@@ -54,6 +54,9 @@ export interface OcrResult {
   /** The person after the station word — the franchise operator — when what
    *  follows looks like a name and not more branding. */
   operatorName?: string;
+  /** The branch number a chain prints right after the station word — "JET
+   *  TANKSTELLE 318". Its own datum; `merchantName` keeps the full line. */
+  stationNumber?: string;
   /** Litres filled. Only a fuel receipt has one. */
   litres?: number;
   /** Price per litre, in euros. Only a fuel receipt has one. */
@@ -550,6 +553,30 @@ function extractPlzCandidates(lines: string[]): PlzCandidate[] {
     return true;
   };
 
+  // OCR likes to split a word with a stray space ("Sol ingen"). In a German
+  // locality every word starts upper-case; the lower-case words a real name
+  // contains are its connectors ("Frankfurt am Main", "Weil der Stadt",
+  // "Dillingen a. d. Donau"). So a fragment that starts lower-case and is not
+  // a connector continues the word before it — glued, never respelled. An
+  // upper-case fragment ("Bergisch Gladbach") is left alone: forcing those
+  // together would be the guessed correction this parser refuses to make.
+  const CITY_CONNECTORS = new Set([
+    'am', 'an', 'im', 'in', 'bei', 'ob', 'vor', 'auf', 'unter',
+    'der', 'die', 'das', 'dem', 'den', 'des', 'zur', 'zum', 'und',
+    'a', 'b', 'd', 'i', 'v',
+  ]);
+  const repairCitySpacing = (value: string): string => {
+    const tokens = value.split(/\s+/).filter(t => t !== '');
+    let healed = tokens[0] ?? '';
+    for (let i = 1; i < tokens.length; i++) {
+      const token = tokens[i];
+      const bare = token.toLowerCase().replace(/\.$/, '');
+      if (/^[a-zäöüß]/.test(token) && !CITY_CONNECTORS.has(bare)) healed += token;
+      else healed += ' ' + token;
+    }
+    return healed;
+  };
+
   // Core logic — all rejections check only the candidate's own line, NOT adjacent lines.
   // This prevents Tel./Fax on the line AFTER the PLZ from falsely rejecting the PLZ.
   const tryAdd = (postalCode: string, rawCity: string, lineIdx: number, adjacent: boolean) => {
@@ -559,12 +586,13 @@ function extractPlzCandidates(lines: string[]): PlzCandidate[] {
     // single spaces — `58089 Hagen Tei.Nr. 0 23 31…` once shipped the city
     // as "Hagen Tei.Nr.". `te[li1]` tolerates the thermal-paper misreads of
     // `Tel.`; the dot after it is required, so Teltow stays a city.
-    const city = rawCity
+    const cut = rawCity
       .trim()
       .split(/\s{2,}/)[0]
       .replace(/\s*(?:\bte[li1]\s*\.|\btelefon\b|\bfax\b|\bsteuer\b|\bust\b|\bwww\.|@|\be-?mail\b).*$/i, '')
       .replace(/[\s.,;:-]+$/, '')
       .trim();
+    const city = repairCitySpacing(cut);
     if (!isValidCity(city)) return;
 
     const line = lines[lineIdx] ?? '';
@@ -614,6 +642,12 @@ function extractPlzCandidates(lines: string[]): PlzCandidate[] {
     if (adjacent) {
       score -= 10;
       reasons.push('-10 PLZ/Stadt aus Nachbarzeilen');
+    }
+
+    // The pre-repair reading stays on record: the correction's source is the
+    // spacing rule above, and whoever audits the Beleg sees both values.
+    if (city !== cut) {
+      reasons.push(`Leerzeichen repariert: "${cut}"`);
     }
 
     candidates.push({ postalCode, city, score, lineIdx, reason: reasons.join('; ') || 'PLZ gefunden', rejected: false });
@@ -768,12 +802,80 @@ const HEADER_NOISE_RE = /\bte[li1](?:efon)?\s*\.|\btelefon\b|\bfax\b|\bsteuer[-\
 // let the match reach back into the station's name on a merged row.
 const STREET_RE = /((?:[\wÄÖÜäöüß.\-]+ )?[\wÄÖÜäöüß.\-]*(?:straße|strasse|gasse|allee|platz|damm|chaussee|ufer|weg|ring|str)\.?\s+\d+(?:\s*[-–\/]\s*\d+)?[a-z]?)\b/i;
 const STATION_WORD_RE = /\b(tankstelle|tankstation|autohof|rasthof|tankcenter|station)\b/i;
+// The same vocabulary, longest first, so a split "tankstation" is never
+// found as "station".
+const STATION_WORDS = ['tankstelle', 'tankstation', 'tankcenter', 'autohof', 'rasthof', 'station'] as const;
+
+/** The station word's span in `name`, tolerating the OCR's stray space inside
+ *  the word itself ("Tankstel le"). The word-boundary match is tried first;
+ *  only when it finds nothing is the spaced shape tried, letter by letter,
+ *  and a match must actually contain a space — a two-space gap is a column
+ *  boundary, not a split word, and `\s?` cannot cross it. */
+function findStationWord(name: string): { start: number; end: number; word: string } | null {
+  const direct = name.match(STATION_WORD_RE);
+  if (direct && direct.index !== undefined) {
+    return { start: direct.index, end: direct.index + direct[0].length, word: direct[0].toLowerCase() };
+  }
+  for (const word of STATION_WORDS) {
+    const spaced = new RegExp(`(^|[^\\p{L}])(${word.split('').join('\\s?')})(?!\\p{L})`, 'iu');
+    const m = name.match(spaced);
+    if (m && m.index !== undefined && /\s/.test(m[2])) {
+      const start = m.index + m[1].length;
+      return { start, end: start + m[2].length, word };
+    }
+  }
+  return null;
+}
+
+/** `Tankstel le` → `Tankstelle`: only the recognised vocabulary word is
+ *  repaired, in the case the paper used. A NAME is never respelled — the
+ *  operator after the word goes out exactly as the OCR read it. */
+function canonicalStationWord(segment: string, word: string): string {
+  if (!/\s/.test(segment)) return segment;
+  return segment === segment.toUpperCase()
+    ? word.toUpperCase()
+    : word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/** `Esso)` → `Esso`: an edge bracket or quote whose partner never appears is
+ *  the OCR's, not the merchant's. A balanced pair — "Tank (24h)" — stays. */
+function stripUnbalancedEdges(value: string): string {
+  const OPENS: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
+  const CLOSES: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  let s = value.trim();
+  for (let changed = true; changed && s.length > 0; ) {
+    changed = false;
+    const first = s[0];
+    const last = s[s.length - 1];
+    if (CLOSES[last] !== undefined && !s.includes(CLOSES[last])) {
+      s = s.slice(0, -1).trimEnd();
+      changed = true;
+      continue;
+    }
+    if (OPENS[first] !== undefined && !s.slice(1).includes(OPENS[first])) {
+      s = s.slice(1).trimStart();
+      changed = true;
+      continue;
+    }
+    if ((first === '"' || first === "'") && s.indexOf(first, 1) === -1) {
+      s = s.slice(1).trimStart();
+      changed = true;
+      continue;
+    }
+    if ((last === '"' || last === "'") && s.lastIndexOf(last, s.length - 2) === -1) {
+      s = s.slice(0, -1).trimEnd();
+      changed = true;
+    }
+  }
+  return s;
+}
 
 interface StationHeader {
   merchantName?: string;
   street?: string;
   stationName?: string;
   operatorName?: string;
+  stationNumber?: string;
 }
 
 function parseStationHeader(lines: string[]): StationHeader {
@@ -803,17 +905,25 @@ function parseStationHeader(lines: string[]): StationHeader {
     }
   }
 
-  const name = nameParts[0];
-  if (name !== undefined) {
+  const name = nameParts[0] === undefined ? undefined : stripUnbalancedEdges(nameParts[0]);
+  if (name !== undefined && name !== '') {
     out.merchantName = name;
     // "JET Tankstelle Detlev Wüstenfelder": the station word ends the brand,
     // and what follows is the operator — when it reads like a person's name
-    // and not like more branding or a legal form.
-    const stationM = name.match(STATION_WORD_RE);
-    if (stationM && stationM.index !== undefined) {
-      const end = stationM.index + stationM[0].length;
-      const station = name.slice(0, end).trim();
-      const after = name.slice(end).trim();
+    // and not like more branding or a legal form. The word is found even
+    // when the OCR split it ("Tankstel le"), and a bare branch number right
+    // after it ("JET TANKSTELLE 318") is its own datum, not a name part —
+    // digits elsewhere in a merchant's name are the name's and stay.
+    const found = findStationWord(name);
+    if (found) {
+      const station = (name.slice(0, found.start)
+        + canonicalStationWord(name.slice(found.start, found.end), found.word)).trim();
+      let after = name.slice(found.end).trim();
+      const branch = after.match(/^(\d{2,5})(?:\b[\s.,-]*)(.*)$/);
+      if (branch) {
+        out.stationNumber = branch[1];
+        after = branch[2].trim();
+      }
       if (station !== '') out.stationName = station;
       if (after !== '' && /^[A-ZÄÖÜ][\p{L}.\-]*(?:\s+[A-ZÄÖÜ][\p{L}.\-]*){1,3}$/u.test(after)) {
         out.operatorName = after;
@@ -978,6 +1088,7 @@ export function parseReceiptText(text: string): OcrResult {
   result.street = header.street;
   result.stationName = header.stationName;
   result.operatorName = header.operatorName;
+  result.stationNumber = header.stationNumber;
   // Only a fuel receipt has these; both stay undefined on anything else.
   result.litres = parseLitres(lines);
   result.pricePerLitre = parsePricePerLitre(lines);

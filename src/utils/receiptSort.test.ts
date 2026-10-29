@@ -286,3 +286,41 @@ describe('sorting is a permutation and nothing else', () => {
     expect(toCents(forward)).toBe(24521);
   });
 });
+
+/**
+ * The date column (29.10.2026): `date` is a day, not an instant, so a month's
+ * Belege are full of ties — and "newest first" used to leave every same-day
+ * row in arrival order, which is the fetch's `date, id` and not the order the
+ * papers were printed in. The day now ranks with the printed sale time inside
+ * it, a Beleg without a time sorts last within its day in both directions
+ * (the module's empty-value rule), and the id is the final key — always
+ * ascending, so equal rows hold ONE order whichever way the ranking runs.
+ */
+describe('the date column ranks by day, sale time and id', () => {
+  const rows: Receipt[] = [
+    beleg({ receiptNumber: 'BEL-0101', date: '2026-03-02', receiptTime: '08:00:00' }),
+    beleg({ receiptNumber: 'BEL-0102', date: '2026-03-02', receiptTime: '12:30:00' }),
+    // Entered by hand: a day but no printed sale time.
+    beleg({ receiptNumber: 'BEL-0103', date: '2026-03-02' }),
+    beleg({ receiptNumber: 'BEL-0104', date: '2026-03-01', receiptTime: '23:59:00' }),
+    // The same day and minute as BEL-0102: only the id separates them.
+    beleg({ receiptNumber: 'BEL-0105', date: '2026-03-02', receiptTime: '12:30:00' }),
+  ];
+  const ordered = (direction: 'asc' | 'desc'): string[] =>
+    sortReceipts(rows, 'date', direction).map(row => row.receiptNumber);
+
+  it('newest first is the latest day and, inside it, the latest sale time', () => {
+    expect(ordered('desc')).toEqual(['BEL-0102', 'BEL-0105', 'BEL-0101', 'BEL-0103', 'BEL-0104']);
+  });
+
+  it('oldest first flips the day and the time, never the empty rule', () => {
+    expect(ordered('asc')).toEqual(['BEL-0104', 'BEL-0101', 'BEL-0102', 'BEL-0105', 'BEL-0103']);
+  });
+
+  it('holds one id order for a full tie in both directions', () => {
+    const asc = ordered('asc');
+    const desc = ordered('desc');
+    expect(asc.indexOf('BEL-0102')).toBeLessThan(asc.indexOf('BEL-0105'));
+    expect(desc.indexOf('BEL-0102')).toBeLessThan(desc.indexOf('BEL-0105'));
+  });
+});
