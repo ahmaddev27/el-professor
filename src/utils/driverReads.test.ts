@@ -202,6 +202,13 @@ const DRIVER_READS: Record<string, readonly DeclaredRead[]> = {
       why: 'A salary can be owed after someone leaves, so the Gehaltsquittung must reach them — the comment at the call site has said so since 3.13. The picker marks them instead of hiding them.',
     },
   ],
+  'lib/simulationInputsClient.ts': [
+    {
+      statement: "select('id, allowed_weekdays, planning_enabled')",
+      kind: 'record',
+      why: "Two planning columns the chooser's reader does not carry, consulted only as `facts.get(d.id)` for drivers `SimulatedRidesPage` has already filtered with `selectableDrivers`. The chooser is the boundary; a second filter here would be a second place the rule lives, and a driver absent from the chooser is never looked up.",
+    },
+  ],
   'lib/tripAnalysisClient.ts': [
     {
       statement: "select('id, name, status, planning_min_salary",

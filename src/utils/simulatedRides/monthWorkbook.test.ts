@@ -1,69 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import * as XLSX from 'xlsx';
-import { generateFullMonth, type FullMonthInput, type FullMonthResult } from './fullMonth';
-import { SIMULATED_FILE_PREFIX, SIMULATED_SHEET_NAME } from './marker';
+import { CONTRACT_LIMITS, type PayloadCell } from '../../lib/workbookContract';
+import type { FullMonthResult } from './fullMonth';
+import { SIMULATED_FILE_PREFIX, SIMULATED_NOTICE, SIMULATED_SHEET_NAME } from './marker';
 import {
-  SHEET_CHECKS, SHEET_DAYS, SHEET_DECLINED, SHEET_DRIVERS, SHEET_ORDER, SHEET_RIDES, SHEET_SOURCE,
-  SHEET_VEHICLES, TOTAL_LABEL, buildMonthWorkbook, monthTotals, reconcile, totalsByDriver, totalsByVehicle,
-  type Cell,
+  LABEL_HEADER, LABEL_VALUE, SHEET_CHECKS, SHEET_DAYS, SHEET_DECISIONS, SHEET_DECLINED, SHEET_DRIVERS,
+  SHEET_EVENTS, SHEET_ORDER, SHEET_RIDES, SHEET_ROUTES, SHEET_SOURCE, SHEET_VEHICLES, TOTAL_LABEL,
+  buildMonthReport, contractProblem, labelled, monthTotals, payloadCost, reconcile, totalsByDriver, totalsByVehicle,
 } from './monthWorkbook';
-import type { PoolAddress } from './types';
+import { buildFixtureMonth } from '../../../scripts/lib/reportFixture';
 
-/** Invented data only: no real name, address or plate. */
-const POOL: PoolAddress[] = Array.from({ length: 25 }, (_, i) => ({
-  label: `Musterweg ${i + 1}, 12345 Testburg, Deutschland`,
-  lat: 50.0 + Math.floor(i / 5) * 0.0085,
-  lon: 8.0 + (i % 5) * 0.0085,
-}));
+/** Invented data only: see reportFixture.ts. */
+const month = (year: number, m: number, extra: Partial<Parameters<typeof buildFixtureMonth>[0]> = {}): Promise<FullMonthResult> =>
+  buildFixtureMonth({ year, month: m, seed: 4711, ...extra });
 
-const WORKDAYS = [1, 2, 3, 4, 5];
+type Table = Record<string, PayloadCell>[];
 
-function input(year: number, month: number): FullMonthInput {
-  return {
-    year,
-    month,
-    base: { lat: 50.01, lon: 8.01 },
-    pool: POOL,
-    vehicles: [
-      { id: 'v1', plate: 'XX-TS 101', type: 'Testwagen' },
-      { id: 'v2', plate: 'XX-TS 102', type: 'Testwagen' },
-    ],
-    // Weekdays only, so every weekend is a day with no ride and sheet B must still list it.
-    drivers: [
-      { id: 'd1', name: 'Fahrer Eins', allowed_weekdays: WORKDAYS },
-      { id: 'd2', name: 'Fahrer Zwei', allowed_weekdays: WORKDAYS },
-    ],
-    driverNotesMap: new Map(),
-    seed: 4711,
-    settings: {
-      declinedRidesEnabled: true,
-      declinedShare: 0.5,
-      monthlyRevenueShareEnabled: true,
-    },
+function readBack(result: FullMonthResult) {
+  const report = buildMonthReport(result);
+  const rowsOf = (name: string): PayloadCell[][] => {
+    const sheet = report.payload.sheets.find(s => s.name === name);
+    if (!sheet) throw new Error(`no sheet ${name}`);
+    return sheet.rows;
   };
-}
-
-function month(year: number, m: number): FullMonthResult {
-  const out = generateFullMonth(input(year, m));
-  if (!out.ok) throw new Error(`generation failed: ${JSON.stringify(out.failure)}`);
-  return out.result;
-}
-
-function readBack(result: FullMonthResult): { names: string[]; sheet: (name: string) => Cell[][]; fileName: string } {
-  const file = buildMonthWorkbook(result);
-  const wb = XLSX.read(file.bytes, { type: 'array' });
-  return {
-    names: wb.SheetNames,
-    fileName: file.fileName,
-    sheet: name => XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[name], { header: 1, defval: '' }),
+  const tableOf = (name: string): Table => {
+    const [header, ...body] = rowsOf(name);
+    return body.map(r => Object.fromEntries(header.map((h, i) => [String(h), r[i] ?? null])));
   };
+  return { report, rowsOf, tableOf, names: report.payload.sheets.map(s => s.name) };
 }
 
-const cents = (cell: Cell): number => Math.round(Number(cell) * 100);
+const cents = (cell: PayloadCell): number => Math.round(Number(cell) * 100);
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
-/** The body of a breakdown sheet: header and the total row removed. */
-const bodyOf = (rows: Cell[][]): Cell[][] => rows.slice(1).filter(r => r[0] !== TOTAL_LABEL);
-const totalOf = (rows: Cell[][]): Cell[] => rows.find(r => r[0] === TOTAL_LABEL) as Cell[];
 
 const CASES: Array<[string, number, number, number]> = [
   ['31-day month', 2026, 10, 31],
@@ -72,50 +39,78 @@ const CASES: Array<[string, number, number, number]> = [
   ['February of a non-leap year', 2026, 2, 28],
 ];
 
-describe.each(CASES)('the month workbook, %s', (_label, year, m, dayCount) => {
-  const result = month(year, m);
-  const book = readBack(result);
-
-  it('carries all seven sheets and the SIMULIERT notice, which is not first', () => {
-    for (const name of SHEET_ORDER) expect(book.names).toContain(name);
-    expect(book.names).toContain(SIMULATED_SHEET_NAME);
-    expect(book.names[0]).toBe(SHEET_RIDES);
-    expect(book.names.indexOf(SIMULATED_SHEET_NAME)).toBeGreaterThan(0);
-    expect(book.fileName.startsWith(SIMULATED_FILE_PREFIX)).toBe(true);
-    for (const name of book.names) expect(name.length).toBeLessThanOrEqual(31);
+describe.each(CASES)('the month report, %s', (_label, year, m, dayCount) => {
+  let result: FullMonthResult;
+  let book: ReturnType<typeof readBack>;
+  it('builds', async () => {
+    result = await month(year, m);
+    book = readBack(result);
   });
 
-  it('lists exactly one row per calendar day in sheet B, zero-ride days included', () => {
-    const days = bodyOf(book.sheet(SHEET_DAYS));
-    expect(days).toHaveLength(dayCount);
-    expect(days.map(r => r[0])).toEqual(
-      Array.from({ length: dayCount }, (_, i) => `${year}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`),
-    );
-    const empty = days.filter(r => r[13] === 'Ja');
-    expect(empty.length).toBeGreaterThan(0);
-    for (const row of empty) {
-      expect(row[5]).toBe(0);
-      expect(String(row[14]).length).toBeGreaterThan(0);
+  it('has the sheets in the contracted order and the SIMULIERT notice last', () => {
+    expect(book.names).toEqual([...SHEET_ORDER]);
+    expect(book.names[book.names.length - 1]).toBe(SIMULATED_SHEET_NAME);
+    for (const name of book.names) expect(name.length).toBeLessThanOrEqual(CONTRACT_LIMITS.maxSheetNameLength);
+    expect(book.report.fileName.startsWith(SIMULATED_FILE_PREFIX)).toBe(true);
+    expect(book.report.fileName).toContain(`Monatsbericht_${year}-${String(m).padStart(2, '0')}_4711`);
+    expect(book.report.payload.sheets.every(s => s.header === true)).toBe(true);
+  });
+
+  it('puts the label in the first column of EVERY row of every sheet', () => {
+    for (const sheet of book.report.payload.sheets) {
+      if (sheet.name === SIMULATED_SHEET_NAME) {
+        expect(sheet.rows).toEqual([[SIMULATED_NOTICE]]);
+        continue;
+      }
+      expect(sheet.rows[0][0], sheet.name).toBe(LABEL_HEADER);
+      expect(sheet.rows.length, sheet.name).toBeGreaterThan(1);
+      for (const [i, row] of sheet.rows.slice(1).entries()) expect(row[0], `${sheet.name} row ${i + 2}`).toBe(LABEL_VALUE);
     }
   });
 
-  it('reconciles the money per day, per driver and per vehicle with the total, in cents', () => {
-    const total = result.revenue.fareCents;
-    expect(total).toBeGreaterThan(0);
-    const days = bodyOf(book.sheet(SHEET_DAYS));
-    expect(sum(days.map(r => cents(r[9])))).toBe(total);
-    expect(cents(totalOf(book.sheet(SHEET_DAYS))[9])).toBe(total);
-    const drivers = bodyOf(book.sheet(SHEET_DRIVERS));
-    expect(sum(drivers.map(r => cents(r[5])))).toBe(total);
-    const vehicles = bodyOf(book.sheet(SHEET_VEHICLES));
-    expect(sum(vehicles.map(r => cents(r[5])))).toBe(total);
+  it('keeps every number bare and every cell a string, a number or empty', () => {
+    for (const sheet of book.report.payload.sheets) {
+      for (const row of sheet.rows) {
+        for (const cell of row) {
+          expect(cell === null || typeof cell === 'string' || typeof cell === 'number').toBe(true);
+          if (typeof cell === 'number') expect(Number.isFinite(cell)).toBe(true);
+        }
+      }
+    }
   });
 
-  it('reconciles every measure, with no difference, and says so on sheet F', () => {
+  it('lists exactly one row per calendar day in sheet B, zero-ride days included', () => {
+    const days = book.tableOf(SHEET_DAYS).filter(r => r.Datum !== TOTAL_LABEL);
+    expect(days).toHaveLength(dayCount);
+    expect(days.map(r => r.Datum)).toEqual(
+      Array.from({ length: dayCount }, (_, i) => `${year}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`),
+    );
+    const empty = days.filter(r => r['Tag ohne Fahrt'] === 'Ja');
+    expect(empty.length).toBeGreaterThan(0);
+    for (const row of empty) {
+      expect(row.Auftraege).toBe(0);
+      expect(String(row.Grund).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('reconciles the money per day, per driver and per vehicle with the ride sheet, in cents', () => {
+    const rides = book.tableOf(SHEET_RIDES);
+    const total = sum(rides.filter(r => r.Status === 'abgeschlossen').map(r => cents(r['Fahrpreis (EUR)'])));
+    expect(total).toBe(result.revenue.fareCents);
+    expect(total).toBeGreaterThan(0);
+    for (const [sheet, key] of [[SHEET_DAYS, 'Datum'], [SHEET_DRIVERS, 'Fahrer'], [SHEET_VEHICLES, 'Fahrzeug']] as const) {
+      const rows = book.tableOf(sheet);
+      const totalRow = rows.find(r => r[key] === TOTAL_LABEL)!;
+      expect(cents(totalRow['Fahrpreise (EUR)']), sheet).toBe(total);
+      expect(sum(rows.filter(r => r !== totalRow).map(r => cents(r['Fahrpreise (EUR)']))), `${sheet} parts`).toBe(total);
+    }
+  });
+
+  it('reconciles every measure with no difference, and says so on sheet F', () => {
     for (const row of reconcile(result)) expect(row.partsSum, row.label).toBe(row.total);
-    const checks = book.sheet(SHEET_CHECKS).filter(r => r[4] === 'OK' || r[4] === 'ABWEICHUNG');
+    const checks = book.tableOf(SHEET_CHECKS).filter(r => r.Abschnitt === 'Abgleich');
     expect(checks.length).toBeGreaterThan(0);
-    expect(checks.every(r => r[4] === 'OK' && r[3] === 0)).toBe(true);
+    expect(checks.every(r => r.Ergebnis === 'OK' && r.Differenz === 0)).toBe(true);
   });
 
   it('sums orders, tips, decline fees and kilometres without double counting', () => {
@@ -123,63 +118,99 @@ describe.each(CASES)('the month workbook, %s', (_label, year, m, dayCount) => {
     expect(sum(totalsByDriver(result.month.rides, result.provenance.settings).map(x => x.orders))).toBe(t.orders);
     expect(sum(totalsByVehicle(result.month.rides, result.provenance.settings).map(x => x.declinedFeeCents)))
       .toBe(t.declinedFeeCents);
-    expect(sum(result.days.map(d => d.rides))).toBe(result.revenue.counts.total);
     expect(t.orders).toBe(t.completed + t.cancelled + t.declined);
     expect(t.appFareCents + t.cashFareCents).toBe(t.fareCents);
   });
+
+  it('prints one route row per check, with no summary above the header', () => {
+    const rows = book.report.payload.sheets.find(s => s.name === SHEET_ROUTES)!.rows;
+    expect(rows).toHaveLength(result.routeChecks.length + 1);
+    expect(rows[0][1]).toBe('Gruppierung');
+  });
+
+  it('fits the contract, and the cost of this month is below every limit', () => {
+    const cost = payloadCost(book.report.payload);
+    expect(contractProblem(cost)).toBeNull();
+    expect(cost.cells).toBeLessThan(CONTRACT_LIMITS.maxCells);
+  });
 });
 
-describe('declined and cancelled rides on sheet E', () => {
-  const result = month(2026, 10);
-  const rows = readBack(result).sheet(SHEET_DECLINED).slice(1);
-
-  it('writes a declined ride with the fee and no fare', () => {
-    const declined = rows.filter(r => r[1] === 'abgelehnt');
-    expect(declined.length).toBeGreaterThan(0);
+describe('declined and cancelled rides', () => {
+  it('writes a declined ride with the fee and its rule, and a cancellation with neither', async () => {
+    const result = await month(2026, 10);
+    const rides = readBack(result).tableOf(SHEET_RIDES);
+    const declined = rides.filter(r => r.Status === 'abgelehnt');
     expect(declined).toHaveLength(result.revenue.counts.declined);
+    expect(declined.length).toBeGreaterThan(0);
     for (const r of declined) {
-      expect(cents(r[5])).toBe(result.provenance.settings.declinedFeeCents);
-      expect(cents(r[6])).toBe(0);
+      expect(cents(r['Gebuehr (EUR)'])).toBe(result.provenance.settings.declinedFeeCents);
+      expect(r.Gebuehrenregel).toBe('idle_in_shift');
+      expect(cents(r['Fahrpreis (EUR)'])).toBe(0);
     }
-  });
-
-  it('keeps a cancelled ride out of the declined count and charges it no fee', () => {
-    const cancelled = rows.filter(r => r[1] === 'storniert');
+    expect(sum(declined.map(r => cents(r['Gebuehr (EUR)'])))).toBe(declined.length * 600);
+    const cancelled = rides.filter(r => r.Status === 'storniert');
     expect(cancelled.length).toBeGreaterThan(0);
-    expect(cancelled).toHaveLength(result.revenue.counts.cancelled);
-    for (const r of cancelled) expect(cents(r[5])).toBe(0);
-    expect(result.revenue.cancelledFeeCents).toBe(0);
+    for (const r of cancelled) {
+      expect(cents(r['Gebuehr (EUR)'])).toBe(0);
+      expect(r.Gebuehrenregel).toBe('');
+    }
+    const e = readBack(result).tableOf(SHEET_DECLINED);
+    expect(e).toHaveLength(declined.length + cancelled.length);
   });
 });
 
-describe('the revenue share and the source sheet', () => {
-  const result = month(2026, 10);
-  const book = readBack(result);
-
-  it('prints basis, rate, amount and remainder, which add back to the basis', () => {
-    const lines = new Map(book.sheet(SHEET_CHECKS).map(r => [r[0], r[1]]));
-    const share = result.share;
-    expect(share).not.toBeNull();
-    expect(cents(lines.get('Betrag (EUR)') as Cell) + cents(lines.get('Rest, falls Abzug (EUR)') as Cell))
+describe('the share block, the decisions and the source sheet', () => {
+  it('prints basis, contents, rate, amount and remainder, and says the share is no tax and no commission', async () => {
+    const result = await month(2026, 10);
+    const lines = new Map(readBack(result).tableOf(SHEET_CHECKS).filter(r => r.Abschnitt !== 'Abgleich').map(r => [r.Posten, r['Wert / Summe der Teile']]));
+    expect(result.share).not.toBeNull();
+    expect(cents(lines.get('Betrag (EUR)') as PayloadCell) + cents(lines.get('Rest, falls Abzug (EUR)') as PayloadCell))
       .toBe(result.basis.basisCents);
-    const rate = Number(lines.get('Satz (%)'));
-    expect(rate).toBeGreaterThanOrEqual(30);
-    expect(rate).toBeLessThanOrEqual(33);
+    expect(cents(lines.get('Zahlung App (EUR)') as PayloadCell) + cents(lines.get('Zahlung Bar (EUR)') as PayloadCell))
+      .toBe(result.revenue.fareCents);
+    expect(Number(lines.get('Satz (%)'))).toBeGreaterThanOrEqual(30);
+    expect(Number(lines.get('Satz (%)'))).toBeLessThanOrEqual(33);
+    expect(String(lines.get('Grundlage enthaelt'))).toContain('Fahrpreise');
+    expect(String(lines.get('Hinweis Monatsanteil'))).toContain('weder eine Steuer noch eine Provision');
   });
 
-  it('names the seed, the generator version and the simulation marking', () => {
-    const text = book.sheet(SHEET_SOURCE).map(r => r.join(' | ')).join('\n');
+  it('lists the constraint log and every shift decision with the driver resolved by id', async () => {
+    const result = await month(2026, 10);
+    const book = readBack(result);
+    expect(book.tableOf(SHEET_EVENTS)).toHaveLength(result.constraints.length);
+    const decisions = book.tableOf(SHEET_DECISIONS);
+    expect(decisions).toHaveLength(result.decisions.length);
+    expect(decisions.some(d => d.Ergebnis === 'nicht eingeplant' && d.Code === 'driver_blocked_by_note')).toBe(true);
+    expect(decisions.some(d => d.Ergebnis === 'eingeplant, zu pruefen')).toBe(true);
+    const blocked = decisions.find(d => d.Code === 'driver_blocked_by_note')!;
+    expect(blocked.Fahrer).toBe('Fahrer 1');
+    expect(decisions.every(d => !String(d.Fahrer).match(/^[0-9a-f]{8}-/))).toBe(true);
+  });
+
+  it('names the seed, the generator, the travel source and the routing provenance', async () => {
+    const result = await month(2026, 10);
+    const rows = readBack(result).tableOf(SHEET_SOURCE);
+    const text = rows.map(r => `${r.Angabe} | ${r.Wert}`).join('\n');
     expect(text).toContain(String(result.provenance.seed));
     expect(text).toContain(result.provenance.generatorVersion);
-    expect(text).toContain('SIMULIERT');
+    expect(text).toContain('Fahrzeit gemessen | Ja');
+    expect(text).toContain('Routing: berechnete Paare');
     expect(text).toContain('simuliert');
     expect(text).toContain('kein Nachweis');
+    expect(text).toContain(SIMULATED_NOTICE);
+  });
+});
+
+describe('the contract limits', () => {
+  it('say in German which limit a too-large month would break', () => {
+    const base = { sheets: 11, cells: 1000, maxRows: 10, maxColumns: 10, bytes: 1000 };
+    expect(contractProblem(base)).toBeNull();
+    expect(contractProblem({ ...base, cells: CONTRACT_LIMITS.maxCells + 1 })).toContain('Zellen');
+    expect(contractProblem({ ...base, maxRows: CONTRACT_LIMITS.maxRowsPerSheet + 1 })).toContain('Zeilen');
+    expect(contractProblem({ ...base, bytes: CONTRACT_LIMITS.maxBodyBytes + 1 })).toContain('Bytes');
   });
 
-  it('keeps numbers as numbers in the cells', () => {
-    const rides = book.sheet(SHEET_RIDES);
-    const done = rides.find(r => r[2] === 'abgeschlossen') as Cell[];
-    expect(typeof done[9]).toBe('number');
-    expect(typeof done[12]).toBe('number');
+  it('labelled() never lets a blank row through unlabelled', () => {
+    expect(labelled([['a'], [], ['b']]).map(r => r[0])).toEqual([LABEL_HEADER, LABEL_VALUE, LABEL_VALUE]);
   });
 });

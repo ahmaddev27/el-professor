@@ -24,6 +24,7 @@ import * as XLSX from 'xlsx';
 import { addressKey, parseGeocodeResponse, INFRASTRUCTURE_REASONS, MAX_ADDRESSES_PER_CALL, type GeocodeResult } from '../supabase/functions/_shared/geocode-core.ts';
 import { parseRouteResponse, MAX_PAIRS_PER_CALL, type RouteResult } from '../supabase/functions/_shared/travel-route-core.ts';
 import { deadheadSeconds, roadKm } from '../src/utils/simulatedRides/geo.ts';
+import { DATETIME_RE, wallTimeToInstant } from '../src/utils/fahrtenbuchImportParser.ts';
 import {
   buildTransitions, causeClass, classifyTransition, csvLine, parseCsv, percentile, wallHour, wallMs,
   type AuditRide, type GeocodeLookup, type RouteLookup, type Transition,
@@ -257,9 +258,25 @@ function transitionsFromEvidence(file: string): Transition[] {
   });
 }
 
+/**
+ * A ride sheet's wall-clock text as an instant in Europe/Berlin, the way the
+ * importer reads it. Reading it as a naive UTC wall time would make every gap
+ * that spans the night the clocks change wrong by an hour; a reading the
+ * clocks skip or repeat is NaN, and the pair is then unverified, not guessed.
+ */
+function zonedMs(text: string): number {
+  const m = DATETIME_RE.exec(text.trim());
+  if (m === null) return Number.NaN;
+  const r = wallTimeToInstant({ year: +m[1], month: +m[2], day: +m[3], hour: +m[4], minute: +m[5], second: m[6] === undefined ? 0 : +m[6] });
+  if (r.kind !== 'ok') return Number.NaN;
+  const fraction = /\.(\d{1,3})/u.exec(text.trim().slice(19));
+  return r.ms + (fraction ? Number(fraction[1].padEnd(3, '0')) : 0);
+}
+
 function cellMs(v: unknown): number {
   if (typeof v === 'number') return Math.round((v - 25569) * 86_400_000);
   if (typeof v !== 'string') return Number.NaN;
+  if (DATETIME_RE.test(v.trim())) return zonedMs(v);
   const german = /^(\d{2})\.(\d{2})\.(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/u.exec(v.trim());
   if (german) return Date.UTC(+german[3], +german[2] - 1, +german[1], +german[4], +german[5], +(german[6] ?? 0));
   return wallMs(v);
@@ -271,19 +288,30 @@ function ridesFromWorkbook(file: string): AuditRide[] {
   const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], { header: 1, raw: true });
   const headAt = rows.findIndex((r) => r.includes('Abholort'));
   if (headAt < 0) throw new Error(`no header row with "Abholort" in sheet ${sheetName}`);
-  const head = rows[headAt] as string[];
-  const at = (n: string) => head.indexOf(n);
-  const need = ['Uhrzeit des Fahrtbeginns', 'Uhrzeit des Fahrtendes', 'Kennzeichen', 'Fahrername', 'Abholort', 'Zielort', 'Fahrtstatus'];
-  for (const n of need) if (at(n) < 0) throw new Error(`column "${n}" missing in sheet ${sheetName}`);
-  return rows.slice(headAt + 1).filter((r) => r.length > 0).map((r, i) => ({
-    nr: i + 1,
-    startMs: cellMs(r[at('Uhrzeit des Fahrtbeginns')]),
-    endMs: cellMs(r[at('Uhrzeit des Fahrtendes')]),
-    vehicle: String(r[at('Kennzeichen')] ?? ''),
-    driver: String(r[at('Fahrername')] ?? ''),
-    pickup: String(r[at('Abholort')] ?? ''),
-    dropoff: String(r[at('Zielort')] ?? ''),
-    cancelled: /storn|cancel|abgebrochen/iu.test(String(r[at('Fahrtstatus')] ?? '')),
+  const head = (rows[headAt] as unknown[]).map((h) => String(h ?? ''));
+  // The Uber export's names first, then the report's sheet A (`A Fahrten`).
+  const columns: Record<string, readonly string[]> = {
+    start: ['Uhrzeit des Fahrtbeginns', 'Fahrtbeginn'],
+    end: ['Uhrzeit des Fahrtendes', 'Fahrtende'],
+    vehicle: ['Kennzeichen'],
+    driver: ['Fahrername', 'Fahrer'],
+    pickup: ['Abholort'],
+    dropoff: ['Zielort'],
+    status: ['Fahrtstatus', 'Status'],
+  };
+  const at = (k: string) => columns[k].map((n) => head.indexOf(n)).find((i) => i >= 0) ?? -1;
+  for (const k of Object.keys(columns)) if (at(k) < 0) throw new Error(`no column ${columns[k].join(' / ')} in sheet ${sheetName}`);
+  const nrAt = head.indexOf('Nr');
+  return rows.slice(headAt + 1).filter((r) => r.length > 0 && String(r[at('pickup')] ?? '') !== '').map((r, i) => ({
+    nr: nrAt >= 0 && Number.isInteger(Number(r[nrAt])) ? Number(r[nrAt]) : i + 1,
+    startMs: cellMs(r[at('start')]),
+    endMs: cellMs(r[at('end')]),
+    vehicle: String(r[at('vehicle')] ?? ''),
+    driver: String(r[at('driver')] ?? ''),
+    pickup: String(r[at('pickup')] ?? ''),
+    dropoff: String(r[at('dropoff')] ?? ''),
+    // Only a completed ride has a drive to check; a declined or cancelled order kept no times.
+    cancelled: !/^(abgeschlossen|completed)$/iu.test(String(r[at('status')] ?? '').trim()),
   }));
 }
 

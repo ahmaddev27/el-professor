@@ -11,6 +11,7 @@ import type * as XLSX from 'xlsx';
 import { ExportServiceError, fetchWorkbook, type ExportServiceDeps } from '../lib/exportService';
 import { reportExportFailure } from '../lib/exportFeedback';
 import { triggerDownload } from './browserDownload';
+import type { WorkbookPayload } from '../lib/workbookContract';
 import { workbookToPayload, type PayloadOptions } from './workbookPayload';
 
 /** Rejects with an ExportServiceError when the service cannot deliver the file. */
@@ -38,4 +39,24 @@ export function deliverWorkbook(source: XLSX.WorkBook, filename: string, options
       retry: retryable ? () => deliverWorkbook(source, filename, options) : undefined,
     });
   });
+}
+
+/**
+ * `deliverWorkbook` for a caller that already holds the payload (the simulated
+ * month's report is built as one, with no SheetJS workbook in between). Same
+ * rules: the file is offered only after the service answered, a failure goes to
+ * the sink, and a retry reuses the payload already built.
+ */
+export function deliverWorkbookPayload(payload: WorkbookPayload, filename: string): void {
+  void fetchWorkbook(payload)
+    .then(blob => triggerDownload(blob, filename))
+    .catch((error: unknown) => {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      const retryable = failure instanceof ExportServiceError && failure.retryable;
+      reportExportFailure({
+        error: failure,
+        filename,
+        retry: retryable ? () => deliverWorkbookPayload(payload, filename) : undefined,
+      });
+    });
 }
