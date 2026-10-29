@@ -39,7 +39,7 @@ Last updated: **29.10.2026**
     - Python 142 passed with openpyxl's lxml path off. Three tests fail only with the local, unpinned `lxml` installed.
     - About 30 mutation controls, all caught.
   - **Open:**
-    - Valhalla on the VPS (owner's call).
+    - ~~Valhalla on the VPS~~ **Declined by the owner on 29.10.2026: no Valhalla; the product stays on ridy's OSRM through our gateway.** The auditor checks with their own Valhalla; what would settle the remaining disagreement is the auditor's geocoded coordinates, not a second engine. Do not propose it again without a new reason.
     - `must_include_in_plan` notes are logged but not enforced by the simulation.
     - The local proxy's ETIMEDOUT to the VPS is this machine's network, not the product.
 
