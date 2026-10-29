@@ -205,6 +205,20 @@ export function effectOfNote(note: StructuredNote): {
     };
   }
 
+  // A `general` or `other` note the operator marked as obligatory: the planner
+  // must place the driver in its window, so calling it neutral would describe a
+  // planner that does not exist. The simulation does not enforce it (it only
+  // ever keeps drivers out), and says so for a person to check. Found on the
+  // first month generated through the screen, 29.10.2026.
+  if (note.note_planning_behavior === 'must_include_in_plan') {
+    return {
+      effect: 'human_review',
+      certainty: 'reported',
+      needsHumanReview: true,
+      reason: 'Pflichtnotiz - der Fahrer muss in diesem Zeitraum eingeplant sein; die Simulation setzt sie nicht um, bitte prüfen',
+    };
+  }
+
   return {
     effect: 'none',
     certainty: 'reported',

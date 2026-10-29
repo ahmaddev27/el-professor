@@ -138,6 +138,10 @@ const READER_MODULE: Readonly<Record<string, string | null>> = {
   // `documents` modules off, these two screens stay reachable over closed data.
   'src/pages/StundennachweisPage.tsx':  null,
   'src/pages/SimulatedRidesPage.tsx':   null,
+  // The simulator's own reads, kept out of the page: driver_notes, the planning
+  // columns of drivers and the month's werkstatt_checks, all read BEFORE a ride
+  // is placed (decision 5 of 29.10.2026). It serves the same module-less screen.
+  'src/lib/simulationInputsClient.ts':  null,
 
   // components, whose module is the screen that mounts them
   'src/components/AbrechnungScheduleCard.tsx':             'abrechnung',
@@ -323,6 +327,10 @@ describe('the cross-module read set', () => {
       'no module reads driver_notes (owned by notes)',
       'no module reads drivers (owned by fahrer)',
       'no module reads income (owned by umsaetze)',
+      // The simulator reads the month's workshop checks so that a negative one
+      // is logged for review. It is a read for a screen no module owns, like
+      // its reads of cars, drivers and driver_notes above.
+      'no module reads werkstatt_checks (owned by werkstatt)',
       'notes reads cars (owned by cars)',
       'notes reads drivers (owned by fahrer)',
       'overview reads cars (owned by cars)',
@@ -568,8 +576,8 @@ describe('the Overview is no longer one of the blockers', () => {
     // Pinned as a pair so neither can move alone. If the crossing count changes
     // a read was added or removed; if only the blocking count changes, a reader
     // was taught or untaught.
-    expect(crossModuleReads()).toHaveLength(32);
-    expect(blockingCrossings()).toHaveLength(27);
+    expect(crossModuleReads()).toHaveLength(33);
+    expect(blockingCrossings()).toHaveLength(28);
   });
 
   it('`shared reads receipts` and `shared reads drivers` are NOT cleared', () => {
@@ -593,6 +601,12 @@ describe('three modules have no lexically visible blocker left', () => {
     was the Overview's — which is why this slice chose the Overview: one reader,
     three modules.
 
+    `werkstatt` has since gained a second, which is why only two are left: the
+    simulator's calendar mode (SimulatedRidesPage, no module) reads the month's
+    `werkstatt_checks` before it places a shift, so a negative check can be
+    logged for review. A module-less screen reading a closed table is exactly
+    the crossing this file exists to count, and the count is the answer here.
+
     This describe block is deliberately **not** the conclusion. Section 7 is,
     and it says the opposite. Both are kept because the difference between them
     is the finding: a measure that looks only at `from('<literal>')` says these
@@ -612,8 +626,8 @@ describe('three modules have no lexically visible blocker left', () => {
       .map(m => m.key)
       .sort();
 
-  it('and they are exactly these three', () => {
-    expect(freeByLiteralScan()).toEqual(['fixkosten', 'salaries', 'werkstatt']);
+  it('and they are exactly these two', () => {
+    expect(freeByLiteralScan()).toEqual(['fixkosten', 'salaries']);
   });
 
   it('`salaries` owns two tables and both had to come clear, not just one', () => {

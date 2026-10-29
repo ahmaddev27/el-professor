@@ -39,7 +39,9 @@ import {
   type FullMonthResult,
   type FullMonthVehicle,
 } from '../src/utils/simulatedRides/fullMonth';
-import { buildMonthWorkbook, reconcile } from '../src/utils/simulatedRides/monthWorkbook';
+import * as XLSX from 'xlsx';
+import { buildMonthReport, reconcile } from '../src/utils/simulatedRides/monthWorkbook';
+import type { WorkbookPayload } from '../src/lib/workbookContract';
 import { SIMULATED_NOTICE } from '../src/utils/simulatedRides/marker';
 import type { PoolAddress } from '../src/utils/simulatedRides/types';
 import type { SimulationTenantSettings } from '../src/utils/simulatedRides/tenantSettings';
@@ -277,7 +279,20 @@ if (!generated.ok) {
 const result = generated.result;
 
 mkdirSync(OUT, { recursive: true });
-const workbook = buildMonthWorkbook(result);
+
+// Historical script, reader-side convenience only: the report is a payload the
+// export service writes since round 4, and this script must keep producing a
+// local file for the round-3 verifier, so the payload is turned into a SheetJS
+// workbook here. The app never does this.
+function payloadToSheetJsFile(payload: WorkbookPayload): Uint8Array {
+  const wb = XLSX.utils.book_new();
+  for (const sheet of payload.sheets) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet.rows.map(r => r.map(c => (typeof c === 'object' && c !== null ? c.v : c)))), sheet.name);
+  }
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
+}
+const report = buildMonthReport(result);
+const workbook = { fileName: report.fileName, bytes: payloadToSheetJsFile(report.payload) };
 writeFileSync(path.join(OUT, workbook.fileName), workbook.bytes);
 writeFileSync(path.join(OUT, 'Finanzbericht.txt'), financialReport(result), 'utf8');
 writeFileSync(path.join(OUT, 'Einschraenkungen.md'), constraintTable(result.constraints), 'utf8');

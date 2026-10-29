@@ -8,6 +8,7 @@ import {
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
+import { findSimulationMarker } from '../utils/simulatedRides/marker';
 import type { TranslationKey } from '../i18n';
 import {
   REVIEW_REASONS,
@@ -465,13 +466,19 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target!.result as ArrayBuffer);
-        setRawXlsxBytes(data);
-        void checkFileFingerprint(data);
         // raw: true → keep numeric values (dates as serials, times as fractions)
         const wb = XLSX.read(data, { type: 'array', raw: true, cellDates: false });
 
         console.log('[Fahrtenbuch] Sheet names:', wb.SheetNames);
         const sheetName = wb.SheetNames[0];
+        // Before the bytes are kept or the fingerprint is asked for: a file that
+        // says it is simulated must leave nothing behind in this dialog.
+        if (findSimulationMarker(wb, sheetName) !== null) {
+          setParseError(t('imp.error.simulatedFile'));
+          return;
+        }
+        setRawXlsxBytes(data);
+        void checkFileFingerprint(data);
         setSourceSheetName(sheetName || 'Sheet1');
         console.log('[Fahrtenbuch] Using sheet:', sheetName);
 

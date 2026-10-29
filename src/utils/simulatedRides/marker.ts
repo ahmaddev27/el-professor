@@ -69,3 +69,48 @@ export function writeMarkedWorkbook(wb: XLSX.WorkBook, fileName: string, simulat
 export function appendSimulatedNoticeRows<T>(rows: T[][]): void {
   rows.push([] as unknown as T[], [SIMULATED_NOTICE as unknown as T]);
 }
+
+/** The header of the label column every row of a simulated report carries. */
+export const SIMULATED_LABEL_HEADER = 'Kennzeichnung';
+export const SIMULATED_LABEL_VALUE = 'SIMULIERT';
+
+export type SimulationMarkerKind = 'sheet' | 'label_column' | 'notice_text';
+
+const norm = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+/**
+ * Whether a workbook handed to the REAL Fahrtenbuch import says it is simulated.
+ *
+ * A simulated file must never be taken in as a real one, however it got there:
+ * a Fahrtenbuch is a statutory record. Three independent signs, any of which
+ * refuses the file, so removing one (renaming the notice sheet, deleting the
+ * label column of a copied sheet) is not enough to launder it:
+ *  - a sheet named `SIMULIERT`;
+ *  - in the sheet that will be read, a `Kennzeichnung` header cell with a
+ *    `SIMULIERT` cell below it in the same column;
+ *  - any cell of the read sheet equal to the notice sentence.
+ *
+ * A real Uber export has none of them: its 18 headers (see `sheet.ts`) do not
+ * include `Kennzeichnung` (the plate column is `Kennzeichen`). The generator's
+ * own import (`importPath.ts`) reads rows itself and never calls this, so the
+ * simulated path keeps working.
+ */
+export function findSimulationMarker(
+  wb: Pick<XLSX.WorkBook, 'SheetNames' | 'Sheets'>,
+  readSheetName: string | undefined,
+): SimulationMarkerKind | null {
+  if (wb.SheetNames.some(n => norm(n).toUpperCase() === SIMULATED_SHEET_NAME)) return 'sheet';
+  const ws = readSheetName === undefined ? undefined : wb.Sheets[readSheetName];
+  if (!ws) return null;
+  const labelColumns = new Set<number>();
+  const valueColumns = new Set<number>();
+  for (const address of Object.keys(ws)) {
+    if (address.startsWith('!')) continue;
+    const text = norm((ws[address] as XLSX.CellObject).v);
+    if (text === SIMULATED_NOTICE) return 'notice_text';
+    const column = XLSX.utils.decode_cell(address).c;
+    if (text === SIMULATED_LABEL_HEADER) labelColumns.add(column);
+    else if (text.toUpperCase() === SIMULATED_LABEL_VALUE) valueColumns.add(column);
+  }
+  return [...labelColumns].some(c => valueColumns.has(c)) ? 'label_column' : null;
+}

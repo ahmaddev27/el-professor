@@ -1,6 +1,47 @@
 # Handoff
 
-Last updated: **28.10.2026**
+Last updated: **29.10.2026**
+
+- **29.10.2026 (latest) - external audit round 4: the calendar month in the screen, drive times from OSRM instead of speed constants, the report through the export service (branch `feat/fleetbook-round4`, PR against `staging`, NO migration, NO epoch bump, nothing on production).**
+  - **The audited file was measured first:** staging's simulated import of 1662 rides, 07.09-04.10, i.e. the weeks mode (`generateFromFigures`). The 28 days are the **business month** (`getBusinessMonthRange(8, 2026)`), not an arithmetic error.
+  - **Valhalla runs nowhere we control** (neither the VPS nor this machine; 7.7 GB RAM with under 1 GB free cannot build its tiles). The product engine stays **OSRM through our gateway** (owner, 25.10.2026). The auditor's Valhalla figures are used as given.
+  - **The 60 pairs, re-routed with OSRM via `travel-route`:**
+    - 35 are the straight-line model underestimating the road.
+    - 25 are the engines disagreeing.
+    - **0 are the generator breaking its own rule.**
+    - OSRM/Valhalla seconds: median **1.184**, so OSRM is the **slower** engine.
+    - At the new generator's minimum gap (OSRM + 45 s), 38 of the 60 pairs fit even the auditor's Valhalla figure. Of the 22 that do not, **18 differ in road km by more than 25%**: the two geocoders place the same address in different places. That question is for the auditor (their coordinates).
+  - **The fix is a TravelModel** (`travelModel.ts`):
+    - A matrix of measured legs over up to 64 verified pool addresses plus the base, one `travel-route` call at a time.
+    - **A pair without a route is null, never zero, and is never used.**
+    - The estimate stays the default and is labelled, and under it every month is **byte-identical** to `origin/staging` (sha256, three seeds, both modes).
+  - **The 244 unverified:** multi-number house numbers (`25;27`, `30, 32`, `20, 20a`) that our own `parseSheetAddress` refused, plus one mis-parse (`... 3; 5` asked for the wrong house).
+    - Fixed in `geocode-core.ts`, **server-side**, so it shows after deploy.
+    - Verified before deploy with the exact request the new parser sends: 7/7 placed at house level, and **all 244 resolve (228 fit, 16 warnings)**.
+    - 40 auditor FITS become UNVERIFIED with us: two ambiguous addresses whose two houses are more than 100 m apart. Deliberate.
+  - **Rules that are easy to undo:**
+    - Only a **confirmed** blocking window blocks a SIMULATED shift (owner decision 5). A notice-date window is logged for review (`simulationConstraints.ts`); the real planner's rule is unchanged.
+    - An expired TÜV blocks the vehicle-day. `generateFullMonth` used to log that as a hard block and place rides anyway.
+    - Declined orders fall only in idle time (`idle_in_shift`), and a cancellation carries fare 0.
+    - **A verified pool address carries the GEOCODER'S point:** the first real run warned one pair (-11 s) because the generator routed from the pool point and the re-check from the house point. The verification cache key moved to v2.
+  - **The report** (`buildMonthReport`):
+    - It is a WorkbookPayload written by the export service: A-I, H2 and SIMULIERT.
+    - **Every row of every sheet carries `Kennzeichnung = SIMULIERT`.**
+    - The real import refuses any workbook with the marker (`findSimulationMarker`).
+  - **Measured after the staging deploy (`f2160978`):** the deployed function places the multi-number addresses from their full text (262 of 264 placed, 2 ambiguous), and all 244 resolve - 228 fit, 16 warnings - exactly as measured before deploy.
+  - **Produced from the real screen** (local dev server on this branch against the staging backend, DEMO company): October and November 2026.
+    - `scripts/audit-round4-verify.py` (openpyxl only): **VERIFY OK** for both.
+    - `scripts/fleetbook-route-check.mts` (re-geocoded, OSRM): **0 warnings, 0 unverifiable**, 1885 and 1228 transitions.
+  - **Gates, exit codes from the commands themselves:**
+    - 60 affected files / 1084 tests, exit 0.
+    - Typecheck 165 at baseline; styles at baseline.
+    - RLS kit `KIT_EXIT=0`.
+    - Python 142 passed with openpyxl's lxml path off. Three tests fail only with the local, unpinned `lxml` installed.
+    - About 30 mutation controls, all caught.
+  - **Open:**
+    - Valhalla on the VPS (owner's call).
+    - `must_include_in_plan` notes are logged but not enforced by the simulation.
+    - The local proxy's ETIMEDOUT to the VPS is this machine's network, not the product.
 
 - **28.10.2026 (latest) - a third party's name, and one customer company's, out of the repository (branch `chore/third-party-and-ya-out-of-docs`, PR against `staging`, two applied migrations touched in COMMENTS ONLY, nothing deployed).** Part 1 is the person PR #347 recorded as out of scope: a **franchise operator printed on a real petrol-station receipt**, a natural person who is not a customer and has no relationship with this product, whose name the receipt scanner captured and who was then written into the repository. **He is not named here, and the shapes below are deliberately all that is said about him.**
   - **Part 1 scope, measured: 25 occurrences in 9 files.** #347 recorded ~24 across "comments in production code, six test files, `tests/rls/partner-receipt-accept.sql`, and a migration dated 27.10.2026". Re-measured over **name-valued fields** (`operator_name` and its neighbours) rather than one spelling: **two** production modules (`src/utils/receiptTextParse.ts`, `src/utils/receiptDisplay.ts` - comments in both, confirmed by reading them), **five** vitest files, the kit file, and the migration. So "six test files" counts the kit's `.sql` as a test file; it is one of nine files, not six plus three.
