@@ -2,6 +2,9 @@ import { createRng, type Rng } from './rng';
 import { DEFAULT_OPTIONS, runShift, type Context, type PlannedShift } from './generator';
 import { daysInMonth, operatingDayStartMs } from './time';
 import { normaliseDriverName } from '../fahrtenbuchImportParser';
+import type { StructuredNote } from '../monatsplanungPhase3';
+import { collapseDecisions, noteVerdict, vehicleVerdict, type ShiftDecision, type VehicleFacts } from './simulationConstraints';
+import type { TravelModel } from './travelModel';
 import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimDriver, SimRide, SimShift, SimVehicle } from './types';
 
 /**
@@ -219,13 +222,19 @@ export interface FiguresInput {
   month: number;
   base: GeoPoint;
   pool: readonly PoolAddress[];
-  vehicles: readonly SimVehicle[];
+  /** With `id` and the TÜV date when the caller has them: an expired TÜV keeps the vehicle off that day. */
+  vehicles: readonly (SimVehicle & VehicleFacts & { id?: string })[];
+  /** With `id` when the caller has it: notes are matched on the id, never on the name. */
   drivers: readonly SimDriver[];
   income: readonly IncomeRow[];
   /** `weekKey(driver, monday)` of every driver-week that already holds real trips. */
   occupied: ReadonlySet<string>;
   seed: number;
   options?: Partial<GeneratorOptions>;
+  /** Structured notes keyed by `drivers.id`. Only a confirmed blocking window keeps a shift out. */
+  driverNotesMap?: ReadonlyMap<string, readonly StructuredNote[]>;
+  /** Where the drive times come from; absent is the labelled estimate. */
+  travel?: TravelModel;
 }
 
 export interface FiguresResult {
@@ -233,6 +242,11 @@ export interface FiguresResult {
   findings: Finding[];
   /** The driver-weeks that were explained, with the figures they now match. */
   explained: WeekFigures[];
+  /**
+   * Every shift placed, and every window a driver's confirmed note or a
+   * vehicle's expired TÜV kept a shift out of (decision 5 of 29.10.2026).
+   */
+  decisions: ShiftDecision[];
 }
 
 interface Busy { start: number; end: number }
@@ -243,6 +257,21 @@ interface Planner {
   vehicleBusy: Map<string, Busy[]>;
   driverLastEnd: Map<string, number>;
   nextId: number;
+  decisions: ShiftDecision[];
+}
+
+const NO_NOTES: ReadonlyMap<string, readonly StructuredNote[]> = new Map();
+
+function driverIdOf(p: Planner, name: string): string | undefined {
+  const key = normaliseDriverName(name);
+  return p.input.drivers.find(d => normaliseDriverName(d.name) === key)?.id;
+}
+
+function excluded(day: string, plate: string, driverId: string | undefined, code: string, reason: string, eventRef: string | null): ShiftDecision {
+  return {
+    day, plate, vehicleId: null, driverId: driverId ?? null, outcome: 'excluded', code, reason, eventRef,
+    certainty: 'confirmed', startMs: null, endMs: null, count: 1,
+  };
 }
 
 const clash = (list: readonly Busy[] | undefined, s: number, e: number, buffer: number): boolean =>
@@ -259,12 +288,27 @@ function planShift(p: Planner, f: WeekFigures, dayOffset: number, taken: Map<str
   const dayStart = operatingDayStartMs(y, m, d);
   if (dayStart === null) return null;
   const driverKey = normaliseDriverName(f.driver);
+  const driverId = driverIdOf(p, f.driver);
+  const notes = p.input.driverNotesMap ?? NO_NOTES;
+  // Vehicles whose TÜV had expired before this day never carry a shift on it;
+  // the filter consumes no random number, so a fleet without such a vehicle
+  // gets the month it always got.
+  const usable = p.input.vehicles.filter(v => {
+    const verdict = vehicleVerdict(v, date);
+    if (verdict.kind === 'blocked') p.decisions.push(excluded(date, v.plate, driverId, verdict.code, verdict.reason, 'tuev'));
+    return verdict.kind !== 'blocked';
+  });
   for (let tries = 0; tries < 8; tries++) {
     const len = rng.int(opts.minShiftMinutes / 15, opts.maxShiftMinutes / 15) * 15;
     const startMs = dayStart + rng.int(0, Math.floor((24 * 60 - len) / 15)) * 15 * 60_000;
     const endMs = startMs + len * 60_000;
     if (startMs < (p.driverLastEnd.get(driverKey) ?? -Infinity) + opts.minDriverRestMinutes * 60_000) continue;
-    const free = p.input.vehicles.filter(v => {
+    const blocking = noteVerdict(driverId, startMs, endMs, notes).blocking;
+    if (blocking) {
+      p.decisions.push(excluded(date, '', driverId, 'driver_blocked_by_note', `Bestätigte sperrende Notiz im Zeitfenster (${blocking.note_type})`, blocking.id));
+      continue;
+    }
+    const free = usable.filter(v => {
       const buffer = opts.minVehicleGapMinutes * 60_000;
       return !clash(p.vehicleBusy.get(v.plate), startMs, endMs, buffer) && !clash(taken.get(v.plate), startMs, endMs, buffer);
     });
@@ -274,11 +318,37 @@ function planShift(p: Planner, f: WeekFigures, dayOffset: number, taken: Map<str
   return null;
 }
 
-interface Attempt { shifts: SimShift[]; rides: SimRide[]; busy: Map<string, Busy[]>; lastEnd: number }
+interface Attempt { shifts: SimShift[]; rides: SimRide[]; busy: Map<string, Busy[]>; lastEnd: number; accepted: ShiftDecision[] }
+
+/** The decision row of a placed shift, with the unconfirmed notes and the missing TÜV it ran past. */
+function acceptedDecision(p: Planner, plan: PlannedShift, driver: SimDriver, endMs: number): ShiftDecision {
+  const driverId = driver.id ?? driverIdOf(p, driver.name);
+  const review = noteVerdict(driverId, plan.startMs, endMs, p.input.driverNotesMap ?? NO_NOTES).review;
+  const vehicle = p.input.vehicles.find(v => v.plate === plan.vehicle.plate);
+  const verdict = vehicle ? vehicleVerdict(vehicle, plan.operatingDay) : null;
+  const reasons = [
+    ...review.map(n => `Notiz ${n.note_type} ohne bestätigten Zeitraum - nicht sperrend, bitte prüfen`),
+    ...(verdict?.kind === 'review' ? [verdict.reason] : []),
+  ];
+  return {
+    day: plan.operatingDay,
+    plate: plan.vehicle.plate,
+    vehicleId: vehicle?.id ?? null,
+    driverId: driverId ?? null,
+    outcome: reasons.length > 0 ? 'accepted_with_review' : 'accepted',
+    code: review.length > 0 ? 'unconfirmed_note' : verdict?.kind === 'review' ? verdict.code : 'accepted',
+    reason: reasons.length > 0 ? reasons.join('; ') : 'Keine bestätigte Einschränkung im Zeitraum',
+    eventRef: review[0]?.id ?? (verdict?.kind === 'review' ? 'tuev' : null),
+    certainty: review.length > 0 ? 'assumed_from_notice_date' : verdict?.kind === 'review' ? 'reported' : null,
+    startMs: plan.startMs,
+    endMs,
+    count: 1,
+  };
+}
 
 function runWeek(p: Planner, f: WeekFigures, k: number): Attempt | string {
   const taken = new Map<string, Busy[]>();
-  const attempt: Attempt = { shifts: [], rides: [], busy: taken, lastEnd: -Infinity };
+  const attempt: Attempt = { shifts: [], rides: [], busy: taken, lastEnd: -Infinity, accepted: [] };
   const driver = p.input.drivers.find(x => normaliseDriverName(x.name) === normaliseDriverName(f.driver)) as SimDriver;
   const driverKey = normaliseDriverName(f.driver);
   for (const offset of chooseDays(p.ctx.rng, k)) {
@@ -289,6 +359,7 @@ function runWeek(p: Planner, f: WeekFigures, k: number): Attempt | string {
     if (!run) return 'a shift could not be built';
     taken.set(plan.vehicle.plate, [...(taken.get(plan.vehicle.plate) ?? []), { start: plan.startMs, end: run.endMs }]);
     attempt.shifts.push({ id, vehicle: plan.vehicle, driver, operatingDay: plan.operatingDay, startMs: plan.startMs, endMs: run.endMs });
+    attempt.accepted.push(acceptedDecision(p, plan, driver, run.endMs));
     attempt.rides.push(...run.rides);
     p.driverLastEnd.set(driverKey, run.endMs);
     attempt.lastEnd = run.endMs;
@@ -317,13 +388,13 @@ function explainWeek(p: Planner, f: WeekFigures): Attempt | string {
 
 export function generateFromFigures(input: FiguresInput): FiguresResult {
   const opts: GeneratorOptions = { ...DEFAULT_OPTIONS, ...input.options };
-  const ctx: Context = { rng: createRng(input.seed), opts, base: input.base, pool: input.pool, usedTransmits: new Set() };
-  const planner: Planner = { ctx, input, vehicleBusy: new Map(), driverLastEnd: new Map(), nextId: 1 };
+  const ctx: Context = { rng: createRng(input.seed), opts, base: input.base, pool: input.pool, usedTransmits: new Set(), travel: input.travel };
+  const planner: Planner = { ctx, input, vehicleBusy: new Map(), driverLastEnd: new Map(), nextId: 1, decisions: [] };
   const reading = readFigures(input.income, input.year, input.month, input.drivers.map(d => d.name));
   const findings = [...reading.findings];
   const month: GeneratedMonth = { shifts: [], rides: [], droppedShifts: 0 };
   const explained: WeekFigures[] = [];
-  if (input.pool.length < 8 || input.vehicles.length === 0) return { month, findings, explained };
+  if (input.pool.length < 8 || input.vehicles.length === 0) return { month, findings, explained, decisions: [] };
 
   for (const f of reading.figures) {
     if (input.occupied.has(weekKey(f.driver, f.weekMonday))) {
@@ -339,8 +410,9 @@ export function generateFromFigures(input: FiguresInput): FiguresResult {
     planner.nextId += result.shifts.length;
     month.shifts.push(...result.shifts);
     month.rides.push(...result.rides);
+    planner.decisions.push(...result.accepted);
     explained.push(f);
   }
   month.rides.sort((a, b) => a.orderTransmittedMs - b.orderTransmittedMs);
-  return { month, findings, explained };
+  return { month, findings, explained, decisions: collapseDecisions(planner.decisions) };
 }

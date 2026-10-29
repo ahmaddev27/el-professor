@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlaskConical } from 'lucide-react';
-import { Alert, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, Input, KpiCard, PageHeader, formatEuro } from '../components/ui';
+import { Alert, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, Input, KpiCard, PageHeader, Tabs, TabsList, TabsTrigger, formatEuro } from '../components/ui';
+import { CalendarResult } from '../components/simulatedRides/CalendarResult';
+import { CalendarSettings } from '../components/simulatedRides/CalendarSettings';
+import { RoutingSummary } from '../components/simulatedRides/RoutingSummary';
 import { SimulatedBadge } from '../components/simulatedRides/SimulatedBadge';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -8,19 +11,32 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useFahrtenbuch } from '../hooks/useFahrtenbuch';
+import { createGeocodeClient } from '../lib/geocodeClient';
+import { loadDriverNotes, loadDriverPlanningFacts, loadWerkstattChecks } from '../lib/simulationInputsClient';
+import { prepareRouting, type RoutingFailureReason } from '../lib/simulationRouting';
 import { supabase } from '../lib/supabase';
+import { createTravelRouteClient } from '../lib/travelRouteClient';
 import { loadCompanyDrivers, loadSettings } from '../lib/tripAnalysisClient';
 import type { CompanyDriver } from '../lib/tripAnalysisView';
 import type { TranslationKey } from '../i18n';
+import type { WerkstattCheckRow } from '../utils/constraintDecisionLog';
 import { selectableDrivers } from '../utils/driverStatus';
+import type { StructuredNote } from '../utils/monatsplanungPhase3';
 import { PoolError, buildAddressPool, readCachedPool, writeCachedPool, type AddressPool } from '../utils/simulatedRides/addressPool';
 import {
   addDays, figuresOf, generateFromFigures, mondayOf, mondaysOfMonth, weekKey, type Finding, type FindingCode, type FiguresResult, type IncomeRow,
 } from '../utils/simulatedRides/figures';
+import { DEFAULT_CALENDAR_FORM, parseCalendarForm, type CalendarForm, type CalendarFormField } from '../utils/simulatedRides/calendarForm';
+import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type RoutingProvenance } from '../utils/simulatedRides/fullMonth';
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
+import { buildMonthReport } from '../utils/simulatedRides/monthWorkbook';
+import { selectMonthlyShareRate } from '../utils/simulatedRides/monthlyRate';
+import { routeChecks, summariseRouteChecks, type RouteCheckSummary } from '../utils/simulatedRides/routeCheck';
 import { rideDate, ridesToRows } from '../utils/simulatedRides/sheet';
-import type { GeoPoint } from '../utils/simulatedRides/types';
+import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from '../utils/simulatedRides/travelModel';
+import type { GeoPoint, PoolAddress } from '../utils/simulatedRides/types';
+import { deliverWorkbookPayload } from '../utils/serviceWorkbookDownload';
 
 /**
  * Fahrten simulieren: rides that EXPLAIN the figures already in the books.
@@ -34,10 +50,26 @@ import type { GeoPoint } from '../utils/simulatedRides/types';
  * copies that marker onto every ride and refuses to change it. The times,
  * addresses and routes are invented, so the marker stays: this screen has no
  * control that leaves it out and must not get one.
+ *
+ * Two modes, chosen explicitly (decision 1 of 29.10.2026). "Kalendermonat"
+ * builds every day of a month and ends in a report, no import. "Geschäftswochen
+ * aus Einnahmen" is the income-driven flow above. Both read the drivers' notes,
+ * the vehicles' TÜV dates and the routed drive times BEFORE a ride is placed:
+ * a read that fails stops the run, because a missing note is not "no note", and
+ * a routing service that cannot answer stops it too unless the operator ticks
+ * the one box that says the estimate is wanted.
  */
-type Phase = 'idle' | 'pool' | 'generating' | 'ready' | 'importing' | 'done';
+type Phase = 'idle' | 'events' | 'pool' | 'verify' | 'route' | 'generating' | 'ready' | 'importing' | 'done';
+type Mode = 'calendar' | 'weeks';
 
-interface CarOption { id: string; plate: string }
+interface CarOption { id: string; plate: string; tuev: string | null }
+
+/** How the drive times of one run were obtained, for the summary under the result. */
+interface RunRouting {
+  model: TravelModel;
+  provenance: RoutingProvenance | null;
+  summary: RouteCheckSummary;
+}
 
 interface Result {
   generated: FiguresResult;
@@ -45,7 +77,42 @@ interface Result {
   poolRequests: number;
   poolCached: boolean;
   booksBefore: number;
+  routing: RunRouting;
 }
+
+/** Everything read before generation. */
+interface RunEvents {
+  notes: Map<string, StructuredNote[]>;
+  facts: Awaited<ReturnType<typeof loadDriverPlanningFacts>>;
+  checks: WerkstattCheckRow[];
+}
+
+/** The pool a run draws from and the model that times it. `travel` absent is the labelled estimate. */
+interface Sourcing {
+  points: readonly PoolAddress[];
+  travel: TravelModel | undefined;
+  provenance: RoutingProvenance | null;
+  estimate: boolean;
+}
+
+const ROUTING_FAILURE_KEYS: Record<RoutingFailureReason, TranslationKey> = {
+  verification_failed: 'simrides.error.routing.verification_failed',
+  too_few_addresses: 'simrides.error.routing.too_few_addresses',
+  routing_failed: 'simrides.error.routing.routing_failed',
+  base_unroutable: 'simrides.error.routing.base_unroutable',
+  too_few_routes: 'simrides.error.routing.too_few_routes',
+};
+
+const FULL_MONTH_FAILURE_KEY = (failure: FullMonthFailure): TranslationKey => {
+  if (failure.kind === 'month_out_of_range') return 'simrides.cal.error.month';
+  if (failure.kind === 'address_pool_too_small') return 'simrides.cal.error.poolSmall';
+  return 'simrides.cal.error.settings';
+};
+
+const monthBounds = (year: number, month: number): { first: string; last: string } => {
+  const mm = String(month).padStart(2, '0');
+  return { first: `${year}-${mm}-01`, last: `${year}-${mm}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}` };
+};
 
 const FINDING_KEYS: Record<FindingCode, TranslationKey> = {
   unknown_driver: 'simrides.finding.unknown_driver',
@@ -64,6 +131,14 @@ const POOL_ERROR_KEYS = {
   too_few_addresses: 'simrides.error.pool.tooFew',
   request_failed: 'simrides.error.pool.requestFailed',
 } as const;
+
+const PROGRESS_KEYS: Record<Exclude<Phase, 'idle' | 'ready' | 'done' | 'importing'>, TranslationKey> = {
+  events: 'simrides.progress.events',
+  pool: 'simrides.progress.pool',
+  verify: 'simrides.progress.verify',
+  route: 'simrides.progress.route',
+  generating: 'simrides.progress.generating',
+};
 
 const PAGE = 1000;
 const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed';
@@ -124,6 +199,7 @@ export default function SimulatedRidesPage() {
   const { createImport } = useFahrtenbuch();
   const canWrite = scope.can('documents', 'edit') && !scope.readOnly;
 
+  const [mode, setMode] = useState<Mode>('calendar');
   const [monthKey, setMonthKey] = useState(defaultMonthKey);
   const [city, setCity] = useState('');
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 2_000_000_000));
@@ -136,6 +212,11 @@ export default function SimulatedRidesPage() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [calendarResult, setCalendarResult] = useState<FullMonthResult | null>(null);
+  const [form, setForm] = useState<CalendarForm>(DEFAULT_CALENDAR_FORM);
+  const [formError, setFormError] = useState<CalendarFormField | null>(null);
+  const [routingFailed, setRoutingFailed] = useState(false);
+  const [allowEstimate, setAllowEstimate] = useState(false);
 
   useEffect(() => {
     if (settings?.city) setCity(current => current || settings.city || '');
@@ -148,13 +229,14 @@ export default function SimulatedRidesPage() {
     void (async () => {
       try {
         const [carRows, driverRows, settingsRow] = await Promise.all([
-          supabase.from('cars').select('id, kennzeichen').eq('company_id', companyId).order('kennzeichen'),
+          supabase.from('cars').select('id, kennzeichen, tuev_gueltig_bis').eq('company_id', companyId).order('kennzeichen'),
           loadCompanyDrivers(companyId),
           loadSettings(companyId),
         ]);
         if (carRows.error) throw new Error(carRows.error.message);
         if (!live) return;
-        const carList = ((carRows.data ?? []) as { id: string; kennzeichen: string }[]).map(c => ({ id: c.id, plate: c.kennzeichen }));
+        const carList = ((carRows.data ?? []) as { id: string; kennzeichen: string; tuev_gueltig_bis: string | null }[])
+          .map(c => ({ id: c.id, plate: c.kennzeichen, tuev: c.tuev_gueltig_bis ?? null }));
         setCars(carList);
         setCarIds(carList.map(c => c.id));
         // `loadCompanyDrivers` is the Fahrtenanalyse's reader and returns every
@@ -174,8 +256,17 @@ export default function SimulatedRidesPage() {
 
   const period = useMemo(() => {
     const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
-    return match ? { year: Number(match[1]), month: Number(match[2]) } : null;
+    const year = match ? Number(match[1]) : 0;
+    const month = match ? Number(match[2]) : 0;
+    return year >= 2000 && month >= 1 && month <= 12 ? { year, month } : null;
   }, [monthKey]);
+
+  // What the seed will draw, shown before anything is generated: it is a
+  // simulation figure, and an operator should not first meet it in the report.
+  const ratePreview = useMemo(
+    () => (mode === 'calendar' && form.monthlyRevenueShareEnabled && period ? selectMonthlyShareRate(seed, period.year, period.month) : null),
+    [mode, form.monthlyRevenueShareEnabled, period, seed],
+  );
 
   const ensurePool = useCallback(async (): Promise<{ pool: AddressPool; cached: boolean }> => {
     const storage = typeof window === 'undefined' ? null : window.localStorage;
@@ -191,29 +282,121 @@ export default function SimulatedRidesPage() {
     return err instanceof Error ? err.message : t('simrides.error.generic');
   };
 
-  const generate = async () => {
-    if (!period || !companyId) return;
+  /** Notes, planning columns and (calendar mode) the month's workshop checks. A failed read throws. */
+  const readEvents = async (year: number, month: number, withChecks: boolean): Promise<RunEvents> => {
+    if (!companyId) throw new Error(t('simrides.error.generic'));
+    const { first, last } = monthBounds(year, month);
+    try {
+      const [notes, facts, checks] = await Promise.all([
+        loadDriverNotes(companyId, addDays(first, -7)),
+        loadDriverPlanningFacts(companyId),
+        withChecks ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
+      ]);
+      return { notes, facts, checks };
+    } catch (err) {
+      console.error('Fahrten simulieren: reading notes and vehicle facts failed', err);
+      throw new Error(t('simrides.error.events'));
+    }
+  };
+
+  /**
+   * Verified pool and routed matrix, or the labelled estimate when the services
+   * cannot answer AND the operator opted in. Returns null after reporting why a
+   * run stopped: there is no third outcome.
+   */
+  const sourcePoints = async (pool: AddressPool, origin: GeoPoint): Promise<Sourcing | null> => {
+    const routing = await prepareRouting({
+      pool: pool.addresses, base: origin,
+      deps: { geocoder: createGeocodeClient(), router: createTravelRouteClient(), storage: typeof window === 'undefined' ? null : window.localStorage },
+      onProgress: p => { setPhase(p.phase); setProgress({ done: p.done, total: p.total }); },
+    });
+    if (routing.ok) return { points: routing.points, travel: routing.model, provenance: routing.provenance, estimate: false };
+    setRoutingFailed(true);
+    if (!allowEstimate) {
+      setError(t(ROUTING_FAILURE_KEYS[routing.reason], { detail: routing.detail ?? '' }));
+      setPhase('idle');
+      return null;
+    }
+    return { points: pool.addresses, travel: undefined, provenance: null, estimate: true };
+  };
+
+  const runRouting = (month: FiguresResult['month'], sourcing: Sourcing): RunRouting => {
+    const model = sourcing.travel ?? ESTIMATE_TRAVEL_MODEL;
+    return { model, provenance: sourcing.provenance, summary: summariseRouteChecks(routeChecks(month.rides, model)) };
+  };
+
+  const begin = () => {
     setError(null);
     setResult(null);
-    setPhase('pool');
+    setCalendarResult(null);
+    setFormError(null);
+    setRoutingFailed(false);
+  };
+
+  const generateCalendar = async () => {
+    if (!period || !companyId) return;
+    begin();
+    const parsed = parseCalendarForm(form);
+    if (!parsed.ok) { setFormError(parsed.field); return; }
+    setPhase('events');
     try {
-      const books = await readBooks(companyId, period.year, period.month);
-      const { pool, cached } = await ensurePool();
+      const events = await readEvents(period.year, period.month, true);
+      setPhase('pool');
+      const { pool } = await ensurePool();
       const origin = base ?? pool.center;
+      const sourcing = await sourcePoints(pool, origin);
+      if (!sourcing) return;
       setPhase('generating');
       await nextTick();
-      const vehicles = cars.filter(c => carIds.includes(c.id)).map(c => ({ plate: c.plate, type: 'Mietwagen' }));
+      const outcome = generateFullMonth({
+        ...period, base: origin, pool: sourcing.points, seed,
+        vehicles: cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev })),
+        drivers: drivers.map(d => ({
+          id: d.id, name: d.name,
+          allowed_weekdays: events.facts.get(d.id)?.allowed_weekdays ?? null, planning_enabled: events.facts.get(d.id)?.planning_enabled ?? true,
+        })),
+        driverNotesMap: events.notes, werkstattChecks: events.checks,
+        settings: parsed.settings, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
+        travel: sourcing.travel, routing: sourcing.provenance ?? undefined,
+      });
+      if (!outcome.ok) throw new Error(t(FULL_MONTH_FAILURE_KEY(outcome.failure)));
+      setCalendarResult(outcome.result);
+      setPhase('ready');
+    } catch (err) {
+      setError(failureText(err));
+      setPhase('idle');
+    }
+  };
+
+  const generateWeeks = async () => {
+    if (!period || !companyId) return;
+    begin();
+    setPhase('events');
+    try {
+      const books = await readBooks(companyId, period.year, period.month);
+      const events = await readEvents(period.year, period.month, false);
+      setPhase('pool');
+      const { pool, cached } = await ensurePool();
+      const origin = base ?? pool.center;
+      const sourcing = await sourcePoints(pool, origin);
+      if (!sourcing) return;
+      setPhase('generating');
+      await nextTick();
+      const vehicles = cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev }));
       const generated = generateFromFigures({
-        ...period, base: origin, pool: pool.addresses, vehicles, drivers: drivers.map(d => ({ name: d.name })),
-        income: books.income, occupied: books.occupied, seed,
+        ...period, base: origin, pool: sourcing.points, vehicles, drivers: drivers.map(d => ({ id: d.id, name: d.name })),
+        income: books.income, occupied: books.occupied, seed, driverNotesMap: events.notes, travel: sourcing.travel,
       });
       if (generated.month.rides.length === 0) throw new Error(t('simrides.error.noRides'));
-      assertSound(generated, origin);
+      assertSound(generated, origin, sourcing.travel);
       const prepared = await prepareSimulatedImport({
         ...period, seed, rows: ridesToRows(generated.month.rides),
         drivers: drivers.map(d => ({ id: d.id, name: d.name })), cars,
       });
-      setResult({ generated, prepared, poolRequests: cached ? 0 : pool.requests, poolCached: cached, booksBefore: sumCents(books.income) });
+      setResult({
+        generated, prepared, poolRequests: cached ? 0 : pool.requests, poolCached: cached, booksBefore: sumCents(books.income),
+        routing: runRouting(generated.month, sourcing),
+      });
       setPhase('ready');
     } catch (err) {
       setError(failureText(err));
@@ -222,8 +405,8 @@ export default function SimulatedRidesPage() {
   };
 
   /** Nothing is offered for import unless the rides pass every rule and add up to the books. */
-  const assertSound = (generated: FiguresResult, origin: GeoPoint) => {
-    if (validateRides(generated.month, origin).length > 0) throw new Error(t('simrides.error.validation'));
+  const assertSound = (generated: FiguresResult, origin: GeoPoint, travel: TravelModel | undefined) => {
+    if (validateRides(generated.month, origin, travel).length > 0) throw new Error(t('simrides.error.validation'));
     const read = figuresOf(generated.month.rides, rideDate);
     const exact = generated.explained.every(f => {
       const got = read.get(weekKey(f.driver, f.weekMonday));
@@ -252,8 +435,25 @@ export default function SimulatedRidesPage() {
     }
   };
 
-  const busy = phase === 'pool' || phase === 'generating' || phase === 'importing';
+  const downloadReport = () => {
+    if (!calendarResult) return;
+    try {
+      const { fileName, payload } = buildMonthReport(calendarResult);
+      deliverWorkbookPayload(payload, fileName);
+    } catch (err) {
+      setError(failureText(err));
+    }
+  };
+
+  const busy = phase !== 'idle' && phase !== 'ready' && phase !== 'done';
   const ready = canWrite && !loadFailed && Boolean(period) && city.trim() !== '' && carIds.length > 0 && drivers.length > 0 && !busy;
+
+  const changeMode = (next: string) => {
+    if (busy) return;
+    setMode(next === 'weeks' ? 'weeks' : 'calendar');
+    begin();
+    setPhase('idle');
+  };
 
   return (
     <div className="grid grid-cols-1 gap-5 font-ui">
@@ -265,11 +465,17 @@ export default function SimulatedRidesPage() {
       <Card>
         <CardHeader>
           <CardTitle>{t('simrides.form.title')}</CardTitle>
-          <CardDescription>{t('simrides.form.figures')}</CardDescription>
+          <CardDescription>{mode === 'calendar' ? t('simrides.cal.description') : t('simrides.form.figures')}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4">
+          <Tabs value={mode} onValueChange={changeMode}>
+            <TabsList variant="segmented" aria-label={t('simrides.mode.label')}>
+              <TabsTrigger value="calendar">{t('simrides.mode.calendar')}</TabsTrigger>
+              <TabsTrigger value="weeks">{t('simrides.mode.weeks')}</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={t('simrides.field.month')}>
+            <Field label={t('simrides.field.month')} hint={t('simrides.field.monthHint')}>
               <Input type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} disabled={busy} />
             </Field>
             <Field label={t('simrides.field.city')} hint={base ? t('simrides.field.cityHintBase') : t('simrides.field.cityHint')}>
@@ -286,6 +492,10 @@ export default function SimulatedRidesPage() {
               </label>
             ))}
           </fieldset>
+          {mode === 'calendar' ? (
+            <CalendarSettings form={form} onChange={patch => setForm(current => ({ ...current, ...patch }))}
+              disabled={busy} errorField={formError} ratePreview={ratePreview} />
+          ) : null}
           <details className="text-sm text-fg-muted">
             <summary className="cursor-pointer">{t('simrides.field.advanced')}</summary>
             <div className="mt-3 max-w-xs">
@@ -294,18 +504,27 @@ export default function SimulatedRidesPage() {
               </Field>
             </div>
           </details>
+          {routingFailed ? (
+            <label className="flex cursor-pointer items-start gap-3 text-sm text-fg">
+              <input type="checkbox" className={checkboxClass} checked={allowEstimate} onChange={e => setAllowEstimate(e.target.checked)} disabled={busy} />
+              <span>
+                {t('simrides.estimate.optIn')}
+                <span className="block text-xs text-fg-subtle">{t('simrides.estimate.optInHint')}</span>
+              </span>
+            </label>
+          ) : null}
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={generate} disabled={!ready} loading={phase === 'pool' || phase === 'generating'}>
+            <Button onClick={mode === 'calendar' ? generateCalendar : generateWeeks} disabled={!ready} loading={busy && phase !== 'importing'}>
               <FlaskConical aria-hidden /> {t('simrides.action.generate')}
             </Button>
-            {phase === 'pool' ? <p role="status" className="text-sm text-fg-muted">{t('simrides.progress.pool', progress)}</p> : null}
-            {phase === 'generating' ? <p role="status" className="text-sm text-fg-muted">{t('simrides.progress.generating')}</p> : null}
+            {busy && phase !== 'importing' ? <p role="status" className="text-sm text-fg-muted">{t(PROGRESS_KEYS[phase], progress)}</p> : null}
           </div>
           {error ? <Alert tone="critical">{error}</Alert> : null}
         </CardContent>
       </Card>
 
-      {result ? <ResultCard result={result} phase={phase} onImport={runImport} /> : null}
+      {mode === 'calendar' && calendarResult ? <CalendarResult result={calendarResult} onDownload={downloadReport} /> : null}
+      {mode === 'weeks' && result ? <ResultCard result={result} phase={phase} onImport={runImport} /> : null}
     </div>
   );
 }
@@ -352,6 +571,8 @@ function ResultCard({ result, phase, onImport }: { result: Result; phase: Phase;
           <KpiCard label={t('simrides.summary.revenue')} value={formatEuro(revenue)} caption={t('simrides.summary.revenueNote')} />
         </div>
         <FindingsList findings={findings} />
+        <RoutingSummary measured={result.routing.model.measured} source={result.routing.model.source}
+          routing={result.routing.provenance} summary={result.routing.summary} />
         {done ? <Alert tone="positive" title={t('simrides.done.title')}>{t('simrides.done.body')}</Alert> : null}
         <div>
           <Button onClick={onImport} disabled={done || phase === 'importing'} loading={phase === 'importing'}>

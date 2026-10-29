@@ -1,4 +1,3 @@
-import { findBlockingNote } from '../driverNoteValidation';
 import type { StructuredNote } from '../monatsplanungPhase3';
 import {
   buildConstraintDecisionLog,
@@ -7,12 +6,20 @@ import {
   type ConstraintLogSummary,
   type WerkstattCheckRow,
 } from '../constraintDecisionLog';
-import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, type Context, type PlannedShift } from './generator';
+import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, validateRides, type Context, type PlannedShift } from './generator';
 import { buildPeriod, isoWeekdayOf, operatingDayIn, type PeriodDay } from './period';
 import { createRng } from './rng';
 import { countRevenue, revenueBasis, type RevenueBasis, type RevenueBreakdown } from './revenue';
 import { applyMonthlyShare, selectMonthlyShareRate, type MonthlyShareRate, type ShareResult } from './monthlyRate';
 import { resolveSettings, type SettingsProblem, type SimulationTenantSettings } from './tenantSettings';
+import { routeChecks, summariseRouteChecks, type RouteCheck, type RouteCheckSummary } from './routeCheck';
+import {
+  collapseDecisions,
+  noteVerdict,
+  vehicleVerdict,
+  type ShiftDecision,
+} from './simulationConstraints';
+import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from './travelModel';
 import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, SimShift, SimVehicle } from './types';
 
 /**
@@ -97,6 +104,29 @@ export interface FullMonthInput {
   options?: Partial<GeneratorOptions>;
   /** Shifts a vehicle may run on one operating day. Capped by `SHIFT_LIMITS`. */
   shiftsPerVehicleDay?: number;
+  /**
+   * Where the drive times come from. Absent is the labelled estimate. A
+   * measured model expects `pool` to be the routed points and `base` to be
+   * routed too; a pair without a route is never used.
+   */
+  travel?: TravelModel;
+  /** How the routes and the addresses were obtained, recorded as given in the provenance. */
+  routing?: RoutingProvenance;
+}
+
+/** What the caller measured before the month was built, printed on the source sheet. */
+export interface RoutingProvenance {
+  /** Points the matrix covers, the base included. */
+  points: number;
+  routedPairs: number;
+  failedPairs: number;
+  failuresByReason: Record<string, number>;
+  computedAt: string | null;
+  /** Pool addresses checked against the geocoder, and how many were kept. */
+  addressesChecked?: number;
+  addressesKept?: number;
+  addressesDroppedByReason?: Record<string, number>;
+  geocoderSource?: string | null;
 }
 
 /** Why a day, or a shift, carries no ride. One code per cause, stable. */
@@ -109,7 +139,8 @@ export type CapacityReason =
   | 'driver_blocked_by_note'
   | 'driver_weekday_not_allowed'
   | 'driver_resting'
-  | 'shift_produced_no_ride';
+  | 'shift_produced_no_ride'
+  | 'vehicle_tuev_expired';
 
 /** One refusal, kept so the summary can say what was not generated and why. */
 export interface CapacityRefusal {
@@ -121,6 +152,8 @@ export interface CapacityRefusal {
   driverId?: string;
   /** The note that blocked him, for `driver_blocked_by_note`. */
   noteType?: string;
+  /** Its id, so the decision row names the note itself and not only its kind. */
+  noteId?: string;
 }
 
 /** One day of the month, including a day with nothing on it. */
@@ -172,13 +205,16 @@ export interface Provenance {
   };
   /** Always true. The month is simulated and says so in its own record. */
   simulated: true;
+  /** The model every drive time came from. `measured: false` is the haversine estimate. */
+  travel: { source: string; measured: boolean };
+  routing: RoutingProvenance | null;
 }
 
 /**
  * Bumped whenever the generated month would differ for the same seed. A month
  * carries it so a figure can be traced to the code that made it.
  */
-export const FULL_MONTH_GENERATOR_VERSION = 'full-month/1.0.0';
+export const FULL_MONTH_GENERATOR_VERSION = 'full-month/2.0.0';
 
 export interface FullMonthResult {
   month: GeneratedMonth;
@@ -194,6 +230,11 @@ export interface FullMonthResult {
   provenance: Provenance;
   /** Rules checked by reading the result back. Empty means every rule held. */
   violations: string[];
+  /** Every placed shift, and every refusal collapsed per day, vehicle, driver and reason. */
+  decisions: ShiftDecision[];
+  /** The route check of the month, read back from the rides with the model they were built with. */
+  routeChecks: RouteCheck[];
+  routeSummary: RouteCheckSummary;
 }
 
 export type FullMonthFailure =
@@ -234,9 +275,12 @@ export function generateFullMonth(
     base: input.base,
     pool: input.pool,
     usedTransmits: new Set(),
+    travel: input.travel,
   };
+  const travel = input.travel ?? ESTIMATE_TRAVEL_MODEL;
 
   const period = buildPeriod(input.year, input.month, settings);
+  const accepted: ShiftDecision[] = [];
   const month: GeneratedMonth = { shifts: [], rides: [], droppedShifts: 0 };
   const refusals: CapacityRefusal[] = [];
   const vehicleBusy = new Map<string, Busy[]>();
@@ -262,6 +306,13 @@ export function generateFullMonth(
 
     const dayEndMs = day.startMs + day.hours * 3_600_000;
     for (const vehicle of input.vehicles) {
+      // Read before any shift is drawn for the vehicle: an expired TÜV keeps it
+      // off the road for the whole day, whoever would drive it.
+      const verdict = vehicleVerdict(vehicle, day.day);
+      if (verdict.kind === 'blocked') {
+        refusals.push({ day: day.day, reason: 'vehicle_tuev_expired', plate: vehicle.plate });
+        continue;
+      }
       for (let slot = 0; slot < shiftsPerVehicleDay; slot++) {
         const placed = placeShift({
           ctx,
@@ -284,14 +335,38 @@ export function generateFullMonth(
         nextShift += 1;
         month.shifts.push(placed.shift);
         month.rides.push(...placed.rides);
+        const reviews = [
+          ...placed.review.map(n => `Notiz ${n.note_type} ohne bestätigten Zeitraum - nicht sperrend, bitte prüfen`),
+          ...(verdict.kind === 'review' ? [verdict.reason] : []),
+        ];
+        accepted.push({
+          day: day.day,
+          plate: vehicle.plate,
+          vehicleId: vehicle.id,
+          driverId: placed.shift.driver.id ?? null,
+          outcome: reviews.length > 0 ? 'accepted_with_review' : 'accepted',
+          code: reviews.length > 0 ? (placed.review.length > 0 ? 'unconfirmed_note' : verdict.kind === 'review' ? verdict.code : 'review') : 'accepted',
+          reason: reviews.length > 0 ? reviews.join('; ') : 'Keine bestätigte Einschränkung im Zeitraum',
+          eventRef: placed.review[0]?.id ?? (verdict.kind === 'review' ? 'tuev' : null),
+          certainty: placed.review.length > 0 ? 'assumed_from_notice_date' : verdict.kind === 'review' ? 'reported' : null,
+          startMs: placed.shift.startMs,
+          endMs: placed.shift.endMs,
+          count: 1,
+        });
       }
     }
   }
 
+  // A cancellation earns nothing unless the tenant says so (decision 3 of
+  // 29.10.2026), and that fee is `declineFeeOf`'s, a field of its own. The
+  // generator's own draw from CANCELLATION_FEES stays drawn, so the random
+  // stream and every later ride are what they were; only the cell is zero.
+  for (const ride of month.rides) if (ride.status === 'cancelled') ride.fare = 0;
+
   // After every shift, so the shared random stream and every completed ride's
   // transmission instant are exactly what they are with the feature off.
   month.rides.push(
-    ...declinedOrders(month.shifts, settings, ctx.usedTransmits, input.pool, input.seed, opts.appPaymentShare),
+    ...declinedOrders(month.shifts, month.rides, settings, ctx.usedTransmits, input.pool, input.seed, opts.appPaymentShare),
   );
   month.rides.sort((a, b) => a.orderTransmittedMs - b.orderTransmittedMs);
 
@@ -329,7 +404,12 @@ export function generateFullMonth(
       werkstattChecks: input.werkstattChecks?.length ?? 0,
     },
     simulated: true,
+    travel: { source: travel.source, measured: travel.measured },
+    routing: input.routing ?? null,
   };
+
+  const checks = routeChecks(month.rides, travel);
+  const decisions = [...accepted, ...collapseDecisions(refusals.map(refusalDecision(input.vehicles)))];
 
   return {
     ok: true,
@@ -344,9 +424,46 @@ export function generateFullMonth(
       constraintSummary: summariseConstraintLog(constraints),
       refusals,
       provenance,
-      violations: validateFullMonth(month, period, input.driverNotesMap, settings),
+      violations: [
+        ...validateFullMonth(month, period, input.driverNotesMap, settings, input.vehicles),
+        ...validateRides(month, input.base, travel),
+      ],
+      decisions,
+      routeChecks: checks,
+      routeSummary: summariseRouteChecks(checks),
     },
   };
+}
+
+const REFUSAL_TEXT: Record<CapacityReason, string> = {
+  no_vehicle_in_fleet: 'Kein Fahrzeug im Bestand',
+  no_driver_in_pool: 'Kein Fahrer im Pool',
+  operating_day_has_no_start_instant: 'Betriebstag hat keinen eindeutigen Startzeitpunkt (Zeitumstellung)',
+  no_driver_available: 'Kein Fahrer für das Zeitfenster verfügbar',
+  no_vehicle_free: 'Fahrzeug in keinem Zeitfenster frei',
+  driver_blocked_by_note: 'Bestätigte sperrende Notiz im Zeitfenster',
+  driver_weekday_not_allowed: 'Wochentag für den Fahrer nicht erlaubt',
+  driver_resting: 'Fahrer in Ruhezeit oder bereits eingesetzt',
+  shift_produced_no_ride: 'Schicht ergab keine Fahrt (keine berechnete Route oder keine Zeit)',
+  vehicle_tuev_expired: 'TÜV abgelaufen - Fahrzeug nicht eingesetzt',
+};
+
+function refusalDecision(vehicles: readonly FullMonthVehicle[]) {
+  const idByPlate = new Map(vehicles.map(v => [v.plate, v.id]));
+  return (r: CapacityRefusal): ShiftDecision => ({
+    day: r.day,
+    plate: r.plate ?? '',
+    vehicleId: r.plate ? idByPlate.get(r.plate) ?? null : null,
+    driverId: r.driverId ?? null,
+    outcome: 'excluded',
+    code: r.reason,
+    reason: r.noteType ? `${REFUSAL_TEXT[r.reason]} (${r.noteType})` : REFUSAL_TEXT[r.reason],
+    eventRef: r.noteId ?? (r.reason === 'vehicle_tuev_expired' ? 'tuev' : null),
+    certainty: r.reason === 'driver_blocked_by_note' || r.reason === 'vehicle_tuev_expired' ? 'confirmed' : null,
+    startMs: null,
+    endMs: null,
+    count: 1,
+  });
 }
 
 function computeShare(basis: RevenueBasis, input: FullMonthInput): { rate: MonthlyShareRate; result: ShareResult } | null {
@@ -375,12 +492,14 @@ interface PlaceArgs {
  *
  * The driver is chosen **after** the window is drawn, because availability is a
  * property of a driver *and* a window: a note that blocks the morning leaves
- * the same driver free in the evening. `findBlockingNote` is the planner's own
- * function, so "unavailable" means here exactly what it means to
- * `monatsplanungPhase3` — a second copy of that rule would let the generator
- * place a ride the planner would refuse.
+ * the same driver free in the evening. Only a CONFIRMED window blocks
+ * (`simulationConstraints.ts`, the owner's decision 5 of 29.10.2026); a window
+ * taken from the notice date lets the shift run and is carried into the
+ * shift's decision row for a person to check. The window itself is the
+ * planner's `noteExclusionIntervals`, so a confirmed block is exactly the
+ * planner's block.
  */
-function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[] } | null {
+function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[]; review: StructuredNote[] } | null {
   const { ctx, day, dayStartMs, dayEndMs, vehicle, pool, notes, refusals } = args;
   const { rng, opts } = ctx;
   const vehicleGap = opts.minVehicleGapMinutes * 60_000;
@@ -398,6 +517,7 @@ function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[] } | nu
     if (clash(args.vehicleBusy.get(vehicle.plate), startMs, endMs, vehicleGap)) continue;
 
     const candidates: FullMonthDriver[] = [];
+    const reviewOf = new Map<string, StructuredNote[]>();
     for (const driver of pool) {
       const allowed = driver.allowed_weekdays;
       if (allowed && allowed.length > 0 && !allowed.includes(isoWeekdayOf(day.day))) {
@@ -412,17 +532,19 @@ function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[] } | nu
         refusals.push({ day: day.day, reason: 'driver_resting', driverId: driver.id, plate: vehicle.plate });
         continue;
       }
-      const blocking = findBlockingNote(driver.id, startMs, endMs, notes);
-      if (blocking) {
+      const verdict = noteVerdict(driver.id, startMs, endMs, notes);
+      if (verdict.blocking) {
         refusals.push({
           day: day.day,
           reason: 'driver_blocked_by_note',
           driverId: driver.id,
           plate: vehicle.plate,
-          noteType: blocking.note_type,
+          noteType: verdict.blocking.note_type,
+          noteId: verdict.blocking.id,
         });
         continue;
       }
+      reviewOf.set(driver.id, verdict.review);
       candidates.push(driver);
     }
     if (candidates.length === 0) {
@@ -445,6 +567,7 @@ function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[] } | nu
     return {
       shift: { id: args.shiftId, vehicle, driver, operatingDay: day.day, startMs, endMs: run.endMs },
       rides,
+      review: reviewOf.get(driver.id) ?? [],
     };
   }
   refusals.push({ day: day.day, reason: 'no_vehicle_free', plate: vehicle.plate });
@@ -482,6 +605,7 @@ function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[] } | nu
  */
 function declinedOrders(
   shifts: readonly SimShift[],
+  rides: readonly SimRide[],
   settings: SimulationTenantSettings,
   usedTransmits: Set<number>,
   pool: readonly PoolAddress[],
@@ -491,14 +615,22 @@ function declinedOrders(
   if (!settings.declinedRidesEnabled || settings.declinedShare <= 0) return [];
   const rng = createRng(declinedStreamSeed(seed));
   const out: SimRide[] = [];
+  const busyByShift = new Map<string, Busy[]>();
+  for (const r of rides) {
+    if (r.status !== 'completed' || r.startMs === null || r.endMs === null) continue;
+    busyByShift.set(r.shiftId, [...(busyByShift.get(r.shiftId) ?? []), { start: r.startMs, end: r.endMs }]);
+  }
   for (const shift of shifts) {
     if (shift.endMs <= shift.startMs) continue;
+    const idle = idleSegments(shift, busyByShift.get(shift.id) ?? []);
+    const idleMs = idle.reduce((n, seg) => n + (seg.end - seg.start), 0);
+    if (idleMs <= 0) continue;
     // One draw per hour of the shift, so the share reads as "a share of orders"
     // at any shift length rather than as a flat count per shift.
     const hours = Math.max(1, Math.round((shift.endMs - shift.startMs) / 3_600_000));
     for (let i = 0; i < hours; i++) {
       if (!rng.chance(settings.declinedShare)) continue;
-      const at = shift.startMs + rng.int(0, Math.max(0, shift.endMs - shift.startMs - 1));
+      const at = instantInIdle(idle, rng.int(0, idleMs - 1));
       let orderTransmittedMs = at;
       while (usedTransmits.has(orderTransmittedMs)) orderTransmittedMs += 1;
       usedTransmits.add(orderTransmittedMs);
@@ -510,6 +642,7 @@ function declinedOrders(
         driver: shift.driver,
         status: 'declined',
         declinedFeeCents: settings.declinedFeeCents,
+        declineRule: DECLINE_RULE_IDLE_IN_SHIFT,
         orderReceivedMs: Math.floor(orderTransmittedMs / 1000) * 1000,
         orderTransmittedMs,
         plannedPickupMs: null,
@@ -527,6 +660,39 @@ function declinedOrders(
     }
   }
   return out;
+}
+
+/**
+ * The eligibility rule of a decline fee in the simulation: the order reached
+ * the driver while the shift was running and no passenger was in the car. An
+ * order offered mid-ride is not one a driver could take, and charging for
+ * refusing it would invent a fee; the generator therefore only ever places a
+ * declined order in idle time, and every declined ride names this rule.
+ */
+export const DECLINE_RULE_IDLE_IN_SHIFT = 'idle_in_shift';
+
+/** The parts of a shift no completed ride occupies. */
+function idleSegments(shift: SimShift, busy: readonly Busy[]): Busy[] {
+  const sorted = [...busy].sort((a, b) => a.start - b.start);
+  const out: Busy[] = [];
+  let cursor = shift.startMs;
+  for (const b of sorted) {
+    if (b.start > cursor) out.push({ start: cursor, end: Math.min(b.start, shift.endMs) });
+    cursor = Math.max(cursor, b.end);
+  }
+  if (cursor < shift.endMs) out.push({ start: cursor, end: shift.endMs });
+  return out.filter(seg => seg.end > seg.start);
+}
+
+/** The instant `offsetMs` into the concatenated idle segments. */
+function instantInIdle(idle: readonly Busy[], offsetMs: number): number {
+  let left = offsetMs;
+  for (const seg of idle) {
+    const length = seg.end - seg.start;
+    if (left < length) return seg.start + left;
+    left -= length;
+  }
+  return idle[idle.length - 1].end - 1;
 }
 
 /**
@@ -595,6 +761,7 @@ export function validateFullMonth(
   period: readonly PeriodDay[],
   notes: Map<string, StructuredNote[]>,
   settings: SimulationTenantSettings,
+  vehicles: readonly FullMonthVehicle[] = [],
 ): string[] {
   const out: string[] = [];
   const driverIdByName = new Map<string, string>();
@@ -616,13 +783,22 @@ export function validateFullMonth(
   out.push(...overlaps(month.rides, r => r.driver.name, 'driver'));
   out.push(...overlaps(month.rides, r => r.vehicle.plate, 'vehicle'));
 
-  // 3. No ride sits inside a driver's blocking note. Asked of the planner's own
-  //    function, so this cannot pass while the planner would refuse the shift.
+  // 3. No shift sits inside a CONFIRMED blocking note of its driver. The same
+  //    rule the generator applies (`noteVerdict`), read back from the output.
   for (const shift of month.shifts) {
     const id = driverIdByName.get(shift.driver.name) ?? findDriverId(notes, shift);
     if (id === null) continue;
-    const blocking = findBlockingNote(id, shift.startMs, shift.endMs, notes);
-    if (blocking) out.push(`shift ${shift.id} runs inside a ${blocking.note_type} note of its driver`);
+    const blocking = noteVerdict(id, shift.startMs, shift.endMs, notes).blocking;
+    if (blocking) out.push(`shift ${shift.id} runs inside a confirmed ${blocking.note_type} note of its driver`);
+  }
+
+  // 3b. No shift on a vehicle whose TÜV had expired before the operating day.
+  const vehicleByPlate = new Map(vehicles.map(v => [v.plate, v]));
+  for (const shift of month.shifts) {
+    const vehicle = vehicleByPlate.get(shift.vehicle.plate);
+    if (vehicle && vehicleVerdict(vehicle, shift.operatingDay).kind === 'blocked') {
+      out.push(`shift ${shift.id} runs on ${shift.vehicle.plate} after its TÜV expired`);
+    }
   }
 
   // 4. A declined ride carries a fee and no fare, a completed one the reverse.
@@ -632,6 +808,24 @@ export function validateFullMonth(
     }
     if (ride.status === 'completed' && ride.declinedFeeCents !== undefined) {
       out.push(`completed ride of shift ${ride.shiftId} carries a decline fee`);
+    }
+    if (ride.status === 'cancelled' && ride.fare !== 0) {
+      out.push(`cancelled ride of shift ${ride.shiftId} carries a fare`);
+    }
+  }
+
+  // 5. A declined order fell in idle time: no completed ride of the same
+  //    vehicle was carrying a passenger at that instant.
+  const carrying = new Map<string, { start: number; end: number }[]>();
+  for (const ride of month.rides) {
+    if (ride.status !== 'completed' || ride.startMs === null || ride.endMs === null) continue;
+    carrying.set(ride.vehicle.plate, [...(carrying.get(ride.vehicle.plate) ?? []), { start: ride.startMs, end: ride.endMs }]);
+  }
+  for (const ride of month.rides) {
+    if (ride.status !== 'declined') continue;
+    const t = ride.orderTransmittedMs;
+    if ((carrying.get(ride.vehicle.plate) ?? []).some(b => t >= b.start && t < b.end)) {
+      out.push(`declined order of shift ${ride.shiftId} reached the car while it carried a passenger`);
     }
   }
 

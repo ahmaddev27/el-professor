@@ -28,7 +28,7 @@ vi.mock('./styledWorkbookDownload', () => ({
   styledWorkbookBlob: () => { throw new Error('the ExcelJS writer must not be reached'); },
 }));
 
-import { deliverWorkbook, downloadServiceWorkbook } from './serviceWorkbookDownload';
+import { deliverWorkbook, deliverWorkbookPayload, downloadServiceWorkbook } from './serviceWorkbookDownload';
 
 function workbook(): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
@@ -114,5 +114,49 @@ describe('deliverWorkbook', () => {
     expect(reports).toHaveLength(1);
     expect(reports[0].retry).toBeUndefined();
     expect(fetchWorkbook).not.toHaveBeenCalled();
+  });
+});
+
+describe('deliverWorkbookPayload', () => {
+  const payload = { version: 1 as const, sheets: [{ name: 'S', header: true as const, rows: [['Kennzeichnung'], ['SIMULIERT']] }] };
+  let reports: ExportFailureReport[];
+  let unregister: () => void;
+
+  beforeEach(() => {
+    triggerDownload.mockClear(); fetchWorkbook.mockReset(); writeFile.mockClear();
+    reports = [];
+    unregister = setExportFailureSink(report => reports.push(report));
+  });
+  afterEach(() => unregister());
+
+  it('sends the payload as given and downloads what the service answered', async () => {
+    const blob = new Blob(['PK']);
+    fetchWorkbook.mockResolvedValue(blob);
+    deliverWorkbookPayload(payload, 'SIMULIERT_a.xlsx');
+    await settle();
+    expect(fetchWorkbook.mock.calls[0][0]).toBe(payload);
+    expect(triggerDownload).toHaveBeenCalledWith(blob, 'SIMULIERT_a.xlsx');
+    expect(reports).toEqual([]);
+  });
+
+  it('service down: one report, no file, a retry that sends the same payload', async () => {
+    fetchWorkbook.mockRejectedValueOnce(new ExportServiceError('unreachable'));
+    deliverWorkbookPayload(payload, 'a.xlsx');
+    await settle();
+    expect(reports).toHaveLength(1);
+    expect(triggerDownload).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    fetchWorkbook.mockResolvedValue(new Blob(['PK']));
+    reports[0].retry?.();
+    await settle();
+    expect(triggerDownload).toHaveBeenCalledTimes(1);
+    expect(fetchWorkbook.mock.calls[1][0]).toBe(payload);
+  });
+
+  it('a refusal the service will repeat offers no retry', async () => {
+    fetchWorkbook.mockRejectedValue(new ExportServiceError('rejected'));
+    deliverWorkbookPayload(payload, 'a.xlsx');
+    await settle();
+    expect(reports[0].retry).toBeUndefined();
   });
 });

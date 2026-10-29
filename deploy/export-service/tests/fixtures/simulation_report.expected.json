@@ -1,0 +1,18 @@
+{
+  "fileName": "SIMULIERT_Monatsbericht_2026-02_20261029.xlsx",
+  "year": 2026,
+  "month": 2,
+  "days": 28,
+  "routeChecks": 575,
+  "declinedCount": 6,
+  "declinedFeeCents": 3600,
+  "declinedFeeUnitCents": 600,
+  "rides": 333,
+  "fareCents": 375437,
+  "routeStatuses": {
+    "route_fits": 499,
+    "same_address": 76,
+    "route_time_warning": 0,
+    "unverifiable": 0
+  }
+}
