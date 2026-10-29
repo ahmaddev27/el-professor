@@ -76,7 +76,9 @@ export interface RoutingDeps {
 
 // ── Cache ───────────────────────────────────────────────────────────────────
 
-const VERIFIED_PREFIX = 'simulatedRides.verified.v1:';
+// v2 (29.10.2026): a kept address carries the geocoder's point, not the pool's;
+// a v1 entry holds the old points and must not be read.
+const VERIFIED_PREFIX = 'simulatedRides.verified.v2:';
 const MATRIX_PREFIX = 'simulatedRides.matrix.v1:';
 
 /** FNV-1a: stable across runs and machines. Paired with the length so two short inputs cannot meet by accident. */

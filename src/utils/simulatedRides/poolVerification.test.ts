@@ -86,6 +86,13 @@ describe('verifyPool', () => {
     expect(out.ok && out.kept).toHaveLength(1);
   });
 
+  it('a kept address carries the point the geocoder answered, so a later re-check routes from the same place', async () => {
+    const addresses = pool(1);
+    const { client } = fakeClient(addresses, a => ({ id: '', kind: 'located', lat: a.lat + 0.00054, lon: a.lon - 0.0003, precision: 'exact', osm: null }));
+    const out = await verifyPool(addresses, client, { sleep: noSleep });
+    expect(out.ok && out.kept).toEqual([{ label: addresses[0].label, lat: addresses[0].lat + 0.00054, lon: addresses[0].lon - 0.0003 }]);
+  });
+
   it('asks at most 50 addresses per call, one call at a time, pausing between calls', async () => {
     const addresses = pool(120);
     const fake = fakeClient(addresses);

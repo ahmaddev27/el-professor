@@ -27,6 +27,14 @@ import type { PoolAddress } from './types';
  * somewhere else is a different place with the same text, and routing the pool's
  * point under that label would put a ride at an address nobody can verify.
  *
+ * A kept address carries the GEOCODER'S point, not the pool's. Measured on the
+ * first real month (29.10.2026, DEMO on staging): one transition was warned by
+ * the independent re-check because the generator had routed from the pool's
+ * point and the re-check from the geocoded house, 7.155 km / 640 s against
+ * 7.316 km / 716 s for the same two addresses, both within the 100 m rule. A
+ * check that places an address again must find the point the month was built
+ * from, so the pool takes the point the product's own locator answers.
+ *
  * Every dropped address keeps its reason, because "we threw some away" is not a
  * finding an operator can act on.
  *
@@ -84,7 +92,7 @@ export function countDropped(dropped: readonly DroppedAddress[]): Record<string,
   return out;
 }
 
-function judge(address: PoolAddress, result: GeocodeResult | undefined): { kept: true } | { kept: false; drop: DroppedAddress } | { failure: VerificationFailure } {
+function judge(address: PoolAddress, result: GeocodeResult | undefined): { kept: true; at: PoolAddress } | { kept: false; drop: DroppedAddress } | { failure: VerificationFailure } {
   if (!result) return { failure: 'not_answered' };
   if (result.kind === 'unlocated') {
     if (INFRASTRUCTURE_REASONS.has(result.reason)) return { failure: result.reason };
@@ -94,7 +102,7 @@ function judge(address: PoolAddress, result: GeocodeResult | undefined): { kept:
   if (away > SAME_PLACE_METERS) {
     return { kept: false, drop: { label: address.label, reason: MOVED_REASON, distanceMeters: Math.round(away) } };
   }
-  return { kept: true };
+  return { kept: true, at: { label: address.label, lat: result.lat, lon: result.lon } };
 }
 
 export async function verifyPool(
@@ -120,7 +128,7 @@ export async function verifyPool(
     for (let n = 0; n < batch.length; n++) {
       const verdict = judge(batch[n], byId.get(String(n)));
       if ('failure' in verdict) return { ok: false, reason: verdict.failure, checked };
-      if (verdict.kept) kept.push(batch[n]);
+      if (verdict.kept) kept.push(verdict.at);
       else dropped.push(verdict.drop);
     }
     checked += batch.length;
