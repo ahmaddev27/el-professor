@@ -150,18 +150,38 @@ export function compareReceipts(
     if (aValue > bValue) return direction === 'asc' ? 1 : -1;
     return 0;
   }
-  // The five older fields, compared exactly as the component compared them, so
-  // adding the five above cannot move a column that already worked. The `any`
-  // is the component's: `a[field]` is `string | number` across this union and
-  // `<` needs both sides the same type. Codepoint order on the three text
-  // fields is unchanged too, umlauts included — the owner named five columns,
-  // and a collator here would quietly reorder the three that already worked.
-  let aValue: any = a[field];
-  let bValue: any = b[field];
+  // The date column ranks by the calendar day AND the printed sale time
+  // (29.10.2026): `date` is a day and is not unique, so "newest first" used
+  // to leave every same-day Beleg in arrival order — the fetch's `date, id`
+  // — which is not the order the paper was printed in. The day compares as
+  // its `YYYY-MM-DD` string (ISO compares lexicographically in calendar
+  // order; the filter above the sort reads the column the same way), the
+  // time as seconds since midnight, and a Beleg without a time sorts last
+  // within its day in both directions — the module's empty-value rule. The
+  // id is the final key, always ascending, so equal rows hold one order
+  // whichever way the ranking runs, exactly as the fetch pages by `date, id`
+  // for the same reason.
   if (field === 'date') {
-    aValue = new Date(aValue);
-    bValue = new Date(bValue);
+    const dayA = a.date.slice(0, 10);
+    const dayB = b.date.slice(0, 10);
+    if (dayA !== dayB) return (dayA < dayB ? -1 : 1) * (direction === 'asc' ? 1 : -1);
+    const timeA = clockSeconds(a.receiptTime);
+    const timeB = clockSeconds(b.receiptTime);
+    if (timeA === null && timeB !== null) return 1;
+    if (timeA !== null && timeB === null) return -1;
+    if (timeA !== null && timeB !== null && timeA !== timeB) {
+      return (timeA < timeB ? -1 : 1) * (direction === 'asc' ? 1 : -1);
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   }
+  // The four older text fields and the amount, compared exactly as the
+  // component compared them, so adding the five measured ones cannot move a
+  // column that already worked. The `any` is the component's: `a[field]` is
+  // `string | number` across this union and `<` needs both sides the same
+  // type. Codepoint order on the three text fields is unchanged too, umlauts
+  // included — a collator here would quietly reorder what already worked.
+  const aValue: any = a[field];
+  const bValue: any = b[field];
   if (aValue < bValue) return direction === 'asc' ? -1 : 1;
   if (aValue > bValue) return direction === 'asc' ? 1 : -1;
   return 0;
