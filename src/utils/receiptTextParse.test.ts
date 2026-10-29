@@ -416,6 +416,99 @@ Summe  EUR  9,99`)
   })
 })
 
+// The Shell Düsseldorf receipt, 29.10.2026: a real long receipt (marketing
+// tail, TSE block with `Start/Ende`, a labelled `Obj.-Nr.`). What it pins:
+// the printed sale stamp 15:47 beside the Beleg-Nr wins over the TSE
+// Start/Ende clock; the labelled object number is the station's own number;
+// and the thermal misread of the litre unit (`l` → `1`) is readable when —
+// and only when — the price-per-litre label anchors the same line.
+
+const SHELL = `Shell Station
+Goller Tankstellen GmbH
+Niederrheinstr. 135
+40474 Düsseldorf
+Obj.-Nr.: 0000003708  Tel.: 0211/454791
+Fax.: 0211/459582
+Beleg-Nr. 3933/010/0002 28.09.2026 15:47
+*U00002 Super FuelSave E16  50,00 EUR *A*
+*Zp 02  21,94 l  2,279 EUR/l  *  *
+Gesamtbetrag  50,00 EUR
+gegeben  50,00 EUR
+Typ  Netto  MwSt  Brutto
+A:19,00%  42,02  7,98  50,00
+Legende der Steuernummer(n)
+# Gesellschaft  DE 811127597
+DIENSTAG IST WASCHTAG !!!
+Sparen Sie 1 EUR je Fahrzeugwäsche !!!
+POS:68007-0000003708-2 TSE-Beleg-Nr. 336123
+Signaturzähler: 359534
+Start/Ende: 28.09.2026 16:47:26 / 28.09.2026 16:47:51`
+
+/** The same receipt with the litre unit and the price's `l` misread as `1`. */
+const SHELL_MISREAD = SHELL.replace(
+  '*Zp 02  21,94 l  2,279 EUR/l  *  *',
+  '*Zp 02  21,94 1  2,279 EUR/1  *  *',
+)
+
+describe('the Shell Düsseldorf receipt', () => {
+  it('reads the printed sale time, not the TSE Start/Ende clock', () => {
+    const r = parseReceiptText(SHELL)
+    expect(r.date).toBe('2026-09-28')
+    expect(r.time).toBe('15:47')
+    expect(r.tseTime).toBe('16:47:26')
+  })
+
+  it('reads the Gesamtbetrag, and the fuel figures confirm it', () => {
+    const r = parseReceiptText(SHELL)
+    expect(r.amount).toBe(50)
+    expect(r.litres).toBe(21.94)
+    expect(r.pricePerLitre).toBe(2.279)
+    expect(r.amountReason?.startsWith('Unsicher')).toBe(false)
+  })
+
+  it('reads station, street, city, and the labelled Obj number', () => {
+    const r = parseReceiptText(SHELL)
+    expect(r.stationName).toBe('Shell Station')
+    expect(r.street).toBe('Niederrheinstr. 135')
+    expect(r.postalCode).toBe('40474')
+    expect(r.city).toBe('Düsseldorf')
+    expect(r.stationNumber).toBe('0000003708')
+    expect(r.receiptNumber).toBe('3933/010/0002')
+  })
+
+  it('still parses the fuel line with l misread as 1, anchored', () => {
+    const r = parseReceiptText(SHELL_MISREAD)
+    expect(r.pricePerLitre).toBe(2.279)
+    expect(r.litres).toBe(21.94)
+    expect(r.amount).toBe(50)
+  })
+
+  it('never takes a bare digit as litres without the price anchor', () => {
+    const r = parseReceiptText(`Tankstelle Test
+Posten 23,50 1
+Gesamtbetrag  EUR  23,50`)
+    expect(r.litres).toBeUndefined()
+  })
+
+  it('reads a labelled Tankstellen-Nr as the station number too', () => {
+    const r = parseReceiptText(`Aral Tankstelle
+Hauptstraße 1
+40627 Düsseldorf
+Tankstellen-Nr.: 0201099115
+Summe  EUR  20,00`)
+    expect(r.stationNumber).toBe('0201099115')
+  })
+
+  it('lets the number in the printed name win over a labelled one', () => {
+    const r = parseReceiptText(`JET TANKSTELLE 318
+Kölner Str. 8
+42651 Solingen
+Tankstellen-Nr.: 999
+Summe  EUR  30,00`)
+    expect(r.stationNumber).toBe('318')
+  })
+})
+
 describe('text with nothing in it', () => {
   it('answers an empty result rather than throwing', () => {
     const r = parseReceiptText('')
