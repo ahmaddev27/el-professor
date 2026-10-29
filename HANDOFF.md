@@ -28,6 +28,7 @@ Last updated: **29.10.2026**
     - It is a WorkbookPayload written by the export service: A-I, H2 and SIMULIERT.
     - **Every row of every sheet carries `Kennzeichnung = SIMULIERT`.**
     - The real import refuses any workbook with the marker (`findSimulationMarker`).
+  - **Measured after the staging deploy (`f2160978`):** the deployed function places the multi-number addresses from their full text (262 of 264 placed, 2 ambiguous), and all 244 resolve - 228 fit, 16 warnings - exactly as measured before deploy.
   - **Produced from the real screen** (local dev server on this branch against the staging backend, DEMO company): October and November 2026.
     - `scripts/audit-round4-verify.py` (openpyxl only): **VERIFY OK** for both.
     - `scripts/fleetbook-route-check.mts` (re-geocoded, OSRM): **0 warnings, 0 unverifiable**, 1885 and 1228 transitions.
@@ -39,7 +40,6 @@ Last updated: **29.10.2026**
     - About 30 mutation controls, all caught.
   - **Open:**
     - Valhalla on the VPS (owner's call).
-    - Re-run the 244 on staging after deploy.
     - `must_include_in_plan` notes are logged but not enforced by the simulation.
     - The local proxy's ETIMEDOUT to the VPS is this machine's network, not the product.
 
