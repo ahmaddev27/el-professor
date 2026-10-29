@@ -169,7 +169,10 @@ const SKIP_LINE_RE = /\b(datum|uhrzeit|startzeitpunkt|beendigungszeitpunkt|tse|s
 
 // Lines containing fuel quantity/unit-price — amounts on these lines are NOT totals.
 // Matches: "14,21 l", "1,829 EUR/l", "EUR/L", "€/l", "EUR pro Liter", etc.
-const FUEL_UNIT_LINE_RE = /eur\s*\/\s*l|EUR\/L|€\s*\/\s*l|\d+[,\.]\d+\s*l\b|liter|ltr\b|menge|preis\s*\/\s*l|einzelpreis|eur\s*pro\s*l/i;
+// The unit's `l` also as `1`/`i` — the thermal-paper misread ("EUR/1"): the
+// label anchors the reading, and without this the misread fuel line's litre
+// count leaks into the amount candidates and can outscore the real total.
+const FUEL_UNIT_LINE_RE = /eur\s*\/\s*[l1i]|EUR\/L|€\s*\/\s*[l1i]|\d+[,\.]\d+\s*l\b|liter|ltr\b|menge|preis\s*\/\s*[l1i]|einzelpreis|eur\s*pro\s*[l1i]/i;
 
 /**
  * Amount format: `25,32`, `25.32`, or German grouping — `2.480,00`.
@@ -690,7 +693,7 @@ function extractPlzCandidates(lines: string[]): PlzCandidate[] {
 // `parseTime` used to take the FIRST time in reading order, and on a JET
 // receipt that is the Anmeldezeit (08:46:19), two lines above the printed
 // `Datum Zeit` row that says 08:45.
-const TIME_TECH_RE = /\b(anmeldezeit|abmeldezeit|startzeitpunkt|beendigungszeitpunkt|tse|signatur\w*|transaktion\w*|terminal|vorgangs?\w*)\b/i;
+const TIME_TECH_RE = /\b(anmeldezeit|abmeldezeit|startzeitpunkt|beendigungszeitpunkt|tse|signatur\w*|transaktion\w*|terminal|vorgangs?\w*|start\s*\/?\s*ende)\b/i;
 const TIME_LABEL_RE = /\b(uhrzeit|zeit|uhr)\b/i;
 const TIME_VALUE_RE = /\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/g;
 
@@ -933,6 +936,21 @@ function parseStationHeader(lines: string[]): StationHeader {
   return out;
 }
 
+/** `Obj.-Nr.: 0000003708` (Shell), `Tankstellen-Nr.: 0201099115` (Aral) —
+ *  the chain's number for the site printed with a LABEL instead of inside
+ *  the name. Scanned over the letterhead/contact zone only; the number in
+ *  the printed name itself (`JET TANKSTELLE 318`) wins when both exist. */
+const STATION_NR_LABEL_RE = /\b(?:obj(?:ekt)?|tankstellen?|stations?|standort)\.?[-\s]?nr\.?\s*:?\s*(\d{2,12})\b/i;
+
+function parseLabeledStationNumber(lines: string[]): string | undefined {
+  const limit = Math.min(lines.length, 12);
+  for (let i = 0; i < limit; i++) {
+    const m = lines[i].match(STATION_NR_LABEL_RE);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
 function parseCategory(text: string): string | undefined {
   const lower = text.toLowerCase();
   if (/\b(benzin|diesel|kraftstoff|tanken|tank|super|e5|e10|sprit|fuel|petrol|gas\s*station)\b/.test(lower)) return 'Tanken';
@@ -962,17 +980,25 @@ const LITRES_AFTER_RE = new RegExp(String.raw`(${FUEL_NUM})\s*(?:liter|ltr|l)\b`
  *  spacing may sit between, never another digit. */
 const LITRES_LABEL_RE = new RegExp(String.raw`\bmenge\b\D{0,4}(${FUEL_NUM})`, "i");
 
-/** `EUR/L 1,789`, `Preis/L 1,789`, `Einzelpreis 1,789`. */
+/** `EUR/L 1,789`, `Preis/L 1,789`, `Einzelpreis 1,789`. The unit's `l` also
+ *  as `1` or `i` — the thermal-paper misreads — because the `EUR/` anchor
+ *  leaves the character no other reading, and the band below rejects any
+ *  figure the misread could drag in. */
 const PRICE_AFTER_LABEL_RE = new RegExp(
-  String.raw`(?:eur\s*\/\s*l|€\s*\/\s*l|preis\s*\/\s*l|eur\s*pro\s*l|einzelpreis)\D{0,4}(${FUEL_NUM})`,
+  String.raw`(?:eur\s*\/\s*[l1i]|€\s*\/\s*[l1i]|preis\s*\/\s*[l1i]|eur\s*pro\s*[l1i]|einzelpreis)\D{0,4}(${FUEL_NUM})`,
   "i",
 );
 
 /** `1,789 EUR/L` — the same thing written the other way round. */
 const PRICE_BEFORE_LABEL_RE = new RegExp(
-  String.raw`(${FUEL_NUM})\s*(?:eur\s*\/\s*l|€\s*\/\s*l|eur\s*pro\s*l)`,
+  String.raw`(${FUEL_NUM})\s*(?:eur\s*\/\s*[l1i]|€\s*\/\s*[l1i]|eur\s*pro\s*[l1i])`,
   "i",
 );
+
+/** `21,94 1` — the litre unit misread as `1`/`I`/`i`. Only ever read on a
+ *  line whose price-per-litre label matched (see `parseLitres`): the anchor
+ *  is what makes a bare trailing digit safe to take as `l`. */
+const LITRES_MISREAD_RE = new RegExp(String.raw`(${FUEL_NUM})\s*[l1iI]\b`);
 
 /**
  * Plausibility, because these figures are read off a photograph and then
@@ -1005,6 +1031,18 @@ function parseLitres(lines: string[]): number | undefined {
       const n = parseFuelNumber(m[1]);
       if (n !== null && n >= LITRES_MIN && n <= LITRES_MAX) return n;
     }
+  }
+  // The fuel line with its unit misread — `21,94 1  2,279 EUR/1` — read only
+  // where the price-per-litre label itself matched on the same line. Without
+  // that anchor a stray digit stays unread, and the gate asks for a better
+  // photo instead of guessing.
+  for (const line of lines) {
+    const price = line.match(PRICE_AFTER_LABEL_RE) ?? line.match(PRICE_BEFORE_LABEL_RE);
+    if (price === null || price.index === undefined) continue;
+    const m = line.slice(0, price.index).match(LITRES_MISREAD_RE);
+    if (!m) continue;
+    const n = parseFuelNumber(m[1]);
+    if (n !== null && n >= LITRES_MIN && n <= LITRES_MAX) return n;
   }
   return undefined;
 }
@@ -1088,7 +1126,7 @@ export function parseReceiptText(text: string): OcrResult {
   result.street = header.street;
   result.stationName = header.stationName;
   result.operatorName = header.operatorName;
-  result.stationNumber = header.stationNumber;
+  result.stationNumber = header.stationNumber ?? parseLabeledStationNumber(lines);
   // Only a fuel receipt has these; both stay undefined on anything else.
   result.litres = parseLitres(lines);
   result.pricePerLitre = parsePricePerLitre(lines);
