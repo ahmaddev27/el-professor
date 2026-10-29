@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LEGACY_NOTE_RULES,
   buildConstraintDecisionLog,
+  effectOfNote,
   summariseConstraintLog,
   type ConstraintDecision,
 } from './constraintDecisionLog';
@@ -68,6 +69,19 @@ function logOf(notes: StructuredNote[], asOfDate?: string): ConstraintDecision[]
 const rowOf = (n: StructuredNote): ConstraintDecision => logOf([n])[0];
 
 // ── 1–4: certainty and effect ───────────────────────────────────────────────
+
+describe('an obligatory note of a free type', () => {
+  it('is a review, never "neutral": the planner acts on it and the simulation does not', () => {
+    const note = {
+      id: 'n-must', driver_id: 'd1', note_type: 'other', note_text: '', note_planning_behavior: 'must_include_in_plan' as const,
+      is_full_day: true, start_date: '2026-11-19', end_date: '2026-11-19', note_date: '2026-10-01T08:00:00.000Z', start_time: null, end_time: null,
+    };
+    const verdict = effectOfNote(note);
+    expect(verdict.effect).toBe('human_review');
+    expect(verdict.needsHumanReview).toBe(true);
+    expect(verdict.reason).toContain('Pflichtnotiz');
+  });
+});
 
 describe('blocking notes', () => {
   it('a blocking note with its own start_date is confirmed and needs no review', () => {
