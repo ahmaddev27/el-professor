@@ -83,6 +83,14 @@ function month(over: Partial<FullMonthInput>): FullMonthResult {
 
 const minutes = (ms: number) => ms / 60_000;
 
+/** A stable number per ordered pair of points, so a test can pick pairs without picking points. */
+function pairHash(a: GeoPoint, b: GeoPoint): number {
+  const text = `${a.lat.toFixed(6)},${a.lon.toFixed(6)}>${b.lat.toFixed(6)},${b.lon.toFixed(6)}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h;
+}
+
 // ── 1. Repositioning legs of 2, 5 and 15 minutes, and one with too little time ──
 
 describe('the scheduling rule: road time, handling and the margin, never less', () => {
@@ -177,9 +185,10 @@ describe('a pair without a route is never driven, and never passes', () => {
         return {
           ...answer,
           results: answer.results.map((r, i) => {
-            // Every pair into or out of a third of the points has no road.
+            // One ordered pair in five has no road: a pair, not a point, so the way
+            // through a waiting position can be routed while the direct drive is not.
             const p = pairs[i];
-            const cut = [p.from, p.to].some(x => Math.round(x.lat * 1e6) % 3 === 0);
+            const cut = pairHash(p.from, p.to) % 5 === 0;
             if (!cut) return r;
             refused.add(`${pointKey(p.from)}>${pointKey(p.to)}`);
             return { id: r.id, kind: 'unavailable' as const, reason: 'no_route' };
@@ -200,8 +209,33 @@ describe('a pair without a route is never driven, and never passes', () => {
     }
     // A pair the generator never drove (across shifts) may lack a route: it is UNVERIFIABLE, and the month is not validated.
     const unverifiable = built.routeChecks.filter(c => c.status === 'UNVERIFIABLE');
-    expect(unverifiable.every(c => !c.sameShift)).toBe(true);
-    if (unverifiable.length > 0) expect(verifyMonth(built).verdict).not.toBe('VALIDATED_FOR_EXPORT');
+    expect(unverifiable.filter(c => c.sameShift)).toEqual([]);
+    expect(unverifiable.length).toBeGreaterThan(0);
+    expect(verifyMonth(built).verdict).toBe('VERIFICATION_INCOMPLETE');
+    expect(verifyMonth(built).checks.find(c => c.code === 'route_pairs')!.outcome).toBe('not_verified');
+  });
+
+  it('holds the direct drive too, where it is longer than the way through the waiting position', async () => {
+    // A detour on one pair in four (a one-way street): the direct drive is
+    // longer than the two legs through a waiting position, so a gap built
+    // from those two legs alone would be too short for the direct route.
+    const detour: TravelRouter = {
+      route: async pairs => {
+        const answer = await lineRouter().route(pairs);
+        if (!answer.ok) return answer;
+        return {
+          ...answer,
+          results: answer.results.map((r, i) => (r.kind === 'route' && pairHash(pairs[i].from, pairs[i].to) % 4 === 0
+            ? { ...r, durationSeconds: r.durationSeconds + 900 } : r)),
+        };
+      },
+    };
+    const { model, pool } = await modelOf(detour);
+    for (const seed of [1, 2, 3]) {
+      const built = month({ pool, travel: model, seed });
+      expect(built.violations).toEqual([]);
+      expect(built.routeChecks.filter(c => c.sameShift && c.status !== 'ROUTE_VERIFIED')).toEqual([]);
+    }
   });
 
   it('stops with a reason when the service fails after the first answers, and never falls back to the estimate', async () => {
@@ -280,6 +314,15 @@ describe('every shift is 240 to 360 minutes, enforced before it is accepted', ()
     }
     const tried = built.scheduling.reduce((n, s) => n + (s.refusedSteps.no_dropoff ?? 0), 0);
     expect(tried).toBeGreaterThan(0);
+  });
+
+  it('fills the window instead of refusing it: a step is drawn again before a shift ends short (measured: 1 refusal in six months, 35 without the retries)', () => {
+    let tooShort = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const built = month({ pool: [...POOL, deadEnd], travel: trapped, seed: 9000 + seed, shiftsPerVehicleDay: 3 });
+      tooShort += built.refusals.filter(r => r.reason === 'shift_too_short').length;
+    }
+    expect(tooShort).toBeLessThanOrEqual(3);
   });
 
   it('reports overlapping rides of one vehicle or one driver when they are injected', async () => {

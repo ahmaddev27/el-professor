@@ -352,7 +352,10 @@ function approachAfterRide(ctx: Context, prev: PrevRide, latestStartMs: number):
   const transmitMs = prev.endMs + legOne * 1000 + waitMs + rng.int(0, 999);
   // The drive to the Abholort starts when the order comes, so it is measured
   // from the transmission, whose sub-second jitter would otherwise eat into it.
-  const startMs = Math.max(earliestStart + waitMs, transmitMs + legTwo * 1000) + rng.int(0, 40) * 1000;
+  // Rounded up to the second: a ride's start is printed to the second, and a
+  // start the sheet truncates would show a gap a second shorter than it was.
+  const fromOrder = Math.ceil((transmitMs + legTwo * 1000) / 1000) * 1000;
+  const startMs = Math.max(earliestStart + waitMs, fromOrder) + rng.int(0, 40) * 1000;
   return { orderPos: stop, transmitMs, pickup, startMs };
 }
 
