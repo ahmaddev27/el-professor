@@ -1,8 +1,83 @@
 # Handoff
 
-Last updated: **29.10.2026**
+Last updated: **30.10.2026**
 
-- **29.10.2026 (latest) - external audit round 4: the calendar month in the screen, drive times from OSRM instead of speed constants, the report through the export service (branch `feat/fleetbook-round4`, PR against `staging`, NO migration, NO epoch bump, nothing on production).**
+- **30.10.2026 (latest) — external audit round 6** (branch `feat/fleetbook-round6`, PR against `staging`, no migration, nothing on production).
+  - **What it delivers:**
+    - Empty drives become records of their own.
+    - Scheduling prevents violations instead of detecting them afterwards.
+    - The S38 short-shift defect is fixed.
+    - Declined orders leave the Fahrtenbuch report.
+    - VALIDATED_FOR_EXPORT is a verdict kept apart from generation.
+  - **Owner decisions that override the assignment text:**
+    - **No Valhalla** (29.10.2026). Scheduling and checking use OSRM and Nominatim through our gateway.
+    - **A cancelled ride** stays in the export with the company's cancellation fee (6,00 EUR in the scenario) and its financial status.
+    - **A declined order** is no row, no count and no fee of the Fahrtenbuch report. It lives only in the internal operational report.
+    - This reverses round 4, where declined rows were in sheet A.
+  - **S38, measured.** The reference file is not on this machine: the calendar mode writes nothing to the database.
+    - Over 4000 generated shifts, none exceeds 360 min. The defect is the lower bound.
+    - **Cause:** `runShift` ended a shift at the first step that found nothing. A long wait clamped to the latest start, followed by a pickup that no ride left in time, closed the shift 66-100 min early (219/285, 200/300 and 200/270 min).
+    - **Fix (prevention):**
+      - `STEP_TRIES = 6` draws the step again.
+      - `placeShift` and the weeks mode refuse a shift under 240 min at scheduling time (`shift_too_short`).
+    - **After:** shortest 253 min, none under 240.
+    - Regression test with an invented dead-end address. Mutations M1-M3 are caught.
+  - **Repositioning** (`repositioningLegs.ts`). Every empty drive is a `REPOSITIONING` / `LEERFAHRT` record.
+    - **Fields:**
+      - Identity: tenant, vehicle UUID, driver UUID (assignment `simulated`), previous and next trip id.
+      - Where and when: places with coordinates, departure and arrival.
+      - Timing: road time and km, handling, margin, required, available, slack.
+      - Provenance: routing source, status, `SIMULATED`, seed and run id.
+    - **Kinds:** `from_base`, `to_pickup`, `to_waiting_position`.
+    - It lives in a **second file**, `SIMULIERT_Betriebsbericht_...` (`operationalReport.ts`):
+      - sheet L: the legs;
+      - sheet M: declined orders, internal;
+      - sheet N: internal revenue;
+      - sheet O: scheduling.
+    - Never in the passenger sheet, never in the database.
+  - **The scheduling rule**, applied before a ride is accepted: `next.start >= prev.end + road + 45 s + margin`.
+    - Default margin: 60 s + 15 % of road time. Both are generator options, editable on the form.
+    - **After a wait, the gap must also hold the direct drive.** A measured matrix need not obey the triangle inequality. A pair without a direct route is refused.
+    - **The pickup drive is measured from the order's arrival**, and the start is rounded up to the second.
+    - **2-5 minute legs are a preference over real candidates**, never a moved point or a shortened time. Measured: 100 % in the window, 83 % without the preference.
+  - **Route statuses:** `ROUTE_VERIFIED` / `ROUTE_CONFLICT` / `UNVERIFIABLE` / `ESTIMATE_ONLY`, on every route pair (sheet G) and every leg (sheet L).
+    - A month built without route calculation is all `ESTIMATE_ONLY` and is never validated.
+    - The screen shows no "0 conflicts" counters for such a month.
+  - **`verifyMonth`** (`monthVerification.ts`): ten checks, each one passed, failed or not verified.
+    - Verdicts: `VALIDATED_FOR_EXPORT`, `VERIFICATION_INCOMPLETE`, `NOT_VALIDATED`.
+    - The verdict is printed in sheets F and I **and in both file names**.
+    - Generation success is reported on a separate line.
+  - **Money** (`monthTotals.ts`).
+    - Days, drivers, vehicles and the month are counted over one scope: completed + cancelled.
+    - The basis never holds a decline fee.
+    - Declined orders get their own id series (`AB...`), so the `F...` ids stay gapless and stable.
+    - **Renamed settings:**
+      - `cancellationFeeEnabled` / `cancellationFeeCents` replace `chargeDeclinedFeeOnCancelled`.
+      - `basisIncludesCancellationFees` replaces `basisIncludesDeclinedFees`.
+  - **Events:** a negative workshop check now marks the shift on that vehicle-day `accepted_with_review` (`werkstatt_negative`). It never blocks the shift, because the data model has no out-of-service window.
+  - **Produced from the real screen.** Local dev server on this branch against the staging backend, DEMO company, seed 20261030.
+
+    | Month | Completed | Cancelled | Declined (internal) | Route checks | Legs |
+    |---|---|---|---|---|---|
+    | September 2026 | 842 | 18 | 20 | 1675 | 1253 |
+    | October 2026 | 859 | 18 | 21 | 1709 | 1279 |
+
+    - Both months are `VALIDATED_FOR_EXPORT`.
+    - `scripts/fleetbook-report-verify.py` (openpyxl only, 70 checks): VERIFY OK for both.
+    - `scripts/fleetbook-route-check.mts` (re-geocoded, OSRM): **0 warnings and 0 unverifiable**, on 1675 and 1709 transitions.
+  - **Gates:**
+    - Simulation and page tests: 25 files / 355 tests, exit 0.
+    - Typecheck 165, at baseline. Styles at baseline.
+    - Python: 150 passed.
+    - 12 mutation controls. Two slipped through the first time (M3 retries, M5 direct route) and are caught now that the tests are sharper.
+    - No SQL changes, so the RLS kit is not affected.
+  - **Still open:**
+    - No Valhalla re-check on our side (owner's decision). The auditor is asked to re-run theirs.
+    - The routed pool is 64 addresses, so a month repeats addresses often.
+    - No return-to-base leg at the end of a shift.
+    - Event dates (occurred / reported / verified) and a vehicle maintenance window are not in the data model.
+    - Mandatory notes are logged, not enforced.
+- **29.10.2026 - external audit round 4: the calendar month in the screen, drive times from OSRM instead of speed constants, the report through the export service (branch `feat/fleetbook-round4`, PR against `staging`, NO migration, NO epoch bump, nothing on production).**
   - **The audited file was measured first:** staging's simulated import of 1662 rides, 07.09-04.10, i.e. the weeks mode (`generateFromFigures`). The 28 days are the **business month** (`getBusinessMonthRange(8, 2026)`), not an arithmetic error.
   - **Valhalla runs nowhere we control** (neither the VPS nor this machine; 7.7 GB RAM with under 1 GB free cannot build its tiles). The product engine stays **OSRM through our gateway** (owner, 25.10.2026). The auditor's Valhalla figures are used as given.
   - **The 60 pairs, re-routed with OSRM via `travel-route`:**
