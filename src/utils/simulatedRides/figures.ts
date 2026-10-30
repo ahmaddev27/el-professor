@@ -1,5 +1,5 @@
 import { createRng, type Rng } from './rng';
-import { DEFAULT_OPTIONS, runShift, type Context, type PlannedShift } from './generator';
+import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, type Context, type PlannedShift } from './generator';
 import { daysInMonth, operatingDayStartMs } from './time';
 import { normaliseDriverName } from '../fahrtenbuchImportParser';
 import type { StructuredNote } from '../monatsplanungPhase3';
@@ -357,6 +357,7 @@ function runWeek(p: Planner, f: WeekFigures, k: number): Attempt | string {
     const id = `S${p.nextId + attempt.shifts.length}`;
     const run = runShift(p.ctx, plan, { shiftId: id, vehicle: plan.vehicle, driver });
     if (!run) return 'a shift could not be built';
+    if (run.endMs - plan.startMs < SHIFT_LIMITS.minMinutes * 60_000) return 'a shift ended before its minimum length';
     taken.set(plan.vehicle.plate, [...(taken.get(plan.vehicle.plate) ?? []), { start: plan.startMs, end: run.endMs }]);
     attempt.shifts.push({ id, vehicle: plan.vehicle, driver, operatingDay: plan.operatingDay, startMs: plan.startMs, endMs: run.endMs });
     attempt.accepted.push(acceptedDecision(p, plan, driver, run.endMs));

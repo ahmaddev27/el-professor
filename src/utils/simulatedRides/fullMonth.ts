@@ -6,10 +6,17 @@ import {
   type ConstraintLogSummary,
   type WerkstattCheckRow,
 } from '../constraintDecisionLog';
-import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, validateRides, type Context, type PlannedShift } from './generator';
+import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, validateRides, type Context, type PlannedShift, type ShiftEnd } from './generator';
 import { buildPeriod, isoWeekdayOf, operatingDayIn, type PeriodDay } from './period';
 import { createRng } from './rng';
-import { countRevenue, revenueBasis, type RevenueBasis, type RevenueBreakdown } from './revenue';
+import { countRevenue, inExportScope, revenueBasis, type RevenueBasis, type RevenueBreakdown } from './revenue';
+import { marginProblem } from './repositioning';
+import {
+  buildRepositioningLegs,
+  summariseRepositioning,
+  type RepositioningLeg,
+  type RepositioningSummary,
+} from './repositioningLegs';
 import { applyMonthlyShare, selectMonthlyShareRate, type MonthlyShareRate, type ShareResult } from './monthlyRate';
 import { resolveSettings, type SettingsProblem, type SimulationTenantSettings } from './tenantSettings';
 import { routeChecks, summariseRouteChecks, type RouteCheck, type RouteCheckSummary } from './routeCheck';
@@ -112,6 +119,10 @@ export interface FullMonthInput {
   travel?: TravelModel;
   /** How the routes and the addresses were obtained, recorded as given in the provenance. */
   routing?: RoutingProvenance;
+  /** The company the month is simulated for, carried onto every repositioning record. */
+  tenantId?: string;
+  /** How the Betriebssitz is named on a repositioning record. */
+  baseLabel?: string;
 }
 
 /** What the caller measured before the month was built, printed on the source sheet. */
@@ -140,6 +151,7 @@ export type CapacityReason =
   | 'driver_weekday_not_allowed'
   | 'driver_resting'
   | 'shift_produced_no_ride'
+  | 'shift_too_short'
   | 'vehicle_tuev_expired';
 
 /** One refusal, kept so the summary can say what was not generated and why. */
@@ -163,12 +175,16 @@ export interface DaySummary {
   /** 23 or 25 on a transition day, 24 otherwise. */
   hours: number;
   shifts: number;
+  /** The day's rides in the Fahrtenbuch report: completed and cancelled. */
   rides: number;
   completed: number;
   cancelled: number;
+  /** Declined orders of the day. Internal: in no figure of the report. */
   declined: number;
   fareCents: number;
   tipCents: number;
+  cancelledFeeCents: number;
+  /** The declined orders' fees. Internal, like `declined`. */
   declinedFeeCents: number;
   km: number;
   /**
@@ -208,13 +224,20 @@ export interface Provenance {
   /** The model every drive time came from. `measured: false` is the haversine estimate. */
   travel: { source: string; measured: boolean };
   routing: RoutingProvenance | null;
+  /** The company the month was simulated for, when the caller named it. */
+  tenantId: string | null;
+  /**
+   * The run's identity: a hash of everything that built the month, so the same
+   * inputs give the same id and a record can be traced to its month.
+   */
+  runId: string;
 }
 
 /**
  * Bumped whenever the generated month would differ for the same seed. A month
  * carries it so a figure can be traced to the code that made it.
  */
-export const FULL_MONTH_GENERATOR_VERSION = 'full-month/2.0.0';
+export const FULL_MONTH_GENERATOR_VERSION = 'full-month/3.0.0';
 
 export interface FullMonthResult {
   month: GeneratedMonth;
@@ -235,10 +258,36 @@ export interface FullMonthResult {
   /** The route check of the month, read back from the rides with the model they were built with. */
   routeChecks: RouteCheck[];
   routeSummary: RouteCheckSummary;
+  /** Every empty drive, as a record of its own. Never a ride row. */
+  repositioning: RepositioningLeg[];
+  repositioningSummary: RepositioningSummary;
+  /**
+   * The declined orders' money, counted apart. Internal: it is in no total of
+   * the Fahrtenbuch report and in no basis of the monthly share.
+   */
+  internal: { declined: RevenueBreakdown };
+  /** How each accepted shift was scheduled: what the ride loop refused before it stopped. */
+  scheduling: SchedulingRecord[];
+}
+
+/** One accepted shift's scheduling record, for the operational report. */
+export interface SchedulingRecord {
+  shiftId: string;
+  day: string;
+  plate: string;
+  driverId: string | null;
+  startMs: number;
+  plannedEndMs: number;
+  endMs: number;
+  /** What the last try found when the ride loop stopped. */
+  endedBy: ShiftEnd;
+  /** Tries of a step that found nothing, by what they found. */
+  refusedSteps: Partial<Record<ShiftEnd, number>>;
 }
 
 export type FullMonthFailure =
   | { kind: 'settings'; problem: SettingsProblem }
+  | { kind: 'options'; problem: NonNullable<ReturnType<typeof marginProblem>> }
   | { kind: 'month_out_of_range' }
   | { kind: 'address_pool_too_small' };
 
@@ -265,6 +314,8 @@ export function generateFullMonth(
   if (input.pool.length < MIN_POOL) return { ok: false, failure: { kind: 'address_pool_too_small' } };
 
   const opts: GeneratorOptions = { ...DEFAULT_OPTIONS, ...input.options };
+  const optionsProblem = marginProblem(opts);
+  if (optionsProblem) return { ok: false, failure: { kind: 'options', problem: optionsProblem } };
   const shiftsPerVehicleDay = Math.max(
     1,
     Math.min(SHIFT_LIMITS.maxPerVehicleDay, input.shiftsPerVehicleDay ?? 1),
@@ -281,6 +332,7 @@ export function generateFullMonth(
 
   const period = buildPeriod(input.year, input.month, settings);
   const accepted: ShiftDecision[] = [];
+  const scheduling: SchedulingRecord[] = [];
   const month: GeneratedMonth = { shifts: [], rides: [], droppedShifts: 0 };
   const refusals: CapacityRefusal[] = [];
   const vehicleBusy = new Map<string, Busy[]>();
@@ -289,6 +341,12 @@ export function generateFullMonth(
   let nextShift = 1;
 
   const pool = input.drivers.filter(d => d.planning_enabled !== false && d.status !== 'inactive');
+  // A negative workshop check is reported, not confirmed, and names no window:
+  // the shift on that vehicle that day runs and is marked for a person to review.
+  const workshopOn = new Map<string, WerkstattCheckRow>();
+  for (const check of input.werkstattChecks ?? []) {
+    if (check.status === 'negative') workshopOn.set(`${check.car_id}|${check.check_date}`, check);
+  }
 
   for (const day of period) {
     if (input.vehicles.length === 0) {
@@ -335,20 +393,34 @@ export function generateFullMonth(
         nextShift += 1;
         month.shifts.push(placed.shift);
         month.rides.push(...placed.rides);
+        scheduling.push({
+          shiftId: placed.shift.id,
+          day: day.day,
+          plate: vehicle.plate,
+          driverId: placed.shift.driver.id ?? null,
+          startMs: placed.shift.startMs,
+          plannedEndMs: placed.plannedEndMs,
+          endMs: placed.shift.endMs,
+          endedBy: placed.endedBy,
+          refusedSteps: placed.refusedSteps,
+        });
+        const workshop = workshopOn.get(`${vehicle.id}|${day.day}`) ?? null;
         const reviews = [
           ...placed.review.map(n => `Notiz ${n.note_type} ohne bestätigten Zeitraum - nicht sperrend, bitte prüfen`),
           ...(verdict.kind === 'review' ? [verdict.reason] : []),
+          ...(workshop ? [`Werkstatt-Prüfung negativ am ${workshop.check_date} - kein Ausfallzeitraum erfasst, nicht sperrend, bitte prüfen`] : []),
         ];
+        const review = reviewOf(placed.review, verdict, workshop);
         accepted.push({
           day: day.day,
           plate: vehicle.plate,
           vehicleId: vehicle.id,
           driverId: placed.shift.driver.id ?? null,
           outcome: reviews.length > 0 ? 'accepted_with_review' : 'accepted',
-          code: reviews.length > 0 ? (placed.review.length > 0 ? 'unconfirmed_note' : verdict.kind === 'review' ? verdict.code : 'review') : 'accepted',
+          code: review?.code ?? 'accepted',
           reason: reviews.length > 0 ? reviews.join('; ') : 'Keine bestätigte Einschränkung im Zeitraum',
-          eventRef: placed.review[0]?.id ?? (verdict.kind === 'review' ? 'tuev' : null),
-          certainty: placed.review.length > 0 ? 'assumed_from_notice_date' : verdict.kind === 'review' ? 'reported' : null,
+          eventRef: review?.eventRef ?? null,
+          certainty: review?.certainty ?? null,
           startMs: placed.shift.startMs,
           endMs: placed.shift.endMs,
           count: 1,
@@ -369,8 +441,23 @@ export function generateFullMonth(
     ...declinedOrders(month.shifts, month.rides, settings, ctx.usedTransmits, input.pool, input.seed, opts.appPaymentShare),
   );
   month.rides.sort((a, b) => a.orderTransmittedMs - b.orderTransmittedMs);
+  // The month's ride list is final here, so every order gets its identity now,
+  // in transmission order. The report's rides and the declined orders count
+  // in two series (F, AB): a ride's id is the same whether declined orders
+  // were generated or not, and no id in the Fahrtenbuch report has a gap
+  // where an order it does not hold would be.
+  let rideNo = 0;
+  let declinedNo = 0;
+  for (const ride of month.rides) {
+    ride.tripId = inExportScope(ride)
+      ? `F${String(++rideNo).padStart(5, '0')}`
+      : `AB${String(++declinedNo).padStart(5, '0')}`;
+  }
 
-  const revenue = countRevenue(month.rides, settings);
+  // The Fahrtenbuch report's money is counted over its own rides only. A
+  // declined order's fee is counted apart and reaches none of it.
+  const revenue = countRevenue(month.rides.filter(inExportScope), settings);
+  const declined = countRevenue(month.rides.filter(r => !inExportScope(r)), settings);
   const basis = revenueBasis(revenue, settings);
   const share = settings.monthlyRevenueShareEnabled ? computeShare(basis, input) : null;
 
@@ -406,9 +493,22 @@ export function generateFullMonth(
     simulated: true,
     travel: { source: travel.source, measured: travel.measured },
     routing: input.routing ?? null,
+    tenantId: input.tenantId ?? null,
+    runId: '',
   };
+  provenance.runId = runIdOf(provenance);
 
-  const checks = routeChecks(month.rides, travel);
+  const checks = routeChecks(month.rides, travel, opts);
+  const repositioning = buildRepositioningLegs(month.shifts, month.rides, {
+    base: input.base,
+    baseLabel: input.baseLabel ?? 'Betriebssitz',
+    travel,
+    margins: opts,
+    tenantId: provenance.tenantId,
+    vehicleIdByPlate: new Map(input.vehicles.map(v => [v.plate, v.id])),
+    seed: provenance.seed,
+    runId: provenance.runId,
+  });
   const decisions = [...accepted, ...collapseDecisions(refusals.map(refusalDecision(input.vehicles)))];
 
   return {
@@ -426,13 +526,47 @@ export function generateFullMonth(
       provenance,
       violations: [
         ...validateFullMonth(month, period, input.driverNotesMap, settings, input.vehicles),
-        ...validateRides(month, input.base, travel),
+        ...validateRides(month, input.base, travel, opts),
       ],
       decisions,
       routeChecks: checks,
       routeSummary: summariseRouteChecks(checks),
+      repositioning,
+      repositioningSummary: summariseRepositioning(repositioning),
+      internal: { declined },
+      scheduling,
     },
   };
+}
+
+/** The review a shift is accepted with, most specific first: a note, the TÜV, a workshop check. */
+function reviewOf(
+  notes: readonly StructuredNote[],
+  verdict: ReturnType<typeof vehicleVerdict>,
+  workshop: WerkstattCheckRow | null,
+): Pick<ShiftDecision, 'code' | 'eventRef' | 'certainty'> | null {
+  if (notes.length > 0) return { code: 'unconfirmed_note', eventRef: notes[0].id ?? null, certainty: 'assumed_from_notice_date' };
+  if (verdict.kind === 'review') return { code: verdict.code, eventRef: 'tuev', certainty: 'reported' };
+  if (workshop) return { code: 'werkstatt_negative', eventRef: `werkstatt:${workshop.check_date}`, certainty: 'reported' };
+  return null;
+}
+
+/** FNV-1a, so a run id is stable across machines and runs. */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/** The run's id: the period, the seed and a hash of everything else that built it. */
+function runIdOf(p: Provenance): string {
+  const mm = String(p.month).padStart(2, '0');
+  const basis = JSON.stringify([p.generatorVersion, p.tenantId, p.seed, p.year, p.month, p.settings, p.options,
+    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null]);
+  return `SIM-${p.year}-${mm}-${p.seed}-${fnv1a(basis)}`;
 }
 
 const REFUSAL_TEXT: Record<CapacityReason, string> = {
@@ -445,6 +579,7 @@ const REFUSAL_TEXT: Record<CapacityReason, string> = {
   driver_weekday_not_allowed: 'Wochentag für den Fahrer nicht erlaubt',
   driver_resting: 'Fahrer in Ruhezeit oder bereits eingesetzt',
   shift_produced_no_ride: 'Schicht ergab keine Fahrt (keine berechnete Route oder keine Zeit)',
+  shift_too_short: `Schicht endete vor der Mindestdauer von ${SHIFT_LIMITS.minMinutes} Minuten und wurde verworfen`,
   vehicle_tuev_expired: 'TÜV abgelaufen - Fahrzeug nicht eingesetzt',
 };
 
@@ -499,7 +634,16 @@ interface PlaceArgs {
  * planner's `noteExclusionIntervals`, so a confirmed block is exactly the
  * planner's block.
  */
-function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[]; review: StructuredNote[] } | null {
+interface Placed {
+  shift: SimShift;
+  rides: SimRide[];
+  review: StructuredNote[];
+  plannedEndMs: number;
+  endedBy: ShiftEnd;
+  refusedSteps: Partial<Record<ShiftEnd, number>>;
+}
+
+function placeShift(args: PlaceArgs): Placed | null {
   const { ctx, day, dayStartMs, dayEndMs, vehicle, pool, notes, refusals } = args;
   const { rng, opts } = ctx;
   const vehicleGap = opts.minVehicleGapMinutes * 60_000;
@@ -559,6 +703,13 @@ function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[]; revie
       refusals.push({ day: day.day, reason: 'shift_produced_no_ride', plate: vehicle.plate, driverId: driver.id });
       continue;
     }
+    // Refused here, before the shift is accepted, and not only reported by the
+    // read-back: a shift that ended short of the minimum is not a shift this
+    // month may contain (round 6, "S38").
+    if (run.endMs - startMs < SHIFT_LIMITS.minMinutes * 60_000) {
+      refusals.push({ day: day.day, reason: 'shift_too_short', plate: vehicle.plate, driverId: driver.id });
+      continue;
+    }
 
     const rides = run.rides;
     args.vehicleBusy.set(vehicle.plate, [...(args.vehicleBusy.get(vehicle.plate) ?? []), { start: startMs, end: run.endMs }]);
@@ -568,6 +719,9 @@ function placeShift(args: PlaceArgs): { shift: SimShift; rides: SimRide[]; revie
       shift: { id: args.shiftId, vehicle, driver, operatingDay: day.day, startMs, endMs: run.endMs },
       rides,
       review: reviewOf.get(driver.id) ?? [],
+      plannedEndMs: endMs,
+      endedBy: run.endedBy,
+      refusedSteps: run.refusedSteps,
     };
   }
   refusals.push({ day: day.day, reason: 'no_vehicle_free', plate: vehicle.plate });
@@ -724,10 +878,14 @@ function summariseDays(
   for (const shift of month.shifts) shiftsByDay.set(shift.operatingDay, (shiftsByDay.get(shift.operatingDay) ?? 0) + 1);
 
   return period.map(day => {
-    const rides = ridesByDay.get(day.day) ?? [];
+    const all = ridesByDay.get(day.day) ?? [];
+    // The day's figures are the Fahrtenbuch report's: its own rides only. The
+    // declined orders are counted beside them, for the internal report.
+    const rides = all.filter(inExportScope);
     const breakdown = countRevenue(rides, settings);
+    const declined = countRevenue(all.filter(r => !inExportScope(r)), settings);
     const dayRefusals = refusals.filter(r => r.day === day.day);
-    const workedDrivers = new Set(rides.map(r => r.driver.name));
+    const workedDrivers = new Set(rides.map(r => r.driver.id ?? `name:${r.driver.name}`));
     return {
       day: day.day,
       isoWeekday: day.isoWeekday,
@@ -736,10 +894,11 @@ function summariseDays(
       rides: rides.length,
       completed: breakdown.counts.completed,
       cancelled: breakdown.counts.cancelled,
-      declined: breakdown.counts.declined,
+      declined: declined.counts.declined,
       fareCents: breakdown.fareCents,
       tipCents: breakdown.tipCents,
-      declinedFeeCents: breakdown.declinedFeeCents,
+      cancelledFeeCents: breakdown.cancelledFeeCents,
+      declinedFeeCents: declined.declinedFeeCents,
       km: breakdown.km,
       driversWorked: workedDrivers.size,
       refusals: dayRefusals,

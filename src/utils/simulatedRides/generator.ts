@@ -1,6 +1,7 @@
 import type { Rng } from './rng';
 import { PICKUP_HANDLING_SECONDS, interpolate, roadKm } from './geo';
 import { isUniqueWallTime, localHour } from './time';
+import { emptyDriveSeconds, isPreferredLeg, pickupDriveSeconds, type MarginOptions } from './repositioning';
 import { ESTIMATE_TRAVEL_MODEL, type TravelLeg, type TravelModel } from './travelModel';
 import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimDriver, SimRide, SimShift, SimVehicle } from './types';
 
@@ -50,6 +51,8 @@ export const DEFAULT_OPTIONS: GeneratorOptions = {
   tipShare: 0.12,
   appPaymentShare: 0.69,
   prebookedShare: 0.03,
+  repositioningMarginSeconds: 60,
+  repositioningMarginPercent: 15,
 };
 
 /** The hard limits, restated for the validator: a shift is 4 to 6 hours, at most 3 per vehicle and day. */
@@ -85,7 +88,17 @@ export function approachSeconds(leg: TravelLeg): number {
 
 export interface ShiftOwner { shiftId: string; vehicle: SimVehicle; driver: SimDriver }
 
-export interface ShiftRun { rides: SimRide[]; endMs: number }
+/** Why the ride loop of a shift stopped: the window ran out, or a choice found nothing. */
+export type ShiftEnd = 'no_approach' | 'no_budget' | 'no_dropoff';
+
+export interface ShiftRun {
+  rides: SimRide[];
+  endMs: number;
+  /** What the last try found when the shift stopped. */
+  endedBy: ShiftEnd;
+  /** Every try of a step that found nothing, by what it found: the shift's own rejection log. */
+  refusedSteps: Partial<Record<ShiftEnd, number>>;
+}
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -97,17 +110,29 @@ function nearest(pool: readonly PoolAddress[], to: GeoPoint, count: number): Poo
     .map(x => x.a);
 }
 
+/** How far afield a pickup is looked for: the nearest few, and a wider ring for the preferred window. */
+const NEAR_PICKUPS = 8;
+const PREFERRED_SEARCH = 16;
+
 /**
  * A pickup near `from` that the model can drive to, with the drive. Null when
- * none of the near addresses has a route: the caller then ends the shift
- * rather than invent a drive. With the estimate every address has one, so the
- * choice is the one it always was.
+ * none of the near addresses has a route: the caller then draws again or ends
+ * the shift rather than invent a drive.
+ *
+ * Round 6 asks for repositioning legs of two to five minutes where the pool
+ * allows them. That is a preference over real candidates: among the nearest
+ * sixteen with a route, those whose drive falls inside the window are drawn
+ * from; when none does, the nearest eight are, as before. No point is moved
+ * and no drive is shortened to land in the window.
  */
 function choosePickup(ctx: Context, from: GeoPoint, hour: number): { pickup: PoolAddress; leg: TravelLeg } | null {
   const travel = travelOf(ctx);
-  const near = nearest(ctx.pool, from, 8)
+  const ring = nearest(ctx.pool, from, PREFERRED_SEARCH)
     .map(pickup => ({ pickup, leg: travel.drive(from, pickup, hour) }))
     .filter((x): x is { pickup: PoolAddress; leg: TravelLeg } => x.leg !== null);
+  const preferred = ring.filter(x => isPreferredLeg(x.leg.seconds));
+  if (preferred.length > 0) return ctx.rng.pick(preferred);
+  const near = ring.slice(0, NEAR_PICKUPS);
   return near.length === 0 ? null : ctx.rng.pick(near);
 }
 
@@ -269,7 +294,7 @@ const clampSeconds = (value: number, max: number): number => Math.min(max, Math.
 function firstApproach(ctx: Context, plan: PlannedShift): Approach | null {
   const chosen = choosePickup(ctx, ctx.base, localHour(plan.startMs));
   if (!chosen) return null;
-  const drive = approachSeconds(chosen.leg);
+  const drive = pickupDriveSeconds(chosen.leg.seconds, ctx.opts);
   return { orderPos: ctx.base, transmitMs: plan.startMs + ctx.rng.int(0, 999), pickup: chosen.pickup, startMs: plan.startMs + drive * 1000 };
 }
 
@@ -279,7 +304,7 @@ function approachDuringRide(ctx: Context, prev: PrevRide, latestStartMs: number)
   const chosen = choosePickup(ctx, prev.dropoff, localHour(prev.endMs));
   if (!chosen) return null;
   const { pickup } = chosen;
-  const drive = approachSeconds(chosen.leg);
+  const drive = pickupDriveSeconds(chosen.leg.seconds, ctx.opts);
   const room = Math.max(0, (latestStartMs - JITTER_MARGIN_MS - prev.endMs) / 1000 - drive);
   const slack = Math.min(clampSeconds(logNormal(rng, SLACK_MEDIAN_SECONDS, SLACK_SIGMA), SLACK_MAX_SECONDS), Math.floor(room)) + rng.int(0, 40);
   // Whole milliseconds. This is the one place a ride instant was ever drawn
@@ -297,6 +322,12 @@ function approachDuringRide(ctx: Context, prev: PrevRide, latestStartMs: number)
  * Zielort to where it waits (leg one), the order comes, it drives to the
  * Abholort (leg two). The wait is shortened, never the legs, when the shift
  * would otherwise run out.
+ *
+ * The gap must also hold the direct drive from the Zielort to the Abholort,
+ * which is what a route check of the finished file asks: a measured matrix
+ * need not obey the triangle inequality, and a pair the model has no direct
+ * route for would be unverifiable afterwards, so such a candidate is refused
+ * here rather than reported there.
  */
 function approachAfterRide(ctx: Context, prev: PrevRide, latestStartMs: number): Approach | null {
   const { rng } = ctx;
@@ -310,14 +341,22 @@ function approachAfterRide(ctx: Context, prev: PrevRide, latestStartMs: number):
   const chosen = choosePickup(ctx, stop, hour);
   if (!chosen) return null;
   const { pickup } = chosen;
-  const legOne = toStop.seconds;
-  const legTwo = approachSeconds(chosen.leg);
-  const earliestStart = prev.endMs + (legOne + legTwo) * 1000;
+  const direct = pickup === prev.dropoff ? { seconds: 0, km: 0 } : travel.drive(prev.dropoff, pickup, hour);
+  if (!direct) return null;
+  const legOne = emptyDriveSeconds(toStop.seconds, ctx.opts);
+  const legTwo = pickupDriveSeconds(chosen.leg.seconds, ctx.opts);
+  const earliestStart = prev.endMs + Math.max(legOne + legTwo, pickupDriveSeconds(direct.seconds, ctx.opts)) * 1000;
   if (earliestStart + JITTER_MARGIN_MS > latestStartMs) return null;
   const wait = clampSeconds(logNormal(rng, WAIT_MEDIAN_SECONDS, WAIT_SIGMA), WAIT_MAX_SECONDS);
   const waitMs = Math.min(wait * 1000, latestStartMs - JITTER_MARGIN_MS - earliestStart);
   const transmitMs = prev.endMs + legOne * 1000 + waitMs + rng.int(0, 999);
-  return { orderPos: stop, transmitMs, pickup, startMs: earliestStart + waitMs + rng.int(0, 40) * 1000 };
+  // The drive to the Abholort starts when the order comes, so it is measured
+  // from the transmission, whose sub-second jitter would otherwise eat into it.
+  // Rounded up to the second: a ride's start is printed to the second, and a
+  // start the sheet truncates would show a gap a second shorter than it was.
+  const fromOrder = Math.ceil((transmitMs + legTwo * 1000) / 1000) * 1000;
+  const startMs = Math.max(earliestStart + waitMs, fromOrder) + rng.int(0, 40) * 1000;
+  return { orderPos: stop, transmitMs, pickup, startMs };
 }
 
 function nextApproach(ctx: Context, plan: PlannedShift, prev: PrevRide | null): Approach | null {
@@ -327,23 +366,55 @@ function nextApproach(ctx: Context, plan: PlannedShift, prev: PrevRide | null): 
   return approachAfterRide(ctx, prev, latestStartMs);
 }
 
+/**
+ * How often one step of a shift is drawn again before the shift ends.
+ *
+ * A step is an approach, a wait and a ride. Until round 6 the first draw that
+ * found nothing ended the shift: a long wait clamped to the latest start left
+ * a budget no ride from the chosen pickup fitted, and the shift closed with an
+ * hour or more of its window unused — and shorter than the 240-minute minimum,
+ * which only the read-back noticed (the audit's "S38"). A fresh draw has a
+ * fresh wait and a fresh pickup, so the window is used. Bounded, so a window
+ * that genuinely holds no further ride ends the shift after a few tries.
+ */
+export const STEP_TRIES = 6;
+
+/** What one try of a step found, when it found nothing. */
+type StepRefusal = ShiftEnd;
+
 /** One shift, rides back to back. Null when any clock reading in it is not unique. */
 export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): ShiftRun | null {
   const { rng, opts } = ctx;
   const rides: SimRide[] = [];
   let prev: PrevRide | null = null;
+  let endedBy: ShiftEnd = 'no_approach';
+  const refusedSteps: Partial<Record<StepRefusal, number>> = {};
 
   for (;;) {
-    const approach = nextApproach(ctx, plan, prev);
-    if (!approach) break;
-    const { pickup, startMs, orderPos, transmitMs } = approach;
-    const budget = (plan.plannedEndMs - startMs) / 1000;
-    if (budget < MIN_RIDE_BUDGET_SECONDS) break;
-    const chosen = chooseDropoff(ctx, pickup, budget, localHour(startMs));
-    if (!chosen) break;
-    const { dropoff } = chosen;
-    const km = chosen.leg.km;
-    const endMs = startMs + chosen.leg.seconds * 1000;
+    let step: { approach: Approach; chosen: { dropoff: PoolAddress; leg: TravelLeg } } | null = null;
+    for (let attempt = 0; attempt < STEP_TRIES && step === null; attempt++) {
+      const approach = nextApproach(ctx, plan, prev);
+      let refusal: StepRefusal | null = null;
+      if (!approach) refusal = 'no_approach';
+      else {
+        const budget = (plan.plannedEndMs - approach.startMs) / 1000;
+        if (budget < MIN_RIDE_BUDGET_SECONDS) refusal = 'no_budget';
+        else {
+          const chosen = chooseDropoff(ctx, approach.pickup, budget, localHour(approach.startMs));
+          if (!chosen) refusal = 'no_dropoff';
+          else step = { approach, chosen };
+        }
+      }
+      if (refusal) {
+        endedBy = refusal;
+        refusedSteps[refusal] = (refusedSteps[refusal] ?? 0) + 1;
+      }
+    }
+    if (step === null) break;
+    const { pickup, startMs, orderPos, transmitMs } = step.approach;
+    const { dropoff } = step.chosen;
+    const km = step.chosen.leg.km;
+    const endMs = startMs + step.chosen.leg.seconds * 1000;
 
     rides.push({
       ...owner,
@@ -367,7 +438,7 @@ export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): S
     prev = ride;
   }
   if (rides.length === 0 || !rides.every(stampsAreUnique)) return null;
-  return { rides, endMs: prev ? prev.endMs : plan.startMs };
+  return { rides, endMs: prev ? prev.endMs : plan.startMs, endedBy, refusedSteps };
 }
 
 // ── The rules, checked independently of how the rides were made ─────────────
@@ -426,33 +497,56 @@ function checkVehicleDays(shifts: readonly SimShift[]): string[] {
 }
 
 /**
- * The gap between two rides must hold the drive. An order that reached the car
- * after the previous ride ended needs both legs, Zielort to Standort and
- * Standort to Abholort, and cannot have arrived before the first leg was
- * driven; one that came during the previous ride needs Zielort to Abholort.
+ * The gap between two rides must hold the drive and its safety margin. An
+ * order that reached the car after the previous ride ended needs both legs,
+ * Zielort to Standort and Standort to Abholort, and cannot have arrived before
+ * the first leg was driven; one that came during the previous ride needs
+ * Zielort to Abholort. Either way the gap must also hold the direct drive,
+ * which is the one a route check of the file asks about.
  */
-function checkApproachLegs(travel: TravelModel, shiftId: string, nth: number, prev: SimRide, next: SimRide, gap: number): string[] {
+function checkApproachLegs(travel: TravelModel, margins: MarginOptions, shiftId: string, nth: number, prev: SimRide, next: SimRide, gap: number): string[] {
   const hour = localHour(prev.endMs as number);
   const unrouted = `${shiftId}: no ${travel.source} route for the approach before ride ${nth}`;
-  if (next.orderTransmittedMs < (prev.endMs as number)) {
-    const direct = travel.drive(prev.dropoff, next.pickup, hour);
-    if (!direct) return [unrouted];
-    const needed = approachSeconds(direct);
-    return gap < needed ? [`${shiftId}: gap of ${gap}s before ride ${nth} is shorter than the ${needed}s the distance needs`] : [];
-  }
+  const sameAddress = prev.dropoff.label === next.pickup.label;
+  const direct = sameAddress ? { seconds: 0, km: 0 } : travel.drive(prev.dropoff, next.pickup, hour);
+  if (!direct) return [unrouted];
+  const out: string[] = [];
+  const neededDirect = pickupDriveSeconds(direct.seconds, margins);
+  if (gap < neededDirect) out.push(`${shiftId}: gap of ${gap}s before ride ${nth} is shorter than the ${neededDirect}s the distance and its margin need`);
+  if (next.orderTransmittedMs < (prev.endMs as number)) return out;
   const toStop = travel.drive(prev.dropoff, next.vehiclePosition, hour);
   const toPickup = travel.drive(next.vehiclePosition, next.pickup, hour);
-  if (!toStop || !toPickup) return [unrouted];
-  const legOne = toStop.seconds;
-  const legTwo = approachSeconds(toPickup);
-  const out: string[] = [];
-  if (gap < legOne + legTwo) out.push(`${shiftId}: gap of ${gap}s before ride ${nth} is shorter than the ${legOne + legTwo}s its two legs need`);
+  if (!toStop || !toPickup) return [...out, unrouted];
+  const legOne = emptyDriveSeconds(toStop.seconds, margins);
+  const legTwo = pickupDriveSeconds(toPickup.seconds, margins);
+  if (gap < legOne + legTwo) out.push(`${shiftId}: gap of ${gap}s before ride ${nth} is shorter than the ${legOne + legTwo}s its two legs and their margins need`);
   const arrived = (next.orderTransmittedMs - (prev.endMs as number)) / 1000;
   if (arrived < legOne) out.push(`${shiftId}: the order for ride ${nth} reached the car ${arrived}s after the last ride, before the ${legOne}s drive to its position`);
+  const afterOrder = ((next.startMs as number) - next.orderTransmittedMs) / 1000;
+  if (afterOrder < legTwo) out.push(`${shiftId}: ride ${nth} starts ${afterOrder}s after its order, short of the ${legTwo}s drive to the Abholort and its margin`);
   return out;
 }
 
-function checkRideChain(rides: readonly SimRide[], base: GeoPoint, travel: TravelModel): string[] {
+/** The first ride of a shift is driven to from the base, and the shift's start must hold that drive. */
+function checkOpeningLegs(shifts: readonly SimShift[], rides: readonly SimRide[], base: GeoPoint, travel: TravelModel, margins: MarginOptions): string[] {
+  const first = new Map<string, SimRide>();
+  for (const r of rides) {
+    if (r.status !== 'completed' || r.startMs === null) continue;
+    const seen = first.get(r.shiftId);
+    if (!seen || (seen.startMs as number) > r.startMs) first.set(r.shiftId, r);
+  }
+  return shifts.flatMap(s => {
+    const ride = first.get(s.id);
+    if (!ride) return [];
+    const leg = travel.drive(base, ride.pickup, localHour(s.startMs));
+    if (!leg) return [`${s.id}: no ${travel.source} route from the base to the first pickup`];
+    const gap = ((ride.startMs as number) - s.startMs) / 1000;
+    const needed = pickupDriveSeconds(leg.seconds, margins);
+    return gap < needed ? [`${s.id}: the first ride starts ${gap}s after the shift, short of the ${needed}s the drive from the base and its margin need`] : [];
+  });
+}
+
+function checkRideChain(rides: readonly SimRide[], base: GeoPoint, travel: TravelModel, margins: MarginOptions): string[] {
   const out: string[] = [];
   for (const [shiftId, list] of groupBy(rides.filter(r => r.status === 'completed'), r => r.shiftId)) {
     const sorted = [...list].sort((a, b) => (a.startMs as number) - (b.startMs as number));
@@ -471,7 +565,7 @@ function checkRideChain(rides: readonly SimRide[], base: GeoPoint, travel: Trave
       const next = sorted[i];
       const gap = ((next.startMs as number) - (prev.endMs as number)) / 1000;
       if (gap < 0) { out.push(`${shiftId}: rides ${i} and ${i + 1} overlap`); continue; }
-      out.push(...checkApproachLegs(travel, shiftId, i + 1, prev, next, gap));
+      out.push(...checkApproachLegs(travel, margins, shiftId, i + 1, prev, next, gap));
     }
   }
   return out;
@@ -483,11 +577,17 @@ function checkRideChain(rides: readonly SimRide[], base: GeoPoint, travel: Trave
  * against another model it can fail, and that is a finding about the two
  * models, not about the month: `routeCheck.ts` reports it as such.
  */
-export function validateRides(month: GeneratedMonth, base: GeoPoint, travel: TravelModel = ESTIMATE_TRAVEL_MODEL): string[] {
+export function validateRides(
+  month: GeneratedMonth,
+  base: GeoPoint,
+  travel: TravelModel = ESTIMATE_TRAVEL_MODEL,
+  margins: MarginOptions = DEFAULT_OPTIONS,
+): string[] {
   return [
     ...checkWholeMilliseconds(month.rides),
     ...checkShiftLengths(month.shifts),
     ...checkVehicleDays(month.shifts),
-    ...checkRideChain(month.rides, base, travel),
+    ...checkOpeningLegs(month.shifts, month.rides, base, travel, margins),
+    ...checkRideChain(month.rides, base, travel, margins),
   ];
 }

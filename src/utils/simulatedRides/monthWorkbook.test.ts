@@ -3,7 +3,7 @@ import { CONTRACT_LIMITS, type PayloadCell } from '../../lib/workbookContract';
 import type { FullMonthResult } from './fullMonth';
 import { SIMULATED_FILE_PREFIX, SIMULATED_NOTICE, SIMULATED_SHEET_NAME } from './marker';
 import {
-  LABEL_HEADER, LABEL_VALUE, SHEET_CHECKS, SHEET_DAYS, SHEET_DECISIONS, SHEET_DECLINED, SHEET_DRIVERS,
+  LABEL_HEADER, LABEL_VALUE, SHEET_CANCELLED, SHEET_CHECKS, SHEET_DAYS, SHEET_DECISIONS, SHEET_DRIVERS,
   SHEET_EVENTS, SHEET_ORDER, SHEET_RIDES, SHEET_ROUTES, SHEET_SOURCE, SHEET_VEHICLES, TOTAL_LABEL,
   buildMonthReport, contractProblem, labelled, monthTotals, payloadCost, reconcile, totalsByDriver, totalsByVehicle,
 } from './monthWorkbook';
@@ -88,7 +88,7 @@ describe.each(CASES)('the month report, %s', (_label, year, m, dayCount) => {
     const empty = days.filter(r => r['Tag ohne Fahrt'] === 'Ja');
     expect(empty.length).toBeGreaterThan(0);
     for (const row of empty) {
-      expect(row.Auftraege).toBe(0);
+      expect(row.Fahrten).toBe(0);
       expect(String(row.Grund).length).toBeGreaterThan(0);
     }
   });
@@ -113,12 +113,12 @@ describe.each(CASES)('the month report, %s', (_label, year, m, dayCount) => {
     expect(checks.every(r => r.Ergebnis === 'OK' && r.Differenz === 0)).toBe(true);
   });
 
-  it('sums orders, tips, decline fees and kilometres without double counting', () => {
+  it('sums rides, tips, cancellation fees and kilometres without double counting', () => {
     const t = monthTotals(result);
-    expect(sum(totalsByDriver(result.month.rides, result.provenance.settings).map(x => x.orders))).toBe(t.orders);
-    expect(sum(totalsByVehicle(result.month.rides, result.provenance.settings).map(x => x.declinedFeeCents)))
-      .toBe(t.declinedFeeCents);
-    expect(t.orders).toBe(t.completed + t.cancelled + t.declined);
+    expect(sum(totalsByDriver(result.month.rides, result.provenance.settings).map(x => x.rides))).toBe(t.rides);
+    expect(sum(totalsByVehicle(result.month.rides, result.provenance.settings).map(x => x.cancelledFeeCents)))
+      .toBe(t.cancelledFeeCents);
+    expect(t.rides).toBe(t.completed + t.cancelled);
     expect(t.appFareCents + t.cashFareCents).toBe(t.fareCents);
   });
 
@@ -135,27 +135,53 @@ describe.each(CASES)('the month report, %s', (_label, year, m, dayCount) => {
   });
 });
 
-describe('declined and cancelled rides', () => {
-  it('writes a declined ride with the fee and its rule, and a cancellation with neither', async () => {
+describe('declined and cancelled rides, the final rule of round 6', () => {
+  it('exports zero declined rows, anywhere in the Fahrtenbuch report', async () => {
     const result = await month(2026, 10);
-    const rides = readBack(result).tableOf(SHEET_RIDES);
-    const declined = rides.filter(r => r.Status === 'abgelehnt');
-    expect(declined).toHaveLength(result.revenue.counts.declined);
-    expect(declined.length).toBeGreaterThan(0);
-    for (const r of declined) {
-      expect(cents(r['Gebuehr (EUR)'])).toBe(result.provenance.settings.declinedFeeCents);
-      expect(r.Gebuehrenregel).toBe('idle_in_shift');
-      expect(cents(r['Fahrpreis (EUR)'])).toBe(0);
+    expect(result.internal.declined.counts.declined).toBeGreaterThan(0);
+    const book = readBack(result);
+    expect(book.tableOf(SHEET_RIDES).filter(r => r.Status === 'abgelehnt')).toHaveLength(0);
+    const ids = new Set(result.month.rides.filter(r => r.status === 'declined').map(r => r.tripId));
+    for (const sheet of book.report.payload.sheets) {
+      for (const row of sheet.rows) {
+        expect(row.some(cell => cell === 'abgelehnt'), sheet.name).toBe(false);
+        expect(row.some(cell => typeof cell === 'string' && ids.has(cell)), sheet.name).toBe(false);
+      }
     }
-    expect(sum(declined.map(r => cents(r['Gebuehr (EUR)'])))).toBe(declined.length * 600);
-    const cancelled = rides.filter(r => r.Status === 'storniert');
+  });
+
+  it('keeps every cancelled ride with the company fee and its financial status', async () => {
+    const result = await month(2026, 10);
+    const book = readBack(result);
+    const cancelled = book.tableOf(SHEET_RIDES).filter(r => r.Status === 'storniert');
+    expect(cancelled.length).toBe(result.revenue.counts.cancelled);
     expect(cancelled.length).toBeGreaterThan(0);
     for (const r of cancelled) {
-      expect(cents(r['Gebuehr (EUR)'])).toBe(0);
-      expect(r.Gebuehrenregel).toBe('');
+      expect(cents(r['Stornogebuehr (EUR)'])).toBe(600);
+      expect(String(r.Finanzstatus)).toContain('Stornogebuehr berechnet');
+      expect(cents(r['Fahrpreis (EUR)'])).toBe(0);
     }
-    const e = readBack(result).tableOf(SHEET_DECLINED);
-    expect(e).toHaveLength(declined.length + cancelled.length);
+    expect(book.tableOf(SHEET_CANCELLED)).toHaveLength(cancelled.length);
+    expect(result.revenue.cancelledFeeCents).toBe(cancelled.length * 600);
+  });
+
+  it('shows a cancellation without a fee when the company charges none, and still keeps the row', async () => {
+    const result = await month(2026, 10, { settings: { cancellationFeeEnabled: false } });
+    const cancelled = readBack(result).tableOf(SHEET_RIDES).filter(r => r.Status === 'storniert');
+    expect(cancelled.length).toBeGreaterThan(0);
+    for (const r of cancelled) {
+      expect(cents(r['Stornogebuehr (EUR)'])).toBe(0);
+      expect(String(r.Finanzstatus)).toContain('keine Stornogebuehr');
+    }
+  });
+
+  it('keeps the decline fees out of every total and out of the basis', async () => {
+    const result = await month(2026, 10);
+    const declinedFees = result.internal.declined.declinedFeeCents;
+    expect(declinedFees).toBe(result.internal.declined.counts.declined * 600);
+    expect(result.revenue.declinedFeeCents).toBe(0);
+    const t = monthTotals(result);
+    expect(result.basis.basisCents).toBe(t.fareCents + t.cancelledFeeCents);
   });
 });
 

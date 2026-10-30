@@ -46,6 +46,14 @@ export interface GeneratorOptions {
   /** Share paid through the app; the rest is cash ("Bar"). */
   appPaymentShare: number;
   prebookedShare: number;
+  /**
+   * The fixed part of the safety margin on every empty drive, in seconds
+   * (`repositioning.ts`). A generator option, so the month says which margin
+   * built it.
+   */
+  repositioningMarginSeconds: number;
+  /** The proportional part of that margin, in percent of the leg's road time. */
+  repositioningMarginPercent: number;
 }
 
 export interface SimShift {
@@ -77,6 +85,14 @@ export interface SimShift {
 export type SimRideStatus = 'completed' | 'cancelled' | 'declined';
 
 export interface SimRide {
+  /**
+   * The ride's stable identity in a generated month, set once the month's ride
+   * list is final (`fullMonth.ts`). Optional because the weeks mode writes a
+   * Fahrtenbuch whose own key is the import's `source_row_key`, not this. A
+   * position in a sheet is not an identity: the passenger sheet leaves the
+   * declined orders out, so its row numbers are not the month's.
+   */
+  tripId?: string;
   shiftId: string;
   vehicle: SimVehicle;
   driver: SimDriver;
