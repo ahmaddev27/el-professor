@@ -351,6 +351,9 @@ def verify(report_path, ops_path):
 
 
 def main(argv):
+    # The console's code page is not UTF-8 everywhere (Windows: cp1252, cp1256); the report is German.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     if len(argv) != 3:
         print(__doc__)
         return 2
