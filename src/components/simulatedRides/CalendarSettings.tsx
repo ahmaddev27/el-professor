@@ -5,9 +5,10 @@ import type { CalendarForm, CalendarFormField } from '../../utils/simulatedRides
 import type { MonthlyShareRate } from '../../utils/simulatedRides/monthlyRate';
 
 /**
- * The calendar-month settings: declined rides, the monthly share, and under
- * "advanced" the zone, the operating-day start and the shifts per vehicle.
- * Presentation only; `calendarForm.ts` reads what is typed here.
+ * The calendar-month settings: declined orders (internal only), the
+ * cancellation fee, the monthly share, and under "advanced" the zone, the
+ * operating-day start, the shifts per vehicle and the safety margin on every
+ * empty drive. Presentation only; `calendarForm.ts` reads what is typed here.
  */
 const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed';
 
@@ -16,6 +17,9 @@ const FIELD_ERROR_KEYS: Record<CalendarFormField, TranslationKey> = {
   operatingDayStartHour: 'simrides.cal.error.dayStart',
   shiftsPerVehicleDay: 'simrides.cal.error.shifts',
   declinedFee: 'simrides.cal.error.fee',
+  cancellationFee: 'simrides.cal.error.fee',
+  marginSeconds: 'simrides.cal.error.marginSeconds',
+  marginPercent: 'simrides.cal.error.marginPercent',
 };
 
 interface Props {
@@ -49,15 +53,26 @@ export function CalendarSettings({ form, onChange, disabled, errorField, ratePre
       <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-3 border-0 p-0" disabled={disabled}>
         <legend className="mb-1 text-[13px] font-medium text-fg-muted">{t('simrides.cal.declined.title')}</legend>
         <Check checked={form.declinedRidesEnabled} disabled={disabled} label={t('simrides.cal.declined.enabled')}
+          hint={t('simrides.cal.declined.internalHint')}
           onChange={declinedRidesEnabled => onChange({ declinedRidesEnabled })} />
         <div className="max-w-xs">
           <Field label={t('simrides.cal.declined.fee')} hint={t('simrides.cal.declined.feeHint')} error={error('declinedFee')}>
             <Input inputMode="decimal" value={form.declinedFee} onChange={e => onChange({ declinedFee: e.target.value })} disabled={disabled || !form.declinedRidesEnabled} />
           </Field>
         </div>
-        <Check checked={form.chargeDeclinedFeeOnCancelled} disabled={disabled || !form.declinedRidesEnabled}
-          label={t('simrides.cal.declined.onCancelled')} hint={t('simrides.cal.declined.onCancelledHint')}
-          onChange={chargeDeclinedFeeOnCancelled => onChange({ chargeDeclinedFeeOnCancelled })} />
+      </fieldset>
+
+      <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-3 border-0 p-0" disabled={disabled}>
+        <legend className="mb-1 text-[13px] font-medium text-fg-muted">{t('simrides.cal.cancellation.title')}</legend>
+        <Check checked={form.cancellationFeeEnabled} disabled={disabled} label={t('simrides.cal.cancellation.enabled')}
+          hint={t('simrides.cal.cancellation.hint')}
+          onChange={cancellationFeeEnabled => onChange({ cancellationFeeEnabled })} />
+        <div className="max-w-xs">
+          <Field label={t('simrides.cal.cancellation.fee')} hint={t('simrides.cal.declined.feeHint')} error={error('cancellationFee')}>
+            <Input inputMode="decimal" value={form.cancellationFee} onChange={e => onChange({ cancellationFee: e.target.value })}
+              disabled={disabled || !form.cancellationFeeEnabled} />
+          </Field>
+        </div>
       </fieldset>
 
       <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-3 border-0 p-0" disabled={disabled}>
@@ -66,8 +81,9 @@ export function CalendarSettings({ form, onChange, disabled, errorField, ratePre
           onChange={monthlyRevenueShareEnabled => onChange({ monthlyRevenueShareEnabled })} />
         <Check checked={form.basisIncludesTips} disabled={disabled || !form.monthlyRevenueShareEnabled} label={t('simrides.cal.share.tips')}
           onChange={basisIncludesTips => onChange({ basisIncludesTips })} />
-        <Check checked={form.basisIncludesDeclinedFees} disabled={disabled || !form.monthlyRevenueShareEnabled} label={t('simrides.cal.share.fees')}
-          onChange={basisIncludesDeclinedFees => onChange({ basisIncludesDeclinedFees })} />
+        <Check checked={form.basisIncludesCancellationFees} disabled={disabled || !form.monthlyRevenueShareEnabled}
+          label={t('simrides.cal.share.cancellationFees')} hint={t('simrides.cal.share.noDeclined')}
+          onChange={basisIncludesCancellationFees => onChange({ basisIncludesCancellationFees })} />
         {ratePreview ? (
           <Alert tone="neutral" role="note">
             {t('simrides.cal.share.preview', { rate: formatNumber(ratePreview.ratePercent, 2) })}
@@ -86,6 +102,12 @@ export function CalendarSettings({ form, onChange, disabled, errorField, ratePre
           </Field>
           <Field label={t('simrides.cal.shifts')} hint={t('simrides.cal.shiftsHint')} error={error('shiftsPerVehicleDay')}>
             <Input type="number" min={1} max={3} value={form.shiftsPerVehicleDay} onChange={e => onChange({ shiftsPerVehicleDay: e.target.value })} disabled={disabled} />
+          </Field>
+          <Field label={t('simrides.cal.marginSeconds')} hint={t('simrides.cal.marginSecondsHint')} error={error('marginSeconds')}>
+            <Input type="number" min={0} max={900} value={form.marginSeconds} onChange={e => onChange({ marginSeconds: e.target.value })} disabled={disabled} />
+          </Field>
+          <Field label={t('simrides.cal.marginPercent')} hint={t('simrides.cal.marginPercentHint')} error={error('marginPercent')}>
+            <Input type="number" min={0} max={100} value={form.marginPercent} onChange={e => onChange({ marginPercent: e.target.value })} disabled={disabled} />
           </Field>
         </div>
       </details>

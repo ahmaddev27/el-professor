@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countRevenue, declineFeeOf, revenueBasis } from './revenue';
+import { cancellationFeeOf, countRevenue, declineFeeOf, inExportScope, revenueBasis } from './revenue';
 import { DEFAULT_SIMULATION_TENANT_SETTINGS, type SimulationTenantSettings } from './tenantSettings';
 import type { SimRide, SimRideStatus } from './types';
 
@@ -91,22 +91,30 @@ describe('the per-tenant fee', () => {
   });
 });
 
-describe('chargeDeclinedFeeOnCancelled', () => {
-  it('is off by default', () => {
-    expect(DEFAULT_SIMULATION_TENANT_SETTINGS.chargeDeclinedFeeOnCancelled).toBe(false);
-    expect(declineFeeOf(cancelled(), S())).toBeNull();
+describe('the cancellation fee', () => {
+  it('is off by default and is never the decline fee', () => {
+    expect(DEFAULT_SIMULATION_TENANT_SETTINGS.cancellationFeeEnabled).toBe(false);
+    expect(cancellationFeeOf(cancelled(), S())).toBeNull();
+    expect(declineFeeOf(cancelled(), S({ cancellationFeeEnabled: true }))).toBeNull();
   });
 
-  it('puts the fee in cancelledFeeCents and never in declinedFeeCents', () => {
-    const r = countRevenue([cancelled(), cancelled(), declined()], S({ chargeDeclinedFeeOnCancelled: true }));
+  it('is the company setting, in cancelledFeeCents and never in declinedFeeCents', () => {
+    const s = S({ cancellationFeeEnabled: true, cancellationFeeCents: 600, declinedFeeCents: 850 });
+    const r = countRevenue([cancelled(), cancelled(), declined()], s);
     expect(r.cancelledFeeCents).toBe(1200);
-    expect(r.declinedFeeCents).toBe(600);
+    expect(r.declinedFeeCents).toBe(850);
   });
 
   it('with no declined ride at all, declinedFeeCents stays zero', () => {
-    const r = countRevenue([cancelled()], S({ chargeDeclinedFeeOnCancelled: true }));
+    const r = countRevenue([cancelled()], S({ cancellationFeeEnabled: true }));
     expect(r.declinedFeeCents).toBe(0);
     expect(r.cancelledFeeCents).toBe(600);
+  });
+});
+
+describe('the report scope', () => {
+  it('holds completed and cancelled rides and never a declined order', () => {
+    expect([completed(10), cancelled(6), declined()].map(inExportScope)).toEqual([true, true, false]);
   });
 });
 
@@ -123,10 +131,10 @@ describe('cancelledSheetFareCents', () => {
     for (const tips of [false, true]) {
       for (const fees of [false, true]) {
         for (const charge of [false, true]) {
-          const s = S({ basisIncludesTips: tips, basisIncludesDeclinedFees: fees, chargeDeclinedFeeOnCancelled: charge });
+          const s = S({ basisIncludesTips: tips, basisIncludesCancellationFees: fees, cancellationFeeEnabled: charge });
           const r = countRevenue(rides, s);
           const b = revenueBasis(r, s);
-          const expected = r.fareCents + (tips ? r.tipCents : 0) + (fees ? r.declinedFeeCents + r.cancelledFeeCents : 0);
+          const expected = r.fareCents + (tips ? r.tipCents : 0) + (fees ? r.cancelledFeeCents : 0);
           expect(b.basisCents).toBe(expected);
           expect(Object.values(b.parts)).not.toContain(r.cancelledSheetFareCents);
         }
@@ -140,16 +148,23 @@ describe('the basis flags', () => {
   const cases: [boolean, boolean, number][] = [
     [false, false, 10000],
     [true, false, 11000],
-    [false, true, 11200],
-    [true, true, 12200],
+    [false, true, 10600],
+    [true, true, 11600],
   ];
-  it.each(cases)('tips=%s fees=%s gives %i cents', (tips, fees, expected) => {
-    const s = S({ basisIncludesTips: tips, basisIncludesDeclinedFees: fees, chargeDeclinedFeeOnCancelled: true });
+  it.each(cases)('tips=%s cancellation fees=%s gives %i cents', (tips, fees, expected) => {
+    const s = S({ basisIncludesTips: tips, basisIncludesCancellationFees: fees, cancellationFeeEnabled: true });
     const b = revenueBasis(countRevenue(rides, s), s);
     expect(b.basisCents).toBe(expected);
     expect(b.includesTips).toBe(tips);
-    expect(b.includesDeclinedFees).toBe(fees);
-    expect(b.parts).toEqual({ fareCents: 10000, tipCents: 1000, declinedFeeCents: 600, cancelledFeeCents: 600 });
+    expect(b.includesCancellationFees).toBe(fees);
+    expect(b.parts).toEqual({ fareCents: 10000, tipCents: 1000, cancelledFeeCents: 600 });
+  });
+
+  it('never takes a decline fee into the basis, even from a breakdown that counted one', () => {
+    const s = S({ basisIncludesTips: true, basisIncludesCancellationFees: true, cancellationFeeEnabled: true });
+    const all = countRevenue(rides, s);
+    expect(all.declinedFeeCents).toBe(600);
+    expect(revenueBasis(all, s).basisCents).toBe(11600);
   });
 });
 

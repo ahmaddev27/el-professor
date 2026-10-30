@@ -89,9 +89,18 @@ describe('the speed implied between consecutive rides of a vehicle', () => {
     expect(speeds.length).toBeGreaterThan(800);
   });
 
-  it('is near the real export: about 6 % of transitions over 120 km/h, not 49 %', () => {
-    expect(over120).toBeGreaterThan(0.03);
-    expect(over120).toBeLessThan(0.10);
+  /**
+   * Until round 6 this asserted a floor as well: at least 3 % of transitions
+   * over 120 km/h, so the generator would carry the real export's share of
+   * nonsense and not be "a tell". Round 6 forbids exactly that: every gap must
+   * hold the drive and a safety margin, and the generator prefers short legs.
+   * The two cannot both hold, and the audit's rule is the one kept. What stays
+   * over 120 is the proxy's own error (it measures from the previous ORDER
+   * position, not from where that ride ended), bounded from above.
+   * Measured 30.10.2026: 0.7 % (5 to 6 % before).
+   */
+  it('stays far below the 49 % of the first generator, now that every gap holds its drive and margin', () => {
+    expect(over120).toBeLessThan(0.03);
   });
 
   it('has a city-traffic median and a bounded tail, as the real file does', () => {

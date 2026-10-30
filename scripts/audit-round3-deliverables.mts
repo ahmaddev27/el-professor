@@ -185,8 +185,8 @@ function financialReport(r: FullMonthResult): string {
   lines.push('-'.repeat(72));
   row('Fahrpreise', euro(basis.parts.fareCents));
   row(`Trinkgelder einbezogen: ${basis.includesTips ? 'ja' : 'nein'}`, euro(basis.includesTips ? basis.parts.tipCents : 0));
-  row(`Ablehnungsgebühren einbezogen: ${basis.includesDeclinedFees ? 'ja' : 'nein'}`,
-      euro(basis.includesDeclinedFees ? basis.parts.declinedFeeCents + basis.parts.cancelledFeeCents : 0));
+  row(`Stornogebühren einbezogen: ${basis.includesCancellationFees ? 'ja' : 'nein'}`,
+      euro(basis.includesCancellationFees ? basis.parts.cancelledFeeCents : 0));
   row('Bemessungsgrundlage', euro(basis.basisCents));
   lines.push('');
   lines.push('4. MONATLICHER ANTEIL');

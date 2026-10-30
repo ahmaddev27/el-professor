@@ -115,8 +115,13 @@ vi.mock('../utils/simulatedRides/fullMonth', async importActual => {
     },
   };
 });
-vi.mock('../utils/simulatedRides/monthWorkbook', () => ({
+vi.mock('../utils/simulatedRides/monthWorkbook', async importActual => ({
+  ...(await importActual<typeof import('../utils/simulatedRides/monthWorkbook')>()),
   buildMonthReport: (result: unknown) => { world.built.push(result); return { fileName: 'SIMULIERT_test.xlsx', payload: { version: 1, sheets: [] } }; },
+}));
+vi.mock('../utils/simulatedRides/operationalReport', async importActual => ({
+  ...(await importActual<typeof import('../utils/simulatedRides/operationalReport')>()),
+  buildOperationalReport: (result: unknown) => { world.built.push(result); return { fileName: 'SIMULIERT_betrieb.xlsx', payload: { version: 1, sheets: [] } }; },
 }));
 vi.mock('../utils/serviceWorkbookDownload', () => ({
   deliverWorkbookPayload: (payload: unknown, name: string) => { world.delivered.push([payload, name]); },
@@ -179,10 +184,21 @@ describe('SimulatedRidesPage, calendar mode', () => {
     expect(text).toContain('falls als Abzug behandelt');
     expect(text).not.toContain('Schätzung, keine Routenprüfung');
 
-    const download = button(renderer.root, 'Monatsbericht herunterladen (SIMULIERT)');
+    // Generation and verification are two answers: a routed, clean month is generated, and says what its verdict is.
+    expect(text).toContain('Erzeugung: erfolgreich, keine Regel verletzt');
+    expect(text).toMatch(/VALIDATED_FOR_EXPORT|VERIFICATION_INCOMPLETE/);
+    expect(text).toContain('Abgelehnt (intern)');
+    expect(text).toContain('Leerfahrten');
+
+    const download = button(renderer.root, 'Fahrtenbuch-Bericht herunterladen (SIMULIERT)');
     expect(download.props.disabled).toBeFalsy();
     await act(async () => { download.props.onClick(); });
-    expect(world.delivered).toEqual([[{ version: 1, sheets: [] }, 'SIMULIERT_test.xlsx']]);
+    const operational = button(renderer.root, 'Betriebsbericht herunterladen (intern, SIMULIERT)');
+    await act(async () => { operational.props.onClick(); });
+    expect(world.delivered).toEqual([
+      [{ version: 1, sheets: [] }, 'SIMULIERT_test.xlsx'],
+      [{ version: 1, sheets: [] }, 'SIMULIERT_betrieb.xlsx'],
+    ]);
   });
 
   it('a month that broke a rule is shown as an error and offers no download', async () => {
@@ -192,7 +208,9 @@ describe('SimulatedRidesPage, calendar mode', () => {
     await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
     await settle(() => collect(renderer.root).includes('Erzeugter Kalendermonat'));
     expect(collect(renderer.root)).toContain('verletzt 1 Regel(n)');
-    expect(button(renderer.root, 'Monatsbericht herunterladen (SIMULIERT)').props.disabled).toBe(true);
+    expect(button(renderer.root, 'Fahrtenbuch-Bericht herunterladen (SIMULIERT)').props.disabled).toBe(true);
+    expect(button(renderer.root, 'Betriebsbericht herunterladen (intern, SIMULIERT)').props.disabled).toBe(true);
+    expect(collect(renderer.root)).toContain('NOT_VALIDATED');
   });
 
   it('with the router unable to answer, nothing is generated and the estimate needs its own box', async () => {
@@ -210,7 +228,13 @@ describe('SimulatedRidesPage, calendar mode', () => {
     await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
     await settle(() => collect(renderer.root).includes('Erzeugter Kalendermonat'));
     expect(world.generateCalls).toBe(1);
-    expect(collect(renderer.root)).toContain('Schätzung, keine Routenprüfung');
+    const estimated = collect(renderer.root);
+    expect(estimated).toContain('Schätzung, keine Routenprüfung');
+    // An estimated month is never validated, and shows no route counters that would read as "0 problems".
+    expect(estimated).toContain('VERIFICATION_INCOMPLETE');
+    expect(estimated).not.toContain('VALIDATED_FOR_EXPORT:');
+    expect(estimated).toContain('Null Warnungen bedeutet hier nichts');
+    expect(estimated).not.toContain('Routenkonflikte');
   });
 
   it('a note that cannot be read stops the run: a missing note is not "no note"', async () => {

@@ -13,7 +13,7 @@ describe('defaults', () => {
   it('ship both scenario features off, so an unconfigured month is unchanged', () => {
     expect(D.declinedRidesEnabled).toBe(false);
     expect(D.monthlyRevenueShareEnabled).toBe(false);
-    expect(D.chargeDeclinedFeeOnCancelled).toBe(false);
+    expect(D.cancellationFeeEnabled).toBe(false);
   });
 
   it('carry the declared values', () => {
@@ -23,10 +23,11 @@ describe('defaults', () => {
       declinedRidesEnabled: false,
       declinedShare: 0.04,
       declinedFeeCents: 600,
-      chargeDeclinedFeeOnCancelled: false,
+      cancellationFeeEnabled: false,
+      cancellationFeeCents: 600,
       monthlyRevenueShareEnabled: false,
       basisIncludesTips: false,
-      basisIncludesDeclinedFees: true,
+      basisIncludesCancellationFees: true,
     });
   });
 
@@ -36,6 +37,10 @@ describe('defaults', () => {
 });
 
 describe('settingsProblem', () => {
+  it('names a cancellation fee that is not whole cents, or negative', () => {
+    expect(settingsProblem(with_({ cancellationFeeCents: 600.5 }))).toBe('cancellation_fee_not_whole_cents');
+    expect(settingsProblem(with_({ cancellationFeeCents: -1 }))).toBe('cancellation_fee_negative');
+  });
   it('names an unknown zone', () => {
     expect(settingsProblem(with_({ timeZone: 'Not/AZone' }))).toBe('time_zone_unknown');
   });

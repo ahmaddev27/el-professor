@@ -64,7 +64,11 @@ export interface FixtureOptions {
   vehicles?: number;
   /** Share declined fee and monthly share on, as the owner's decisions 3 and 4 ask. */
   settings?: FullMonthInput['settings'];
+  options?: FullMonthInput['options'];
 }
+
+/** An invented company id: the fixture is no real tenant. */
+export const FIXTURE_TENANT_ID = '00000000-0000-4000-8000-00000000f1b0';
 
 /** Builds the month with a routed model; throws when generation fails. */
 export async function buildFixtureMonth(o: FixtureOptions): Promise<FullMonthResult> {
@@ -82,8 +86,12 @@ export async function buildFixtureMonth(o: FixtureOptions): Promise<FullMonthRes
   const out = generateFullMonth({
     year: o.year, month: o.month, base: FIXTURE_BASE, pool, vehicles: plates, drivers: FIXTURE_DRIVERS,
     driverNotesMap: fixtureNotes(o.year, o.month), seed: o.seed,
-    settings: { declinedRidesEnabled: true, declinedFeeCents: 600, monthlyRevenueShareEnabled: true, ...o.settings },
-    options: { cancellationShare: 0.1 },
+    settings: {
+      declinedRidesEnabled: true, declinedFeeCents: 600, cancellationFeeEnabled: true, cancellationFeeCents: 600,
+      monthlyRevenueShareEnabled: true, ...o.settings,
+    },
+    options: { cancellationShare: 0.1, ...o.options },
+    tenantId: FIXTURE_TENANT_ID,
     travel: matrixTravelModel(matrix),
     routing: {
       points: matrix.points.length,

@@ -1,18 +1,36 @@
 {
-  "fileName": "SIMULIERT_Monatsbericht_2026-02_20261029.xlsx",
+  "fileName": "SIMULIERT_Monatsbericht_2026-02_20261029_VALIDATED_FOR_EXPORT.xlsx",
+  "operationalFileName": "SIMULIERT_Betriebsbericht_2026-02_20261029_VALIDATED_FOR_EXPORT.xlsx",
+  "verdict": "VALIDATED_FOR_EXPORT",
   "year": 2026,
   "month": 2,
   "days": 28,
-  "routeChecks": 575,
+  "seed": 20261029,
+  "runId": "SIM-2026-02-20261029-a8dbdd8a",
+  "tenantId": "00000000-0000-4000-8000-00000000f1b0",
+  "routeChecks": 601,
+  "routeStatuses": {
+    "ROUTE_VERIFIED": 601,
+    "ROUTE_CONFLICT": 0,
+    "UNVERIFIABLE": 0,
+    "ESTIMATE_ONLY": 0
+  },
+  "reportRides": 323,
+  "completed": 303,
+  "cancelled": 20,
+  "cancellationFeeCents": 12000,
+  "cancellationFeeUnitCents": 600,
+  "fareCents": 413071,
   "declinedCount": 6,
   "declinedFeeCents": 3600,
   "declinedFeeUnitCents": 600,
-  "rides": 333,
-  "fareCents": 375437,
-  "routeStatuses": {
-    "route_fits": 499,
-    "same_address": 76,
-    "route_time_warning": 0,
-    "unverifiable": 0
-  }
+  "legs": 432,
+  "legStatuses": {
+    "ROUTE_VERIFIED": 432,
+    "ROUTE_CONFLICT": 0,
+    "UNVERIFIABLE": 0,
+    "ESTIMATE_ONLY": 0
+  },
+  "marginSeconds": 60,
+  "marginPercent": 15
 }
