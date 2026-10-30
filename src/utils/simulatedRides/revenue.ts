@@ -63,7 +63,7 @@ export interface RevenueBreakdown {
   tipCents: number;
   /** Decline fees of declined rides. */
   declinedFeeCents: number;
-  /** Decline fees charged on cancellations, when the tenant asks for it. Zero otherwise. */
+  /** Cancellation fees, when the company charges them. Zero otherwise. */
   cancelledFeeCents: number;
   /**
    * What the sheet's `Fahrpreis` column holds for cancelled rides, summed.
@@ -111,13 +111,32 @@ const EMPTY_BREAKDOWN: RevenueBreakdown = {
  * "لا تفرض 6 € تلقائيًا على CANCELLED ما لم تنص سياسة الشركة على ذلك".
  */
 export function declineFeeOf(ride: SimRide, settings: SimulationTenantSettings): number | null {
-  if (ride.status === 'declined') {
-    return ride.declinedFeeCents ?? settings.declinedFeeCents;
-  }
-  if (ride.status === 'cancelled' && settings.chargeDeclinedFeeOnCancelled) {
-    return settings.declinedFeeCents;
-  }
-  return null;
+  return ride.status === 'declined' ? ride.declinedFeeCents ?? settings.declinedFeeCents : null;
+}
+
+/**
+ * The cancellation fee a cancelled ride earns under the company's setting, in
+ * integer cents, or null when it earns none. A field of its own and a setting
+ * of its own (round 6): it is not the decline fee, and a cancellation is not a
+ * decline.
+ */
+export function cancellationFeeOf(ride: SimRide, settings: SimulationTenantSettings): number | null {
+  return ride.status === 'cancelled' && settings.cancellationFeeEnabled ? settings.cancellationFeeCents : null;
+}
+
+/** The fee a ride that is not completed earns, whichever kind it is. */
+export function feeOf(ride: SimRide, settings: SimulationTenantSettings): number | null {
+  return ride.status === 'declined' ? declineFeeOf(ride, settings) : cancellationFeeOf(ride, settings);
+}
+
+/**
+ * The rides the Fahrtenbuch report covers: completed and cancelled. A
+ * declined order is an order the driver turned down; it is no ride of the
+ * book (the owner's final rule of round 6) and appears only in the internal
+ * operational report.
+ */
+export function inExportScope(ride: SimRide): boolean {
+  return ride.status !== 'declined';
 }
 
 /** Round a kilometre sum to the two decimals the sheet carries. */
@@ -155,7 +174,7 @@ export function countRevenue(
       if (sheetFare !== null && sheetFare > 0) out.cancelledSheetFareCents += sheetFare;
     }
 
-    const fee = declineFeeOf(ride, settings);
+    const fee = feeOf(ride, settings);
     if (fee === null) continue;
     if (!Number.isInteger(fee) || !Number.isFinite(fee)) {
       out.findings.push({ shiftId: ride.shiftId, status: ride.status, field: 'declinedFee', value: String(fee), code: 'fee_not_whole_cents' });
@@ -202,22 +221,24 @@ function readCents(
 export interface RevenueBasis {
   basisCents: number;
   includesTips: boolean;
-  includesDeclinedFees: boolean;
+  includesCancellationFees: boolean;
   /** The parts, so the basis can be checked by addition rather than believed. */
-  parts: { fareCents: number; tipCents: number; declinedFeeCents: number; cancelledFeeCents: number };
+  parts: { fareCents: number; tipCents: number; cancelledFeeCents: number };
 }
 
 /**
  * The basis the monthly share is taken of.
  *
- * Section 4 asks that tips and decline fees be **configurable** members of it
- * ("عرّف بشكل قابل للضبط ما إذا كانت الإكراميات ورسوم DECLINED تدخل في أساس
- * الإيراد"), so both are flags and both are printed beside the figure. Fares of
- * completed rides are always in it; nothing in the audit suggests otherwise.
+ * Section 4 asks that tips and fees be **configurable** members of it, so both
+ * are flags and both are printed beside the figure. Fares of completed rides
+ * are always in it.
  *
- * A fee charged on a cancellation follows the same flag as a decline fee: it is
- * the same quantity under the tenant's own policy, and splitting the two flags
- * would let a tenant include one and exclude the other with no rule saying why.
+ * A decline fee is **never** in it, whatever a flag says (the owner's final
+ * rule of round 6): the share is a figure of the Fahrtenbuch report, and a
+ * declined order is not in that report. The breakdown handed in is the
+ * report's own (`inExportScope`), so a declined fee cannot reach this sum even
+ * through a breakdown counted over the whole order list — `parts` does not
+ * name it.
  */
 export function revenueBasis(
   breakdown: RevenueBreakdown,
@@ -226,16 +247,15 @@ export function revenueBasis(
   const parts = {
     fareCents: breakdown.fareCents,
     tipCents: breakdown.tipCents,
-    declinedFeeCents: breakdown.declinedFeeCents,
     cancelledFeeCents: breakdown.cancelledFeeCents,
   };
   let basisCents = parts.fareCents;
   if (settings.basisIncludesTips) basisCents += parts.tipCents;
-  if (settings.basisIncludesDeclinedFees) basisCents += parts.declinedFeeCents + parts.cancelledFeeCents;
+  if (settings.basisIncludesCancellationFees) basisCents += parts.cancelledFeeCents;
   return {
     basisCents,
     includesTips: settings.basisIncludesTips,
-    includesDeclinedFees: settings.basisIncludesDeclinedFees,
+    includesCancellationFees: settings.basisIncludesCancellationFees,
     parts,
   };
 }

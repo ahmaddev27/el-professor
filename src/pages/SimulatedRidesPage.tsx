@@ -31,6 +31,7 @@ import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type Ro
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
 import { buildMonthReport } from '../utils/simulatedRides/monthWorkbook';
+import { buildOperationalReport } from '../utils/simulatedRides/operationalReport';
 import { selectMonthlyShareRate } from '../utils/simulatedRides/monthlyRate';
 import { routeChecks, summariseRouteChecks, type RouteCheckSummary } from '../utils/simulatedRides/routeCheck';
 import { rideDate, ridesToRows } from '../utils/simulatedRides/sheet';
@@ -356,8 +357,8 @@ export default function SimulatedRidesPage() {
           allowed_weekdays: events.facts.get(d.id)?.allowed_weekdays ?? null, planning_enabled: events.facts.get(d.id)?.planning_enabled ?? true,
         })),
         driverNotesMap: events.notes, werkstattChecks: events.checks,
-        settings: parsed.settings, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
-        travel: sourcing.travel, routing: sourcing.provenance ?? undefined,
+        settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
+        travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
       });
       if (!outcome.ok) throw new Error(t(FULL_MONTH_FAILURE_KEY(outcome.failure)));
       setCalendarResult(outcome.result);
@@ -435,10 +436,10 @@ export default function SimulatedRidesPage() {
     }
   };
 
-  const downloadReport = () => {
+  const downloadReport = (build: typeof buildMonthReport | typeof buildOperationalReport) => {
     if (!calendarResult) return;
     try {
-      const { fileName, payload } = buildMonthReport(calendarResult);
+      const { fileName, payload } = build(calendarResult);
       deliverWorkbookPayload(payload, fileName);
     } catch (err) {
       setError(failureText(err));
@@ -523,7 +524,10 @@ export default function SimulatedRidesPage() {
         </CardContent>
       </Card>
 
-      {mode === 'calendar' && calendarResult ? <CalendarResult result={calendarResult} onDownload={downloadReport} /> : null}
+      {mode === 'calendar' && calendarResult ? (
+        <CalendarResult result={calendarResult} onDownload={() => downloadReport(buildMonthReport)}
+          onDownloadOperational={() => downloadReport(buildOperationalReport)} />
+      ) : null}
       {mode === 'weeks' && result ? <ResultCard result={result} phase={phase} onImport={runImport} /> : null}
     </div>
   );

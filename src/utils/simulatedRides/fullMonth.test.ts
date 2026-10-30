@@ -231,7 +231,7 @@ describe('a healthy month', () => {
   });
 
   it('every orderTransmittedMs is unique, declined rides included', () => {
-    expect(r.revenue.counts.declined).toBeGreaterThan(0);
+    expect(r.internal.declined.counts.declined).toBeGreaterThan(0);
     const all = r.month.rides.map(x => x.orderTransmittedMs);
     expect(new Set(all).size).toBe(all.length);
   });
@@ -269,16 +269,19 @@ describe('provenance', () => {
 
 describe('declined rides', () => {
   it('are off by default and on when asked', () => {
-    expect(run().revenue.counts.declined).toBe(0);
+    expect(run().internal.declined.counts.declined).toBe(0);
     const on = run({ settings: { declinedRidesEnabled: true, declinedShare: 0.5 } });
-    expect(on.revenue.counts.declined).toBeGreaterThan(0);
-    expect(on.revenue.declinedFeeCents).toBe(on.revenue.counts.declined * 600);
+    expect(on.internal.declined.counts.declined).toBeGreaterThan(0);
+    expect(on.internal.declined.declinedFeeCents).toBe(on.internal.declined.counts.declined * 600);
+    // The report's own money never holds one of them.
+    expect(on.revenue.counts.declined).toBe(0);
+    expect(on.revenue.declinedFeeCents).toBe(0);
   });
 
   it('consume no shift time: the completed rides are byte-identical with the feature on or off', () => {
     const off = run({ seed: 2026 });
     const on = run({ seed: 2026, settings: { declinedRidesEnabled: true, declinedShare: 0.5 } });
-    expect(on.revenue.counts.declined).toBeGreaterThan(0);
+    expect(on.internal.declined.counts.declined).toBeGreaterThan(0);
     const completedOf = (r: FullMonthResult) => r.month.rides.filter(x => x.status === 'completed');
     expect(completedOf(on).length).toBe(completedOf(off).length);
     expect(JSON.stringify(completedOf(on))).toBe(JSON.stringify(completedOf(off)));

@@ -3,17 +3,29 @@ import type { ConstraintDecision } from '../constraintDecisionLog';
 import { formatCentsDe } from '../money';
 import type { FullMonthResult } from './fullMonth';
 import { SIMULATED_NOTICE, SIMULATED_SHEET_NAME, simulatedFileName } from './marker';
+import {
+  TOTAL_LABEL,
+  monthTotals,
+  reconcile,
+  totalsByDriver,
+  totalsByVehicle,
+  type Totals,
+} from './monthTotals';
+import { VERDICT_TEXT, verifyMonth, type MonthVerification, type CheckOutcome } from './monthVerification';
 import { operatingDayIn } from './period';
-import { countRevenue, declineFeeOf, type RevenueBreakdown } from './revenue';
-import type { RouteCheck, RouteCheckStatus } from './routeCheck';
+import { cancellationFeeOf, inExportScope } from './revenue';
+import type { RouteCheck } from './routeCheck';
 import type { ShiftDecision } from './simulationConstraints';
 import type { SimulationTenantSettings } from './tenantSettings';
 import { formatStamp } from './time';
 import type { SimRide } from './types';
 
+export { TOTAL_LABEL, monthTotals, reconcile, totalsByDriver, totalsByVehicle };
+export type { DriverTotals, ReconciliationRow, Totals, VehicleTotals } from './monthTotals';
+
 /**
- * The monthly report of a simulated month, as a workbook the export service
- * writes with openpyxl (owner decision 6 of 29.10.2026: every operational Excel
+ * The monthly report of a simulated month — the Fahrtenbuch report — as a
+ * workbook the export service writes with openpyxl (owner decision 6 of 29.10.2026: every operational Excel
  * file comes from the service; there is no JavaScript writer and no fallback).
  *
  * Every sheet is built by a pure function returning rows, header first, and the
@@ -40,6 +52,16 @@ import type { SimRide } from './types';
  * `cents / 100` is exact to two decimals. Kilometres are summed in hundredths,
  * because adding the sheet's two-decimal floats would drift. Numbers are bare:
  * the plain export carries no number format.
+ *
+ * ## What the report holds, and what it never holds (round 6)
+ *
+ * Passenger rides and cancelled rides, nothing else. A **declined** order is
+ * not a ride of this book (the owner's final rule): no row, no count and no
+ * fee of one reaches any sheet here, and the basis of the monthly share is the
+ * report's own. The **empty drives** are not rides either. Both live in the
+ * separate operational report (`operationalReport.ts`). A cancelled ride stays,
+ * with its cancellation fee under the company's setting and its financial
+ * status on its row.
  */
 
 export type Cell = string | number | null;
@@ -54,7 +76,7 @@ export const SHEET_RIDES = 'A Fahrten';
 export const SHEET_DAYS = 'B Monatsuebersicht';
 export const SHEET_DRIVERS = 'C Summe je Fahrer';
 export const SHEET_VEHICLES = 'D Summe je Fahrzeug';
-export const SHEET_DECLINED = 'E Abgelehnt und storniert';
+export const SHEET_CANCELLED = 'E Stornierungen';
 export const SHEET_CHECKS = 'F Pruefung und Grenzen';
 export const SHEET_ROUTES = 'G Routenpruefung';
 /** H is two tables, so two sheets: each keeps its own header row in row 1. */
@@ -63,12 +85,9 @@ export const SHEET_DECISIONS = 'H2 Schichtentscheidungen';
 export const SHEET_SOURCE = 'I Quelle und Einstellungen';
 
 export const SHEET_ORDER: readonly string[] = [
-  SHEET_RIDES, SHEET_DAYS, SHEET_DRIVERS, SHEET_VEHICLES, SHEET_DECLINED, SHEET_CHECKS,
+  SHEET_RIDES, SHEET_DAYS, SHEET_DRIVERS, SHEET_VEHICLES, SHEET_CANCELLED, SHEET_CHECKS,
   SHEET_ROUTES, SHEET_EVENTS, SHEET_DECISIONS, SHEET_SOURCE, SIMULATED_SHEET_NAME,
 ];
-
-/** The label of the total row in sheets B, C and D. */
-export const TOTAL_LABEL = 'Summe';
 
 /** Column 1 of every row: header text, then the value every data row carries. */
 export const LABEL_HEADER = 'Kennzeichnung';
@@ -79,121 +98,69 @@ export function labelled(rows: readonly Row[]): Row[] {
   return rows.map((r, i) => [i === 0 ? LABEL_HEADER : LABEL_VALUE, ...r]);
 }
 
-/** Everything one group of rides adds up to, in integer cents and hundredths of a km. */
-export interface Totals {
-  key: string;
-  orders: number;
-  completed: number;
-  cancelled: number;
-  declined: number;
-  fareCents: number;
-  tipCents: number;
-  declinedFeeCents: number;
-  cancelledFeeCents: number;
-  appFareCents: number;
-  cashFareCents: number;
-  kmHundredths: number;
-}
-
-export type DriverTotals = Totals;
-export type VehicleTotals = Totals;
-
 const euro = (cents: number): number => cents / 100;
-const yesNo = (v: boolean): string => (v ? 'Ja' : 'Nein');
-
-function fromBreakdown(key: string, b: RevenueBreakdown): Totals {
-  return {
-    key,
-    orders: b.counts.total,
-    completed: b.counts.completed,
-    cancelled: b.counts.cancelled,
-    declined: b.counts.declined,
-    fareCents: b.fareCents,
-    tipCents: b.tipCents,
-    declinedFeeCents: b.declinedFeeCents,
-    cancelledFeeCents: b.cancelledFeeCents,
-    appFareCents: b.appFareCents,
-    cashFareCents: b.cashFareCents,
-    kmHundredths: Math.round(b.km * 100),
-  };
-}
-
-const ADDITIVE: ReadonlyArray<Exclude<keyof Totals, 'key'>> = [
-  'orders', 'completed', 'cancelled', 'declined', 'fareCents', 'tipCents',
-  'declinedFeeCents', 'cancelledFeeCents', 'appFareCents', 'cashFareCents', 'kmHundredths',
-];
-
-/** One ride counted through the same function as the month, so the rules exist once. */
-function groupTotals(
-  rides: readonly SimRide[],
-  settings: SimulationTenantSettings,
-  keyOf: (ride: SimRide) => string,
-): Totals[] {
-  const groups = new Map<string, Totals>();
-  for (const ride of rides) {
-    const key = keyOf(ride);
-    const one = fromBreakdown(key, countRevenue([ride], settings));
-    const acc = groups.get(key) ?? fromBreakdown(key, countRevenue([], settings));
-    for (const field of ADDITIVE) acc[field] += one[field];
-    groups.set(key, acc);
-  }
-  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key, 'de'));
-}
-
-export function totalsByDriver(rides: readonly SimRide[], settings: SimulationTenantSettings): DriverTotals[] {
-  return groupTotals(rides, settings, r => r.driver.name);
-}
-
-export function totalsByVehicle(rides: readonly SimRide[], settings: SimulationTenantSettings): VehicleTotals[] {
-  return groupTotals(rides, settings, r => r.vehicle.plate);
-}
-
-/** The month total, from the whole ride list in one pass, independent of every breakdown. */
-export function monthTotals(result: FullMonthResult): Totals {
-  return fromBreakdown(TOTAL_LABEL, result.revenue);
-}
+export const yesNo = (v: boolean): string => (v ? 'Ja' : 'Nein');
 
 const dayOfRide = (ride: SimRide, s: SimulationTenantSettings): string =>
   operatingDayIn(ride.startMs ?? ride.orderTransmittedMs, s.timeZone, s.operatingDayStartHour);
 
 const stampOrEmpty = (ms: number | null, millis = false): string => (ms === null ? '' : formatStamp(ms, millis));
 
-// ── Sheet A: every ride ────────────────────────────────────────────────────
+// ── Sheet A: the report's rides ────────────────────────────────────────────
 
+/**
+ * `Nr` is the row's number in this sheet; `Fahrt-ID` is the ride's identity in
+ * the month, which the route sheet and the operational report name. They differ
+ * because the declined orders, which hold ids of their own, are not rows here.
+ */
 export const RIDE_HEADERS: readonly string[] = [
-  'Nr', 'Datum der Fahrt', 'Status', 'Fahrer', 'Kennzeichen', 'Schicht', 'Auftragsuebermittlung',
-  'Fahrtbeginn', 'Fahrtende', 'Fahrpreis (EUR)', 'Trinkgeld (EUR)', 'Gebuehr (EUR)', 'Gebuehrenregel',
-  'Kilometer', 'Zahlungsart', 'Abholort', 'Zielort',
+  'Nr', 'Fahrt-ID', 'Datum der Fahrt', 'Status', 'Fahrer', 'Fahrer-ID', 'Kennzeichen', 'Schicht',
+  'Auftragsuebermittlung', 'Fahrtbeginn', 'Fahrtende', 'Fahrpreis (EUR)', 'Trinkgeld (EUR)',
+  'Stornogebuehr (EUR)', 'Finanzstatus', 'Kilometer', 'Zahlungsart', 'Abholort', 'Zielort',
 ];
 
-const STATUS_WORD: Record<SimRide['status'], string> = {
+export const STATUS_WORD: Record<SimRide['status'], string> = {
   completed: 'abgeschlossen', cancelled: 'storniert', declined: 'abgelehnt',
 };
+
+/** The financial status of a ride of the report, in words, so the fee's reason is on its own row. */
+export function financialStatus(ride: SimRide, s: SimulationTenantSettings): string {
+  if (ride.status === 'completed') return 'Fahrpreis abgerechnet';
+  if (ride.status === 'cancelled') {
+    return cancellationFeeOf(ride, s) === null
+      ? 'storniert, keine Stornogebuehr (Einstellung der Firma)'
+      : 'storniert, Stornogebuehr berechnet (Einstellung der Firma)';
+  }
+  return 'abgelehnt - nicht im Fahrtenbuch';
+}
+
+/** The report's rides in sheet order: completed and cancelled, by transmission. */
+export function reportRides(result: FullMonthResult): SimRide[] {
+  return result.month.rides.filter(inExportScope);
+}
 
 /** Fare, tip and km count only for a completed ride; the others read 0 here by rule. */
 function rideRow(ride: SimRide, nr: number, s: SimulationTenantSettings): Row {
   const done = ride.status === 'completed';
-  const fee = declineFeeOf(ride, s);
+  const fee = cancellationFeeOf(ride, s);
   return [
-    nr, dayOfRide(ride, s), STATUS_WORD[ride.status], ride.driver.name, ride.vehicle.plate, ride.shiftId,
-    stampOrEmpty(ride.orderTransmittedMs, true), stampOrEmpty(ride.startMs), stampOrEmpty(ride.endMs),
-    done ? ride.fare : 0, done ? ride.tip : 0, euro(fee ?? 0),
-    // The rule is printed only where a fee was counted: a rule on a row without a fee would claim one.
-    fee === null ? '' : (ride.declineRule ?? ''),
+    nr, ride.tripId ?? '', dayOfRide(ride, s), STATUS_WORD[ride.status], ride.driver.name, ride.driver.id ?? '',
+    ride.vehicle.plate, ride.shiftId, stampOrEmpty(ride.orderTransmittedMs, true), stampOrEmpty(ride.startMs),
+    stampOrEmpty(ride.endMs), done ? ride.fare : 0, done ? ride.tip : 0, euro(fee ?? 0), financialStatus(ride, s),
     done ? ride.km : 0, ride.payment, ride.pickup.label, ride.dropoff.label,
   ];
 }
 
 export function ridesSheetRows(result: FullMonthResult): Row[] {
   const s = result.provenance.settings;
-  return [[...RIDE_HEADERS], ...result.month.rides.map((r, i) => rideRow(r, i + 1, s))];
+  return [[...RIDE_HEADERS], ...reportRides(result).map((r, i) => rideRow(r, i + 1, s))];
 }
 
 // ── Sheets B, C, D: the breakdowns ─────────────────────────────────────────
 
 const WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
-const REASON_TEXT: Record<string, string> = {
+export const REASON_TEXT: Record<string, string> = {
   no_vehicle_in_fleet: 'kein Fahrzeug im Bestand',
   no_driver_in_pool: 'kein Fahrer im Pool',
   operating_day_has_no_start_instant: 'Betriebstag hat keinen Startzeitpunkt (Zeitumstellung)',
@@ -203,13 +170,14 @@ const REASON_TEXT: Record<string, string> = {
   driver_weekday_not_allowed: 'Wochentag fuer Fahrer nicht erlaubt',
   driver_resting: 'Fahrer in Ruhezeit',
   shift_produced_no_ride: 'Schicht ohne Fahrt',
+  shift_too_short: 'Schicht unter der Mindestdauer verworfen',
   vehicle_tuev_expired: 'TUEV des Fahrzeugs abgelaufen',
 };
 
 export const DAY_HEADERS: readonly string[] = [
-  'Datum', 'Wochentag', 'Stunden', 'Schichten', 'Fahrer im Einsatz', 'Auftraege', 'Abgeschlossen',
-  'Abgelehnt', 'Storniert', 'Fahrpreise (EUR)', 'Ablehnungsgebuehren (EUR)', 'Trinkgeld (EUR)',
-  'Kilometer', 'Tag ohne Fahrt', 'Grund',
+  'Datum', 'Wochentag', 'Stunden', 'Schichten', 'Fahrer im Einsatz', 'Fahrten', 'Abgeschlossen',
+  'Storniert', 'Fahrpreise (EUR)', 'Stornogebuehren (EUR)', 'Trinkgeld (EUR)', 'Kilometer',
+  'Tag ohne Fahrt', 'Grund',
 ];
 
 function emptyDayReason(result: FullMonthResult, day: string): string {
@@ -221,126 +189,67 @@ function emptyDayReason(result: FullMonthResult, day: string): string {
 export function daysSheetRows(result: FullMonthResult): Row[] {
   const body = result.days.map((d): Row => [
     d.day, WEEKDAYS[d.isoWeekday - 1] ?? '', d.hours, d.shifts, d.driversWorked, d.rides, d.completed,
-    d.declined, d.cancelled, euro(d.fareCents), euro(d.declinedFeeCents), euro(d.tipCents), d.km,
+    d.cancelled, euro(d.fareCents), euro(d.cancelledFeeCents), euro(d.tipCents), d.km,
     yesNo(d.zeroRideDay), d.zeroRideDay ? emptyDayReason(result, d.day) : '',
   ]);
-  const t = result.revenue;
+  const t = monthTotals(result);
   const hours = result.days.reduce((n, d) => n + d.hours, 0);
   const total: Row = [
-    TOTAL_LABEL, '', hours, result.month.shifts.length, '', t.counts.total, t.counts.completed,
-    t.counts.declined, t.counts.cancelled, euro(t.fareCents), euro(t.declinedFeeCents), euro(t.tipCents),
-    t.km, '', '',
+    TOTAL_LABEL, '', hours, result.month.shifts.length, '', t.rides, t.completed,
+    t.cancelled, euro(t.fareCents), euro(t.cancelledFeeCents), euro(t.tipCents), t.kmHundredths / 100, '', '',
   ];
   return [[...DAY_HEADERS], ...body, total];
 }
 
-const groupHeaders = (label: string): string[] => [
-  label, 'Auftraege', 'Abgeschlossen', 'Abgelehnt', 'Storniert', 'Fahrpreise (EUR)', 'davon App (EUR)',
-  'davon Bar (EUR)', 'Ablehnungsgebuehren (EUR)', 'Stornogebuehren (EUR)', 'Trinkgeld (EUR)', 'Kilometer',
+const groupHeaders = (label: string, idLabel: string | null): string[] => [
+  label, ...(idLabel ? [idLabel] : []), 'Fahrten', 'Abgeschlossen', 'Storniert', 'Fahrpreise (EUR)', 'davon App (EUR)',
+  'davon Bar (EUR)', 'Stornogebuehren (EUR)', 'Trinkgeld (EUR)', 'Kilometer',
 ];
 
-const groupRow = (t: Totals): Row => [
-  t.key, t.orders, t.completed, t.declined, t.cancelled, euro(t.fareCents), euro(t.appFareCents),
-  euro(t.cashFareCents), euro(t.declinedFeeCents), euro(t.cancelledFeeCents), euro(t.tipCents), t.kmHundredths / 100,
+const groupRow = (t: Totals, withId: boolean): Row => [
+  t.label, ...(withId ? [t.key === TOTAL_LABEL ? '' : t.key] : []), t.rides, t.completed, t.cancelled, euro(t.fareCents),
+  euro(t.appFareCents), euro(t.cashFareCents), euro(t.cancelledFeeCents), euro(t.tipCents), t.kmHundredths / 100,
 ];
 
-function groupSheetRows(label: string, groups: Totals[], total: Totals): Row[] {
-  return [groupHeaders(label), ...groups.map(groupRow), groupRow(total)];
+function groupSheetRows(label: string, idLabel: string | null, groups: Totals[], total: Totals): Row[] {
+  return [groupHeaders(label, idLabel), ...groups.map(g => groupRow(g, idLabel !== null)), groupRow(total, idLabel !== null)];
 }
 
 export function driversSheetRows(result: FullMonthResult): Row[] {
   const groups = totalsByDriver(result.month.rides, result.provenance.settings);
-  return groupSheetRows('Fahrer', groups, monthTotals(result));
+  return groupSheetRows('Fahrer', 'Fahrer-ID', groups, monthTotals(result));
 }
 
 export function vehiclesSheetRows(result: FullMonthResult): Row[] {
   const groups = totalsByVehicle(result.month.rides, result.provenance.settings);
-  return groupSheetRows('Fahrzeug', groups, monthTotals(result));
+  return groupSheetRows('Fahrzeug', null, groups, monthTotals(result));
 }
 
-// ── Sheet E: declined and cancelled ────────────────────────────────────────
+// ── Sheet E: cancellations ─────────────────────────────────────────────────
 
-export const DECLINED_HEADERS: readonly string[] = [
-  'Datum', 'Status', 'Fahrer', 'Kennzeichen', 'Auftragsuebermittlung', 'Gebuehr gezaehlt (EUR)', 'Gebuehrenregel',
-  'Fahrpreis laut Blatt, nicht gezaehlt (EUR)', 'Abholort', 'Zielort',
+export const CANCELLED_HEADERS: readonly string[] = [
+  'Fahrt-ID', 'Datum', 'Fahrer', 'Kennzeichen', 'Schicht', 'Auftragsuebermittlung', 'Stornogebuehr (EUR)',
+  'Finanzstatus', 'Abholort', 'Zielort',
 ];
 
-export function declinedSheetRows(result: FullMonthResult): Row[] {
+/** Every cancelled ride, each with its fee under the company's setting and its financial status. */
+export function cancelledSheetRows(result: FullMonthResult): Row[] {
   const s = result.provenance.settings;
-  const rows = result.month.rides.filter(r => r.status !== 'completed').map((r): Row => {
-    const fee = declineFeeOf(r, s);
-    return [
-      dayOfRide(r, s), STATUS_WORD[r.status], r.driver.name, r.vehicle.plate,
-      stampOrEmpty(r.orderTransmittedMs, true), euro(fee ?? 0), fee === null ? '' : (r.declineRule ?? ''),
-      // A cancelled ride's own fare stays visible but counts into nothing, so it cannot be mistaken for the fee.
-      r.status === 'cancelled' ? r.fare : 0, r.pickup.label, r.dropoff.label,
-    ];
-  });
-  return [[...DECLINED_HEADERS], ...rows];
+  const rows = reportRides(result).filter(r => r.status === 'cancelled').map((r): Row => [
+    r.tripId ?? '', dayOfRide(r, s), r.driver.name, r.vehicle.plate, r.shiftId, stampOrEmpty(r.orderTransmittedMs, true),
+    euro(cancellationFeeOf(r, s) ?? 0), financialStatus(r, s), r.pickup.label, r.dropoff.label,
+  ]);
+  return [[...CANCELLED_HEADERS], ...rows];
 }
 
-// ── Sheet F: reconciliation, revenue basis, validation ─────────────────────
-
-export interface ReconciliationRow {
-  /** What was added up, e.g. "Fahrpreise (Cent) je Tag". */
-  label: string;
-  partsSum: number;
-  total: number;
-}
-
-interface Measure {
-  name: string;
-  of: (t: Totals) => number;
-}
-
-const CANCELLED_FEE_MEASURE = 'Stornogebuehren (Cent)';
-
-const MEASURES: readonly Measure[] = [
-  { name: 'Auftraege', of: t => t.orders },
-  { name: 'Fahrpreise (Cent)', of: t => t.fareCents },
-  { name: 'Trinkgeld (Cent)', of: t => t.tipCents },
-  { name: 'Ablehnungsgebuehren (Cent)', of: t => t.declinedFeeCents },
-  { name: CANCELLED_FEE_MEASURE, of: t => t.cancelledFeeCents },
-  { name: 'Kilometer (Hundertstel)', of: t => t.kmHundredths },
-];
-
-/** A day carries no cancellation fee, so that measure is left out of the day check. */
-function dayAsTotals(d: FullMonthResult['days'][number]): Totals {
-  return {
-    key: d.day, orders: d.rides, completed: d.completed, cancelled: d.cancelled, declined: d.declined,
-    fareCents: d.fareCents, tipCents: d.tipCents, declinedFeeCents: d.declinedFeeCents, cancelledFeeCents: 0,
-    appFareCents: 0, cashFareCents: 0, kmHundredths: Math.round(d.km * 100),
-  };
-}
-
-function reconcileGroup(
-  dimension: string,
-  parts: readonly Totals[],
-  total: Totals,
-  skip: readonly string[] = [],
-): ReconciliationRow[] {
-  return MEASURES.filter(m => !skip.includes(m.name)).map(m => ({
-    label: `${m.name} je ${dimension}`,
-    partsSum: parts.reduce((n, p) => n + m.of(p), 0),
-    total: m.of(total),
-  }));
-}
-
-export function reconcile(result: FullMonthResult): ReconciliationRow[] {
-  const s = result.provenance.settings;
-  const total = monthTotals(result);
-  return [
-    ...reconcileGroup('Tag', result.days.map(dayAsTotals), total, [CANCELLED_FEE_MEASURE]),
-    ...reconcileGroup('Fahrer', totalsByDriver(result.month.rides, s), total),
-    ...reconcileGroup('Fahrzeug', totalsByVehicle(result.month.rides, s), total),
-  ];
-}
+// ── Sheet F: verification, reconciliation, revenue basis ───────────────────
 
 const SECTION_RECON = 'Abgleich';
 const SECTION_BASIS = 'Einnahmengrundlage und Monatsanteil';
+const SECTION_VERIFY = 'Pruefung fuer den Export';
 const SECTION_LIMITS = 'Pruefergebnisse und Einschraenkungen';
 
-/** One uniform table: Abschnitt, Posten, Wert, then Gesamt/Differenz/Ergebnis for the reconciliation only. */
+/** One uniform table: Abschnitt, Posten, Wert, then Gesamt/Differenz/Ergebnis. */
 const reconciliationLines = (result: FullMonthResult): Row[] =>
   reconcile(result).map((r): Row => {
     const diff = r.partsSum - r.total;
@@ -355,7 +264,7 @@ const NOT_A_TAX =
 function basisContents(s: SimulationTenantSettings): string {
   const parts = ['Fahrpreise abgeschlossener Fahrten'];
   if (s.basisIncludesTips) parts.push('Trinkgeld');
-  if (s.basisIncludesDeclinedFees) parts.push('Ablehnungs- und Stornogebuehren');
+  if (s.basisIncludesCancellationFees) parts.push('Stornogebuehren');
   return parts.join(' + ');
 }
 
@@ -364,21 +273,21 @@ function shareLines(result: FullMonthResult): Row[] {
   const s = result.provenance.settings;
   const line = (label: string, value: Cell): Row => [SECTION_BASIS, label, value];
   const lines: Row[] = [
-    line('Auftraege gesamt', revenue.counts.total),
+    line('Fahrten im Bericht', revenue.counts.completed + revenue.counts.cancelled),
     line('Abgeschlossen', revenue.counts.completed),
-    line('Abgelehnt', revenue.counts.declined),
     line('Storniert', revenue.counts.cancelled),
     line('Fahrpreise (EUR)', euro(basis.parts.fareCents)),
-    line('Ablehnungsgebuehren (EUR)', euro(basis.parts.declinedFeeCents)),
     line('Stornogebuehren (EUR)', euro(basis.parts.cancelledFeeCents)),
     line('Trinkgeld (EUR)', euro(basis.parts.tipCents)),
     line('Kilometer', revenue.km),
     line('Zahlung App (EUR)', euro(revenue.appFareCents)),
     line('Zahlung Bar (EUR)', euro(revenue.cashFareCents)),
     line('Monatssumme Fahrpreise App + Bar (EUR)', euro(revenue.appFareCents + revenue.cashFareCents)),
+    line('Stornogebuehr der Firma (EUR)', s.cancellationFeeEnabled ? euro(s.cancellationFeeCents) : 'keine'),
     line('Trinkgeld in Grundlage', yesNo(s.basisIncludesTips)),
-    line('Gebuehren in Grundlage', yesNo(s.basisIncludesDeclinedFees)),
+    line('Stornogebuehren in Grundlage', yesNo(s.basisIncludesCancellationFees)),
     line('Grundlage enthaelt', basisContents(s)),
+    line('Abgelehnte Auftraege', 'nicht im Bericht und nicht in der Grundlage (intern im Betriebsbericht)'),
     line('Anspruchsberechtigte Einnahmen (EUR)', euro(basis.basisCents)),
     line('Anspruchsberechtigte Einnahmen (Text)', formatCentsDe(basis.basisCents)),
   ];
@@ -392,6 +301,18 @@ function shareLines(result: FullMonthResult): Row[] {
     line('Betrag (EUR)', euro(share.result.amountCents)),
     line('Rest, falls Abzug (EUR)', euro(share.result.remainderCents)),
     note,
+  ];
+}
+
+const OUTCOME_TEXT: Record<CheckOutcome, string> = { passed: 'bestanden', failed: 'NICHT BESTANDEN', not_verified: 'nicht geprueft' };
+
+function verificationLines(v: MonthVerification): Row[] {
+  const line = (label: string, value: Cell, outcome: Cell = ''): Row => [SECTION_VERIFY, label, value, '', '', outcome];
+  return [
+    line('Erzeugung', v.generated ? 'erzeugt, keine Regel verletzt' : 'erzeugt mit Regelverstoessen'),
+    line('Exportstatus', v.verdict, VERDICT_TEXT[v.verdict]),
+    line('Fahrzeiten', v.routing === 'measured' ? 'berechnete Routen' : 'nur Schaetzung (ESTIMATE_ONLY)'),
+    ...v.checks.map(c => line(c.label, c.detail, OUTCOME_TEXT[c.outcome])),
   ];
 }
 
@@ -409,34 +330,32 @@ function limitLines(result: FullMonthResult): Row[] {
     line('Tage ohne Fahrt', result.days.filter(d => d.zeroRideDay).length),
     line('Nicht eingeplante Schichten', result.month.droppedShifts),
     line('Unlesbare Betraege', result.revenue.findings.length),
+    line('Leerfahrten (im Betriebsbericht)', result.repositioningSummary.legs),
     ...violations,
   ];
 }
 
 export const CHECKS_HEADERS: readonly string[] = ['Abschnitt', 'Posten', 'Wert / Summe der Teile', 'Gesamt', 'Differenz', 'Ergebnis'];
 
-export function checksSheetRows(result: FullMonthResult): Row[] {
-  return [[...CHECKS_HEADERS], ...reconciliationLines(result), ...shareLines(result), ...limitLines(result)];
+export function checksSheetRows(result: FullMonthResult, verification: MonthVerification = verifyMonth(result)): Row[] {
+  return [
+    [...CHECKS_HEADERS], ...verificationLines(verification), ...reconciliationLines(result), ...shareLines(result),
+    ...limitLines(result),
+  ];
 }
 
 // ── Sheet G: the route check ───────────────────────────────────────────────
 
 export const ROUTE_HEADERS: readonly string[] = [
-  'Gruppierung', 'Gruppe', 'Nr frueher', 'Nr spaeter', 'Ende frueher', 'Beginn spaeter', 'Luecke (s)',
-  'Fahrzeit Strasse (s)', 'Strecke (km)', 'Reserve (s)', 'Ergebnis', 'Grund', 'Quelle',
+  'Gruppierung', 'Gruppe', 'Fahrt-ID frueher', 'Fahrt-ID spaeter', 'Gleiche Schicht', 'Ende frueher',
+  'Beginn spaeter', 'Luecke (s)', 'Fahrzeit Strasse (s)', 'Strecke (km)', 'Sicherheitsreserve (s)',
+  'Benoetigt (s)', 'Spielraum (s)', 'Status', 'Grund', 'Quelle',
 ];
 
-const ROUTE_STATUS_WORD: Record<RouteCheckStatus, string> = {
-  route_fits: 'Route passt',
-  same_address: 'Gleiche Adresse',
-  route_time_warning: 'Fahrzeit zu lang',
-  unverifiable: 'nicht pruefbar',
-};
-
 const routeRow = (c: RouteCheck): Row => [
-  c.grouping === 'vehicle' ? 'Fahrzeug' : 'Fahrer', c.groupLabel, c.prevNr, c.nextNr,
-  formatStamp(c.prevEndMs, false), formatStamp(c.nextStartMs, false), c.availableSeconds,
-  c.roadSeconds, c.roadKm, c.marginSeconds, ROUTE_STATUS_WORD[c.status], c.reason, c.source,
+  c.grouping === 'vehicle' ? 'Fahrzeug' : 'Fahrer', c.groupLabel, c.prevTripId, c.nextTripId, yesNo(c.sameShift),
+  formatStamp(c.prevEndMs, false), formatStamp(c.nextStartMs, false), c.availableSeconds, c.roadSeconds, c.roadKm,
+  c.safetyMarginSeconds, c.requiredSeconds, c.slackSeconds, c.status, c.reason, c.source,
 ];
 
 /** Every check, no summary rows above it: the header is row 1. */
@@ -521,14 +440,20 @@ function routingLines(result: FullMonthResult): Row[] {
   const p = result.provenance;
   const r = p.routing;
   const rs = result.routeSummary;
+  const rp = result.repositioningSummary;
   const base: Row[] = [
     ['Fahrzeitquelle', p.travel.source],
     ['Fahrzeit gemessen', yesNo(p.travel.measured)],
     ['Routenpruefungen gesamt', rs.checks],
-    ['Routenpruefungen: Route passt', rs.byStatus.route_fits],
-    ['Routenpruefungen: Gleiche Adresse', rs.byStatus.same_address],
-    ['Routenpruefungen: Fahrzeit zu lang', rs.byStatus.route_time_warning],
-    ['Routenpruefungen: nicht pruefbar', rs.byStatus.unverifiable],
+    ...Object.entries(rs.byStatus).map(([status, n]): Row => [`Routenpruefungen: ${status}`, n]),
+    ['Routenpruefungen: Konflikte (eindeutige Paare)', rs.uniqueConflicts],
+    ['Routenpruefungen: nicht pruefbar (eindeutige Paare)', rs.uniqueUnverifiable],
+    ['Routenpruefungen: gleiche Adresse', rs.sameAddress],
+    ['Leerfahrten gesamt', rp.legs],
+    ...Object.entries(rp.byStatus).map(([status, n]): Row => [`Leerfahrten: ${status}`, n]),
+    ['Leerfahrten im Wunschfenster 2-5 Minuten', rp.preferredWindow],
+    ['Leerfahrten mit Route', rp.withRoute],
+    ['Leerfahrten Strecke (km)', rp.roadKm],
   ];
   if (!r) return [...base, ['Routing', 'keine Routing-Angaben uebergeben (Schaetzung ohne Messung)']];
   return [
@@ -545,13 +470,16 @@ function routingLines(result: FullMonthResult): Row[] {
   ];
 }
 
-export function sourceSheetRows(result: FullMonthResult): Row[] {
+export function sourceSheetRows(result: FullMonthResult, verification: MonthVerification = verifyMonth(result)): Row[] {
   const p = result.provenance;
   return [
     [...SOURCE_HEADERS],
     ['Kennzeichnung', SIMULATED_NOTICE],
     ['Hinweis', 'Die Fahrten dieser Datei sind simuliert. Sie sind kein Nachweis tatsaechlich durchgefuehrter Fahrten.'],
     ['Simuliert', yesNo(p.simulated)],
+    ['Exportstatus', `${verification.verdict} - ${VERDICT_TEXT[verification.verdict]}`],
+    ['Lauf-ID', p.runId],
+    ['Firma (Mandant)', p.tenantId ?? ''],
     ['Generatorversion', p.generatorVersion],
     ['Seed', p.seed],
     ['Jahr', p.year],
@@ -571,7 +499,7 @@ export function sourceSheetRows(result: FullMonthResult): Row[] {
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
 
-function toPayloadCell(cell: Cell): PayloadCell {
+export function toPayloadCell(cell: Cell): PayloadCell {
   if (typeof cell === 'string') return cell.replace(CONTROL_CHARS, ' ').slice(0, CONTRACT_LIMITS.maxStringLength);
   if (typeof cell === 'number' && !Number.isFinite(cell)) return String(cell);
   return cell;
@@ -603,34 +531,58 @@ export function contractProblem(cost: PayloadCost): string | null {
 }
 
 /**
- * The monthly report as the payload the export service writes. Throws a
- * German message when the month is larger than the contract carries; the
- * service would refuse it anyway, and this says why before a round trip.
+ * Labelled sheets, the notice sheet last, checked against the contract. Shared
+ * by both reports of a month, so both carry the label the same way.
  */
-export function buildMonthReport(result: FullMonthResult): MonthReport {
-  const tables: Array<[string, Row[]]> = [
-    [SHEET_RIDES, ridesSheetRows(result)],
-    [SHEET_DAYS, daysSheetRows(result)],
-    [SHEET_DRIVERS, driversSheetRows(result)],
-    [SHEET_VEHICLES, vehiclesSheetRows(result)],
-    [SHEET_DECLINED, declinedSheetRows(result)],
-    [SHEET_CHECKS, checksSheetRows(result)],
-    [SHEET_ROUTES, routesSheetRows(result)],
-    [SHEET_EVENTS, eventsSheetRows(result)],
-    [SHEET_DECISIONS, decisionsSheetRows(result)],
-    [SHEET_SOURCE, sourceSheetRows(result)],
-  ];
+export function assemblePayload(tables: ReadonlyArray<readonly [string, Row[]]>): WorkbookPayload {
   const sheets = tables.map(([name, rows]) => ({
     name,
     header: true as const,
     rows: labelled(rows).map(r => r.map(toPayloadCell)),
   }));
-  // Last, so the rides stay the first sheet; it is a single cell whose text opens with the label.
+  // Last, so the data stays first; it is a single cell whose text opens with the label.
   sheets.push({ name: SIMULATED_SHEET_NAME, header: true as const, rows: [[SIMULATED_NOTICE]] });
   const payload: WorkbookPayload = { version: CONTRACT_VERSION, sheets };
   const problem = contractProblem(payloadCost(payload));
   if (problem) throw new Error(problem);
+  return payload;
+}
+
+/** The verdict in the file's own name, so a file that was not validated cannot pass for one that was. */
+export function reportFileName(kind: string, result: FullMonthResult, verification: MonthVerification): string {
   const p = result.provenance;
   const mm = String(p.month).padStart(2, '0');
-  return { fileName: simulatedFileName(`Monatsbericht_${p.year}-${mm}_${p.seed}.xlsx`), payload };
+  const routing = verification.routing === 'estimate' ? '_ESTIMATE_ONLY' : '';
+  return simulatedFileName(`${kind}_${p.year}-${mm}_${p.seed}_${verification.verdict}${routing}.xlsx`);
+}
+
+/**
+ * The monthly report as the payload the export service writes. Throws a
+ * German message when the month is larger than the contract carries; the
+ * service would refuse it anyway, and this says why before a round trip.
+ *
+ * It also refuses a ride sheet that holds a declined order. The sheet is built
+ * from `reportRides`, so this cannot happen today; it is the second wall the
+ * owner's rule gets, because a rule kept by one filter is lost by the next
+ * person who builds the rows another way.
+ */
+export function buildMonthReport(result: FullMonthResult, verification: MonthVerification = verifyMonth(result)): MonthReport {
+  const rides = ridesSheetRows(result);
+  const statusAt = RIDE_HEADERS.indexOf('Status');
+  if (rides.slice(1).some(r => r[statusAt] === STATUS_WORD.declined)) {
+    throw new Error('Der Fahrtenbuch-Bericht enthielte abgelehnte Auftraege; er wird nicht erstellt.');
+  }
+  const payload = assemblePayload([
+    [SHEET_RIDES, rides],
+    [SHEET_DAYS, daysSheetRows(result)],
+    [SHEET_DRIVERS, driversSheetRows(result)],
+    [SHEET_VEHICLES, vehiclesSheetRows(result)],
+    [SHEET_CANCELLED, cancelledSheetRows(result)],
+    [SHEET_CHECKS, checksSheetRows(result, verification)],
+    [SHEET_ROUTES, routesSheetRows(result)],
+    [SHEET_EVENTS, eventsSheetRows(result)],
+    [SHEET_DECISIONS, decisionsSheetRows(result)],
+    [SHEET_SOURCE, sourceSheetRows(result, verification)],
+  ]);
+  return { fileName: reportFileName('Monatsbericht', result, verification), payload };
 }

@@ -73,15 +73,17 @@ describe('the route a gap must hold', () => {
     const { model, pool } = await routed();
     const built = month({ pool });
     const checked = summariseRouteChecks(routeChecks(built.month.rides, model));
-    expect(checked.uniqueWarnings).toBeGreaterThan(0);
+    expect(checked.uniqueConflicts).toBeGreaterThan(0);
   });
 
   it('built with the router, every gap of every vehicle and every driver holds the routed drive', async () => {
     const { model, pool } = await routed();
     const built = month({ pool, travel: model });
     expect(built.violations).toEqual([]);
-    expect(built.routeSummary.byStatus.route_time_warning).toBe(0);
-    expect(built.routeSummary.byStatus.unverifiable).toBe(0);
+    expect(built.routeSummary.byStatus.ROUTE_CONFLICT).toBe(0);
+    expect(built.routeSummary.byStatus.UNVERIFIABLE).toBe(0);
+    expect(built.routeSummary.byStatus.ESTIMATE_ONLY).toBe(0);
+    expect(built.repositioningSummary.byStatus).toEqual({ ROUTE_VERIFIED: built.repositioning.length, ROUTE_CONFLICT: 0, UNVERIFIABLE: 0, ESTIMATE_ONLY: 0 });
     expect(built.routeSummary.checks).toBeGreaterThan(200);
     expect(built.provenance.travel).toEqual({ source: 'osrm', measured: true });
     expect(built.provenance.generatorVersion).toBe(FULL_MONTH_GENERATOR_VERSION);
@@ -178,7 +180,8 @@ describe('declined and cancelled orders', () => {
       expect(r.declinedFeeCents).toBe(600);
       expect([r.fare, r.tip, r.km]).toEqual([0, 0, 0]);
     }
-    expect(built.revenue.declinedFeeCents).toBe(declined.length * 600);
+    expect(built.internal.declined.declinedFeeCents).toBe(declined.length * 600);
+    expect(built.revenue.declinedFeeCents).toBe(0);
     expect(built.violations).toEqual([]);
   });
 
@@ -197,7 +200,7 @@ describe('declined and cancelled orders', () => {
     expect(cancelled.length).toBeGreaterThan(0);
     expect(cancelled.every(r => r.fare === 0)).toBe(true);
     expect(built.revenue.cancelledFeeCents).toBe(0);
-    const charged = month({ options: { cancellationShare: 0.2 }, settings: { declinedRidesEnabled: true, chargeDeclinedFeeOnCancelled: true } });
+    const charged = month({ options: { cancellationShare: 0.2 }, settings: { declinedRidesEnabled: true, cancellationFeeEnabled: true } });
     expect(charged.revenue.cancelledFeeCents).toBe(charged.revenue.counts.cancelled * 600);
   });
 

@@ -68,21 +68,35 @@ export interface SimulationTenantSettings {
    */
   declinedFeeCents: number;
   /**
-   * Whether a CANCELLED ride earns the same fee. **False by default, and the
-   * audit is explicit**: "لا تفرض 6 € تلقائيًا على CANCELLED ما لم تنص سياسة
-   * الشركة على ذلك" — do not charge it on a cancellation unless company policy
-   * says so. A cancellation keeps the separate `CANCELLATION_FEES` the
-   * generator has always drawn from, which is a different quantity.
+   * The declined orders' place in the output, stated once (the owner's final
+   * rule of round 6): a declined order is **never** a row of the Fahrtenbuch
+   * report and its fee is in none of that report's totals or in the basis of
+   * the monthly share. It is kept, with its fee, in the internal operational
+   * report, whose revenue is labelled as internal.
    */
-  chargeDeclinedFeeOnCancelled: boolean;
+
+  // ── Cancellations (round 6) ─────────────────────────────────────────────
+  /**
+   * Whether a CANCELLED ride earns a cancellation fee. A company setting, and
+   * off unless the company says so: the round-3 audit was explicit that no fee
+   * is charged on a cancellation by default. A cancelled ride stays in the
+   * Fahrtenbuch report either way, with its financial status on its row.
+   */
+  cancellationFeeEnabled: boolean;
+  /** The cancellation fee, in **integer cents**. 6,00 EUR in the audited scenario. */
+  cancellationFeeCents: number;
 
   // ── Section 4: the monthly revenue share ────────────────────────────────
   /** Off by default. On, the month's report carries the share figure. */
   monthlyRevenueShareEnabled: boolean;
   /** Whether tips enter the eligible-revenue basis. Configurable, per section 4. */
   basisIncludesTips: boolean;
-  /** Whether declined fees enter the eligible-revenue basis. Configurable. */
-  basisIncludesDeclinedFees: boolean;
+  /**
+   * Whether cancellation fees enter the eligible-revenue basis. Configurable.
+   * A declined order's fee never does: it is not in the report the basis is
+   * taken from.
+   */
+  basisIncludesCancellationFees: boolean;
 }
 
 export const DEFAULT_SIMULATION_TENANT_SETTINGS: SimulationTenantSettings = {
@@ -91,10 +105,11 @@ export const DEFAULT_SIMULATION_TENANT_SETTINGS: SimulationTenantSettings = {
   declinedRidesEnabled: false,
   declinedShare: 0.04,
   declinedFeeCents: 600,
-  chargeDeclinedFeeOnCancelled: false,
+  cancellationFeeEnabled: false,
+  cancellationFeeCents: 600,
   monthlyRevenueShareEnabled: false,
   basisIncludesTips: false,
-  basisIncludesDeclinedFees: true,
+  basisIncludesCancellationFees: true,
 };
 
 /** A reason a settings object is refused. One code per rule, stable. */
@@ -103,7 +118,9 @@ export type SettingsProblem =
   | 'operating_day_start_hour_out_of_range'
   | 'declined_share_out_of_range'
   | 'declined_fee_not_whole_cents'
-  | 'declined_fee_negative';
+  | 'declined_fee_negative'
+  | 'cancellation_fee_not_whole_cents'
+  | 'cancellation_fee_negative';
 
 /**
  * The first rule a settings object breaks, or null.
@@ -121,6 +138,8 @@ export function settingsProblem(s: SimulationTenantSettings): SettingsProblem | 
   if (!Number.isFinite(s.declinedShare) || s.declinedShare < 0 || s.declinedShare > 1) return 'declined_share_out_of_range';
   if (!Number.isInteger(s.declinedFeeCents)) return 'declined_fee_not_whole_cents';
   if (s.declinedFeeCents < 0) return 'declined_fee_negative';
+  if (!Number.isInteger(s.cancellationFeeCents)) return 'cancellation_fee_not_whole_cents';
+  if (s.cancellationFeeCents < 0) return 'cancellation_fee_negative';
   return null;
 }
 
