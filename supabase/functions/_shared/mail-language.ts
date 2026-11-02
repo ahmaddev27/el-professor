@@ -51,9 +51,15 @@ const LRI = '⁦'; // left-to-right isolate
 const FSI = '⁨'; // first-strong isolate
 const PDI = '⁩'; // pop directional isolate
 
-/** HTML: an amount, a date range or a time, kept left-to-right inside an Arabic line. */
+/**
+ * HTML: an amount, a date range or a time, kept left-to-right inside an Arabic line.
+ *
+ * `nowrap` because a run split across two lines reads backwards: on a phone a
+ * range came out as "(– 26.10.2026" over "01.11.2026)", with its dash and bracket
+ * on the wrong side. Whole, the run moves to the next line instead.
+ */
 export function ltrRunHtml(escaped: string, language: MailLanguage): string {
-  return isRtl(language) ? `<span dir="ltr" style="unicode-bidi:isolate;">${escaped}</span>` : escaped;
+  return isRtl(language) ? `<span dir="ltr" style="unicode-bidi:isolate;white-space:nowrap;">${escaped}</span>` : escaped;
 }
 
 /** HTML: a name whose own direction is unknown (a driver, a company). */

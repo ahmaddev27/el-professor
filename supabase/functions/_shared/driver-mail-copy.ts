@@ -98,7 +98,7 @@ const DE: DriverMailCopy = {
     subject: 'Abrechnung {label} – {company}',
     heading: 'Abrechnung {label}',
     preheader: 'Deine Abrechnung für {range}',
-    note: 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres Unternehmens erstellt. '
+    note: 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem deines Unternehmens erstellt. '
       + 'Sie ist eine Übersicht, keine Rechnung und keine Zahlungsaufforderung.',
   },
   reminder: {
@@ -111,7 +111,7 @@ const DE: DriverMailCopy = {
     subject: 'Erinnerung: Abrechnung {label} – {company}',
     heading: 'Erinnerung zur Abrechnung',
     preheader: 'Die Abrechnung für {range} geht um {clock} raus',
-    note: 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres Unternehmens erstellt. '
+    note: 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem deines Unternehmens erstellt. '
       + 'Sie ist eine Erinnerung, keine Rechnung und keine Zahlungsaufforderung.',
   },
 };
@@ -127,9 +127,9 @@ const EN: DriverMailCopy = {
     intro: 'here is your settlement for {label} ({range}).',
     cash: 'Cash collected',
     belege: 'Receipts ({count})',
-    owes: 'To hand in',
+    owes: 'To hand over',
     credit: 'Credit',
-    tankenquote: 'Fuel share',
+    tankenquote: 'Fuel cost share',
     imageNote: 'The overview is also attached to this email as an image.',
     sources: 'The figures come from the records of {company}. If you have any questions, please contact the office.',
     subject: 'Settlement {label} – {company}',
@@ -142,7 +142,7 @@ const EN: DriverMailCopy = {
     intro: 'this is the weekly reminder about the settlement for {label} ({range}).',
     handIn: 'If you still have receipts for this week, please upload them now.',
     when: 'At {clock}, {company} sends out the settlement for this week by email automatically. '
-      + 'Receipts uploaded after that are missing from the figures.',
+      + 'Receipts uploaded after that will not be in the figures.',
     ignore: 'If you have already uploaded all your receipts for this week, you can simply ignore this email.',
     clock: '{time}',
     subject: 'Reminder: settlement {label} – {company}',
@@ -158,7 +158,7 @@ const AR: DriverMailCopy = {
   helloPlain: 'مرحبًا،',
   footer: [
     'El-Professor · إدارة الرواتب والتخطيط لشركات سيارات الأجرة وسيارات الإيجار بسائق',
-    'أُرسلت هذه الرسالة تلقائيًا. لا تتم قراءة الردود على هذا العنوان.',
+    'أُرسلت هذه الرسالة تلقائيًا. لا تُقرأ الردود المرسلة إلى هذا العنوان.',
   ],
   abrechnung: {
     intro: 'إليك كشف حسابك عن {label} ({range}).',
@@ -166,11 +166,11 @@ const AR: DriverMailCopy = {
     belege: 'الإيصالات ({count})',
     owes: 'المطلوب تسليمه',
     credit: 'الرصيد المستحق لك',
-    tankenquote: 'نسبة الوقود',
+    tankenquote: 'نسبة تكلفة الوقود',
     imageNote: 'الملخص مرفق بهذه الرسالة أيضًا كصورة.',
-    sources: 'الأرقام مأخوذة من سجلات {company}. إذا كانت لديك أي أسئلة، يرجى التواصل مع المكتب.',
-    subject: 'كشف الحساب {label} – {company}',
-    heading: 'كشف الحساب {label}',
+    sources: 'الأرقام مأخوذة من سجلات {company}. إذا كانت لديك أي أسئلة، فيرجى التواصل مع المكتب.',
+    subject: 'كشف الحساب: {label} – {company}',
+    heading: 'كشف الحساب: {label}',
     preheader: 'كشف حسابك عن الفترة {range}',
     note: 'أُنشئت هذه الرسالة تلقائيًا من نظام المحاسبة في شركتك. '
       + 'وهي ملخص فقط، وليست فاتورة ولا طلب دفع.',
@@ -180,9 +180,9 @@ const AR: DriverMailCopy = {
     handIn: 'إذا كانت لديك إيصالات عن هذا الأسبوع لم ترفعها بعد، فيرجى رفعها الآن.',
     when: 'في الساعة {clock} تُرسل {company} كشف حساب هذا الأسبوع تلقائيًا بالبريد الإلكتروني. '
       + 'والإيصالات التي تُرفع بعد ذلك لن تظهر في الأرقام.',
-    ignore: 'إذا كنت قد رفعت كل إيصالاتك عن هذا الأسبوع، يمكنك ببساطة تجاهل هذه الرسالة.',
+    ignore: 'إذا كنت قد رفعت كل إيصالاتك عن هذا الأسبوع، فيمكنك ببساطة تجاهل هذه الرسالة.',
     clock: '{time}',
-    subject: 'تذكير: كشف الحساب {label} – {company}',
+    subject: 'تذكير بكشف الحساب: {label} – {company}',
     heading: 'تذكير بكشف الحساب',
     preheader: 'يصدر كشف الحساب عن الفترة {range} في الساعة {clock}',
     note: 'أُنشئت هذه الرسالة تلقائيًا من نظام المحاسبة في شركتك. '
@@ -195,7 +195,7 @@ const TR: DriverMailCopy = {
   helloPlain: 'Merhaba,',
   footer: [
     'El-Professor · Taksi ve şoförlü kiralık araç şirketleri için bordro ve planlama yönetimi',
-    'Bu e-posta otomatik olarak gönderilmiştir. Bu adrese verilen yanıtlar okunmaz.',
+    'Bu e-posta otomatik olarak gönderilmiştir. Bu adrese gönderilen yanıtlar okunmaz.',
   ],
   abrechnung: {
     intro: '{label} ({range}) dönemine ait hesap dökümünüz aşağıdadır.',
@@ -203,28 +203,28 @@ const TR: DriverMailCopy = {
     belege: 'Fişler ({count})',
     owes: 'Teslim edilecek tutar',
     credit: 'Alacağınız',
-    tankenquote: 'Yakıt oranı',
+    tankenquote: 'Yakıt gideri oranı',
     imageNote: 'Özet, bu e-postaya görsel olarak da eklenmiştir.',
     sources: 'Rakamlar {company} kayıtlarından alınmıştır. Sorularınız için lütfen ofisle iletişime geçin.',
-    subject: 'Hesap dökümü {label} – {company}',
-    heading: 'Hesap dökümü {label}',
+    subject: 'Hesap dökümü: {label} – {company}',
+    heading: 'Hesap dökümü: {label}',
     preheader: '{range} dönemine ait hesap dökümünüz',
-    note: 'Bu e-posta, şirketinizin hesap sistemi tarafından otomatik olarak oluşturulmuştur. '
+    note: 'Bu e-posta, şirketinizin muhasebe sistemi tarafından otomatik olarak oluşturulmuştur. '
       + 'Bu bir özettir; fatura veya ödeme talebi değildir.',
   },
   reminder: {
-    intro: 'Bu, {label} ({range}) hesap dökümü için haftalık hatırlatmadır.',
+    intro: 'Bu e-posta, {label} ({range}) hesap dökümü için haftalık hatırlatmadır.',
     handIn: 'Bu haftaya ait henüz yüklemediğiniz fişleriniz varsa lütfen şimdi yükleyin.',
-    // "Saat {clock} itibarıyla" and not "{clock}'da": a suffix after a time changes
+    // "saat {clock} olduğunda" and not "{clock}'da": a suffix after a time changes
     // with the time's last digit, and the sentence is filled with any time.
-    when: 'Saat {clock} itibarıyla {company}, bu haftanın hesap dökümünü otomatik olarak e-postayla gönderir. '
+    when: 'Bu haftanın hesap dökümü, saat {clock} olduğunda {company} tarafından otomatik olarak e-postayla gönderilir. '
       + 'Bundan sonra yüklenen fişler rakamlara dahil edilmez.',
-    ignore: 'Bu haftaya ait tüm fişlerinizi zaten yüklediyseniz bu e-postayı dikkate almayabilirsiniz.',
+    ignore: 'Bu haftaya ait tüm fişlerinizi zaten yüklediyseniz bu e-postayı dikkate almanıza gerek yoktur.',
     clock: '{time}',
-    subject: 'Hatırlatma: hesap dökümü {label} – {company}',
+    subject: 'Hesap dökümü hatırlatması: {label} – {company}',
     heading: 'Hesap dökümü hatırlatması',
-    preheader: '{range} hesap dökümü saat {clock} itibarıyla gönderilecek',
-    note: 'Bu e-posta, şirketinizin hesap sistemi tarafından otomatik olarak oluşturulmuştur. '
+    preheader: '{range} hesap dökümü saat {clock} olduğunda gönderilecek',
+    note: 'Bu e-posta, şirketinizin muhasebe sistemi tarafından otomatik olarak oluşturulmuştur. '
       + 'Bu bir hatırlatmadır; fatura veya ödeme talebi değildir.',
   },
 };
@@ -242,13 +242,14 @@ const RU: DriverMailCopy = {
     intro: 'Ваш расчёт: {label} ({range}).',
     cash: 'Получено наличными',
     belege: 'Чеки ({count})',
-    owes: 'К сдаче',
+    // Not "К сдаче": on a till receipt that is the change handed back to a customer.
+    owes: 'Нужно сдать',
     credit: 'К получению',
-    tankenquote: 'Доля топлива',
+    tankenquote: 'Доля расходов на топливо',
     imageNote: 'Сводка также приложена к этому письму в виде изображения.',
     sources: 'Данные взяты из записей компании {company}. Если у вас есть вопросы, обратитесь в офис.',
-    subject: 'Расчёт {label} – {company}',
-    heading: 'Расчёт {label}',
+    subject: 'Расчёт: {label} – {company}',
+    heading: 'Расчёт: {label}',
     preheader: 'Ваш расчёт за период {range}',
     note: 'Это письмо автоматически создано системой расчётов вашей компании. '
       + 'Это сводка, а не счёт и не требование об оплате.',
@@ -257,10 +258,10 @@ const RU: DriverMailCopy = {
     intro: 'Это еженедельное напоминание о расчёте: {label} ({range}).',
     handIn: 'Если у вас ещё есть чеки за эту неделю, пожалуйста, загрузите их сейчас.',
     when: 'В {clock} компания {company} автоматически отправит расчёт за эту неделю по электронной почте. '
-      + 'Чеки, загруженные позже, не войдут в данные.',
+      + 'Чеки, загруженные позже, не будут учтены в расчёте.',
     ignore: 'Если вы уже загрузили все чеки за эту неделю, можете просто проигнорировать это письмо.',
     clock: '{time}',
-    subject: 'Напоминание: расчёт {label} – {company}',
+    subject: 'Напоминание о расчёте: {label} – {company}',
     heading: 'Напоминание о расчёте',
     preheader: 'Расчёт за период {range} будет отправлен в {clock}',
     note: 'Это письмо автоматически создано системой расчётов вашей компании. '

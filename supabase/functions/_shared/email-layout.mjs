@@ -111,6 +111,10 @@ export function renderEmailHtml(content) {
   requireCode(code);
   const lang = escapeHtml(content.lang ?? 'de');
   const dirAttr = content.dir === 'rtl' ? ' dir="rtl"' : '';
+  // The eyebrow is a company's name, uppercased by CSS, and CSS uppercases by the
+  // document's language: in a Turkish mail "Mobility" became "MOBİLİTY". The name
+  // is German, so it keeps German rules. Every other language's bytes are unchanged.
+  const eyebrowLang = content.lang === 'tr' ? ' lang="de"' : '';
   const footerLines = content.footer ?? DEFAULT_FOOTER_LINES;
 
   // Each block ends with a newline and blocks are separated by one empty line,
@@ -193,7 +197,7 @@ export function renderEmailHtml(content) {
 
     <tr><td class="card"${dirAttr} style="background-color:${C.card};border:1px solid ${C.border};border-radius:8px;padding:40px 40px 36px 40px;">
 
-      <p style="margin:0 0 12px 0;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${C.muted};">${escapeHtml(eyebrow)}</p>
+      <p${eyebrowLang} style="margin:0 0 12px 0;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${C.muted};">${escapeHtml(eyebrow)}</p>
       <h1 class="h1" style="margin:0 0 20px 0;font-family:${FONT};font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-0.02em;color:${C.ink};">${escapeHtml(heading)}</h1>
 ${blocks.join('\n')}
     </td></tr>
