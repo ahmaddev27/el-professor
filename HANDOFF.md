@@ -2,6 +2,17 @@
 
 Last updated: **02.11.2026**
 
+- **02.11.2026 (latest) — toasts are centred and stack above every dialog** (branch `fix/toast-center`, PR against `staging`, no migration, nothing on production).
+  - **The defect, measured in a browser:** a toast raised while a form was open could not be seen. It sat top right on `z-50`, and the Sheet (receipts, drivers, vehicles) opens on the right on `z-50` from a later portal, so it painted over the toast at 1400, 1280 and 390 px. Pressing Save on an incomplete receipt appeared to do nothing, because the form reports through a toast and stays open. The toast's spot is also where the Sheet's close button sits.
+  - **The fix (`ToastContext.tsx`):**
+    - Centred at the top, below the staging banner's height, on `z-[80]`.
+    - `ToastContext.render.test.ts` reads the source and fails on any `z-[N]` at or above that level.
+    - `pointer-events-auto` on the toast, because a modal dialog turns pointer events off on the body.
+    - Its `pointerdown` stops at the toast, so closing a message cannot close a form. Measured: the press never reaches the document.
+    - A solid surface under the tint, because the dark theme's tints are 10 % washes and a centred toast has text behind it.
+  - **The owner's voice note said left and then "in the middle".** The last thing said was built. Moving it is one class.
+  - **Found, not fixed:** on Belege at 1280 px and below, the search box shrinks to 50 px and overlaps the month field by 20 to 38 px, with no dialog open.
+  - **Gates:** typecheck 165 and styles at baseline, 6 mutation controls caught, and the fix measured on the real form in the design harness at four sizes.
 - **02.11.2026 (latest) — Turkish and Russian as driver e-mail languages, and the reminder asks for receipts only** (branch `feat/driver-languages-receipts-reminder`, PR against `staging`, one migration, nothing on production).
   - **The languages:** `tr` and `ru` join `drivers.preferred_language`. `20261102110000` widens the CHECK, `MAIL_LANGUAGES` and `DRIVER_LANGUAGES` move with it, and `driver-mail-copy.ts` has a full table for each.
     - The default stays English. The CHECK only widens and the previous release reads an unknown language as English, so there is no epoch bump.
