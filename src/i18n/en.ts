@@ -6550,7 +6550,7 @@ export const en: PartialDictionary = {
   'inc.uber.period.tooManyDays':       'At most {max} days at once; {count} are chosen. Please choose fewer days.',
   'inc.uber.tab.daily':                'Daily',
   'settings.abrSchedule.preview.manager.goesAddress': 'The summary goes to the saved notification address.',
-  'settings.abrSchedule.reminder.hint':    'Every active driver with an e-mail address gets a short e-mail without amounts at the chosen time before the send, the evening before included. It states no figures and only asks whether a Fahrtenbuch, cash or cash receipts are still to be handed in. Only applies when sending to the drivers is on.',
+  'settings.abrSchedule.reminder.hint':    'Every active driver with an e-mail address gets a short e-mail without amounts at the chosen time before the send, the evening before included. It states no figures and only asks the driver to upload any receipts still open. Only applies when sending to the drivers is on.',
   'settings.abrSchedule.reminder.label':   'Remind drivers before it is sent',
   'settings.abrSchedule.reminder.lead':    'Reminder before the send',
   'settings.abrSchedule.reminder.leadOption': '{minutes} minutes before',

@@ -1,8 +1,9 @@
 /**
  * The language a driver's e-mails are written in (`drivers.preferred_language`).
  *
- * Three languages and one default, **English**: the owner's decision of
- * 19.10.2026, deliberately not the UI's German fallback. The list is held in
+ * Five languages and one default, **English**: the owner's decision of
+ * 19.10.2026, deliberately not the UI's German fallback, with Turkish and
+ * Russian added on his word of 02.11.2026. The list is held in
  * three places that must agree (this file, `MAIL_LANGUAGES` in
  * `supabase/functions/_shared/mail-language.ts`, and the column's CHECK), and
  * `driverLanguage.test.ts` reads the other two and fails when they part.
@@ -13,7 +14,7 @@
  * it whatever the UI language is.
  */
 
-export const DRIVER_LANGUAGES = ['ar', 'en', 'de'] as const;
+export const DRIVER_LANGUAGES = ['ar', 'en', 'de', 'tr', 'ru'] as const;
 
 export type DriverLanguage = (typeof DRIVER_LANGUAGES)[number];
 
@@ -24,6 +25,8 @@ export const DRIVER_LANGUAGE_NAMES: Record<DriverLanguage, string> = {
   ar: 'العربية',
   en: 'English',
   de: 'Deutsch',
+  tr: 'Türkçe',
+  ru: 'Русский',
 };
 
 export function isDriverLanguage(value: unknown): value is DriverLanguage {

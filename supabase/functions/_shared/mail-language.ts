@@ -3,7 +3,7 @@
  *
  * Pure: no Deno, `npm:` or `jsr:` import, so vitest runs it in Node.
  *
- * Three languages, one default, and the default is the owner's decision of
+ * Five languages, one default, and the default is the owner's decision of
  * 19.10.2026: **English**, even though the product's UI falls back to German. A
  * driver whose language is missing, empty, mistyped or one we do not write gets
  * English, never German by accident and never a crash. The database says the same
@@ -17,7 +17,7 @@
  * one-to-one onto German payroll paperwork.
  */
 
-export const MAIL_LANGUAGES = ['ar', 'en', 'de'] as const;
+export const MAIL_LANGUAGES = ['ar', 'en', 'de', 'tr', 'ru'] as const;
 
 export type MailLanguage = (typeof MAIL_LANGUAGES)[number];
 
