@@ -52,21 +52,24 @@ describe('the copy tables', () => {
  */
 describe('the reminder asks for receipts and nothing else', () => {
   const RECEIPT: Record<(typeof MAIL_LANGUAGES)[number], RegExp> = {
-    de: /Belege/, en: /receipts/, ar: /إيصالات/, tr: /fiş/, ru: /чеки/,
+    de: /Belege/, en: /[Rr]eceipts/, ar: /إيصالات/, tr: /fiş/, ru: /[Чч]еки/,
   };
   const FORBIDDEN: Record<(typeof MAIL_LANGUAGES)[number], RegExp> = {
-    de: /Fahrtenbuch|Bargeld|Barbeleg|abzugeben/,
-    en: /Fahrtenbuch|\bcash\b|hand (it )?in/,
-    ar: /Fahrtenbuch|نقد|تسلّم|سلّمت/,
-    tr: /Fahrtenbuch|nakit|teslim/i,
-    ru: /Fahrtenbuch|наличн|сдат|сдач/i,
+    de: /Fahrtenbuch|Bargeld|Barbeleg|abzugeben|Was danach eingeht/,
+    en: /Fahrtenbuch|\bcash\b|hand (it )?in|Anything that arrives/,
+    ar: /Fahrtenbuch|نقد|تسلّم|سلّمت|ما يصل/,
+    tr: /Fahrtenbuch|nakit|teslim|gelenler/i,
+    ru: /Fahrtenbuch|наличн|сдат|сдач|Всё, что поступит/i,
   };
 
-  it.each(MAIL_LANGUAGES)('%s: the ask and the way out both name receipts only', (code) => {
-    const { handIn, ignore } = DRIVER_MAIL_COPY[code].reminder;
-    for (const text of [handIn, ignore]) {
-      expect(text, code).toMatch(RECEIPT[code]);
-      expect(text, code).not.toMatch(FORBIDDEN[code]);
+  it.each(MAIL_LANGUAGES)('%s: the ask, the deadline and the way out all name receipts', (code) => {
+    const { handIn, ignore, when } = DRIVER_MAIL_COPY[code].reminder;
+    for (const text of [handIn, ignore, when]) expect(text, code).toMatch(RECEIPT[code]);
+  });
+
+  it.each(MAIL_LANGUAGES)('%s: no sentence of the reminder asks for anything else', (code) => {
+    for (const [path, text] of sentences(DRIVER_MAIL_COPY[code].reminder)) {
+      expect(text, `${code} ${path}`).not.toMatch(FORBIDDEN[code]);
     }
   });
 });

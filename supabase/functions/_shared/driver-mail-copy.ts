@@ -63,8 +63,9 @@ export interface DriverMailCopy {
      *
      * It asks for **receipts and nothing else** since 02.11.2026 (the owner, on a
      * reminder as it reached a driver): no Fahrtenbuch and no cash. The driver
-     * uploads receipts; the office enters the rest. `ignore` follows it, because
-     * "handed in everything" would ask for the same things by another word.
+     * uploads receipts; the office enters the rest. `ignore` and `when` follow it:
+     * "handed in everything" and "anything that arrives later" ask for the same
+     * things by another word, and he repeated that the mail is about receipts only.
      */
     handIn: string;
     when: string;
@@ -104,7 +105,7 @@ const DE: DriverMailCopy = {
     intro: 'das ist die wöchentliche Erinnerung zur Abrechnung für {label} ({range}).',
     handIn: 'Falls du für diese Woche noch Belege hast, lade sie bitte jetzt hoch.',
     when: 'Um {clock} verschickt {company} die Abrechnung für diese Woche automatisch per E-Mail. '
-      + 'Was danach eingeht, fehlt in den Zahlen.',
+      + 'Belege, die danach hochgeladen werden, fehlen in den Zahlen.',
     ignore: 'Hast du für diese Woche schon alle Belege hochgeladen, kannst du diese E-Mail einfach ignorieren.',
     clock: '{time} Uhr',
     subject: 'Erinnerung: Abrechnung {label} – {company}',
@@ -141,7 +142,7 @@ const EN: DriverMailCopy = {
     intro: 'this is the weekly reminder about the settlement for {label} ({range}).',
     handIn: 'If you still have receipts for this week, please upload them now.',
     when: 'At {clock}, {company} sends out the settlement for this week by email automatically. '
-      + 'Anything that arrives after that is missing from the figures.',
+      + 'Receipts uploaded after that are missing from the figures.',
     ignore: 'If you have already uploaded all your receipts for this week, you can simply ignore this email.',
     clock: '{time}',
     subject: 'Reminder: settlement {label} – {company}',
@@ -178,7 +179,7 @@ const AR: DriverMailCopy = {
     intro: 'هذا هو التذكير الأسبوعي بخصوص كشف الحساب عن {label} ({range}).',
     handIn: 'إذا كانت لديك إيصالات عن هذا الأسبوع لم ترفعها بعد، فيرجى رفعها الآن.',
     when: 'في الساعة {clock} تُرسل {company} كشف حساب هذا الأسبوع تلقائيًا بالبريد الإلكتروني. '
-      + 'وما يصل بعد ذلك لن يظهر في الأرقام.',
+      + 'والإيصالات التي تُرفع بعد ذلك لن تظهر في الأرقام.',
     ignore: 'إذا كنت قد رفعت كل إيصالاتك عن هذا الأسبوع، يمكنك ببساطة تجاهل هذه الرسالة.',
     clock: '{time}',
     subject: 'تذكير: كشف الحساب {label} – {company}',
@@ -217,7 +218,7 @@ const TR: DriverMailCopy = {
     // "Saat {clock} itibarıyla" and not "{clock}'da": a suffix after a time changes
     // with the time's last digit, and the sentence is filled with any time.
     when: 'Saat {clock} itibarıyla {company}, bu haftanın hesap dökümünü otomatik olarak e-postayla gönderir. '
-      + 'Bundan sonra gelenler rakamlara dahil edilmez.',
+      + 'Bundan sonra yüklenen fişler rakamlara dahil edilmez.',
     ignore: 'Bu haftaya ait tüm fişlerinizi zaten yüklediyseniz bu e-postayı dikkate almayabilirsiniz.',
     clock: '{time}',
     subject: 'Hatırlatma: hesap dökümü {label} – {company}',
@@ -256,7 +257,7 @@ const RU: DriverMailCopy = {
     intro: 'Это еженедельное напоминание о расчёте: {label} ({range}).',
     handIn: 'Если у вас ещё есть чеки за эту неделю, пожалуйста, загрузите их сейчас.',
     when: 'В {clock} компания {company} автоматически отправит расчёт за эту неделю по электронной почте. '
-      + 'Всё, что поступит позже, не войдёт в данные.',
+      + 'Чеки, загруженные позже, не войдут в данные.',
     ignore: 'Если вы уже загрузили все чеки за эту неделю, можете просто проигнорировать это письмо.',
     clock: '{time}',
     subject: 'Напоминание: расчёт {label} – {company}',
