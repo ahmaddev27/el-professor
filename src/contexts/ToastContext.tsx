@@ -90,8 +90,14 @@ const ToastContainer: React.FC<{ toasts: Toast[]; onRemove: (id: string) => void
   toasts,
   onRemove,
 }) => {
+  // Centred, and above every dialog. It sat at the top right on z-50, and the
+  // Sheet (receipts, drivers, vehicles) opens on the right on z-50 from a portal
+  // later in the document, so a message raised while a form was open was painted
+  // underneath it: Save seemed to do nothing. Nothing in the app may stack above
+  // this level (ToastContext.render.test.ts reads the source). The banner offset
+  // is the Sheet's own, so a toast never hides under the staging banner.
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-md">
+    <div className="pointer-events-none fixed left-1/2 top-[calc(var(--env-banner-height,0px)+1rem)] z-[80] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 flex-col items-center gap-2">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
       ))}
@@ -125,9 +131,15 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
 
   return (
     <div
-      className="rounded-lg shadow-lg p-4 flex items-start gap-3 animate-slide-in-right"
+      // A modal dialog turns pointer events off on the body and closes on a press
+      // outside it. This toast is outside it, so it switches them back on and keeps
+      // its presses from the document: closing a message must not close the form.
+      onPointerDown={(event) => event.stopPropagation()}
+      className="pointer-events-auto flex max-w-full items-start gap-3 rounded-lg bg-overlay p-4 shadow-overlay motion-safe:animate-ui-fade-in"
       style={{
-        background: colors.bg,
+        // Over a solid surface: the dark theme's tints are 10 % washes, and a toast
+        // in the middle of the page has text behind it.
+        backgroundImage: `linear-gradient(${colors.bg}, ${colors.bg})`,
         border: `1px solid ${colors.border}`,
         color: colors.text,
       }}
