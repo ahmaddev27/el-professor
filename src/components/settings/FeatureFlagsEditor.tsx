@@ -121,7 +121,7 @@ const FeatureFlagsEditor: React.FC = () => {
                         {maySave && !row.known && (
                           <button
                             onClick={() => setForm(form.filter((_, i) => i !== index))}
-                            className="p-1.5 rounded-lg"
+                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg"
                             style={{ color: 'var(--danger)' }}
                             title={t('admin.flags.remove')}
                             aria-label={t('admin.flags.remove')}

@@ -561,7 +561,7 @@ export default function SubscriptionBillingPage() {
       <div className="relative">
         <button
           onClick={() => setOpen(!open)}
-          className="p-1.5 rounded-lg transition-colors"
+          className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
           style={{ color: 'var(--text-tertiary)' }}
           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -717,7 +717,7 @@ export default function SubscriptionBillingPage() {
 
       {/* KPI Cards */}
       {!problem && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-3">
           {[
             { label: t('sa.subs.kpi.activeSubs'), value: activeSubCount, icon: CreditCard, color: 'var(--accent)' },
             { label: t('sa.subs.kpi.openInvoices'), value: invoiceSummary.openCount, icon: Clock, color: 'var(--warning)' },
@@ -743,7 +743,7 @@ export default function SubscriptionBillingPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
+      <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
         {(['invoices', 'subscriptions', 'plans'] as const).map(tab => {
           const labels = {
             invoices: t('sa.subs.tab.invoices'),
@@ -891,19 +891,19 @@ export default function SubscriptionBillingPage() {
                       <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
                         {monthLabel(t, inv.invoice_month)} {inv.invoice_year}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                      <td className="px-4 py-3 whitespace-nowrap font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
                         {inv.invoice_number}
                       </td>
-                      <td className="px-4 py-3 font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      <td className="px-4 py-3 whitespace-nowrap font-semibold" style={{ color: 'var(--text-primary)' }}>
                         {fmtEur(inv.amount)}
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={inv.status} dueDate={inv.due_date} />
                       </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
+                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
                         {(() => { try { return format(new Date(inv.due_date), 'dd.MM.yy'); } catch { return '-'; } })()}
                       </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
+                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
                         {inv.paid_at ? (() => { try { return format(new Date(inv.paid_at), 'dd.MM.yy HH:mm'); } catch { return '-'; } })() : '-'}
                       </td>
                       <td className="px-4 py-3">

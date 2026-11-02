@@ -82,7 +82,7 @@ const KpiCard: React.FC<{
   higherIsBetter?: boolean;
 }> = ({ label, value, sub, icon, iconBg, iconColor, delta, higherIsBetter }) => (
   <div
-    className="rounded-2xl p-5 flex flex-col gap-3 transition-all duration-200 cursor-default"
+    className="rounded-2xl p-4 sm:p-5 flex flex-col gap-3 transition-all duration-200 cursor-default"
     style={{
       background: 'var(--bg-surface)',
       border: '1px solid var(--border)',
@@ -91,17 +91,19 @@ const KpiCard: React.FC<{
     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)'; }}
     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)'; }}
   >
-    <div className="flex items-center justify-between">
-      <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-tertiary)' }}>
+    <div className="flex flex-col-reverse items-start gap-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
+      <span className="min-w-0 break-words text-xs font-semibold uppercase tracking-wide sm:tracking-widest" style={{ color: 'var(--text-tertiary)' }}>
         {label}
       </span>
-      <div className="rounded-xl p-2" style={{ background: iconBg, color: iconColor }}>
+      <div className="shrink-0 rounded-xl p-2" style={{ background: iconBg, color: iconColor }}>
         {icon}
       </div>
     </div>
     <div>
-      <p className="text-2xl font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>{value}</p>
-      <div className="flex items-center gap-2 mt-1">
+      <div className="[container-type:inline-size]">
+        <p className="text-[clamp(1.0625rem,14cqi,1.5rem)] font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>{value}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 mt-1">
         {sub && <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{sub}</p>}
         {delta !== undefined && (
           <DeltaBadge delta={delta ?? null} higherIsBetter={higherIsBetter} />
@@ -655,7 +657,7 @@ const OverviewPage: React.FC = () => {
             type="month"
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
-            className="text-sm font-medium bg-transparent focus:outline-none"
+            className="text-sm font-medium bg-transparent focus:outline-none [@media(pointer:coarse)]:min-h-10"
             style={{ color: 'var(--text-primary)' }}
           />
         </div>
@@ -686,7 +688,7 @@ const OverviewPage: React.FC = () => {
           reason underneath, rather than a 0,00 € or an empty grid cell. The
           `delta` goes with the figure: a percentage change against a month
           whose term was not read is the same false statement one level down. */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
         <KpiCard label={t('overview.kpi.umsatz')}
           value={offSub('kpiUmsatz') ? WITHHELD : `${fmt(currentMetrics.umsatz)} €`}
           sub={offSub('kpiUmsatz') ?? t('overview.kpi.vsPrevMonth')}
@@ -1292,7 +1294,7 @@ const OverviewPage: React.FC = () => {
               { label: t('overview.fleet.problems'), value: fleetIssues, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
               { label: t('overview.fleet.repaired'), value: fleetRepaired, color: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
             ].map(s => (
-              <div key={s.label} className="p-3 rounded-xl text-center" style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+              <div key={s.label} className="min-w-0 rounded-xl p-2 text-center sm:p-3" style={{ background: s.bg, border: `1px solid ${s.border}` }}>
                 <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
                 <p className="text-xs font-medium mt-0.5" style={{ color: s.color }}>{s.label}</p>
               </div>

@@ -85,7 +85,7 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
             </h2>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{companyName || t('common.unknown')}</p>
           </div>
-          <button onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
+          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
         </div>
 
         <div className="p-5 space-y-4">

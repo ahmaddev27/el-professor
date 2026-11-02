@@ -264,7 +264,7 @@ export function DataTable<Row>({
         tabIndex={0}
         aria-busy={loading || undefined}
         className={cn(
-          'overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+          'relative overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
           // Paint containment, and only where the caller caps the height.
           //
           // Measured in Chrome 141 on the Fahrtenanalyse's 118 findings (8265 px

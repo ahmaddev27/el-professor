@@ -236,7 +236,7 @@ export default function WerkstattCheckModal({
               {check ? t('fleet.editCheck') : t('fleet.newWerkstattCheck')}
             </h2>
           </div>
-          <button
+          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
             onClick={onClose}
             style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
@@ -344,7 +344,7 @@ export default function WerkstattCheckModal({
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
               {t('common.status')} *
             </label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
               <button
                 type="button"
                 onClick={() => setStatus('positive')}

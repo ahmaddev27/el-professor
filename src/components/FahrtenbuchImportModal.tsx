@@ -768,7 +768,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               </p>
             </div>
           </div>
-          <button onClick={handleClose} style={{ color: 'var(--text-tertiary)' }}>
+          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={handleClose} style={{ color: 'var(--text-tertiary)' }}>
             <X size={20} />
           </button>
         </div>

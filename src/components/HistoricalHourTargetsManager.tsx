@@ -468,7 +468,7 @@ export default function HistoricalHourTargetsManager({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg transition-colors hover:opacity-70"
+          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors hover:opacity-70"
             style={{ color: 'var(--text-secondary)' }}>
             <X size={18} />
           </button>

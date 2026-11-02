@@ -859,14 +859,14 @@ export function NotesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('notes.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
             {t('notes.subtitle')}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canCatchUp && (
             <Button
               variant="secondary"
@@ -938,10 +938,10 @@ export function NotesPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Calendar className="w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
             <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('notes.timeFilter')}</span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {(['all','date','week','month'] as FilterMode[]).map(mode => (
                 <button key={mode}
                   onClick={() => setFilterMode(mode)}
@@ -957,7 +957,7 @@ export function NotesPage() {
           </div>
 
           {filterMode === 'date' && (
-            <div className="flex items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
+            <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
               <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={inputStyle} />
               <button onClick={() => setSelectedDate(format(new Date(), 'yyyy-MM-dd'))}
                 className="px-3 py-2 rounded-lg text-sm"
@@ -969,7 +969,7 @@ export function NotesPage() {
           )}
 
           {(filterMode === 'week' || filterMode === 'month') && (
-            <div className="flex items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
+            <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
               <button onClick={() => handleMonthChange('prev')} className="p-2 rounded-lg"
                 style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -1081,12 +1081,12 @@ export function NotesPage() {
                   )}
                 </div>
                 {mayEdit && <div className="flex gap-2 ml-2 flex-shrink-0">
-                  <button onClick={() => handleEdit(note)} className="p-1 rounded" style={{ color: 'var(--accent-text)' }}
+                  <button onClick={() => handleEdit(note)} className="p-1 rounded inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--accent-text)' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button onClick={() => handleDelete(note.id)} className="p-1 rounded" style={{ color: 'var(--danger)' }}
+                  <button onClick={() => handleDelete(note.id)} className="p-1 rounded inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--danger)' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <Trash2 className="w-4 h-4" />
@@ -1117,7 +1117,7 @@ export function NotesPage() {
               <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {editingNote ? t('notes.edit') : t('notes.new')}
               </h2>
-              <button onClick={handleCloseModal} style={{ color: 'var(--text-tertiary)' }}
+              <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={handleCloseModal} style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}>
                 <X className="w-6 h-6" />

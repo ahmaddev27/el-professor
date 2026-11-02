@@ -30,7 +30,7 @@ export const buttonVariants = cva(
         'icon-sm': 'size-8 [@media(pointer:coarse)]:size-10',
       },
     },
-    compoundVariants: [{ variant: 'link', className: 'h-auto px-0 [@media(pointer:coarse)]:h-auto' }],
+    compoundVariants: [{ variant: 'link', className: 'h-auto px-0 [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-10' }],
     defaultVariants: { variant: 'primary', size: 'md' },
   },
 );
