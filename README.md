@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **Toasts are centred and stack above every dialog (02.11.2026, PR against `staging`, no migration, nothing on production).** A message raised while a form was open used to be painted underneath the Sheet at every width, so Save on an incomplete receipt appeared to do nothing.
+>
 > **Driver e-mail languages and the reminder (02.11.2026, PR against `staging`, one migration, nothing on production).** Turkish and Russian join Arabic, English and German; the default stays English. The weekly reminder now asks a driver to upload receipts, and no longer names a Fahrtenbuch or cash. The Turkish and Russian copy has not been read by a native speaker.
 >
 > **External audit round 6 (30.10.2026, PR against `staging`, no migration, nothing on production).** Empty drives are now records of their own, in a separate operational report. A ride is accepted only when its gap holds road time + 45 s + a configurable margin. A shift under 240 minutes is refused when it is scheduled (S38). Declined orders leave the Fahrtenbuch report. VALIDATED_FOR_EXPORT is a verdict of its own, separate from generation. September and October 2026 were generated from the real screen for the DEMO company: both are `VALIDATED_FOR_EXPORT`, pass VERIFY, and show 0 warnings and 0 unverifiable pairs in the independent OSRM re-check. Details: `Docs/audit/round6/`.
