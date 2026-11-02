@@ -6624,7 +6624,7 @@ export const de = {
   'inc.uber.period.tooManyDays':       'Höchstens {max} Tage auf einmal; gewählt sind {count}. Bitte weniger Tage wählen.',
   'inc.uber.tab.daily':                'Täglich',
   'settings.abrSchedule.preview.manager.goesAddress': 'Übersicht geht an die hinterlegte Benachrichtigungsadresse.',
-  'settings.abrSchedule.reminder.hint':    'Jeder aktive Fahrer mit hinterlegter E-Mail-Adresse bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Sie nennt keine Zahlen und fragt nur, ob noch ein Fahrtenbuch, Bargeld oder Barbelege abzugeben sind. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
+  'settings.abrSchedule.reminder.hint':    'Jeder aktive Fahrer mit hinterlegter E-Mail-Adresse bekommt zum gewählten Zeitpunkt vor dem Versand eine kurze E-Mail ohne Beträge, auch der Abend davor ist möglich. Sie nennt keine Zahlen und bittet nur darum, noch offene Belege hochzuladen. Gilt nur, wenn der Versand an die Fahrer eingeschaltet ist.',
   'settings.abrSchedule.reminder.label':   'Fahrer vor dem Versand erinnern',
   'settings.abrSchedule.reminder.lead':    'Erinnerung vor dem Versand',
   'settings.abrSchedule.reminder.leadOption': '{minutes} Minuten vorher',

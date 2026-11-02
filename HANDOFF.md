@@ -1,8 +1,18 @@
 # Handoff
 
-Last updated: **30.10.2026**
+Last updated: **02.11.2026**
 
-- **30.10.2026 (latest) — external audit round 6** (branch `feat/fleetbook-round6`, PR against `staging`, no migration, nothing on production).
+- **02.11.2026 (latest) — Turkish and Russian as driver e-mail languages, and the reminder asks for receipts only** (branch `feat/driver-languages-receipts-reminder`, PR against `staging`, one migration, nothing on production).
+  - **The languages:** `tr` and `ru` join `drivers.preferred_language`. `20261102110000` widens the CHECK, `MAIL_LANGUAGES` and `DRIVER_LANGUAGES` move with it, and `driver-mail-copy.ts` has a full table for each.
+    - The default stays English. The CHECK only widens and the previous release reads an unknown language as English, so there is no epoch bump.
+    - Figures and dates stay German in every language.
+    - **Nobody who reads Turkish or Russian natively has read these tables.** The same is still true of the Arabic one.
+  - **The reminder (the owner, 02.11.2026, on a mail as it reached a driver):** `reminder.handIn` asks the driver to upload receipts. It no longer names a Fahrtenbuch or cash, in any language.
+    - `reminder.ignore` and the second sentence of `reminder.when` moved with it: "handed in everything" and "anything that arrives after that" ask for the same things by another word. The owner repeated that the mail is about receipts only.
+    - The settings hint `settings.abrSchedule.reminder.hint` described the old sentence and moved too.
+  - **A dated test broke every branch, and this PR fixes it:** `FixedCostsManagement.writeRefusal.test.ts` hard-coded a row of October 2026, and the screen only opens the current month, so from 01.11.2026 its delete button was not on screen and all three tests failed with nothing having changed. Its clock is now pinned to October (control: pinned to November, the same three fail). The product was never wrong.
+  - **Gates:** the five affected test files pass (110 tests), typecheck 165 at baseline, and 8 mutation controls are all caught (the old sentence back, Fahrtenbuch in Turkish, the old way out, each language dropped from a list or the CHECK, a missing month, a German word in the Russian table).
+- **30.10.2026 — external audit round 6** (branch `feat/fleetbook-round6`, PR against `staging`, no migration, nothing on production).
   - **What it delivers:**
     - Empty drives become records of their own.
     - Scheduling prevents violations instead of detecting them afterwards.

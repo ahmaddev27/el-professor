@@ -35,7 +35,7 @@ const reminder = (language: MailLanguage) => renderReminderMail({
 
 const NUMBERS = ['1.506,95 €', '112,00 €', '1.394,95 €', '11,3 %', '31.08.2026 – 06.09.2026'];
 
-describe.each(['de', 'en', 'ar'] as const)('the Abrechnung in %s', (language) => {
+describe.each(['de', 'en', 'ar', 'tr', 'ru'] as const)('the Abrechnung in %s', (language) => {
   it('keeps every figure and date in German format, in html and text', () => {
     const mail = abrechnung(language);
     for (const figure of NUMBERS) {
@@ -131,9 +131,40 @@ describe('Arabic', () => {
   });
 });
 
+describe.each([
+  ['tr', 'Merhaba Nora Vogt,', 'Teslim edilecek tutar: 1.394,95 €', 'Hafta 5 - Ağustos 2026', 'Alacağınız: 120,00 €', 'Taksi ve şoförlü'],
+  ['ru', 'Здравствуйте, Nora Vogt!', 'К сдаче: 1.394,95 €', 'Неделя 5 - Август 2026', 'К получению: 120,00 €', 'Управление зарплатой'],
+] as const)('%s', (language, greeting, owes, week, credit, footer) => {
+  it('is written in that language, left-to-right, and none of it is German', () => {
+    const mail = abrechnung(language);
+    expect(mail.html).toContain(`<html lang="${language}"`);
+    expect(mail.html).not.toContain('dir="rtl"');
+    expect(mail.text).toContain(greeting);
+    expect(mail.text).toContain(owes);
+    expect(mail.subject).toContain(week);
+    expect(mail.html).toContain(footer);
+    expect(mail.text).toContain(footer);
+    expect(mail.html).not.toMatch(/Abzugeben|Hallo|Woche|Bargeld|Lohn- und/);
+  });
+
+  it('tells the credit case apart without a minus', () => {
+    const mail = abrechnung(language, { figures: { cash: 80, belege: 200, difference: -120, belegeCount: 4, tankenquote: null } });
+    expect(mail.text).toContain(credit);
+    expect(mail.text).not.toContain('-120,00');
+  });
+
+  it('builds the reminder with its time, and no German', () => {
+    const mail = reminder(language);
+    expect(mail.text).toContain('08:00');
+    expect(mail.text).toContain(week);
+    expect(mail.text).not.toMatch(/Uhr|Fahrtenbuch|Hallo/);
+    expect(mail.html).not.toContain('dir="rtl"');
+  });
+});
+
 describe('the reminder', () => {
   it('states no amount in any language', () => {
-    for (const language of ['de', 'en', 'ar'] as const) {
+    for (const language of ['de', 'en', 'ar', 'tr', 'ru'] as const) {
       const mail = reminder(language);
       for (const part of [mail.html, mail.text, mail.subject]) expect(part).not.toMatch(/€|\d,\d\d/);
     }
