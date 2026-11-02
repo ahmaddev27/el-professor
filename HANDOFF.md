@@ -11,6 +11,7 @@ Last updated: **02.11.2026**
     - `reminder.ignore` moved with it, because "handed in everything" asks for the same things by another word.
     - The settings hint `settings.abrSchedule.reminder.hint` described the old sentence and moved too.
     - `reminder.when` was left alone: "anything that arrives after that" asks for nothing.
+  - **A dated test broke every branch, and this PR fixes it:** `FixedCostsManagement.writeRefusal.test.ts` hard-coded a row of October 2026, and the screen only opens the current month, so from 01.11.2026 its delete button was not on screen and all three tests failed with nothing having changed. Its clock is now pinned to October (control: pinned to November, the same three fail). The product was never wrong.
   - **Gates:** the five affected test files pass (110 tests), typecheck 165 at baseline, and 8 mutation controls are all caught (the old sentence back, Fahrtenbuch in Turkish, the old way out, each language dropped from a list or the CHECK, a missing month, a German word in the Russian table).
 - **30.10.2026 — external audit round 6** (branch `feat/fleetbook-round6`, PR against `staging`, no migration, nothing on production).
   - **What it delivers:**

@@ -46,6 +46,12 @@ vi.mock('./ui', async importOriginal => {
   };
 });
 
+// The screen opens on the current month and ROW belongs to October 2026, so the
+// clock is pinned to that month: unpinned, the row left the screen on 01.11.2026
+// and this file failed for every branch with nothing having changed. Only Date is
+// faked, so the renderer's timers still run.
+vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-15T12:00:00Z') });
+
 vi.stubGlobal('requestAnimationFrame', (cb: () => void) => setTimeout(cb, 0));
 vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id));
 const eventTarget = () => ({ addEventListener: () => {}, removeEventListener: () => {} });
