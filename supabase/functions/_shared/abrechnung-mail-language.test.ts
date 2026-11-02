@@ -66,14 +66,14 @@ describe('English', () => {
     const owing = abrechnung('en');
     expect(owing.subject).toBe('Settlement Week 5 - August 2026 – Y&A Mobility');
     expect(owing.text).toContain('Hello Nora Vogt,');
-    expect(owing.text).toContain('To hand in: 1.394,95 €');
+    expect(owing.text).toContain('To hand over: 1.394,95 €');
     expect(owing.html).not.toContain('Abzugeben');
     const credit = abrechnung('en', {
       figures: { cash: 80, belege: 200, difference: -120, belegeCount: 4, tankenquote: null },
     });
     expect(credit.text).toContain('Credit: 120,00 €');
     expect(credit.text).not.toContain('-120,00');
-    expect(credit.text).not.toContain('Fuel share');
+    expect(credit.text).not.toContain('Fuel cost share');
   });
 
   it('is left-to-right, with the English footer', () => {
@@ -104,8 +104,8 @@ describe('Arabic', () => {
     expect(html).toContain('<table role="presentation" dir="rtl" style="width:100%');
     expect(html).toContain('text-align:left;font-size:14px;');
     expect(html).not.toContain('text-align:right');
-    expect(html).toContain('<span dir="ltr" style="unicode-bidi:isolate;">1.506,95 €</span>');
-    expect(html).toContain('<span dir="ltr" style="unicode-bidi:isolate;">31.08.2026 – 06.09.2026</span>');
+    expect(html).toContain('<span dir="ltr" style="unicode-bidi:isolate;white-space:nowrap;">1.506,95 €</span>');
+    expect(html).toContain('<span dir="ltr" style="unicode-bidi:isolate;white-space:nowrap;">31.08.2026 – 06.09.2026</span>');
   });
 
   it('isolates names so Latin text cannot reorder the sentence', () => {
@@ -133,7 +133,7 @@ describe('Arabic', () => {
 
 describe.each([
   ['tr', 'Merhaba Nora Vogt,', 'Teslim edilecek tutar: 1.394,95 €', 'Hafta 5 - Ağustos 2026', 'Alacağınız: 120,00 €', 'Taksi ve şoförlü'],
-  ['ru', 'Здравствуйте, Nora Vogt!', 'К сдаче: 1.394,95 €', 'Неделя 5 - Август 2026', 'К получению: 120,00 €', 'Управление зарплатой'],
+  ['ru', 'Здравствуйте, Nora Vogt!', 'Нужно сдать: 1.394,95 €', 'Неделя 5 - Август 2026', 'К получению: 120,00 €', 'Управление зарплатой'],
 ] as const)('%s', (language, greeting, owes, week, credit, footer) => {
   it('is written in that language, left-to-right, and none of it is German', () => {
     const mail = abrechnung(language);
