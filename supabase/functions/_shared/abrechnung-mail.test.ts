@@ -218,11 +218,12 @@ describe('renderReminderMail', () => {
     appUrl: 'https://app.elprofessor.eu',
   });
 
-  it('says which week, asks for whatever is outstanding, and when the figures go out', () => {
+  it('says which week, asks for receipts only, and when the figures go out', () => {
     const { text } = reminder();
     expect(text).toContain('Woche 5 - August 2026');
     expect(text).toContain('31.08.2026 – 06.09.2026');
-    expect(text).toContain('Fahrtenbuch, Bargeld oder Barbelege');
+    expect(text).toContain('noch Belege hast, lade sie bitte jetzt hoch');
+    expect(text).not.toMatch(/Fahrtenbuch|Bargeld|Barbeleg/);
     expect(text).toContain('08:00 Uhr');
   });
 

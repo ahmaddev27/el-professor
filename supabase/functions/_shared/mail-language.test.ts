@@ -14,7 +14,8 @@ describe('resolveMailLanguage', () => {
     expect(DEFAULT_MAIL_LANGUAGE).toBe('en');
   });
 
-  it('keeps the three languages we write', () => {
+  it('keeps every language we write, Turkish and Russian included', () => {
+    expect([...MAIL_LANGUAGES].sort()).toEqual(['ar', 'de', 'en', 'ru', 'tr']);
     for (const code of MAIL_LANGUAGES) expect(resolveMailLanguage(code)).toBe(code);
   });
 
@@ -39,6 +40,8 @@ describe('bidirectional helpers', () => {
   it('leave left-to-right text byte for byte alone', () => {
     expect(ltrRunHtml('506,95 €', 'en')).toBe('506,95 €');
     expect(ltrRunHtml('506,95 €', 'de')).toBe('506,95 €');
+    expect(ltrRunHtml('506,95 €', 'tr')).toBe('506,95 €');
+    expect(ltrRunText('506,95 €', 'ru')).toBe('506,95 €');
     expect(nameRunHtml('Y&amp;A', 'de')).toBe('Y&amp;A');
     expect(ltrRunText('506,95 €', 'en')).toBe('506,95 €');
   });

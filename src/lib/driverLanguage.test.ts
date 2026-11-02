@@ -41,6 +41,8 @@ describe('the three lists of driver languages', () => {
   it('name each language in itself', () => {
     expect(Object.keys(DRIVER_LANGUAGE_NAMES).sort()).toEqual([...DRIVER_LANGUAGES].sort());
     expect(DRIVER_LANGUAGE_NAMES.ar).toBe('العربية');
+    expect(DRIVER_LANGUAGE_NAMES.tr).toBe('Türkçe');
+    expect(DRIVER_LANGUAGE_NAMES.ru).toBe('Русский');
   });
 });
 
@@ -48,6 +50,8 @@ describe('toDriverLanguage / mapDriverRow', () => {
   it('falls back to English for anything unknown', () => {
     for (const value of [undefined, null, '', 'fr', 3]) expect(toDriverLanguage(value)).toBe('en');
     expect(toDriverLanguage('ar')).toBe('ar');
+    expect(toDriverLanguage('tr')).toBe('tr');
+    expect(toDriverLanguage('ru')).toBe('ru');
   });
 
   it('carries the stored language onto the driver, English when the row has none', () => {
