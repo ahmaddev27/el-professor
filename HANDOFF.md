@@ -16,6 +16,8 @@ Last updated: **02.11.2026**
     - The German mail said "du" everywhere but "Ihres Unternehmens" in the note.
     - Turkish "itibarıyla" means "as of", not "at".
     - The fuel figure is a cost share, so its label says so.
+    - In a Turkish mail CSS uppercased the company name by Turkish rules ("Mobility" became "MOBİLİTY"), seen only in the render. The eyebrow keeps German rules there.
+    - **The month name stays translated in each language** (the owner, 02.11.2026). This answers the question open since 19.10.2026.
     - Rejected from the review: "Ваш" is capitalised because it opens the sentence, and Turkish "Bu" because the greeting is its own paragraph.
   - **A dated test broke every branch, and this PR fixes it:** `FixedCostsManagement.writeRefusal.test.ts` hard-coded a row of October 2026, and the screen only opens the current month, so from 01.11.2026 its delete button was not on screen and all three tests failed with nothing having changed. Its clock is now pinned to October (control: pinned to November, the same three fail). The product was never wrong.
   - **Gates:** the five affected test files pass (110 tests), typecheck 165 at baseline, and 8 mutation controls are all caught (the old sentence back, Fahrtenbuch in Turkish, the old way out, each language dropped from a list or the CHECK, a missing month, a German word in the Russian table).

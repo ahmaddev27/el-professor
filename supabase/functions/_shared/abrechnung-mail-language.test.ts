@@ -147,6 +147,12 @@ describe.each([
     expect(mail.html).not.toMatch(/Abzugeben|Hallo|Woche|Bargeld|Lohn- und/);
   });
 
+  it('uppercases the company name by German rules, not by the language of the mail', () => {
+    // Turkish CSS uppercasing turns i into a dotted capital: "Mobility" would read "MOBİLİTY".
+    const eyebrow = /<p( lang="de")? style="[^"]*text-transform:uppercase[^"]*">/.exec(abrechnung(language).html);
+    expect(eyebrow?.[1]).toBe(language === 'tr' ? ' lang="de"' : undefined);
+  });
+
   it('tells the credit case apart without a minus', () => {
     const mail = abrechnung(language, { figures: { cash: 80, belege: 200, difference: -120, belegeCount: 4, tankenquote: null } });
     expect(mail.text).toContain(credit);
