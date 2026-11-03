@@ -404,7 +404,7 @@ export default function MonatsplanungDriverPool({
                       {missing.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {missing.map(m => (
-                            <Badge key={m} tone="caution">
+                            <Badge key={m} tone="caution" className="whitespace-normal">
                               <AlertTriangle aria-hidden /> {t(m)}
                             </Badge>
                           ))}
@@ -432,7 +432,7 @@ function ChipBtn({
   icon?: React.ReactNode;
 }) {
   return (
-    <Button variant="secondary" size="sm" onClick={onClick}>
+    <Button variant="secondary" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left" onClick={onClick}>
       {icon}
       {children}
     </Button>
@@ -471,7 +471,7 @@ function Tag({
   children: React.ReactNode;
   tone?: 'primary' | 'warning' | 'owner';
 }) {
-  return <Badge tone={tone ? TAG_TONE[tone] : 'neutral'}>{children}</Badge>;
+  return <Badge tone={tone ? TAG_TONE[tone] : 'neutral'} className="whitespace-normal">{children}</Badge>;
 }
 
 function Field({
@@ -486,8 +486,8 @@ function Field({
   full?: boolean;
 }) {
   return (
-    <div className={full ? 'sm:col-span-2' : ''}>
-      <span className="mr-1 inline-flex items-center gap-1 text-fg-muted [&_svg]:size-3 [&_svg]:shrink-0">
+    <div className={`min-w-0 [overflow-wrap:anywhere] ${full ? 'sm:col-span-2' : ''}`}>
+      <span className="mr-1 inline-flex max-w-full items-center gap-1 text-fg-muted [&_svg]:size-3 [&_svg]:shrink-0">
         {icon}
         {label}:
       </span>

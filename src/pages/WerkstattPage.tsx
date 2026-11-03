@@ -284,7 +284,7 @@ export default function WerkstattPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-xl" style={{ background: 'var(--warning-subtle)' }}>
             <Wrench className="w-7 h-7" style={{ color: 'var(--warning)' }} />
@@ -294,7 +294,7 @@ export default function WerkstattPage() {
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.subtitle')}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleExport}
             disabled={loadFailed !== null}
@@ -324,11 +324,11 @@ export default function WerkstattPage() {
 
       <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Calendar className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
             <button
               onClick={() => handleMonthChange('prev')}
-              className="px-3 py-1 rounded-lg text-sm"
+              className="px-3 py-1 rounded-lg text-sm [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
@@ -338,14 +338,14 @@ export default function WerkstattPage() {
             </div>
             <button
               onClick={() => handleMonthChange('next')}
-              className="px-3 py-1 rounded-lg text-sm"
+              className="px-3 py-1 rounded-lg text-sm [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
             >→</button>
             <button
               onClick={() => setSelectedMonth(new Date())}
-              className="px-3 py-1 rounded-lg text-xs"
+              className="px-3 py-1 rounded-lg text-xs [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
               style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
@@ -363,7 +363,7 @@ export default function WerkstattPage() {
 
           <div className="flex-1" />
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {statusButtons.map(btn => (
               <button
                 key={btn.key}

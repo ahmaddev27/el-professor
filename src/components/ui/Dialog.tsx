@@ -12,7 +12,7 @@ import { cn } from './cn';
 const scrimClass = 'bg-[rgb(5_8_16/0.55)] motion-safe:data-[state=open]:animate-ui-fade-in';
 
 const closeButtonClass = [
-  'absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-control text-fg-subtle transition-colors',
+  'absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-control text-fg-subtle transition-colors [@media(pointer:coarse)]:right-2 [@media(pointer:coarse)]:top-2 [@media(pointer:coarse)]:size-10',
   'hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus',
 ].join(' ');
 

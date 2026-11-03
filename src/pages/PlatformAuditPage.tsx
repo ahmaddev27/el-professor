@@ -448,7 +448,7 @@ const PlatformAuditPage: React.FC = () => {
 const Field: React.FC<{ labelKey: TranslationKey; children: React.ReactNode }> = ({ labelKey, children }) => {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex min-w-0 max-w-full flex-col gap-1">
       <span className="text-[11px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>{t(labelKey)}</span>
       {children}
     </div>
@@ -499,7 +499,7 @@ const Row: React.FC<{ row: AuditRow; expanded: boolean; onToggle: () => void }> 
         </td>
         <td className="px-5 py-3 text-right">
           {hasDetail && (
-            <button onClick={onToggle} className="p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}
+            <button onClick={onToggle} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}
               title={t('admin.audit.details')}>
               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>

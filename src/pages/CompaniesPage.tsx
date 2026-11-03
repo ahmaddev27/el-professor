@@ -483,7 +483,7 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.stepOfTwo', { step })}</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}
+          <button onClick={onClose} className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}><X size={16} /></button>
         </div>
@@ -598,7 +598,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
         <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--border)' }}>
           <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.editTitle', { name: company.name })}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}
+          <button onClick={onClose} className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}><X size={16} /></button>
         </div>
@@ -675,7 +675,7 @@ function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps
       <div className="w-full max-w-md rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
         <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--border)' }}>
           <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.addUser')}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}
+          <button onClick={onClose} className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}><X size={16} /></button>
         </div>
@@ -797,7 +797,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <button onClick={onBack} className="flex items-center gap-1.5 text-sm mb-3 transition-colors" style={{ color: 'var(--text-secondary)' }}
+          <button onClick={onBack} className="[@media(pointer:coarse)]:min-h-10 flex items-center gap-1.5 text-sm mb-3 transition-colors" style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
             onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
             <ArrowLeft size={14} />{t('sa.companies.backToAll')}
@@ -998,7 +998,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       <CompanyModulesCard companyId={company.id} canEdit={canLifecycle} />
 
       {/* Users table */}
-      <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+      <div className="rounded-2xl overflow-x-auto" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
             {usersTotal === null ? t('sa.companies.users') : t('sa.companies.usersCount', { count: usersTotal })}
@@ -1481,7 +1481,7 @@ export default function CompaniesPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+        <div className="rounded-2xl overflow-x-auto" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1532,19 +1532,19 @@ export default function CompaniesPage() {
                     </td>
                     <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1.5 justify-end">
-                        <button onClick={() => setViewingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('sa.companies.details')}
+                        <button onClick={() => setViewingCompany(company)} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('sa.companies.details')}
                           onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
                           onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}>
                           <Eye size={14} />
                         </button>
                         {!isArchived && !isDeleted && (
                           <>
-                            <button hidden={!canLifecycle} onClick={() => setEditingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('common.edit')}
+                            <button hidden={!canLifecycle} onClick={() => setEditingCompany(company)} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('common.edit')}
                               onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
                               onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}>
                               <Edit2 size={14} />
                             </button>
-                            <button hidden={!canOpenCompany} onClick={() => { void handleEnterCompany(company); }} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
+                            <button hidden={!canOpenCompany} onClick={() => { void handleEnterCompany(company); }} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
                               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                               <ExternalLink size={14} />
@@ -1552,7 +1552,7 @@ export default function CompaniesPage() {
                           </>
                         )}
                         {(isArchived || isDeleted) && (
-                          <button hidden={!canLifecycle} onClick={() => handleLifecycleAction(company, 'restore')} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.lifecycle.restore.confirm')}
+                          <button hidden={!canLifecycle} onClick={() => handleLifecycleAction(company, 'restore')} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.lifecycle.restore.confirm')}
                             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                             <RotateCcw size={14} />

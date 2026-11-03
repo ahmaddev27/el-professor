@@ -866,7 +866,7 @@ export default function SuperAdminDashboard() {
                             {canLifecycle && ap === 'approved' && !suspended && (
                               <button
                                 onClick={() => setSuspendConfirm(c)}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors"
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
                                 style={{ borderColor: 'var(--border)', color: 'var(--text-tertiary)' }}
                                 onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--danger)'); (e.currentTarget.style.color = 'var(--danger)'); }}
                                 onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
@@ -884,7 +884,7 @@ export default function SuperAdminDashboard() {
                               <button
                                 onClick={() => handleReactivate(c)}
                                 disabled={approvingId === c.id}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors"
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
                                 style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
                                 {approvingId === c.id ? '…' : t('sa.lifecycle.reactivate.confirm')}
@@ -894,7 +894,7 @@ export default function SuperAdminDashboard() {
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors"
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
                                 style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
                                 {t('sa.dash.approve')}
@@ -904,7 +904,7 @@ export default function SuperAdminDashboard() {
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors"
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
                                 style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
                                 {approvingId === c.id ? '…' : t('sa.dash.approve')}
@@ -932,7 +932,7 @@ export default function SuperAdminDashboard() {
                         <td className="px-4 py-3">
                           <button
                             hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                            className="p-1.5 rounded-lg transition-colors"
+                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
                             onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
@@ -1011,7 +1011,7 @@ export default function SuperAdminDashboard() {
                 { plan: 'advanced' as Plan, count: kpis.advancedCount },
                 { plan: 'premium' as Plan,  count: kpis.premiumCount  },
               ].map(({ plan, count }) => (
-                <div key={plan} className="p-3 rounded-xl text-center" style={{ background: PLAN_BG[plan], border: `1px solid ${PLAN_COLOR[plan]}30` }}>
+                <div key={plan} className="min-w-0 rounded-xl p-2 text-center sm:p-3" style={{ background: PLAN_BG[plan], border: `1px solid ${PLAN_COLOR[plan]}30` }}>
                   <p className="text-xl font-bold" style={{ color: PLAN_COLOR[plan] }}>{count}</p>
                   <p className="text-xs font-semibold mt-0.5" style={{ color: PLAN_COLOR[plan] }}>{PLAN_LABEL[plan]}</p>
                 </div>
@@ -1050,7 +1050,7 @@ export default function SuperAdminDashboard() {
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button
                       hidden={!canOpenCompany} onClick={() => { void enterCompany(item.company as any); }}
-                      className="p-1.5 rounded-lg transition-colors"
+                      className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
                       title={t('sa.dash.openCompany')}
                       onMouseEnter={e => (e.currentTarget.style.background = severityBg)}
@@ -1258,7 +1258,7 @@ export default function SuperAdminDashboard() {
                       const monthly = quote ? quote.amountCents / 100 : bp.monthlyEquivalent;
                       return (
                         <div>
-                          <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          <p className="whitespace-nowrap text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
                             {fmtPrice(monthly)} €<span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('sa.dash.perMonthShort')}</span>
                           </p>
                           {quote?.firstInvoice && (
@@ -1308,7 +1308,7 @@ export default function SuperAdminDashboard() {
                       <button
                         hidden={!canBilling}
                         onClick={() => setManualSubModal(c)}
-                        className="p-1.5 rounded-lg transition-colors"
+                        className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--text-tertiary)' }}
                         title={t('sa.dash.editSubscriptionManually')}
                         onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-subtle)'; e.currentTarget.style.color = 'var(--accent)'; }}
@@ -1318,7 +1318,7 @@ export default function SuperAdminDashboard() {
                       </button>
                       <button
                         hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                        className="p-1.5 rounded-lg transition-colors"
+                        className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
@@ -1369,7 +1369,7 @@ export default function SuperAdminDashboard() {
               </span>
               <button
                 hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                className="p-1.5 rounded-lg transition-colors"
+                className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
                 onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}

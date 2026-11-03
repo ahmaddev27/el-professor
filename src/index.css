@@ -29,6 +29,28 @@
  * (cards, tables, dialogs, sheets) use --radius-surface, badges and avatars are
  * fully round.
  */
+/* A screen-reader label in a scrolled-off table cell is absolutely positioned. With nothing
+   positioned inside its scrolling frame it escapes the frame's clipping, and the whole page
+   gained a sideways scroll. In the base layer, so a frame that is itself fixed or absolute
+   keeps what its own utility says. */
+@layer base {
+  .overflow-x-auto, .overflow-auto { position: relative; }
+}
+
+/* A select takes its width from its longest option, so one long company name in a filter
+   pushed the whole page past a phone's edge. In a table cell the column has to keep its
+   width from the control, so the cap stops there. */
+select { max-width: 100%; }
+td select, th select { max-width: none; }
+
+/* A field a thumb can hit, on any screen that was not converted one by one. */
+@media (pointer: coarse) {
+  select,
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='hidden']) {
+    min-height: 2.5rem;
+  }
+}
+
 /* @tokens light */
 :root {
   --canvas:         244 246 250;  /* #F4F6FA page background */
