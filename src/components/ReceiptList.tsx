@@ -584,11 +584,11 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       {/* Search, month, week, filters, and both exports — which sit here, next to
           the filters that decide what they hold. The Excel button used to be in
           the page header, two components away from the filter it was supposed to
-          honour, which is how it came to honour none of them. The grid's five
-          tracks are unchanged: the two export buttons share the last one and
-          wrap inside it, so the row narrows instead of pushing the page wider. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_11rem_15rem_auto_auto] lg:items-end">
-        <Field label={t('common.search')} className="sm:col-span-2 lg:col-span-1">
+          honour, which is how it came to honour none of them. A wrapping row and
+          not a grid: fixed tracks left the search box 50 px wide at 1280, drawn
+          under the month field, because nothing could move to a second line. */}
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label={t('common.search')} className="w-full min-w-0 sm:w-auto sm:min-w-72 sm:flex-1">
           <div className="relative">
             <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
             <Input
@@ -601,7 +601,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           </div>
         </Field>
 
-        <Field label={t('common.month')}>
+        <Field label={t('common.month')} className="w-full sm:w-44">
           <Input
             type="month"
             value={filters.selectedMonth}
@@ -609,7 +609,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           />
         </Field>
 
-        <Field label={t('common.week')}>
+        <Field label={t('common.week')} className="w-full sm:w-60">
           <NativeSelect
             value={filters.selectedWeek}
             onChange={(e) => handleWeekChange(Number(e.target.value))}
@@ -632,7 +632,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           onClick={() => setShowFilters(!showFilters)}
           aria-expanded={showFilters}
           aria-controls={filterPanelId}
-          className={cn(hasActiveFilters && 'border-brand/40 bg-brand-soft text-brand-text hover:bg-brand-soft')}
+          className={cn('w-full sm:w-auto', hasActiveFilters && 'border-brand/40 bg-brand-soft text-brand-text hover:bg-brand-soft')}
         >
           <Filter aria-hidden />
           {t('rec.filter')}
@@ -643,10 +643,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           )}
         </Button>
 
-        {/* One cell, two files, one row set. flex-wrap is what keeps the row from
-            growing: the cell's min-content is the wider button alone, so a narrow
-            viewport puts them on two lines instead of pushing the page past its
-            width — an `auto` grid track holding two unwrapped buttons would. */}
+        {/* Two files, one row set. */}
         <div className="flex flex-wrap items-end gap-3">
           <Button
             variant="secondary"

@@ -468,7 +468,7 @@ export default function HistoricalHourTargetsManager({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg transition-colors hover:opacity-70"
+          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors hover:opacity-70"
             style={{ color: 'var(--text-secondary)' }}>
             <X size={18} />
           </button>
@@ -809,7 +809,7 @@ export function HourTargetsTrigger({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:brightness-110"
+      className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:brightness-110 [@media(pointer:coarse)]:min-h-10"
       style={{ background: 'rgba(37,99,235,0.08)', color: '#2563eb', border: '1px solid rgba(37,99,235,0.2)' }}>
       <Database size={13} />
       {t('hrt.triggerLabel')}

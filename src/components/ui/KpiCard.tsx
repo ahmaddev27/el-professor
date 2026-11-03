@@ -51,7 +51,13 @@ export function KpiCard({ label, value, icon: Icon, trend, caption, loading = fa
         </>
       ) : (
         <>
-          <p className="text-[28px] font-semibold leading-none tracking-tight text-fg tabular-nums">{value}</p>
+          {/* The figure sizes itself to its card: a fixed 28 px ran out of a two-column
+              card on a phone. The wrapper is the query container rather than the card,
+              because a container takes no width from its content and a card in a flex
+              row has to keep sizing from its label. */}
+          <div className="[container-type:inline-size]">
+            <p className="text-[clamp(1.0625rem,14cqi,1.75rem)] font-semibold leading-none tracking-tight text-fg tabular-nums">{value}</p>
+          </div>
           {trend || caption ? (
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
               {trend && TrendIcon ? (

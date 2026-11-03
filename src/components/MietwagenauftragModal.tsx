@@ -590,7 +590,7 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
               </p>
             </div>
           </div>
-          <button
+          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
             onClick={onClose}
             style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}

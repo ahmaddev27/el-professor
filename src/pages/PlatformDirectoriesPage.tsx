@@ -375,7 +375,7 @@ const PlatformDirectoriesPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
+      <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
         {TABS.map(({ id, icon: Icon, labelKey }) => (
           <button
             key={id}

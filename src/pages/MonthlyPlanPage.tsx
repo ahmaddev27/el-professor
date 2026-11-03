@@ -53,10 +53,17 @@ import {
   type PlanNote,
   type PlanTripInput,
   type PlanViolation,
+  type PlanWarning,
   type RejectedTrip,
   type ValidationResult,
   type VehicleOverlap,
 } from '../utils/monthlyPlan';
+import {
+  describePlanViolation,
+  describePlanWarning,
+  WARNING_KEYS,
+  type PlanMessageContext,
+} from '../utils/monthlyPlanMessages';
 import {
   buildPlanSummaryRows,
   groupWarnings,
@@ -230,17 +237,6 @@ const VIOLATION_KEYS: Record<PlanViolation['rule'], TranslationKey> = {
   assigned_inside_exclusion: 'mplan.violation.assignedInsideExclusion',
   vehicle_switch_gap: 'mplan.violation.vehicleSwitchGap',
   pin_ignored: 'mplan.violation.pinIgnored',
-};
-
-/** Every warning kind `validate.ts` can produce. A kind with no label is a bug. */
-const WARNING_KEYS: Record<string, TranslationKey> = {
-  unassigned_block: 'mplan.warn.unassignedBlock',
-  unmet_mandatory_note: 'mplan.warn.unmetMandatoryNote',
-  note_conflict: 'mplan.warn.noteConflict',
-  contested_block: 'mplan.warn.contestedBlock',
-  pin_conflict: 'mplan.warn.pinConflict',
-  rejected_trip: 'mplan.warn.rejectedTrip',
-  source_overlap: 'mplan.warn.sourceOverlap',
 };
 
 /** The rides the engine reads, and the original driver kept for the suggestion. */
@@ -990,6 +986,16 @@ export default function MonthlyPlanPage() {
       (id ? plan?.drivers.find(d => d.id === id)?.name ?? id : null),
     [plan],
   );
+
+  /** A finding's ids as a person reads them. An id the plan no longer knows is never printed. */
+  const findingContext = useMemo<PlanMessageContext>(() => ({
+    t,
+    driverName: driverId => plan?.drivers.find(d => d.id === driverId)?.name ?? t('mplan.finding.unknownDriver'),
+    blockLabel: blockId => (blockId && plan?.blocks.some(b => b.id === blockId)
+      ? blockLabel(blockId)
+      : t('mplan.finding.unknownBlock')),
+    vehicleLabel: vehicleId => plan?.blocks.find(b => b.vehicleId === vehicleId)?.vehicleIdentifier ?? null,
+  }), [t, blockLabel, plan]);
 
   /**
    * Step 3's table: the blocks as the engine built them.
@@ -1900,8 +1906,7 @@ export default function MonthlyPlanPage() {
                 {plan.validation.violations.slice(0, VIOLATIONS_SHOWN).map((v, index) => (
                   <li key={`${v.rule}-${v.blockId ?? ''}-${v.driverId ?? ''}-${index}`}>
                     <span className="font-medium">{t(VIOLATION_KEYS[v.rule])}</span>
-                    {/* The engine's own words, untranslated and exact. */}
-                    <span className="text-[13px]"> — {v.detail}</span>
+                    <span className="text-[13px]"> — {describePlanViolation(v, findingContext)}</span>
                   </li>
                 ))}
               </ul>
@@ -1953,13 +1958,13 @@ export default function MonthlyPlanPage() {
                     <li key={group.kind}>
                       <p className="text-sm font-medium text-fg">
                         {t('mplan.warn.withCount', {
-                          label: WARNING_KEYS[group.kind] ? t(WARNING_KEYS[group.kind]) : group.kind,
+                          label: t(WARNING_KEYS[group.kind as PlanWarning['kind']]),
                           count: group.count,
                         })}
                       </p>
                       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[13px] text-fg-muted">
-                        {group.samples.map((sample, index) => (
-                          <li key={`${group.kind}-${index}`}>{sample}</li>
+                        {group.items.map((warning, index) => (
+                          <li key={`${group.kind}-${index}`}>{describePlanWarning(warning, findingContext)}</li>
                         ))}
                       </ul>
                     </li>

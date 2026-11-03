@@ -296,7 +296,7 @@ function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => 
       <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('codes.details.title')}</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
+          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
             <X size={16} />
           </button>
         </div>
@@ -750,7 +750,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
             </div>
             <button
               onClick={() => load()}
-              className="p-1.5 rounded-lg transition-colors"
+              className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
               style={{ color: 'var(--text-tertiary)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}

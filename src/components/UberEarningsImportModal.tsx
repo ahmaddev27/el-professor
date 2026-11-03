@@ -413,7 +413,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
 
   const busy = stage === 'pulling' || stage === 'importing';
   const rowClass = (selected: boolean) => cn(
-    'flex min-h-10 cursor-pointer items-center gap-3 rounded-control border px-3 py-2 text-sm [@media(pointer:coarse)]:min-h-11',
+    'flex min-h-10 cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-control border px-3 py-2 text-sm [@media(pointer:coarse)]:min-h-11',
     selected ? 'border-brand bg-brand-soft' : 'border-border bg-raised',
   );
   const inputClass = 'size-4 shrink-0 accent-brand [@media(pointer:coarse)]:size-5';

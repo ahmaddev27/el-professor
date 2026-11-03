@@ -495,7 +495,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:opacity-70 transition-opacity">
+          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg hover:opacity-70 transition-opacity">
             <X size={18} style={{ color: 'var(--text-tertiary)' }} />
           </button>
         </div>

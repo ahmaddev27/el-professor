@@ -167,7 +167,7 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
             {dc ? t('codes.discount.edit') : t('codes.discount.new')}
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:opacity-70 transition-opacity" style={{ color: 'var(--text-secondary)' }}>
+          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg hover:opacity-70 transition-opacity" style={{ color: 'var(--text-secondary)' }}>
             <X size={18} />
           </button>
         </div>
@@ -635,7 +635,7 @@ const DiscountCodesManagement: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setModalDc(dc)}
-                            className="p-1.5 rounded-lg transition-opacity hover:opacity-70"
+                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-opacity hover:opacity-70"
                             style={{ color: 'var(--accent)' }}
                             title={t('common.edit')}
                           >
@@ -643,7 +643,7 @@ const DiscountCodesManagement: React.FC = () => {
                           </button>
                           <button
                             onClick={() => handleDelete(dc)}
-                            className="p-1.5 rounded-lg transition-opacity hover:opacity-70"
+                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-opacity hover:opacity-70"
                             style={{ color: 'var(--danger)' }}
                             title={t('common.delete')}
                           >

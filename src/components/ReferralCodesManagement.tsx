@@ -180,7 +180,7 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
     <div className="space-y-4">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Gift size={18} style={{ color: '#10b981' }} />
           <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.referral.title')}</h2>
@@ -349,7 +349,7 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
                               setForm({ ref_code: r.ref_code, name: r.name, description: r.description ?? '' });
                               setShowForm(true);
                             }}
-                            className="p-1.5 rounded-lg transition-colors"
+                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
                             onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
@@ -358,7 +358,7 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
                           </button>
                           <button
                             onClick={() => handleDelete(r)}
-                            className="p-1.5 rounded-lg transition-colors"
+                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--danger-subtle)'); (e.currentTarget.style.color = 'var(--danger)'); }}
                             onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}

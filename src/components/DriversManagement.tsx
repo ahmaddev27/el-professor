@@ -4,6 +4,7 @@ import { Driver, DriverContact } from '../types/receipt';
 import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
+import { useUserDisplayNames } from '../hooks/useUserDisplayNames';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { pageWriteRights } from '../lib/pageWriteRights';
@@ -53,6 +54,12 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
 
   const { t } = useTranslation();
   const exportPicker = useColumnPickerExport();
+  const userNames = useUserDisplayNames();
+  /** The account that created a driver, as a person reads it. Its id means nothing to anyone. */
+  const creatorName = (driver: Driver): string => {
+    if (!userNames) return '…';
+    return (driver.createdBy ? userNames.get(driver.createdBy) : undefined) ?? t('common.unknown');
+  };
   // No cap on how many drivers a company may have (owner, 21.10.2026, and
   // again on 26.10.2026 for cars: billing, never blocking).
   //
@@ -158,7 +165,10 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'createdBy',                     label: t('fleet.createdBy'),              width: 28 },
         { key: 'createdAt',                     label: t('fleet.createdAt'),              width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
-      rows: drivers as unknown as Record<string, unknown>[],
+      rows: drivers.map(driver => ({
+        ...driver,
+        createdBy: (driver.createdBy ? userNames?.get(driver.createdBy) : undefined) ?? t('common.unknown'),
+      })) as unknown as Record<string, unknown>[],
       // The totals row's LABEL, not a figure in the Fahrername column: keyed on
       // the first column it was discarded unrendered, so the file said
       // "Gesamt (N Einträge)" instead. `totals: {}` keeps the row — none of the
@@ -259,8 +269,8 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       id: 'createdBy',
       header: t('fleet.createdBy'),
       cell: driver => (
-        <span className="block max-w-[16rem] truncate text-fg-muted" title={driver.createdBy || undefined}>
-          {driver.createdBy || t('common.unknown')}
+        <span className="block max-w-[16rem] truncate text-fg-muted" title={creatorName(driver)}>
+          {creatorName(driver)}
         </span>
       ),
       hideBelow: 'lg',

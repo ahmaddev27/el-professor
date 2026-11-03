@@ -93,7 +93,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{company.name}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
+          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
             <X size={16} />
           </button>
         </div>

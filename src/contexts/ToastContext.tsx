@@ -165,7 +165,7 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
       </div>
       <button
         onClick={() => onRemove(toast.id)}
-        className="flex-shrink-0 transition-colors"
+        className="flex-shrink-0 transition-colors inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:-m-2"
         style={{ color: 'var(--text-tertiary)' }}
         aria-label={t('common.close')}
       >
