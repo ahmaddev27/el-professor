@@ -79,7 +79,7 @@ const ROUTES = [
 const NEVER_PRESS = /abmeld|sign out|log ?out|export|download|herunterlad|drucken|print|\bpdf\b|excel|csv|hochlad|upload|importier/i;
 
 /** The buttons that move a wizard on. "Apply" is not one of them: the proxy would refuse it, and nothing follows. */
-const FORWARD = /^(Weiter|Next|Bestätigen und Plan erzeugen|Confirm and create plan|Auf Fahrer verteilen|Empfehlung berechnen|Neue Planung starten|Plan bestätigen|Weiter zu den Dokumenten)$/i;
+const FORWARD = /^(Weiter|Next|Continue|Bestätigen und Plan erzeugen|Confirm and generate the plan|Auf Fahrer verteilen|Share out to drivers|Empfehlung berechnen|Calculate recommendation|Neue Planung starten|Start a new plan|Plan bestätigen|Confirm the plan|Weiter zu den Dokumenten|Continue to the documents)$/i;
 
 /** The month the DEMO company's plan can be confirmed for; a later one stops at step 4. */
 const PLAN_MONTH = { 'monatsplan?art=standard': 'November 2026' };
@@ -87,8 +87,8 @@ const PLAN_MONTH = { 'monatsplan?art=standard': 'November 2026' };
 /** A wizard with a fork in it: each list is one way through, pressed in order, then walked forward. */
 const FORKS = {
   'company-planner': [
-    [/^Historischen Abgleich starten$/, /^Mit Brutto-Gehältern starten$/],
-    [/^Historischen Abgleich starten$/, /^Mit Arbeitsstunden starten$/],
+    [/^(Historischen Abgleich starten|Start historical reconciliation)$/, /^(Mit Brutto-Gehältern starten|Start with gross salaries)$/],
+    [/^(Historischen Abgleich starten|Start historical reconciliation)$/, /^(Mit Arbeitsstunden starten|Start with working hours)$/],
   ],
 };
 
@@ -236,7 +236,12 @@ function inspect() {
     const room = r.width - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
     if (el.children.length === 0 && s.whiteSpace !== 'nowrap' && s.textOverflow !== 'ellipsis' && room > 0) {
       const widest = widestWord(text, s);
-      if (widest > room + 3) defects.push({ kind: 'broken', px: Math.round(widest - room), detail: describe(el) });
+      // A word that really broke fills two lines. On one line the ruler is only disagreeing with the
+      // renderer by a pixel or two, as it does for "Wed" over the shift heatmap.
+      const measured = document.createRange();
+      measured.selectNodeContents(el);
+      const onLines = new Set([...measured.getClientRects()].map(rect => Math.round(rect.top))).size;
+      if (onLines > 1 && widest > room + 3) defects.push({ kind: 'broken', px: Math.round(widest - room), detail: describe(el) });
     }
     // Lines of text, not the box's height: a table cell is as tall as the tallest cell in its row.
     const range = document.createRange();

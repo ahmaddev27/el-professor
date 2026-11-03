@@ -7751,7 +7751,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToSelection')}
         </button>
@@ -7896,8 +7896,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {/* ── Step 1: Lohnabrechnung-Zielwerte ──────────────────────────────────── */}
       {step === 1 && (
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-[1_1_16rem]">
               <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.step1Title')}</h2>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.step1Subtitle')}</p>
             </div>

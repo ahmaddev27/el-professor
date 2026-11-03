@@ -141,7 +141,7 @@ export function TripAnalysisSettingsCard({ row, effective, canEdit, onSave, onUs
             tone="caution"
             title={t('ta.settings.missingTitle')}
             action={
-              <Button variant="secondary" size="sm" onClick={() => onUseTestDefault(true)}>
+              <Button variant="secondary" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left" onClick={() => onUseTestDefault(true)}>
                 <FlaskConical aria-hidden />
                 {t('ta.settings.useTestDefault', { minutes: TEST_DEFAULT_MINUTES })}
               </Button>
