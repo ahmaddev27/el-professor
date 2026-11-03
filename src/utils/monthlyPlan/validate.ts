@@ -25,8 +25,11 @@ import type { PlanBlock } from './blocks';
 import {
   findExclusion,
   type AvailabilityResult,
+  type UnmetInclusionReason,
 } from './availability';
-import type { AssignResult, PlanDriverInput } from './assign';
+import type { AssignRefusal, AssignResult, PlanDriverInput } from './assign';
+import type { TripProblem } from './blocks';
+import type { HoursRangeProblem } from './hoursRange';
 
 const MS_PER_MINUTE = 60_000;
 
@@ -44,6 +47,33 @@ export interface PlanViolation {
   blockId: string | null;
   driverId: string | null;
   detail: string;
+  facts?: PlanViolationFacts;
+}
+
+/**
+ * What `detail` was written from, so a screen can word a finding itself. `detail`
+ * stays as it is: it is stored with the plan, in the engine's own terms, and holds
+ * ids and codes a person cannot read. `monthlyPlanMessages.ts` is the reader.
+ */
+export interface PlanViolationFacts {
+  otherBlockId?: string;
+  minutes?: number;
+  switchMinutes?: number;
+  capMinutes?: number;
+  assignedDriverId?: string;
+}
+
+export interface PlanWarningFacts {
+  refusals?: { driverId: string; refusal: AssignRefusal }[];
+  unmetReason?: UnmetInclusionReason;
+  driverIds?: string[];
+  brokenRule?: AssignRefusal;
+  tripProblem?: TripProblem;
+  /** The ride's date as read, so a person can find it. */
+  tripDate?: string | null;
+  vehicleId?: string;
+  minutes?: number;
+  rangeProblems?: HoursRangeProblem[];
 }
 
 export interface PlanWarning {
@@ -62,6 +92,7 @@ export interface PlanWarning {
   driverId?: string;
   noteId?: string;
   tripId?: string;
+  facts?: PlanWarningFacts;
 }
 
 export interface ValidationResult {
@@ -78,7 +109,7 @@ export interface ValidateInput {
   result: AssignResult;
   switchMinutes: number;
   /** §14 diagnostics from the block builder, passed through as warnings. */
-  rejectedTrips?: { tripId: string; problem: string; detail: string }[];
+  rejectedTrips?: { tripId: string; problem: TripProblem; detail: string; tripDate?: string | null }[];
   sourceOverlaps?: { vehicleId: string; firstTripId: string; secondTripId: string; overlapMinutes: number }[];
 }
 
@@ -166,6 +197,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
               blockId: b.id,
               driverId,
               detail: `${Math.round((b.startMs - a.endMs) / MS_PER_MINUTE)} min between ${a.id} and ${b.id}, switch duration is ${switchMinutes}`,
+              facts: { otherBlockId: a.id, minutes: Math.round((b.startMs - a.endMs) / MS_PER_MINUTE), switchMinutes },
             });
           }
           break;
@@ -175,6 +207,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
           blockId: b.id,
           driverId,
           detail: `blocks ${a.id} and ${b.id} overlap`,
+          facts: { otherBlockId: a.id },
         });
       }
     }
@@ -193,6 +226,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
         blockId: null,
         driverId: s.driver.id,
         detail: `${assigned} assigned minutes exceed the cap of ${Math.round(s.range.effectiveMaxHours * 60)}`,
+        facts: { minutes: assigned, capMinutes: Math.round(s.range.effectiveMaxHours * 60) },
       });
     }
   }
@@ -212,6 +246,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
         detail: a
           ? `pinned to ${pin.driverId} but assigned to ${a.driverId}`
           : `pinned to ${pin.driverId} but left unassigned with no reported conflict`,
+        facts: a ? { assignedDriverId: a.driverId } : {},
       });
     }
   }
@@ -225,6 +260,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
       detail: u.refusals.length === 0
         ? 'no selected driver was available'
         : u.refusals.map(r => `${r.driverId}: ${r.refusal}`).join(', '),
+      facts: { refusals: u.refusals },
     });
   }
   for (const u of availability.unmet) {
@@ -233,6 +269,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
       noteId: u.note.id,
       driverId: u.note.driver_id,
       detail: u.reason,
+      facts: { unmetReason: u.reason },
     });
   }
   for (const c of availability.conflicts) {
@@ -248,6 +285,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
         kind: 'contested_block',
         blockId: c.blockId,
         detail: `mandatory claims by ${c.driverIds.join(' and ')}`,
+        facts: { driverIds: c.driverIds },
       });
     }
   }
@@ -258,6 +296,7 @@ export function validatePlan(input: ValidateInput): ValidationResult {
       driverId: c.driverId,
       noteId: c.noteId,
       detail: c.brokenRule,
+      facts: { brokenRule: c.brokenRule },
     });
   }
   /*
@@ -301,18 +340,25 @@ export function validatePlan(input: ValidateInput): ValidationResult {
             detail: `${s.driver.name} hat keinen verwendbaren Stundenrahmen`
                   + `${s.range.problems.length > 0 ? `: ${s.range.problems.join(', ')}` : ''}`
                   + ' und wurde deshalb nicht eingeplant.',
+            facts: { rangeProblems: s.range.problems },
           },
     );
   }
 
   for (const r of input.rejectedTrips ?? []) {
-    warnings.push({ kind: 'rejected_trip', tripId: r.tripId, detail: `${r.problem}: ${r.detail}` });
+    warnings.push({
+      kind: 'rejected_trip',
+      tripId: r.tripId,
+      detail: `${r.problem}: ${r.detail}`,
+      facts: { tripProblem: r.problem, tripDate: r.tripDate ?? null },
+    });
   }
   for (const o of input.sourceOverlaps ?? []) {
     warnings.push({
       kind: 'source_overlap',
       tripId: o.firstTripId,
       detail: `${o.firstTripId} overlaps ${o.secondTripId} on ${o.vehicleId} by ${o.overlapMinutes} min`,
+      facts: { vehicleId: o.vehicleId, minutes: o.overlapMinutes },
     });
   }
 

@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **No engine code, column name or id on a screen (03.11.2026, PR against `staging`, no migration, nothing on production).** The standard plan's notes, the Fahrer table and fourteen dictionary messages printed them.
+>
 > **Every screen measured at 14 sizes (03.11.2026, PR against `staging`, no migration, layout only, nothing on production).** `e2e/responsive-sweep.mjs` found a search box 50 px wide on Belege, 241 px and 499 px of sideways page scroll, and row actions a phone could not reach. See `e2e/README.md`.
 >
 > **Toasts are centred and stack above every dialog (02.11.2026, PR against `staging`, no migration, nothing on production).** A message raised while a form was open used to be painted underneath the Sheet at every width, so Save on an incomplete receipt appeared to do nothing.

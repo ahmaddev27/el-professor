@@ -51,6 +51,7 @@ import type {
   DriverPlanState,
   HoursRangeProblem,
   RangePosition,
+  PlanWarning,
   ValidationResult,
 } from './monthlyPlan';
 
@@ -377,6 +378,8 @@ export interface WarningGroup {
   count: number;
   /** The first few details, so a long list does not fill the screen. */
   samples: string[];
+  /** The same warnings as `samples`, for a screen that words them itself. */
+  items: PlanWarning[];
 }
 
 /**
@@ -392,11 +395,14 @@ export function groupWarnings(validation: ValidationResult, sampleLimit = 5): Wa
   for (const w of validation.warnings) {
     let group = byKind.get(w.kind);
     if (!group) {
-      group = { kind: w.kind, count: 0, samples: [] };
+      group = { kind: w.kind, count: 0, samples: [], items: [] };
       byKind.set(w.kind, group);
     }
     group.count += 1;
-    if (group.samples.length < sampleLimit) group.samples.push(w.detail);
+    if (group.samples.length < sampleLimit) {
+      group.samples.push(w.detail);
+      group.items.push(w);
+    }
   }
   return [...byKind.values()].sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind));
 }

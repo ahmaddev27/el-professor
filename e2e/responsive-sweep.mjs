@@ -17,6 +17,7 @@
  *   broken     a box narrower than one word in it, so the word breaks in the middle
  *   offscreen  a dialog that does not fit, with no way to scroll to its end
  *   tap        on a touch screen, a control too small to press
+ *   rawcode    text a person should not have to read: an engine code or an id
  *
  * With --deep it also walks every tab, moves each wizard forward, and presses every
  * button on the page. What a press opens (a dialog, a panel, another page) is measured,
@@ -252,6 +253,17 @@ function inspect() {
     }
   }
 
+  // A code or an id on the screen means a label is missing somewhere. Inputs hold what was typed.
+  const RAW = /\b[a-z]{2,}(?:_[a-z0-9]+)+\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/;
+  const texts = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  for (let node = texts.nextNode(); node; node = texts.nextNode()) {
+    const match = RAW.exec(node.textContent ?? '');
+    if (!match) continue;
+    const owner = node.parentElement;
+    if (!owner || !visible(owner) || owner.closest('script, style, code, pre, [aria-hidden="true"], .sr-only, option')) continue;
+    defects.push({ kind: 'rawcode', px: 0, detail: `${match[0].slice(0, 40)} in "${(owner.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 50)}"` });
+  }
+
   if (inDialog) {
     const r = scope.getBoundingClientRect();
     const out = Math.max(r.right - vw, -r.left, 0);
@@ -397,6 +409,11 @@ async function pressEverything(page, sizes, report, where, seen) {
     const clicked = await page.locator(PRESSABLE).nth(index).click({ timeout: 2500 }).then(() => true).catch(() => false);
     if (!clicked) continue;
     await page.waitForTimeout(350);
+    // A sheet still sliding in reads as off the screen by its own width.
+    await page.evaluate(() => Promise.race([
+      Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))),
+      new Promise(done => setTimeout(done, 1500)),
+    ])).catch(() => {});
     if (await dialogOpen(page)) {
       await sweep(page, sizes, report, `${where} > ${name.slice(0, 40)}`, true);
     } else if (page.url() !== url) {

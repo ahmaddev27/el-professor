@@ -326,7 +326,8 @@ const AccountPage: React.FC = () => {
             </p>
             <p className="text-sm font-semibold mt-1 flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
               <Building2 size={14} style={{ color: 'var(--accent)' }} />
-              {companyName ?? t('account.company.none')}
+              {/* "No company" is a claim, so it waits for the profile and is only made for an account with none. */}
+              {companyName ?? (profile && !profile.company_id ? t('account.company.none') : '…')}
             </p>
           </div>
         </div>
