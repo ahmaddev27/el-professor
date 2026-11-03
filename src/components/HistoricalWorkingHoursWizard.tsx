@@ -918,7 +918,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
       <div className="flex items-center justify-between pt-2">
         <button
           onClick={onRecompute}
-          className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80"
+          className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10"
           style={{ color: 'var(--text-secondary)' }}
         >
           <ArrowLeft size={15} /> {t('hwh.recompute')}
@@ -1763,10 +1763,10 @@ function RegularDriverAssignmentView({
 
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2 flex-wrap">
-        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToVehicleBlocks')}
         </button>
-        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         <button
@@ -2133,10 +2133,10 @@ function InhaberNonConflictView({
 
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2">
-        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToRegularDrivers')}
         </button>
-        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         {remainingConflictedBlocks.length > 0 && (
@@ -2552,10 +2552,10 @@ function InhaberLongestConflictView({
 
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2">
-        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToOwnerNonConflict')}
         </button>
-        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         {remainingUnassignedBlocks.length > 0 && (
@@ -5884,10 +5884,10 @@ function InhaberFreeWindowSearchView({
 
       {/* Bottom nav */}
       <div className="flex flex-wrap items-center gap-4 pt-2">
-        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToOwnerConflictPick')}
         </button>
-        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
       </div>
@@ -7752,7 +7752,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <ArrowLeft size={15} /> {t('hwh.backToSelection')}
         </button>
         <StepDots current={step} total={5} />
@@ -7984,6 +7984,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                         {['hourly','baseH','nacht25H','nacht40H','sunH','holH'].map(field => (
                           <td key={field} className="px-2 py-1">
                             <input
+                              className="min-w-[5.5rem]"
                               type="text" inputMode="decimal"
                               value={d[field as keyof WzDraft]}
                               disabled={isOwner && field !== 'hourly'}
@@ -8002,14 +8003,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <button onClick={() => setStep(0)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button onClick={() => setStep(0)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
               <ArrowLeft size={15} /> {t('common.back')}
             </button>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={() => setDebugMode(m => !m)}
-                className="text-xs px-2 py-1 rounded-lg transition-colors hover:opacity-80"
+                className="text-xs px-2 py-1 rounded-lg transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10"
                 style={{ color: debugMode ? '#b91c1c' : 'var(--text-secondary)', background: debugMode ? 'rgba(220,38,38,0.07)' : 'transparent', border: `1px solid ${debugMode ? 'rgba(220,38,38,0.3)' : 'var(--border)'}` }}
               >
                 {debugMode ? t('hwh.closeDebugView') : t('hwh.openDebugView')}
@@ -8302,7 +8303,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               </button>
             )}
           </div>
-          <button onClick={() => setStep(1)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <button onClick={() => setStep(1)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
             <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>

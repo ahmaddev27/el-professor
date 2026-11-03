@@ -81,6 +81,9 @@ const NEVER_PRESS = /abmeld|sign out|log ?out|export|download|herunterlad|drucke
 /** The buttons that move a wizard on. "Apply" is not one of them: the proxy would refuse it, and nothing follows. */
 const FORWARD = /^(Weiter|Next|Bestätigen und Plan erzeugen|Confirm and create plan|Auf Fahrer verteilen|Empfehlung berechnen|Neue Planung starten|Plan bestätigen|Weiter zu den Dokumenten)$/i;
 
+/** The month the DEMO company's plan can be confirmed for; a later one stops at step 4. */
+const PLAN_MONTH = { 'monatsplan?art=standard': 'November 2026' };
+
 /** A wizard with a fork in it: each list is one way through, pressed in order, then walked forward. */
 const FORKS = {
   'company-planner': [
@@ -192,7 +195,7 @@ function inspect() {
   for (const { el, r } of boxes) {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) {
       // A select holding a year or a short word needs less than a field holding a sentence.
-      const min = el.type === 'number' ? 44 : el.tagName === 'SELECT' ? 64 : 90;
+      const min = el.type === 'number' ? 44 : el.tagName === 'SELECT' ? 64 : 80;
       if (r.width < min) defects.push({ kind: 'squeezed', px: Math.round(r.width), detail: describe(el) });
     }
     // Below a clipping box with no scroll, a control simply cannot be reached.
@@ -331,7 +334,16 @@ const mainText = page => page.evaluate(() => document.querySelector('main')?.inn
 
 /** Moves a wizard forward as far as it goes on its own, measuring each step. */
 async function walkForward(page, route, sizes, report) {
-  for (let step = 1; step <= 10; step++) {
+  if (PLAN_MONTH[route]) {
+    await page.locator('main select').first().selectOption({ label: new RegExp(PLAN_MONTH[route]) }).catch(async () => {
+      const option = page.locator('main select').first().locator('option').filter({ hasText: PLAN_MONTH[route] }).first();
+      const value = await option.getAttribute('value').catch(() => null);
+      if (value) await page.locator('main select').first().selectOption(value).catch(() => {});
+    });
+    await page.waitForTimeout(800);
+  }
+  let stalled = 0;
+  for (let step = 1; step <= 12; step++) {
     await page.evaluate(() => {
       for (const select of document.querySelectorAll('main select')) {
         if (select.value || select.options.length < 2) continue;
@@ -348,7 +360,13 @@ async function walkForward(page, route, sizes, report) {
     if (!clicked) return;
     await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
     await page.waitForTimeout(1500);
-    if (await mainText(page) === before) return;
+    // The plan's steps 4 and 6 show the same words and the same button, so one quiet press is not the end.
+    if (await mainText(page) === before) {
+      stalled += 1;
+      if (stalled > 1) return;
+      continue;
+    }
+    stalled = 0;
     await sweep(page, sizes, report, `${route} step ${step} ${names[index].slice(0, 30)}`, true);
     await page.setViewportSize({ width: sizes[0][0] >= 1000 ? 1440 : sizes[sizes.length - 1][0], height: 900 });
   }

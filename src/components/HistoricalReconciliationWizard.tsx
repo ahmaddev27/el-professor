@@ -1480,7 +1480,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       <div className="flex items-center justify-between mb-5">
         <button
           onClick={step > 0 ? () => setStep(s => s - 1) : onBack}
-          className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80"
+          className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10"
           style={{ color: 'var(--text-secondary)' }}
         >
           <ArrowLeft size={15} />

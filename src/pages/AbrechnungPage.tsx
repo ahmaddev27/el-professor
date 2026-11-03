@@ -1237,15 +1237,15 @@ export function AbrechnungPage() {
       neutral: 'text-fg',
     }[tone];
     return (
-      <div className={cn('flex items-center justify-between gap-3 rounded-surface border px-4 py-3', fill)}>
-        <div className="flex min-w-0 items-center gap-3">
+      <div className={cn('flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-surface border px-4 py-3', fill)}>
+        <div className="flex min-w-0 flex-[1_1_11rem] items-center gap-3">
           <Icon aria-hidden className={cn('size-5 shrink-0', text)} />
           <div className="min-w-0">
             <p className={cn('text-sm font-semibold', text)}>{label}</p>
             {hint ? <p className="text-xs text-fg-muted">{hint}</p> : null}
           </div>
         </div>
-        <p className={cn('shrink-0 text-xl font-semibold tabular-nums', text)}>{amount}</p>
+        <p className={cn('ml-auto shrink-0 text-xl font-semibold tabular-nums', text)}>{amount}</p>
       </div>
     );
   };

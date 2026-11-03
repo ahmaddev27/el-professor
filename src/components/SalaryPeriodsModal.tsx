@@ -462,6 +462,7 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
                         <td className="px-3 py-3 text-right text-sm">
                           <div className="flex justify-end gap-2">
                             <button
+                              className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                               onClick={() => setDeleteTarget(row)}
                               disabled={!!deleteBlocked}
                               style={{

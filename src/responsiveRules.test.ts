@@ -48,6 +48,13 @@ describe('responsive rules', () => {
     }
   });
 
+  it('lets the salary payments table scroll, because its row actions are the last column', () => {
+    // overflow hidden cut "view payment" and delete off by up to 298 px on a phone, with no way to reach them.
+    const frame = source('components/SalaryDetailsModal.tsx').match(/<div style=\{\{[^}]*\}\}>\s*<table className="w-full">/);
+    expect(frame?.[0]).toContain("overflowX: 'auto'");
+    expect(frame?.[0]).not.toContain("overflow: 'hidden'");
+  });
+
   it('sizes a figure to its card, not to a fixed 28 px', () => {
     // 1.774,00 € ran 30 px out of a two-column card on a phone.
     const card = source('components/ui/KpiCard.tsx');

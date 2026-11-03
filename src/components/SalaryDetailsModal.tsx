@@ -675,9 +675,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         <div style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)' }} className="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
 
           {/* Header */}
-          <div style={{ borderBottom: '1px solid var(--border)' }} className="px-6 pt-6 pb-0">
-            <div className="flex items-start justify-between mb-4">
-              <div>
+          <div style={{ borderBottom: '1px solid var(--border)' }} className="px-4 pt-4 pb-0 sm:px-6 sm:pt-6">
+            <div className="flex items-start justify-between gap-2 mb-4">
+              <div className="min-w-0">
                 <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold">
                   {t('sal.details.title', { name: salary.driver_name })}
                 </h2>
@@ -698,7 +698,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             </div>
 
             {/* Tab bar */}
-            <div className="flex gap-1" style={{ marginBottom: '-1px' }}>
+            <div className="flex flex-wrap gap-1" style={{ marginBottom: '-1px' }}>
               {([
                 { key: 'details', label: t('sal.tab.details'), icon: <DollarSign size={15} /> },
                 { key: 'summary', label: t('common.summary'), icon: <LayoutDashboard size={15} /> },
@@ -706,7 +706,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors [@media(pointer:coarse)]:min-h-10"
                   style={{
                     background: activeTab === tab.key ? 'var(--bg-surface)' : 'transparent',
                     color: activeTab === tab.key ? 'var(--accent)' : 'var(--text-tertiary)',
@@ -722,7 +722,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             </div>
           </div>
 
-          <div className="p-6 space-y-6 overflow-y-auto flex-1">
+          <div className="p-4 space-y-6 overflow-y-auto flex-1 sm:p-6">
 
             {/* ── Summary tab ── */}
             {activeTab === 'summary' && (<>
@@ -947,7 +947,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPayrollData(prev => ({ ...prev, tax_review_confirmed: !prev.tax_review_confirmed }))}
-                    className="flex items-center gap-2 text-sm"
+                    className="flex items-center gap-2 text-left text-sm [@media(pointer:coarse)]:min-h-10"
                     style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   >
                     {payrollData.tax_review_confirmed
@@ -1013,7 +1013,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
                   onMouseEnter={e => { if (remainingBalance > 0) e.currentTarget.style.background = 'var(--accent-hover)'; }}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-                  className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed [@media(pointer:coarse)]:min-h-10"
                 >
                   <Plus size={20} />
                   <span>{t('sal.payment.add')}</span>
@@ -1031,7 +1031,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
               ) : payments.length === 0 ? (
                 <div style={{ color: 'var(--text-tertiary)' }} className="text-center py-8">{t('sal.noPayments')}</div>
               ) : (
-                <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflow: 'hidden' }}>
+                <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflowX: 'auto' }}>
                   <table className="w-full">
                     <thead style={{ background: 'var(--bg-subtle)' }}>
                       <tr>
@@ -1090,7 +1090,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             aria-label={t('sal.payment.viewCashAria', {
                               date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
                             })}
-                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)]"
+                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)] [@media(pointer:coarse)]:min-h-10"
                           >
                             <Eye size={14} />
                             {t('sal.payment.viewCash')}
@@ -1181,7 +1181,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   <Lock size={16} />
                                 </span>
                                 {rowActions.preview && (
-                                  <button
+                                  <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                     type="button"
                                     onClick={() => setReceiptPreviewId(rowActions.receiptId)}
                                     aria-label={t('sal.payment.previewReceiptAria', {
@@ -1206,7 +1206,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                     aria-label={t('sal.payment.voidAria', {
                                       date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
                                     })}
-                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger-subtle)]"
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger-subtle)] [@media(pointer:coarse)]:min-h-10"
                                   >
                                     <Ban size={14} />
                                     {t('gq.action.void')}
@@ -1216,7 +1216,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             ) : (
                             <div className="flex items-center justify-end space-x-2">
                               {viewOffered && viewButton}
-                              <button
+                              <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                 onClick={() => { setSelectedPayment(paymentRow); setIsPaymentModalOpen(true); }}
                                 style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
@@ -1225,7 +1225,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                               >
                                 <Edit2 size={16} />
                               </button>
-                              {rolePermits('salaries', 'edit') && <button
+                              {rolePermits('salaries', 'edit') && <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                 onClick={() => setPaymentToDelete(paymentRow)}
                                 style={{ color: 'var(--danger)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
@@ -1250,7 +1250,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
           {/* Footer */}
           <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)', padding: '1.5rem' }} className="flex justify-end">
-            <button
+            <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
               onClick={handleClose}
               style={{ background: 'var(--bg-muted)', color: 'var(--text-primary)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: '1px solid var(--border)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}

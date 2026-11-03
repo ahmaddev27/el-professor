@@ -78,7 +78,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               {getIcon()}
               <h3 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
             </div>
-            <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
+            <button
               onClick={onClose}
               style={{ color: closeHover ? 'var(--text-secondary)' : 'var(--text-tertiary)', transition: 'color 0.15s' }}
               onMouseEnter={() => setCloseHover(true)}

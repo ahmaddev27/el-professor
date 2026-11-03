@@ -432,7 +432,7 @@ function ChipBtn({
   icon?: React.ReactNode;
 }) {
   return (
-    <Button variant="secondary" size="sm" onClick={onClick}>
+    <Button variant="secondary" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left" onClick={onClick}>
       {icon}
       {children}
     </Button>
