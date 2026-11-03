@@ -98,8 +98,10 @@ export type TripProblem =
 export interface RejectedTrip {
   tripId: string;
   problem: TripProblem;
-  /** What was read, so the screen can show why it could not be used. */
+  /** What was read, in the engine's terms. It names database columns, so it is not for a screen. */
   detail: string;
+  /** The ride's date as read, the one part of it a person can use to find the ride. */
+  tripDate?: string | null;
 }
 
 /** Two rides of the same vehicle that overlap in the source data (آ§14). */
@@ -314,6 +316,7 @@ function resolveTrip(trip: PlanTripInput): ResolvedTrip | RejectedTrip {
       return {
         tripId: trip.id,
         problem: 'end_before_start',
+        tripDate: trip.tripDate ?? null,
         detail: `start_at ${trip.startAt} is after end_at ${trip.endAt}`,
       };
     }
@@ -325,6 +328,7 @@ function resolveTrip(trip: PlanTripInput): ResolvedTrip | RejectedTrip {
     return {
       tripId: trip.id,
       problem: 'unparsable_time',
+      tripDate: trip.tripDate ?? null,
       detail: `no usable start_at and no readable trip_date (${trip.tripDate ?? 'null'})`,
     };
   }
@@ -334,6 +338,7 @@ function resolveTrip(trip: PlanTripInput): ResolvedTrip | RejectedTrip {
     return {
       tripId: trip.id,
       problem: 'missing_start',
+      tripDate: trip.tripDate ?? null,
       detail: `trip_date ${trip.tripDate} with start_time ${trip.startTime ?? 'null'}`,
     };
   }
@@ -343,6 +348,7 @@ function resolveTrip(trip: PlanTripInput): ResolvedTrip | RejectedTrip {
     return {
       tripId: trip.id,
       problem: 'missing_end',
+      tripDate: trip.tripDate ?? null,
       detail: `trip_date ${trip.tripDate} with end_time ${trip.endTime ?? 'null'}`,
     };
   }
@@ -410,6 +416,7 @@ export function buildBlocks(
       rejected.push({
         tripId: trip.id,
         problem: 'missing_vehicle',
+        tripDate: trip.tripDate ?? null,
         detail: 'neither car_id nor car_identifier is set',
       });
       continue;

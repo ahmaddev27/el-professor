@@ -2,6 +2,14 @@
 
 Last updated: **02.11.2026**
 
+- **03.11.2026 (latest) — no engine code, column name or id on a screen** (branch `fix/plan-raw-codes`, PR against `staging`, no migration, nothing on production).
+  - **The standard plan's notes printed the engine's own text:** `driver_without_range`, `invalid_hourly_rate`, block ids, driver ids, `trip_date`. `src/utils/monthlyPlanMessages.ts` now words each finding in the UI language. Its tables are `Record`s over each code's union, so a new code fails to compile rather than reaching a screen.
+  - **`detail` is untouched.** It is stored with the plan in the engine's own terms, for audit. `validate.ts` carries `facts` beside it, and a plan stored before them still gets a sentence. A rejected ride also carries its date now, because its `detail` names database columns.
+  - **The Fahrer table and its Excel export printed a user id under "Erstellt von".** They print the name now, through `useUserDisplayNames`, which never falls back to an id.
+  - **Fourteen dictionary messages named a column or a function**, in both languages (`assignment_block_id`, `company_id`, `generate_invoice_number`). Reworded. `src/i18n/noRawCodes.test.ts` fails on the next one, and the sweep gained a `rawcode` check.
+  - **Mein Konto said "Kein Unternehmen (Plattform-Konto)" while the company was loading.** It says that only for an account with no company now.
+  - **Left on purpose:** the panel's Protokoll shows action names such as `platform_read.companies_list`, because a log of what ran is read by the people who look those up. The Abnahme-Diagnose shows its pinned run's id, for the same reason.
+  - **Left as it is, and worth knowing:** opening a driver's salary dialog writes a `salaries` row when none exists (`ensureSalaryExists`). A role that may not write would presumably see an error toast on opening it; that role was not tested.
 - **03.11.2026 (latest) — every screen measured at 14 sizes, and what that found fixed** (branch `fix/responsive-all`, PR against `staging`, no migration, layout classes only, nothing on production).
   - **The tool:** `e2e/responsive-sweep.mjs` opens every screen, walks its tabs and wizards, presses every button and measures what opens, at 14 sizes with a mouse and with a touch pointer. How to run it is in `e2e/README.md`. **It presses delete and deactivate on purpose, so `e2e/responsive-proxy.cjs` refuses every write before it reaches staging, and it must never be pointed at staging directly.** The platform panel runs on invented rows (`responsive-panel-standin.mjs`), because no platform credential belongs in `e2e/.env.local`.
   - **Two global rules in `src/index.css` a later screen depends on:**
