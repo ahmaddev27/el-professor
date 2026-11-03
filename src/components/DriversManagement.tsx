@@ -56,8 +56,10 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const exportPicker = useColumnPickerExport();
   const userNames = useUserDisplayNames();
   /** The account that created a driver, as a person reads it. Its id means nothing to anyone. */
-  const creatorName = (driver: Driver): string =>
-    (driver.createdBy ? userNames.get(driver.createdBy) : undefined) ?? t('common.unknown');
+  const creatorName = (driver: Driver): string => {
+    if (!userNames) return '…';
+    return (driver.createdBy ? userNames.get(driver.createdBy) : undefined) ?? t('common.unknown');
+  };
   // No cap on how many drivers a company may have (owner, 21.10.2026, and
   // again on 26.10.2026 for cars: billing, never blocking).
   //
@@ -163,7 +165,10 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'createdBy',                     label: t('fleet.createdBy'),              width: 28 },
         { key: 'createdAt',                     label: t('fleet.createdAt'),              width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
-      rows: drivers.map(driver => ({ ...driver, createdBy: creatorName(driver) })) as unknown as Record<string, unknown>[],
+      rows: drivers.map(driver => ({
+        ...driver,
+        createdBy: (driver.createdBy ? userNames?.get(driver.createdBy) : undefined) ?? t('common.unknown'),
+      })) as unknown as Record<string, unknown>[],
       // The totals row's LABEL, not a figure in the Fahrername column: keyed on
       // the first column it was discarded unrendered, so the file said
       // "Gesamt (N Einträge)" instead. `totals: {}` keeps the row — none of the
