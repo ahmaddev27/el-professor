@@ -25,7 +25,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **A Beleg printed before 04:00 counts on the previous day (09.11.2026, branch `fix/receipt-business-day`, not pushed, one migration not yet applied).** `receipts.business_date` is derived by `public.receipt_business_date(date, time)` (`receiptBusinessDate()` in TypeScript); the weekly Abrechnung, the mail's figures, the Tankenquote, the till and the Overview group by it. The Belege list still shows the printed date and says `Zählt zum …` when they differ.
+> **A Beleg printed before 04:00 counts on the previous day (09.11.2026, branch `fix/receipt-business-day`, PR against `staging`, one migration).** `receipts.business_date` is derived by `public.receipt_business_date(date, time)` (`receiptBusinessDate()` in TypeScript); the weekly Abrechnung, the mail's figures, the Tankenquote, the till and the Overview group by it. The Belege list still shows the printed date and says `Zählt zum …` when they differ.
 >
 > **No engine code, column name or id on a screen (03.11.2026, #368 and #369, on production since 03.11.2026, no migration).** The standard plan's notes, the Fahrer table and fourteen dictionary messages printed them.
 >
