@@ -126,6 +126,28 @@ describe('calcCashSummary', () => {
   });
 });
 
+describe('calcCashSummary: a Beleg before 04:00 counts on the day before (09.11.2026)', () => {
+  const night = (id: string, date: string, time: string, expense: number): Receipt => ({
+    ...beleg(id, date, expense),
+    receiptTime: time,
+  });
+
+  it('moves a Beleg printed 01.04. 02:00 into March, and keeps 01.04. 04:00 in April', () => {
+    const receipts = [night('n1', '2026-04-01', '02:00:00', 25), night('n2', '2026-04-01', '04:00:00', 10)];
+
+    const march = calcCashSummary([], receipts, MARCH.start, MARCH.end);
+    const april = calcCashSummary([], receipts, APRIL.start, APRIL.end);
+
+    expect(march.cashFromExpenses).toBe(25);
+    expect(april.cashFromExpenses).toBe(10);
+  });
+
+  it('keeps a Beleg with no time on its printed date', () => {
+    const april = calcCashSummary([], [beleg('n3', '2026-04-01', 7)], APRIL.start, APRIL.end);
+    expect(april.cashFromExpenses).toBe(7);
+  });
+});
+
 // ─── Fixed costs are per month, so the Overview must not sum the table ───────
 //
 // Since `20261003110000` a fixed cost belongs to a month. `calcPeriodMetrics`

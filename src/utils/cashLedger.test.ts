@@ -181,6 +181,14 @@ describe('summarizeCashLedger', () => {
     expect(totals.bargeldIncomeCents).toBe(0);
   });
 
+  it('dates a Beleg on the day it counts on (04:00 rule), and on its own date without one', () => {
+    const rows = [
+      { id: 'n1', expense: 5, date: '2026-04-01', business_date: '2026-03-31' },
+      { id: 'n2', expense: 5, date: '2026-04-01' },
+    ];
+    expect(belegEntries(rows, labels).map(e => e.date)).toEqual(['2026-03-31', '2026-04-01']);
+  });
+
   it('reads a NULL expense as zero, the way the column default does', () => {
     expect(summarizeCashLedger(belegEntries([belege[1]], labels)).belegExpenseCents).toBe(0);
   });

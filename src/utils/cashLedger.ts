@@ -113,6 +113,11 @@ export interface BelegRow {
   driver_name?: string | null;
   date: string;
   /**
+   * The day the Beleg counts on in the till (`receipts.business_date`; a time
+   * before 04:00 counts on the day before). Absent: the printed date.
+   */
+  business_date?: string | null;
+  /**
    * `'bar'` or `'uberweisung'`, as `receipts.payment_method` stores it.
    * Optional because a caller that reads the receipt through another shape
    * (`utils/overviewHelpers.ts` maps a `Receipt`) does not carry it — see
@@ -206,7 +211,7 @@ export function belegEntries(
     id: row.id,
     direction: 'out' as const,
     amountCents: amountToCents(row.expense),
-    date: row.date,
+    date: row.business_date || row.date,
     description: row.description || labels.beleg,
     driverName: row.driver_name || '',
     source: 'beleg' as const,
