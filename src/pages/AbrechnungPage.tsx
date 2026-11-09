@@ -286,8 +286,8 @@ export function AbrechnungPage() {
         .from('receipts')
         .select('expense, description')
         .eq('driver_name', driverName)
-        .gte('date', startIso)
-        .lte('date', endIso),
+        .gte('business_date', startIso)
+        .lte('business_date', endIso),
       supabase
         .from('income')
         .select('amount, type')

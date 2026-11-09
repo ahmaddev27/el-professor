@@ -262,10 +262,10 @@ export default function BargeldbestandPage() {
             // payment_method is load-bearing, not decoration: without it
             // cashBelegRows() below keeps nothing and the Belege total reads
             // 0,00 €. src/utils/moneyScreenFailures.test.ts pins it.
-            .select('id, expense, description, driver_name, date, payment_method')
+            .select('id, expense, description, driver_name, date, business_date, payment_method')
             .eq('company_id', companyId)
-            .gte('date', monthStart)
-            .lte('date', monthEnd)
+            .gte('business_date', monthStart)
+            .lte('business_date', monthEnd)
             .order('id', { ascending: true })
             .range(from, to),
           { label: t('bargeld.load.belege') },

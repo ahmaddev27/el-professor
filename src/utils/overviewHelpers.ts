@@ -11,6 +11,7 @@ import {
 } from './cashLedger';
 import { salaryDueState } from './salaryDue';
 import { resolveMonth, sumEuro } from './fixedCostMonths';
+import { receiptCountsOn } from './receiptBusinessDate';
 
 // Type-only: this module names a dictionary key beside its German text.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
@@ -158,7 +159,7 @@ export function calcPeriodMetrics(
     isWithinInterval(new Date(s.period_start), { start, end })
   );
   const periodReceipts = receipts.filter(r =>
-    isWithinInterval(new Date(r.date), { start, end })
+    isWithinInterval(new Date(receiptCountsOn(r)), { start, end })
   );
 
   const umsatzOnly = periodIncomes
@@ -244,7 +245,7 @@ export function calcDriverPerformance(
     isWithinInterval(new Date(s.period_start), { start, end })
   );
   const periodReceipts = receipts.filter(r =>
-    isWithinInterval(new Date(r.date), { start, end })
+    isWithinInterval(new Date(receiptCountsOn(r)), { start, end })
   );
 
   const performances = drivers.map(driver => {
@@ -383,7 +384,7 @@ export function calcCashSummary(
     isWithinInterval(new Date(i.date), { start, end })
   );
   const periodReceipts = receipts.filter(r =>
-    isWithinInterval(new Date(r.date), { start, end })
+    isWithinInterval(new Date(receiptCountsOn(r)), { start, end })
   );
   const periodMovements = movements.filter(m =>
     isWithinInterval(new Date(m.movement_date), { start, end })
@@ -397,7 +398,7 @@ export function calcCashSummary(
       LEDGER_LABELS
     ),
     ...belegEntries(
-      periodReceipts.map(r => ({ id: r.id, expense: r.expense, description: r.description, driver_name: r.driverName, date: r.date })),
+      periodReceipts.map(r => ({ id: r.id, expense: r.expense, description: r.description, driver_name: r.driverName, date: r.date, business_date: receiptCountsOn(r) })),
       LEDGER_LABELS
     ),
     ...cashMovementEntries(periodMovements, LEDGER_LABELS),
@@ -482,7 +483,7 @@ export function getTopExpenses(
   topN = 5
 ): ExpenseItem[] {
   const periodReceipts = receipts
-    .filter(r => isWithinInterval(new Date(r.date), { start, end }))
+    .filter(r => isWithinInterval(new Date(receiptCountsOn(r)), { start, end }))
     .map(r => ({
       description: r.description || r.receiptNumber,
       amount: r.expense,

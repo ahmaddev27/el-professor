@@ -44,6 +44,7 @@ import { ADMIN_BASE } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { engineText } from '../i18n/engineMessage';
+import { receiptCountsOn } from '../utils/receiptBusinessDate';
 import { FleetImportPrompt } from '../components/partner/FleetImportPrompt';
 
 const fmt = (n: number) =>
@@ -544,7 +545,7 @@ const OverviewPage: React.FC = () => {
     .map(d => ({ ...d, name: engineText(t, d.name, d.nameKey) }));
 
   const recentReceipts = [...receipts]
-    .filter(r => isWithinInterval(new Date(r.date), { start: monthStart, end: monthEnd }))
+    .filter(r => isWithinInterval(new Date(receiptCountsOn(r)), { start: monthStart, end: monthEnd }))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
