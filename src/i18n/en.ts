@@ -7391,4 +7391,7 @@ export const en: PartialDictionary = {
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.finding.unknownBlock':  'A block outside this plan',
   'mplan.finding.unknownDriver': 'A driver outside this plan',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.countsToward': 'Counts towards {date}',
 };

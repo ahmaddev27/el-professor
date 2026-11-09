@@ -7465,4 +7465,7 @@ export const de = {
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.finding.unknownBlock':  'Ein Block außerhalb dieses Plans',
   'mplan.finding.unknownDriver': 'Ein Fahrer außerhalb dieses Plans',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'rec.countsToward': 'Zählt zum {date}',
 } as const;

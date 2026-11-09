@@ -343,6 +343,7 @@ export const useDatabase = () => {
           paymentMethod: (r.payment_method as 'bar' | 'uberweisung') || 'bar',
           merchantName: r.merchant_name || undefined,
           receiptTime: r.receipt_time || undefined,
+          businessDate: r.business_date || undefined,
           litres: numberOrUndefined(r.litres),
           pricePerLitre: numberOrUndefined(r.price_per_litre),
           odometerKm: numberOrUndefined(r.odometer_km),

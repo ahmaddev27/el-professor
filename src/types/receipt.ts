@@ -11,6 +11,12 @@ export interface Receipt {
   createdBy?: string;
   paymentMethod?: 'bar' | 'uberweisung';
   /**
+   * The day the Beleg counts on (`receipts.business_date`): the printed date,
+   * or the day before it for a time before 04:00. Never shown as the Beleg's
+   * date; see utils/receiptBusinessDate.ts.
+   */
+  businessDate?: string;
+  /**
    * What the Beleg itself says, filled when it came from the driver app
    * (20261011100000, 20261012100000). All optional: a Beleg entered by hand
    * has none of them, and an absent figure is not a zero.

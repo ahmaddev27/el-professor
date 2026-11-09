@@ -38,6 +38,7 @@ import {
   Tooltip,
   type DataTableColumn,
 } from './ui';
+import { receiptCountsOn } from '../utils/receiptBusinessDate';
 
 interface ReceiptListProps {
   receipts: Receipt[];
@@ -222,7 +223,8 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       if (activeDateKeys) {
         // ISO dates compare lexicographically in calendar order, so this needs no
         // Date at all and both ends are inclusive.
-        const day = receipt.date.slice(0, 10);
+        // The day the Beleg counts on, not the printed one (04:00 rule).
+        const day = receiptCountsOn(receipt);
         matchesDate = day >= activeDateKeys.start && day <= activeDateKeys.end;
       }
 
@@ -376,12 +378,27 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
   // The header carries no unit for a distance, so the cell does; an absent reading stays empty.
   const withKm = (figure: string | null) => (figure === null ? null : `${figure} km`);
 
+  // Shown only when the 04:00 rule moves the Beleg to another day than the one
+  // printed on it; the printed date stays what the row shows.
+  const countsTowardNote = (receipt: Receipt): string | null => {
+    const day = receiptCountsOn(receipt);
+    return day === receipt.date.slice(0, 10) ? null : t('rec.countsToward', { date: formatDate(day) });
+  };
+
   const columns: DataTableColumn<Receipt>[] = [
     {
       id: 'date',
       header: sortHeader('date', t(SORTABLE_COLUMN_LABELS.date)),
       kind: 'date',
       value: receipt => receipt.date,
+      cell: receipt => (
+        <span className="grid gap-0.5 py-2">
+          <span className="whitespace-nowrap tabular-nums">{formatDate(receipt.date)}</span>
+          {countsTowardNote(receipt) ? (
+            <span className="whitespace-nowrap text-xs text-fg-muted">{countsTowardNote(receipt)}</span>
+          ) : null}
+        </span>
+      ),
       hideBelow: 'sm',
       className: 'px-3',
     },
@@ -408,7 +425,10 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           ) : null}
           {/* A phone hides the date and driver columns; their values move here. */}
           <span className="text-[13px] text-fg-muted md:hidden">
-            <span className="tabular-nums sm:hidden">{formatDate(receipt.date)} · </span>
+            <span className="tabular-nums sm:hidden">
+              {formatDate(receipt.date)}
+              {countsTowardNote(receipt) ? ` (${countsTowardNote(receipt)})` : ''} ·{' '}
+            </span>
             {receipt.driverName}
           </span>
           {/* Below lg the merchant, place, time and fuel columns are hidden;
