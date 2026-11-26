@@ -7,6 +7,7 @@ import {
   businessWeekNumber,
   completedOperatingDay,
   dueOccurrence,
+  earnersToPlace,
   isFailure,
   isGap,
   planDay,
@@ -281,5 +282,27 @@ describe('a day with an earner Reidey could not place', () => {
   it('records each earner once and at most 200', () => {
     const many = Array.from({ length: 250 }, (_, i) => ({ name: 'E' + i, uberDriverUuid: 'u' + i, trips: null }));
     expect(unmatchedNotes(many)).toHaveLength(200);
+  });
+});
+
+describe('earnersToPlace', () => {
+  const day = '2026-10-14';
+  const earner = (id: string, name: string, fareCents: number): UberDriverEarnings => ({
+    externalDriverId: id, uberDriverUuid: null, name, fareCents, promotionCents: 0, tipsCents: 0,
+    cashCents: 0, netOutstandingCents: 0, trips: 3, differenceCents: 0,
+  });
+
+  it('names the unlinked earners with money, and nobody else', () => {
+    const drivers = [earner('1', 'Anna Beispiel', 1000), earner('2', 'Ben Muster', 2000), earner('3', 'Cara Probe', 0)];
+    expect(earnersToPlace(drivers, day, new Set(['1']))).toEqual([{ external_driver_id: '2', name: 'Ben Muster' }]);
+  });
+
+  it('lists an id once even if the partner repeats it', () => {
+    const drivers = [earner('2', 'Ben Muster', 2000), earner('2', 'Ben Muster', 500)];
+    expect(earnersToPlace(drivers, day, new Set())).toHaveLength(1);
+  });
+
+  it('is empty when every earner is linked', () => {
+    expect(earnersToPlace([earner('1', 'Anna Beispiel', 1000)], day, new Set(['1']))).toEqual([]);
   });
 });

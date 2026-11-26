@@ -266,6 +266,30 @@ export function driversWithRows(drivers: readonly UberDriverEarnings[], day: str
   return drivers.filter((d) => buildDayRows(day, [d]).length > 0);
 }
 
+/** What uber_pull_place_unlinked takes: Reidey's id and its spelling of the name. */
+export interface EarnerToPlace { external_driver_id: string; name: string }
+
+/** Most earners one call may place; the database refuses more (`too_many`). */
+export const MAX_PLACED_PER_DAY = 5;
+
+/**
+ * The earners with money on the day and no confirmed link, once each. They are
+ * the ones the database may place (link to a same-named driver, or create one)
+ * before the day is written, so a new hire does not lose the company a day.
+ */
+export function earnersToPlace(
+  drivers: readonly UberDriverEarnings[], day: string, linked: ReadonlySet<string>,
+): EarnerToPlace[] {
+  const seen = new Set<string>();
+  const out: EarnerToPlace[] = [];
+  for (const d of driversWithRows(drivers, day)) {
+    if (linked.has(d.externalDriverId) || seen.has(d.externalDriverId)) continue;
+    seen.add(d.externalDriverId);
+    out.push({ external_driver_id: d.externalDriverId, name: d.name });
+  }
+  return out;
+}
+
 /**
  * Maps the system writer's refusal reason to the outcome the run records.
  * An unknown reason is `refused`, with the reason in the detail.
