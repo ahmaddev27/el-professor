@@ -287,13 +287,13 @@ describe('a day with an earner Reidey could not place', () => {
 
 describe('earnersToPlace', () => {
   const day = '2026-10-14';
-  const earner = (id: string, name: string, fareCents: number): UberDriverEarnings => ({
+  const earner = (id: string, name: string, fareCents: number, trips: number | null = 3): UberDriverEarnings => ({
     externalDriverId: id, uberDriverUuid: null, name, fareCents, promotionCents: 0, tipsCents: 0,
-    cashCents: 0, netOutstandingCents: 0, trips: 3, differenceCents: 0,
+    cashCents: 0, netOutstandingCents: 0, trips, differenceCents: 0,
   });
 
   it('names the unlinked earners with money, and nobody else', () => {
-    const drivers = [earner('1', 'Anna Beispiel', 1000), earner('2', 'Ben Muster', 2000), earner('3', 'Cara Probe', 0)];
+    const drivers = [earner('1', 'Anna Beispiel', 1000), earner('2', 'Ben Muster', 2000), earner('3', 'Cara Probe', 0, null)];
     expect(earnersToPlace(drivers, day, new Set(['1']))).toEqual([{ external_driver_id: '2', name: 'Ben Muster' }]);
   });
 
