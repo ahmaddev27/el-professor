@@ -82,8 +82,10 @@ BEGIN
       FROM public.drivers d
      WHERE d.company_id = p_company
        AND d.employment_type IS DISTINCT FROM 'company_owner'
-       AND btrim(d.personalnummer) ~ '^[0-9]{1,9}$'
-       AND btrim(d.personalnummer)::bigint = v_max;
+       -- A CASE, not AND: PostgreSQL does not promise to test the pattern
+       -- before the cast, and one 'A12' would then fail every insert.
+       AND CASE WHEN btrim(d.personalnummer) ~ '^[0-9]{1,9}$'
+                THEN btrim(d.personalnummer)::bigint END = v_max;
     v_next := v_max + 1;
   END IF;
 
@@ -91,8 +93,8 @@ BEGIN
   WHILE EXISTS (
     SELECT 1 FROM public.drivers d
      WHERE d.company_id = p_company
-       AND btrim(d.personalnummer) ~ '^[0-9]{1,9}$'
-       AND btrim(d.personalnummer)::bigint = v_next
+       AND CASE WHEN btrim(d.personalnummer) ~ '^[0-9]{1,9}$'
+                THEN btrim(d.personalnummer)::bigint END = v_next
   ) LOOP
     v_next := v_next + 1;
   END LOOP;

@@ -22,6 +22,11 @@
 --      held by a driver linked to ANOTHER partner driver are refused, with a
 --      reason. The human function calls it with 'inactive' (people in old
 --      earnings who are long gone), the nightly one with 'active'.
+--    * One rule differs, and only for 'active': the name match finds a driver
+--      who is still working. A same-named driver who has left, with no link,
+--      is refused (`name_inactive`), never linked: with nobody watching, a
+--      new hire who shares a former driver's name would otherwise put his
+--      money on the old record. The 'inactive' call matches as before.
 --    * More than five earners in one call are refused (`too_many`). Twenty-two
 --      unlinked at once means the connection was reset or the fleet was never
 --      imported, and that is the full import's job, not something to do
@@ -135,11 +140,23 @@ BEGIN
          AND NOT EXISTS (SELECT 1 FROM public.partner_driver_links x
                           WHERE x.company_id = p_company AND x.partner = v_partner
                             AND x.driver_id = d.id)
+         -- With nobody watching (the nightly call, status active), a name may
+         -- only find a driver who is still working: a departed one of the same
+         -- name is more likely someone else, and the money would follow him.
+         AND (p_new_status = 'inactive' OR coalesce(d.status, 'active') = 'active')
        ORDER BY d.created_at, d.id LIMIT 1;
 
       IF v_driver IS NOT NULL THEN
         v_linked := v_linked || jsonb_build_object(
           'external_driver_id', v_earner.external_id, 'name', v_dname);
+      ELSIF p_new_status = 'active' AND EXISTS (
+              SELECT 1 FROM public.drivers d
+               WHERE d.company_id = p_company AND lower(btrim(d.name)) = v_key
+                 AND coalesce(d.status, 'active') <> 'active'
+                 AND NOT EXISTS (SELECT 1 FROM public.partner_driver_links x
+                                  WHERE x.company_id = p_company AND x.partner = v_partner
+                                    AND x.driver_id = d.id)) THEN
+        v_reason := 'name_inactive';
       ELSIF EXISTS (SELECT 1 FROM public.drivers d
                      WHERE d.company_id = p_company AND lower(btrim(d.name)) = v_key) THEN
         v_reason := 'name_taken';
@@ -369,7 +386,9 @@ BEGIN
   END IF;
   IF v_hsrc NOT LIKE '%lower(btrim(d.name)) = v_key%' OR v_hsrc NOT LIKE '%name_taken%'
      OR v_hsrc NOT LIKE '%name_missing%' OR v_hsrc NOT LIKE '%rejected%'
-     OR v_hsrc NOT LIKE '%limit_reached%' THEN
+     OR v_hsrc NOT LIKE '%limit_reached%'
+     OR v_hsrc NOT LIKE '%name_inactive%'
+     OR v_hsrc NOT LIKE '%p_new_status = ''inactive'' OR coalesce(d.status, ''active'') = ''active''%' THEN
     RAISE EXCEPTION 'place earners self-check 5: the name match or one of its refusals is gone';
   END IF;
   IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = v_help)

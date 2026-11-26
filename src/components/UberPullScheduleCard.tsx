@@ -6,7 +6,13 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { parsePlacedDrivers, placedNames } from '../lib/placedDrivers';
 import { germanDay } from '../../supabase/functions/_shared/abrechnung-schedule-core';
-import { isFailure, isGap } from '../../supabase/functions/_shared/uber-pull-core';
+import {
+  isFailure,
+  isGap,
+  isPlacementBlockReason,
+  type PlacementBlockReason,
+} from '../../supabase/functions/_shared/uber-pull-core';
+import type { TranslationKey } from '../i18n';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, formatEuroCents } from './ui';
 
 /**
@@ -32,6 +38,18 @@ interface ScheduleForm {
 }
 
 const DEFAULTS: ScheduleForm = { enabled: false, time: '06:00', replaceCorrections: false };
+
+/** What the screen says when the night could not place a new Uber driver, per reason. */
+const UNLINKED_REASON_KEY: Record<PlacementBlockReason, TranslationKey> = {
+  too_many: 'settings.uberPull.runs.unlinkedReason.too_many',
+  name_taken: 'settings.uberPull.runs.unlinkedReason.name_taken',
+  name_inactive: 'settings.uberPull.runs.unlinkedReason.name_inactive',
+  name_missing: 'settings.uberPull.runs.unlinkedReason.name_missing',
+  rejected: 'settings.uberPull.runs.unlinkedReason.rejected',
+  limit_reached: 'settings.uberPull.runs.unlinkedReason.limit_reached',
+  company_blocked: 'settings.uberPull.runs.unlinkedReason.company_blocked',
+  run_not_open: 'settings.uberPull.runs.unlinkedReason.run_not_open',
+};
 
 interface RunRow {
   id: string;
@@ -342,9 +360,15 @@ const RunLine: React.FC<{ run: RunRow }> = ({ run }) => {
         </span>
       )}
       {run.outcome === 'blocked_unlinked' && (
-        <span className="min-w-0 break-words text-fg-subtle">{t('settings.uberPull.runs.unlinkedHint')}</span>
+        <span className="min-w-0 break-words text-fg-subtle">
+          {isPlacementBlockReason(run.detail)
+            ? t(UNLINKED_REASON_KEY[run.detail])
+            : t('settings.uberPull.runs.unlinkedHint')}
+        </span>
       )}
-      {failure && run.detail && <span className="min-w-0 break-words text-fg-subtle">{run.detail}</span>}
+      {failure && run.detail && run.outcome !== 'blocked_unlinked' && (
+        <span className="min-w-0 break-words text-fg-subtle">{run.detail}</span>
+      )}
     </li>
   );
 };

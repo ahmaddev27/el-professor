@@ -7482,4 +7482,14 @@ export const de = {
   'settings.uberPull.runs.linkedOne':    'Verknüpft: {names}',
   'settings.uberPull.runs.linkedOther':  'Verknüpft: {names}',
   'settings.uberPull.runs.unlinkedHint': 'Ein unbekannter Uber-Fahrer konnte nicht automatisch angelegt werden. Auf der Fahrer-Seite mit „Fahrer aus Reidey aktualisieren“ anlegen, dann den Tag über die Umsätze-Seite nachholen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.uberPull.runs.unlinkedReason.company_blocked': 'Das Unternehmen ist gesperrt oder hat kein aktives Abonnement, deshalb wurde nachts kein Fahrer angelegt.',
+  'settings.uberPull.runs.unlinkedReason.limit_reached': 'Das Fahrerlimit des Tarifs ist erreicht, deshalb wurde der neue Uber-Fahrer nicht angelegt. Den Tag über die Umsätze-Seite nachholen, sobald wieder Platz ist.',
+  'settings.uberPull.runs.unlinkedReason.name_inactive': 'Ein neuer Uber-Fahrer trägt den Namen eines ausgeschiedenen Fahrers. Nachts wird er ihm nicht zugeordnet, damit der Umsatz nicht beim Falschen landet. Auf der Fahrer-Seite mit „Fahrer aus Reidey aktualisieren“ prüfen, dann den Tag über die Umsätze-Seite nachholen.',
+  'settings.uberPull.runs.unlinkedReason.name_missing': 'Uber hat einen Fahrer ohne Namen geliefert, der so nicht angelegt werden kann. Den Tag über die Umsätze-Seite nachholen, sobald der Name bei Uber eingetragen ist.',
+  'settings.uberPull.runs.unlinkedReason.name_taken': 'Ein neuer Uber-Fahrer trägt den Namen eines Fahrers, der schon mit einem anderen Uber-Konto verknüpft ist. Auf der Fahrer-Seite prüfen und zuordnen, dann den Tag über die Umsätze-Seite nachholen.',
+  'settings.uberPull.runs.unlinkedReason.rejected': 'Die Zuordnung dieses Uber-Fahrers wurde früher abgelehnt, deshalb wird er nicht automatisch angelegt. Auf der Fahrer-Seite zuordnen, dann den Tag über die Umsätze-Seite nachholen.',
+  'settings.uberPull.runs.unlinkedReason.run_not_open': 'Der Tag war schon abgeschlossen, als der neue Fahrer angelegt werden sollte. Den Tag über die Umsätze-Seite nachholen.',
+  'settings.uberPull.runs.unlinkedReason.too_many': 'Mehr als fünf neue Uber-Fahrer an einem Tag werden nachts nicht automatisch angelegt. Auf der Fahrer-Seite mit „Fahrer aus Reidey aktualisieren“ anlegen, dann den Tag über die Umsätze-Seite nachholen.',
 } as const;

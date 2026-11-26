@@ -287,13 +287,16 @@ DECLARE
   v_run   text;
   v_late  text;
   v_other uuid;
+  v_gone  uuid;
   v_n     integer;
   v_call  text;
 BEGIN
   PERFORM _dd_driver(co_a, 'Dd Alt', '00007');
-  -- Inactive, so the trigger leaves it without a number and the probe can see
-  -- that placing a driver changes neither name nor number.
-  v_other := _dd_driver(co_a, 'Omar Khalil', NULL, 'inactive');
+  -- Active with a number below the highest, so the probe can see that placing a
+  -- driver changes neither name nor number and that 00009 is still the next one.
+  v_other := _dd_driver(co_a, 'Omar Khalil', '00005');
+  -- Departed, with no link: the nightly call must refuse it, never link to it.
+  v_gone := _dd_driver(co_a, 'Lena Weg', NULL, 'inactive');
   PERFORM _dd_driver(co_a, 'Held Name', '00008');
   INSERT INTO partner_driver_links (company_id, partner, external_driver_id, driver_id, status, linked_at)
   VALUES (co_a, 'reidey', '6010', (SELECT id FROM drivers WHERE company_id = co_a AND name = 'Held Name'), 'linked', now());
@@ -316,16 +319,19 @@ BEGIN
     || ' / ' || ((SELECT count(*) FROM drivers WHERE company_id = co_a) - v_n)::text,
     '{"ok": false, "reason": "too_many"} / 0');
 
-  -- The happy path: one new name, one name that matches an unlinked driver
-  -- (case and padding differ), one name held by a driver linked elsewhere, one
-  -- earner whose link a person rejected.
+  -- The happy path: one new name, one name that matches an unlinked active
+  -- driver (case and padding differ), one name held by a driver linked
+  -- elsewhere, one that only a departed driver holds, one earner whose link a
+  -- person rejected.
   v_n := (SELECT count(*) FROM drivers WHERE company_id = co_a);
   PERFORM _dd_rec(64, 'the answer names what was created, linked and refused',
     _dd_place(v_run, jsonb_build_array(
       _dd_earner('6001', '  Neu Fahrer '), _dd_earner('6002', ' omar khalil'),
-      _dd_earner('6003', 'HELD name'), _dd_earner('6005', 'Rita Rejected'))),
+      _dd_earner('6003', 'HELD name'), _dd_earner('6004', 'lena weg'),
+      _dd_earner('6005', 'Rita Rejected'))),
     '{"ok": true, "linked": [{"name": "Omar Khalil"}], "created": [{"name": "Neu Fahrer"}], '
-    || '"refused": [{"name": "HELD name", "reason": "name_taken"}, {"name": "Rita Rejected", "reason": "rejected"}]}');
+    || '"refused": [{"name": "HELD name", "reason": "name_taken"}, {"name": "lena weg", "reason": "name_inactive"}, '
+    || '{"name": "Rita Rejected", "reason": "rejected"}]}');
 
   PERFORM _dd_rec(65, 'exactly one driver was created',
     ((SELECT count(*) FROM drivers WHERE company_id = co_a) - v_n)::text, '1');
@@ -338,11 +344,16 @@ BEGIN
   PERFORM _dd_rec(68, 'the matched driver was linked and never renamed or renumbered',
     (SELECT d.name || ' ' || coalesce(d.personalnummer, 'null') || ' ' || l.status
        FROM drivers d JOIN partner_driver_links l ON l.driver_id = d.id AND l.external_driver_id = '6002'
-      WHERE d.id = v_other), 'Omar Khalil null linked');
+      WHERE d.id = v_other), 'Omar Khalil 00005 linked');
   PERFORM _dd_rec(69, 'the refused ones got no link and no driver',
     (SELECT count(*)::text FROM partner_driver_links WHERE company_id = co_a AND external_driver_id = '6003')
     || '/' || (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND lower(name) IN ('held name'))
     , '0/1');
+  PERFORM _dd_rec(75, 'the departed driver was neither linked nor touched, and no namesake was created',
+    (SELECT count(*)::text FROM partner_driver_links WHERE company_id = co_a AND external_driver_id = '6004')
+    || '/' || (SELECT status || ' ' || coalesce(personalnummer, 'null') FROM drivers WHERE id = v_gone)
+    || '/' || (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND lower(name) = 'lena weg'),
+    '0/inactive null/1');
   PERFORM _dd_rec(70, 'the run records what was placed, for the screen',
     (SELECT placed_drivers::text FROM uber_pull_runs WHERE id = v_run::uuid),
     '[{"name": "Neu Fahrer", "action": "created"}, {"name": "Omar Khalil", "action": "linked"}]');
@@ -396,6 +407,13 @@ BEGIN
        FROM drivers WHERE company_id = co_a AND name = 'Ehemalige Fahrerin'), 'inactive null');
   PERFORM _dd_rec(83, 'and the next number is still the next one',
     _dd_next(co_a), '00021');
+  -- The nightly call refuses a departed namesake (probe 75); the human call,
+  -- whose result an administrator reads, links it exactly as before.
+  PERFORM _dd_driver(co_a, 'Dd Gegangen', NULL, 'inactive');
+  PERFORM _dd_rec(84, 'the human call still links a departed driver of the same name',
+    _dd_call(admin_a, format($q$SELECT partner_earners_resolve('reidey', %L::jsonb)::text$q$,
+                             jsonb_build_array(_dd_earner('7002', 'dd gegangen'))::text)),
+    '{"ok": true, "linked": [{"name": "Dd Gegangen", "external_driver_id": "7002"}], "already": 0, "created": [], "skipped": []}');
   PERFORM _dd_clear(co_a);
 END $$;
 

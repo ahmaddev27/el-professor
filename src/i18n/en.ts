@@ -7408,4 +7408,14 @@ export const en: PartialDictionary = {
   'settings.uberPull.runs.linkedOne':    'Linked: {names}',
   'settings.uberPull.runs.linkedOther':  'Linked: {names}',
   'settings.uberPull.runs.unlinkedHint': 'An unknown Uber driver could not be added automatically. Add them on the Drivers page with “Update drivers from Reidey”, then catch up the day on the Earnings page.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.uberPull.runs.unlinkedReason.company_blocked': 'The company is blocked or has no active subscription, so no driver was added at night.',
+  'settings.uberPull.runs.unlinkedReason.limit_reached': 'The plan\'s driver limit is reached, so the new Uber driver was not added. Catch up the day on the Earnings page once there is room again.',
+  'settings.uberPull.runs.unlinkedReason.name_inactive': 'A new Uber driver has the name of a driver who has left. At night they are not matched, so the earnings do not end up with the wrong person. Check on the Drivers page with “Update drivers from Reidey”, then catch up the day on the Earnings page.',
+  'settings.uberPull.runs.unlinkedReason.name_missing': 'Uber sent a driver without a name, who cannot be added like that. Catch up the day on the Earnings page once the name is set at Uber.',
+  'settings.uberPull.runs.unlinkedReason.name_taken': 'A new Uber driver has the name of a driver who is already linked to another Uber account. Check and assign them on the Drivers page, then catch up the day on the Earnings page.',
+  'settings.uberPull.runs.unlinkedReason.rejected': 'This Uber driver\'s link was rejected earlier, so they are not added automatically. Assign them on the Drivers page, then catch up the day on the Earnings page.',
+  'settings.uberPull.runs.unlinkedReason.run_not_open': 'The day was already closed when the new driver was to be added. Catch up the day on the Earnings page.',
+  'settings.uberPull.runs.unlinkedReason.too_many': 'More than five new Uber drivers in one day are not added automatically at night. Add them on the Drivers page with “Update drivers from Reidey”, then catch up the day on the Earnings page.',
 };

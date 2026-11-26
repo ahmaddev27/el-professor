@@ -8,6 +8,7 @@ import {
   completedOperatingDay,
   dueOccurrence,
   earnersToPlace,
+  placementBlockReason,
   isFailure,
   isGap,
   planDay,
@@ -304,5 +305,30 @@ describe('earnersToPlace', () => {
 
   it('is empty when every earner is linked', () => {
     expect(earnersToPlace([earner('1', 'Anna Beispiel', 1000)], day, new Set(['1']))).toEqual([]);
+  });
+});
+
+describe('placementBlockReason', () => {
+  it("takes the database's own refusal", () => {
+    expect(placementBlockReason({ ok: false, reason: 'too_many' })).toBe('too_many');
+    expect(placementBlockReason({ ok: false, reason: 'company_blocked' })).toBe('company_blocked');
+  });
+
+  it("takes the first refused earner's reason, never the name", () => {
+    expect(placementBlockReason({
+      ok: true, created: [], linked: [],
+      refused: [{ name: 'Anna Beispiel', reason: 'name_inactive' }, { name: 'Ben Muster', reason: 'name_taken' }],
+    })).toBe('name_inactive');
+  });
+
+  it('is null when everyone was placed', () => {
+    expect(placementBlockReason({ ok: true, created: [{ name: 'Anna Beispiel' }], linked: [], refused: [] })).toBeNull();
+  });
+
+  it('keeps nothing it does not know, so no free text reaches the run', () => {
+    expect(placementBlockReason({ ok: false, reason: 'Anna Beispiel' })).toBeNull();
+    expect(placementBlockReason({ ok: true, refused: [{ name: 'x', reason: 'something_new' }] })).toBeNull();
+    expect(placementBlockReason(null)).toBeNull();
+    expect(placementBlockReason('too_many')).toBeNull();
   });
 });

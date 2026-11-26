@@ -151,7 +151,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
   // and the cleanup drops the answer to an earlier opening.
   useEffect(() => {
     setNumberSuggested(false);
-    if (driver?.personalnummer) return;
+    if (!isOpen || driver?.personalnummer) return;
     let current = true;
     void (async () => {
       try {
