@@ -52,7 +52,7 @@ interface FleetImportCardProps {
 
 const LEG_TITLE = { drivers: 'import.drivers.title', vehicles: 'import.vehicles.title' } as const;
 
-const DEPS: ImportDeps = {
+export const PARTNER_IMPORT_DEPS: ImportDeps = {
   pull: scope => supabase.functions.invoke('partner-pull', { body: { scope } }),
   importRpc: async rpc => await supabase.rpc(rpc, { p_partner: 'reidey' }),
 };
@@ -68,7 +68,7 @@ export function FleetImportCard({ connected, mayImport }: FleetImportCardProps) 
     setState({ kind: 'running', progress: null });
     const report = (progress: BackfillProgress) => setState({ kind: 'running', progress });
     const earnings = (r: typeof report) => runEarningsBackfill(supabaseBackfillDeps(() => stopRequested.current), r);
-    setState({ kind: 'finished', outcomes: await runFleetImport(DEPS, earnings, report) });
+    setState({ kind: 'finished', outcomes: await runFleetImport(PARTNER_IMPORT_DEPS, earnings, report) });
   };
 
   const running = state.kind === 'running';
@@ -215,7 +215,8 @@ function earningsBody(o: EarningsOutcome, t: Translate): string {
   }
 }
 
-function LegOutcomeView({ outcome }: { outcome: FleetOutcome }) {
+/** One leg's result, also drawn by the single-leg shortcut on the Fahrer and Fahrzeuge pages. */
+export function LegOutcomeView({ outcome }: { outcome: FleetOutcome }) {
   const { t } = useTranslation();
   if (outcome.scope === 'earnings') return <EarningsView outcome={outcome.earnings} />;
   const title = t(LEG_TITLE[outcome.scope]);

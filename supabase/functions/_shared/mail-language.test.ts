@@ -10,8 +10,8 @@ import {
 } from './mail-language.ts';
 
 describe('resolveMailLanguage', () => {
-  it("defaults to English, the owner's decision", () => {
-    expect(DEFAULT_MAIL_LANGUAGE).toBe('en');
+  it("defaults to German, the owner's decision of 26.11.2026", () => {
+    expect(DEFAULT_MAIL_LANGUAGE).toBe('de');
   });
 
   it('keeps every language we write, Turkish and Russian included', () => {
@@ -25,9 +25,9 @@ describe('resolveMailLanguage', () => {
   });
 
   it.each([undefined, null, '', '  ', 'fr', 'ar-EG', 'deutsch', 7, {}, []])(
-    'falls back to English for %j, never German and never a throw',
+    'falls back to German for %j and never throws',
     (value) => {
-      expect(resolveMailLanguage(value)).toBe('en');
+      expect(resolveMailLanguage(value)).toBe('de');
     },
   );
 });
