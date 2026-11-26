@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronDown, Save, User } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
 import { useTranslation } from '../contexts/LanguageContext';
+import { supabase } from '../lib/supabase';
 import { formatPhone, normalizePhone } from '../utils/phoneNumber';
 import {
   DEFAULT_DRIVER_LANGUAGE,
@@ -140,6 +141,32 @@ const DriverModal: React.FC<DriverModalProps> = ({
     };
   }, [email, phone]);
   const { t } = useTranslation();
+  const [numberSuggested, setNumberSuggested] = useState(false);
+  const personalnummerRef = useRef('');
+  personalnummerRef.current = personalnummer;
+
+  // A driver without a staff number (a new one, or one the Reidey import created)
+  // is offered the company's next one. The answer only fills a field that is still
+  // empty when it arrives, so what the operator typed meanwhile is never replaced,
+  // and the cleanup drops the answer to an earlier opening.
+  useEffect(() => {
+    setNumberSuggested(false);
+    if (driver?.personalnummer) return;
+    let current = true;
+    void (async () => {
+      try {
+        const { data, error } = await supabase.rpc('driver_next_personalnummer');
+        if (!current || error || typeof data !== 'string' || data.trim() === '') return;
+        const suggestion = data.trim();
+        if (personalnummerRef.current !== '') return;
+        setPersonalnummer(suggestion);
+        setNumberSuggested(true);
+      } catch {
+        // Only a convenience: the field stays empty and required.
+      }
+    })();
+    return () => { current = false; };
+  }, [driver, isOpen]);
 
   useEffect(() => {
     if (driver) {
@@ -318,11 +345,15 @@ const DriverModal: React.FC<DriverModalProps> = ({
               </NativeSelect>
             </Field>
 
-            <Field label={t('fleet.personalnummer')} hint={t('fleet.personalnummerHint')} required>
+            <Field
+              label={t('fleet.personalnummer')}
+              hint={numberSuggested ? t('fleet.personalnummerSuggested') : t('fleet.personalnummerHint')}
+              required
+            >
               <Input
                 type="text"
                 value={personalnummer}
-                onChange={(e) => setPersonalnummer(e.target.value)}
+                onChange={(e) => { setPersonalnummer(e.target.value); setNumberSuggested(false); }}
                 placeholder={t('fleet.personalnummerPlaceholder')}
                 required
               />
