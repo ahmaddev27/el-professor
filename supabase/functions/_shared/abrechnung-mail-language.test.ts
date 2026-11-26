@@ -192,12 +192,11 @@ describe('the reminder', () => {
 });
 
 describe('the language a mail is built for', () => {
-  it("is English when the driver's language is missing or unknown, never German", () => {
+  it("is German when the driver's language is missing or unknown (the owner's decision of 26.11.2026)", () => {
     for (const stored of [undefined, null, '', 'fr', 'ar-EG']) {
       const mail = abrechnung(resolveMailLanguage(stored));
-      expect(mail.subject, String(stored)).toMatch(/^Settlement /);
-      expect(mail.html).toContain('<html lang="en"');
-      expect(mail.html).not.toContain('Hallo');
+      expect(mail.subject, String(stored)).toBe(abrechnung('de').subject);
+      expect(mail.html).toContain('<html lang="de"');
     }
   });
 

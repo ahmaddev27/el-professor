@@ -31,11 +31,10 @@ describe('the three lists of driver languages', () => {
     expect(migrationLanguages().sort()).toEqual([...DRIVER_LANGUAGES].sort());
   });
 
-  it('default to English everywhere, the owner\'s decision', () => {
-    expect(DEFAULT_DRIVER_LANGUAGE).toBe('en');
-    expect(DEFAULT_MAIL_LANGUAGE).toBe('en');
-    expect(read('supabase/migrations/20261019100000_driver_preferred_language.sql'))
-      .toMatch(/preferred_language text NOT NULL DEFAULT 'en'/);
+  it("default to German in the code, the owner's decision of 26.11.2026", () => {
+    // The column's own default moves in the backend's migration; this pins the two code copies.
+    expect(DEFAULT_DRIVER_LANGUAGE).toBe('de');
+    expect(DEFAULT_MAIL_LANGUAGE).toBe('de');
   });
 
   it('name each language in itself', () => {
@@ -47,17 +46,17 @@ describe('the three lists of driver languages', () => {
 });
 
 describe('toDriverLanguage / mapDriverRow', () => {
-  it('falls back to English for anything unknown', () => {
-    for (const value of [undefined, null, '', 'fr', 3]) expect(toDriverLanguage(value)).toBe('en');
+  it('falls back to German for anything unknown', () => {
+    for (const value of [undefined, null, '', 'fr', 3]) expect(toDriverLanguage(value)).toBe('de');
     expect(toDriverLanguage('ar')).toBe('ar');
     expect(toDriverLanguage('tr')).toBe('tr');
     expect(toDriverLanguage('ru')).toBe('ru');
   });
 
-  it('carries the stored language onto the driver, English when the row has none', () => {
+  it('carries the stored language onto the driver, German when the row has none', () => {
     const base = { id: '1', name: 'A', salary_ratio: 0.5 };
     expect(mapDriverRow({ ...base, preferred_language: 'de' }).preferred_language).toBe('de');
-    expect(mapDriverRow(base).preferred_language).toBe('en');
+    expect(mapDriverRow(base).preferred_language).toBe('de');
   });
 });
 
