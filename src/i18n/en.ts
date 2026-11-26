@@ -6575,7 +6575,7 @@ export const en: PartialDictionary = {
   'settings.uberPull.enabled.label':       'Pull automatically every day',
   'settings.uberPull.loadFailed':          'The schedule could not be loaded.',
   'settings.uberPull.outcome.already_imported': 'Already entered, nothing changed',
-  'settings.uberPull.outcome.blocked_unlinked': 'Driver not linked',
+  'settings.uberPull.outcome.blocked_unlinked': 'New driver not added',
   'settings.uberPull.outcome.blocked_unmatched': 'Uber driver not matched',
   'settings.uberPull.outcome.company_blocked': 'Company blocked',
   'settings.uberPull.outcome.failed':      'Failed',
@@ -6796,7 +6796,7 @@ export const en: PartialDictionary = {
   'rec.place':         'Place',
   'rec.pricePerLitre': 'Price per litre (€/l)',
   'fleet.mailLanguage':     'E-mail language',
-  'fleet.mailLanguageHint': 'The driver receives their settlement e-mails in this language. The default is English. Amounts and dates keep their German format.',
+  'fleet.mailLanguageHint': 'The driver receives their settlement e-mails in this language. The default is German. Amounts and dates keep their German format.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'export.error.busy':                'The export service is busy right now. No file was created. Please try again shortly.',
@@ -7394,4 +7394,18 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'rec.countsToward': 'Counts towards {date}',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.personalnummerSuggested': 'A suggestion: the next free number. You can change it.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.shortcut.updateDrivers':  'Update drivers from Reidey',
+  'import.shortcut.updateVehicles': 'Update vehicles from Reidey',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.uberPull.runs.createdOne':   'Newly created: {names}',
+  'settings.uberPull.runs.createdOther': 'Newly created: {names}',
+  'settings.uberPull.runs.linkedOne':    'Linked: {names}',
+  'settings.uberPull.runs.linkedOther':  'Linked: {names}',
+  'settings.uberPull.runs.unlinkedHint': 'An unknown Uber driver could not be added automatically. Add them on the Drivers page with “Update drivers from Reidey”, then catch up the day on the Earnings page.',
 };

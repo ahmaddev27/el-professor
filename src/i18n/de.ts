@@ -6649,7 +6649,7 @@ export const de = {
   'settings.uberPull.enabled.label':       'Täglich automatisch holen',
   'settings.uberPull.loadFailed':          'Der Zeitplan konnte nicht geladen werden.',
   'settings.uberPull.outcome.already_imported': 'Bereits eingetragen, nichts geändert',
-  'settings.uberPull.outcome.blocked_unlinked': 'Fahrer nicht verknüpft',
+  'settings.uberPull.outcome.blocked_unlinked': 'Neuer Fahrer nicht angelegt',
   'settings.uberPull.outcome.blocked_unmatched': 'Uber-Fahrer nicht zugeordnet',
   'settings.uberPull.outcome.company_blocked': 'Firma gesperrt',
   'settings.uberPull.outcome.failed':      'Fehlgeschlagen',
@@ -6870,7 +6870,7 @@ export const de = {
   'rec.place':         'Ort',
   'rec.pricePerLitre': 'Preis je Liter (€/l)',
   'fleet.mailLanguage':     'E-Mail-Sprache',
-  'fleet.mailLanguageHint': 'In dieser Sprache erhält der Fahrer seine Abrechnung per E-Mail. Standard ist Englisch. Beträge und Daten bleiben deutsch formatiert.',
+  'fleet.mailLanguageHint': 'In dieser Sprache erhält der Fahrer seine Abrechnung per E-Mail. Standard ist Deutsch. Beträge und Daten bleiben deutsch formatiert.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'export.error.busy':                'Der Export-Dienst ist gerade ausgelastet. Es wurde keine Datei erstellt. Bitte versuchen Sie es gleich noch einmal.',
@@ -7468,4 +7468,18 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'rec.countsToward': 'Zählt zum {date}',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.personalnummerSuggested': 'Vorschlag: die nächste freie Nummer. Du kannst sie ändern.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.shortcut.updateDrivers':  'Fahrer aus Reidey aktualisieren',
+  'import.shortcut.updateVehicles': 'Fahrzeuge aus Reidey aktualisieren',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'settings.uberPull.runs.createdOne':   'Neu angelegt: {names}',
+  'settings.uberPull.runs.createdOther': 'Neu angelegt: {names}',
+  'settings.uberPull.runs.linkedOne':    'Verknüpft: {names}',
+  'settings.uberPull.runs.linkedOther':  'Verknüpft: {names}',
+  'settings.uberPull.runs.unlinkedHint': 'Ein unbekannter Uber-Fahrer konnte nicht automatisch angelegt werden. Auf der Fahrer-Seite mit „Fahrer aus Reidey aktualisieren“ anlegen, dann den Tag über die Umsätze-Seite nachholen.',
 } as const;
