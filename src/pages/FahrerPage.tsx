@@ -145,7 +145,7 @@ const FahrerPage: React.FC = () => {
       </TabsList>
 
       <TabsContent value="own">
-    <FleetImportShortcut empty={drivers.length === 0} />
+    <FleetImportShortcut empty={drivers.length === 0} scope="drivers" onImported={() => void loadData()} />
     <DriversManagement
       drivers={drivers}
       onAddDriver={handleAddDriver}
