@@ -490,7 +490,7 @@ describe('sheet 4: the month never reads better than its own rows (D1, owner 27.
   it.each<[string, () => FullMonthResult]>([
     ['the fixture month (a week across the boundary, a real day with a tip)', () => month],
     ['no share rate', () => run({ shareSetting: null })],
-    ['Uber not read', () => run({ uber: null })],
+    ['Uber not read', () => run({ uber: undefined })],
     ['every figure placed', () => reconciled],
   ])('%s: a row that is not reconciled keeps the month from reading reconciled', (_name, get) => {
     const r = get();
@@ -528,7 +528,7 @@ describe('sheet 4: the gap between Uber\'s turnover and the fares is shown, neve
   });
 
   it('says why there is no gap instead of printing 0, and leaves weeks and open tips empty', () => {
-    const blind = dayRows(run({ uber: null }));
+    const blind = dayRows(run({ uber: undefined }));
     expect(new Set(blind.map(r => r[at(FARE_GAP_HEADER)]))).toEqual(new Set([UBER_NOT_READ]));
     const uber = sheetOf(month, CLOSING_SHEET_UBER);
     // A driver Uber reports nothing daily for is planned on every allowed day, with no figure to compare.
@@ -551,7 +551,7 @@ describe('sheet 4: the gap between Uber\'s turnover and the fares is shown, neve
     const gaps = dayRows(month).map(r => r[at(FARE_GAP_HEADER)]).filter((g): g is number => typeof g === 'number');
     const total = String(checkValue(sheetOf(month, CLOSING_SHEET_CHECKS), FARE_GAP_TOTAL_LABEL));
     expect(total.startsWith(`${gaps.reduce((n, g) => n + cents(g), 0) / 100} EUR ueber ${gaps.length} Fahrertage`)).toBe(true);
-    expect(checkValue(sheetOf(run({ uber: null }), CLOSING_SHEET_CHECKS), FARE_GAP_TOTAL_LABEL)).toBe(UBER_NOT_READ);
+    expect(checkValue(sheetOf(run({ uber: undefined }), CLOSING_SHEET_CHECKS), FARE_GAP_TOTAL_LABEL)).toBe(UBER_NOT_READ);
   });
 
   it('fits no fare to Uber: doubling every day\'s Umsatz moves the gap and leaves every simulated ride as it was', () => {
