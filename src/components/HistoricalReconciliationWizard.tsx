@@ -508,13 +508,9 @@ function StepDots({ current, total }: { current: number; total: number }) {
       {Array.from({ length: total }, (_, i) => (
         <div
           key={i}
-          className="h-2 rounded-full transition-all"
-          style={{
-            width: i === current ? 24 : 8,
-            background: i === current
-              ? 'var(--accent, #06b6d4)'
-              : i < current ? 'rgba(6,182,212,0.4)' : 'var(--border)',
-          }}
+          className={`h-2 rounded-full transition-all ${
+            i === current ? 'w-6 bg-brand' : i < current ? 'w-2 bg-brand/40' : 'w-2 bg-line'
+          }`}
         />
       ))}
     </div>
@@ -1407,24 +1403,24 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
   function resultStatusBadge(r: DriverResult) {
     if (r.isOwner) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-          style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-positive-soft text-positive"
+ >
           {t('rec2.ownerBalancingDriver')}
         </span>
       );
     }
     if (r.missingHourlyRate) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-          style={{ background: 'rgba(220,38,38,0.1)', color: '#b91c1c' }}>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-critical-soft text-critical"
+ >
           <AlertTriangle size={11} /> {t('rec2.badgeMissingHourlyRate')}
         </span>
       );
     }
     if (r.overTarget) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-          style={{ background: 'rgba(220,38,38,0.1)', color: '#b91c1c' }}>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-critical-soft text-critical"
+ >
           <AlertTriangle size={11} /> {t('rec2.badgeOverTarget')}
         </span>
       );
@@ -1432,23 +1428,23 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
     if (!r.isOwner && !r.overTarget && !r.noTarget && r.targetGrossCents > 0
       && r.finalGrossCents !== r.targetGrossCents) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-          style={{ background: 'rgba(234,179,8,0.1)', color: '#a16207' }}>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-caution-soft text-caution"
+ >
           <AlertTriangle size={11} /> {t('rec2.badgeDifference')}
         </span>
       );
     }
     if (r.ausgleichMinutes > 0) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-          style={{ background: 'rgba(124,58,237,0.1)', color: '#6d28d9' }}>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-soft text-violet"
+ >
           <CheckCircle2 size={11} /> {t('rec2.badgeBalancingNeeded')}
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
-        style={{ background: 'rgba(21,128,61,0.1)', color: '#15803d' }}>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-positive-soft text-positive"
+ >
         <CheckCircle2 size={11} /> {t('rec2.badgeTargetReached')}
       </span>
     );
@@ -1459,13 +1455,13 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
   function SaveBadge() {
     if (saveStatus === 'idle') return null;
     const cfg = ({
-      saving:  { label: 'common.saving',          color: '#6b7280' },
-      saved:   { label: 'rec2.saveStatusSaved',   color: '#15803d' },
-      unsaved: { label: 'rec2.saveStatusUnsaved', color: '#b45309' },
+      saving:  { label: 'common.saving',          color: 'text-fg-muted' },
+      saved:   { label: 'rec2.saveStatusSaved',   color: 'text-positive' },
+      unsaved: { label: 'rec2.saveStatusUnsaved', color: 'text-caution' },
     } as const)[saveStatus];
     if (!cfg) return null;
     return (
-      <span className="inline-flex items-center gap-1 text-xs" style={{ color: cfg.color }}>
+      <span className={`inline-flex items-center gap-1 text-xs ${cfg.color}`}>
         <Save size={11} />
         {t(cfg.label)}
       </span>
@@ -1480,8 +1476,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       <div className="flex items-center justify-between mb-5">
         <button
           onClick={step > 0 ? () => setStep(s => s - 1) : onBack}
-          className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10"
-          style={{ color: 'var(--text-secondary)' }}
+          className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10 text-fg-muted"
+
         >
           <ArrowLeft size={15} className="rtl:-scale-x-100" />
           {step === 0 ? t('rec2.backToSelection') : t('common.back')}
@@ -1495,48 +1491,48 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       {/* ── Step 0: Monat & Import ─────────────────────────────────────────── */}
       {step === 0 && (
         <div className="space-y-5">
-          <div className="rounded-2xl p-6" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <div className="rounded-surface p-6 glass-card">
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                <Clock size={18} style={{ color: '#7c3aed' }} />
+              <div className="w-9 h-9 rounded-tile flex items-center justify-center bg-violet-soft">
+                <Clock size={18} className="text-violet" />
               </div>
               <div>
-                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step1Title')}</h2>
-                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.step1Subtitle')}</p>
+                <h2 className="font-bold text-base text-fg">{t('rec2.step1Title')}</h2>
+                <p className="text-xs text-fg-subtle">{t('rec2.step1Subtitle')}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('common.month')}</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5 text-fg-subtle">{t('common.month')}</label>
                 <select
                   value={month}
                   onChange={e => setMonth(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  className="w-full px-3 py-2.5 rounded-tile text-sm focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                 >
                   {MONTH_NAME_KEYS.map((key, i) => <option key={key} value={i + 1}>{t(key)}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.year')}</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5 text-fg-subtle">{t('rec2.year')}</label>
                 <select
                   value={year}
                   onChange={e => setYear(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  className="w-full px-3 py-2.5 rounded-tile text-sm focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                 >
                   {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.fahrtenbuchImport')}</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5 text-fg-subtle">{t('rec2.fahrtenbuchImport')}</label>
                 <select
                   value={selectedImportId}
                   onChange={e => setSelectedImportId(e.target.value)}
                   disabled={loadingImports || imports.length === 0}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  className="w-full px-3 py-2.5 rounded-tile text-sm focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                 >
                   {imports.length === 0 ? (
                     <option value="">{t('rec2.noImportForMonth', { month: monthLabel, year })}</option>
@@ -1554,8 +1550,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             </div>
 
             {imports.length === 0 && !loadingImports && (
-              <div className="mt-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
-                style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
+              <div className="mt-4 px-4 py-3 rounded-tile flex items-center gap-2 text-sm bg-caution-soft border border-caution/20 text-caution"
+ >
                 <AlertTriangle size={14} />
                 {t('rec2.noImportHint', { month: monthLabel, year })}
               </div>
@@ -1566,8 +1562,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             <button
               onClick={handleAdvanceToStep1}
               disabled={!selectedImportId || loadingImports || loadingDrivers}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40 bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover [@media(pointer:coarse)]:min-h-11"
+
             >
               {t('rec2.next')} <ArrowRight size={15} className="rtl:-scale-x-100" />
             </button>
@@ -1579,16 +1575,16 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       {step === 1 && (
         <div className="space-y-5">
           {/* Regular drivers table */}
-          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="rounded-surface overflow-hidden glass-card">
+            <div className="px-6 py-4 border-b border-line">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                    <Users size={18} style={{ color: '#7c3aed' }} />
+                  <div className="w-9 h-9 rounded-tile flex items-center justify-center bg-violet-soft">
+                    <Users size={18} className="text-violet" />
                   </div>
                   <div>
-                    <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step2Title')}</h2>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    <h2 className="font-bold text-base text-fg">{t('rec2.step2Title')}</h2>
+                    <p className="text-xs text-fg-subtle">
                       {monthLabel} {year} · {selectedImport?.file_name}
                     </p>
                   </div>
@@ -1597,7 +1593,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             </div>
 
             <div className="px-6 pt-3 pb-1">
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              <p className="text-xs text-fg-subtle">
                 {t('rec2.hourlyRateHint')}
               </p>
             </div>
@@ -1605,8 +1601,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: 'var(--bg-subtle)' }}>
-                    <th className="px-4 py-2.5 text-start text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+                  <tr className="bg-wash">
+                    <th className="px-4 py-2.5 text-start text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                       <label className="inline-flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
@@ -1616,17 +1612,17 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                         {t('rec2.colDriverEmployed')}
                       </label>
                     </th>
-                    <th className="px-4 py-2.5 text-end text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)', minWidth: 140 }}>
+                    <th className="px-4 py-2.5 text-end text-xs font-semibold uppercase tracking-wider text-fg-subtle min-w-[140px]">
                       {t('rec2.colHourlyRateEur')}
                     </th>
-                    <th className="px-4 py-2.5 text-end text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)', minWidth: 160 }}>
+                    <th className="px-4 py-2.5 text-end text-xs font-semibold uppercase tracking-wider text-fg-subtle min-w-[160px]">
                       {t('rec2.colTargetGrossEur')}
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {driverConfigs.map((cfg, idx) => (
-                    <tr key={cfg.driverId} style={{ borderTop: '1px solid var(--border)', opacity: cfg.included ? 1 : 0.45 }}>
+                    <tr key={cfg.driverId} className={`border-t border-line ${cfg.included ? '' : 'opacity-[0.45]'}`}>
                       <td className="px-4 py-2.5">
                         <label className="flex items-center gap-2.5 cursor-pointer">
                           <input
@@ -1637,8 +1633,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                             )}
                           />
                           <div>
-                            <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{cfg.driverName}</div>
-                            {cfg.personalnummer && <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>#{cfg.personalnummer}</div>}
+                            <div className="font-medium text-fg">{cfg.driverName}</div>
+                            {cfg.personalnummer && <div className="text-xs text-fg-subtle">#{cfg.personalnummer}</div>}
                           </div>
                         </label>
                       </td>
@@ -1675,10 +1671,10 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                               });
                             }}
                             disabled={!cfg.included}
-                            className="w-24 px-2.5 py-1.5 rounded-lg text-sm text-end focus:outline-none"
-                            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                            className="w-24 px-2.5 py-1.5 rounded-control text-sm text-end focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                           />
-                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>€/h</span>
+                          <span className="text-xs text-fg-subtle">€/h</span>
                         </div>
                       </td>
                       <td className="px-4 py-2.5">
@@ -1714,17 +1710,17 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                               });
                             }}
                             disabled={!cfg.included}
-                            className="w-28 px-2.5 py-1.5 rounded-lg text-sm text-end focus:outline-none"
-                            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                            className="w-28 px-2.5 py-1.5 rounded-control text-sm text-end focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                           />
-                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>€</span>
+                          <span className="text-xs text-fg-subtle">€</span>
                         </div>
                       </td>
                     </tr>
                   ))}
                   {driverConfigs.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                      <td colSpan={3} className="px-4 py-8 text-center text-sm text-fg-subtle">
                         {t('rec2.noEmployedDrivers')}
                       </td>
                     </tr>
@@ -1735,17 +1731,17 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           </div>
 
           {/* Inhaber / Ausgleichsfahrer section */}
-          <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <h3 className="font-bold text-sm mb-1" style={{ color: 'var(--text-primary)' }}>
+          <div className="rounded-surface p-5 glass-card">
+            <h3 className="font-bold text-sm mb-1 text-fg">
               {t('rec2.ownerBalancingDriver')}
             </h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>
+            <p className="text-xs mb-4 text-fg-subtle">
               {t('rec2.ownerBalancingHint')}
             </p>
 
             {ownerDrivers.length === 0 && (
-              <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
-                style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
+              <div className="mb-4 px-4 py-3 rounded-tile flex items-center gap-2 text-sm bg-caution-soft border border-caution/20 text-caution"
+ >
                 <AlertTriangle size={14} />
                 {t('rec2.noOwnerFound')}
               </div>
@@ -1759,7 +1755,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   onChange={e => setUseInhaber(e.target.checked)}
                   className="w-4 h-4"
                 />
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-sm font-medium text-fg">
                   {t('rec2.useOwnerAsBalancingDriver')}
                 </span>
               </label>
@@ -1767,14 +1763,14 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               {useInhaber && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 ps-6">
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5 text-fg-subtle">
                       {t('rec2.selectOwner')}
                     </label>
                     <select
                       value={inhaberId}
                       onChange={e => setInhaberId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none"
-                      style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                      className="w-full px-3 py-2 rounded-tile text-sm focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                     >
                       <option value="">{t('rec2.pleaseSelect')}</option>
                       {ownerDrivers.map(d => (
@@ -1785,13 +1781,13 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                       ))}
                     </select>
                     {inhaberId && (
-                      <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                      <p className="text-xs mt-1 text-fg-subtle">
                         {t('rec2.balancingDriverIs', { name: inhaberDriver?.name ?? '' })}
                       </p>
                     )}
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5 text-fg-subtle">
                       {t('rec2.ownerTargetGross')}
                     </label>
                     <div className="flex items-center gap-1.5">
@@ -1832,12 +1828,12 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                           });
                           setInhaberTargetDraft(null);
                         }}
-                        className="w-28 px-2.5 py-1.5 rounded-lg text-sm text-end focus:outline-none"
-                        style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                        className="w-28 px-2.5 py-1.5 rounded-control text-sm text-end focus:outline-none bg-field border border-line text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+
                       />
-                      <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>€</span>
+                      <span className="text-xs text-fg-subtle">€</span>
                     </div>
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                    <p className="text-xs mt-1 text-fg-subtle">
                       {t('rec2.ownerTargetGrossHint')}
                     </p>
                   </div>
@@ -1852,7 +1848,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                     onChange={e => setInhaberGeneratePdf(e.target.checked)}
                     className="w-4 h-4"
                   />
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  <span className="text-sm text-fg-muted">
                     {t('rec2.createOwnerStundennachweis')}
                   </span>
                 </label>
@@ -1861,8 +1857,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           </div>
 
           {!step1Valid && includedCount > 0 && (
-            <div className="px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
-              style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
+            <div className="px-4 py-3 rounded-tile flex items-center gap-2 text-sm bg-caution-soft border border-caution/20 text-caution"
+ >
               <AlertTriangle size={14} />
               {t('rec2.enterRateAndTarget')}
             </div>
@@ -1878,8 +1874,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 setStep(2);
               }}
               disabled={!step1Valid}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40 bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover [@media(pointer:coarse)]:min-h-11"
+
             >
               {t('rec2.nextToCalculation')} <ArrowRight size={15} className="rtl:-scale-x-100" />
             </button>
@@ -1890,14 +1886,14 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       {/* ── Step 2: Berechnung starten ─────────────────────────────────────── */}
       {step === 2 && (
         <div className="space-y-5">
-          <div className="rounded-2xl p-6" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <div className="rounded-surface p-6 glass-card">
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                <Calculator size={18} style={{ color: '#7c3aed' }} />
+              <div className="w-9 h-9 rounded-tile flex items-center justify-center bg-violet-soft">
+                <Calculator size={18} className="text-violet" />
               </div>
               <div>
-                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step3Title')}</h2>
-                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                <h2 className="font-bold text-base text-fg">{t('rec2.step3Title')}</h2>
+                <p className="text-xs text-fg-subtle">
                   {t('rec2.step3Subtitle')}
                 </p>
               </div>
@@ -1905,37 +1901,37 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
             <div className="space-y-2 mb-5">
               {driverConfigs.filter(c => c.included).map(cfg => (
-                <div key={cfg.driverId} className="px-4 py-3 rounded-xl flex items-center justify-between"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                <div key={cfg.driverId} className="px-4 py-3 rounded-tile flex items-center justify-between bg-sunken border border-line"
+ >
                   <div>
-                    <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{cfg.driverName}</span>
-                    <span className="text-xs ms-2" style={{ color: 'var(--text-tertiary)' }}>
+                    <span className="font-medium text-sm text-fg">{cfg.driverName}</span>
+                    <span className="text-xs ms-2 text-fg-subtle">
                       {t('rec2.rateAndTargetSummary', {
                         rate: centsToDisplay(cfg.hourlyCents),
                         target: centsToDisplay(cfg.targetGrossCents),
                       })}
                     </span>
                   </div>
-                  <CheckCircle2 size={15} style={{ color: '#15803d' }} />
+                  <CheckCircle2 size={15} className="text-positive" />
                 </div>
               ))}
               {useInhaber && inhaberId && (
-                <div className="px-4 py-3 rounded-xl flex items-center justify-between"
-                  style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                <div className="px-4 py-3 rounded-tile flex items-center justify-between bg-positive-soft border border-positive/20"
+ >
                   <div>
-                    <span className="font-medium text-sm" style={{ color: '#047857' }}>
+                    <span className="font-medium text-sm text-positive">
                       {inhaberDriver?.name ?? t('rec2.owner')}
                     </span>
-                    <span className="text-xs ms-2" style={{ color: '#15803d' }}>{t('rec2.balancingDriver')}</span>
+                    <span className="text-xs ms-2 text-positive">{t('rec2.balancingDriver')}</span>
                   </div>
-                  <CheckCircle2 size={15} style={{ color: '#15803d' }} />
+                  <CheckCircle2 size={15} className="text-positive" />
                 </div>
               )}
             </div>
 
             {useInhaber && inhaberId && (
-              <div className="mb-4 px-4 py-3 rounded-xl flex items-start gap-2 text-sm"
-                style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)', color: '#6d28d9' }}>
+              <div className="mb-4 px-4 py-3 rounded-tile flex items-start gap-2 text-sm bg-violet-soft border border-violet/20 text-violet"
+ >
                 <Info size={14} className="mt-0.5 shrink-0" />
                 <span>
                   <strong>{t('rec2.ownerRepairActiveTitle')}</strong>{' '}
@@ -1945,8 +1941,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             )}
 
             {computeError && (
-              <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
-                style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+              <div className="mb-4 px-4 py-3 rounded-tile flex items-center gap-2 text-sm bg-critical-soft border border-critical/20 text-critical"
+ >
                 <AlertTriangle size={14} /> {computeError}
               </div>
             )}
@@ -1954,8 +1950,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             <button
               onClick={handleCompute}
               disabled={computing}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
-              style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover [@media(pointer:coarse)]:min-h-11"
+
             >
               {computing ? <RefreshCw size={14} className="animate-spin" /> : <Calculator size={14} />}
               {computing ? t('rec2.calculating') : t('rec2.calculateNow')}
@@ -1968,38 +1964,38 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       {step === 3 && results && (
         <div className="space-y-5">
           {repairDiag && useInhaber && inhaberId && (
-            <div className="rounded-2xl p-5" style={{ background: 'rgba(124,58,237,0.05)', border: '1px solid rgba(124,58,237,0.2)' }}>
-              <h3 className="font-bold text-sm mb-3" style={{ color: '#6d28d9' }}>{t('rec2.ownerBalancing')}</h3>
+            <div className="rounded-surface p-5 bg-violet-soft border border-violet/20">
+              <h3 className="font-bold text-sm mb-3 text-violet">{t('rec2.ownerBalancing')}</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.movedGroups')}</div>
-                  <div className="text-xl font-bold" style={{ color: '#7c3aed' }}>{repairDiag.movedGroups}</div>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1 text-fg-subtle">{t('rec2.movedGroups')}</div>
+                  <div className="text-xl font-bold text-violet">{repairDiag.movedGroups}</div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.movedTime')}</div>
-                  <div className="text-xl font-bold" style={{ color: '#7c3aed' }}>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1 text-fg-subtle">{t('rec2.movedTime')}</div>
+                  <div className="text-xl font-bold text-violet">
                     {(repairDiag.movedMinutes / 60).toFixed(2).replace('.', ',')} h
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.reducedOverTarget')}</div>
-                  <div className="text-xl font-bold" style={{ color: '#15803d' }}>{repairDiag.reducedOverTargetCount}</div>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1 text-fg-subtle">{t('rec2.reducedOverTarget')}</div>
+                  <div className="text-xl font-bold text-positive">{repairDiag.reducedOverTargetCount}</div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.unmovable')}</div>
-                  <div className="text-xl font-bold" style={{
-                    color: unmovableIsBlocking ? '#b91c1c'
-                      : unmovableIsNonBlocking ? '#b45309'
-                      : 'var(--text-tertiary)',
-                  }}>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1 text-fg-subtle">{t('rec2.unmovable')}</div>
+                  <div className={`text-xl font-bold ${
+                    unmovableIsBlocking ? 'text-critical'
+                      : unmovableIsNonBlocking ? 'text-caution'
+                      : 'text-fg-subtle'
+                  }`}>
                     {repairDiag.unmovableGroups}
                   </div>
                 </div>
               </div>
 
               {unmovableIsNonBlocking && (
-                <div className="mt-3 px-4 py-3 rounded-xl flex items-start gap-2 text-sm"
-                  style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
+                <div className="mt-3 px-4 py-3 rounded-tile flex items-start gap-2 text-sm bg-caution-soft border border-caution/20 text-caution"
+ >
                   <Info size={14} className="mt-0.5 shrink-0" />
                   <div>
                     <div className="font-semibold">{t('rec2.unmovableNonBlockingTitle')}</div>
@@ -2011,8 +2007,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               )}
 
               {unmovableIsBlocking && (
-                <div className="mt-3 px-4 py-3 rounded-xl flex items-start gap-2 text-sm"
-                  style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+                <div className="mt-3 px-4 py-3 rounded-tile flex items-start gap-2 text-sm bg-critical-soft border border-critical/20 text-critical"
+ >
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                   <div>
                     <div className="font-semibold">{t('rec2.unmovableBlockingTitle')}</div>
@@ -2025,10 +2021,10 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
               {repairDiag.unmovableReasons.length > 0 && (
                 <details className="mt-3">
-                  <summary className="text-xs cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
+                  <summary className="text-xs cursor-pointer text-fg-subtle">
                     {t('rec2.unmovableGroupsCount', { count: repairDiag.unmovableReasons.length })}
                   </summary>
-                  <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  <ul className="mt-2 space-y-1 text-xs text-fg-muted">
                     {repairDiag.unmovableReasons.slice(0, 20).map((r, i) => (
                       <li key={i}>• {r} — {unmovableIsBlocking ? t('rec2.exportBlocker') : t('rec2.notExportBlocker')}</li>
                     ))}
@@ -2041,15 +2037,15 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             </div>
           )}
 
-          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="rounded-surface overflow-hidden glass-card">
+            <div className="px-6 py-4 border-b border-line">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                  <CheckCircle2 size={18} style={{ color: '#7c3aed' }} />
+                <div className="w-9 h-9 rounded-tile flex items-center justify-center bg-violet-soft">
+                  <CheckCircle2 size={18} className="text-violet" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step4Title')}</h2>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <h2 className="font-bold text-base text-fg">{t('rec2.step4Title')}</h2>
+                  <p className="text-xs text-fg-subtle">
                     {monthLabel} {year} · {t('rec2.exportableCount', { count: exportableResults.length })}
                     {blockedResults.length > 0 ? t('rec2.blockedCountSuffix', { count: blockedResults.length }) : ''}
                   </p>
@@ -2060,9 +2056,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: 'var(--bg-subtle)' }}>
+                  <tr className="bg-wash">
                     {RESULT_COLUMN_KEYS.map(h => (
-                      <th key={h} className="px-3 py-2.5 text-start text-xs font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>
+                      <th key={h} className="px-3 py-2.5 text-start text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-fg-subtle">
                         {t(h)}
                       </th>
                     ))}
@@ -2076,43 +2072,38 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                       <React.Fragment key={r.driverId}>
                         <tr
                           onClick={() => setExpandedDriverId(isExpanded ? null : r.driverId)}
-                          style={{
-                            borderTop: '1px solid var(--border)',
-                            background: r.isOwner ? 'rgba(16,185,129,0.04)' : undefined,
-                            cursor: 'pointer',
-                          }}>
+                          className={`border-t border-line cursor-pointer ${r.isOwner ? 'bg-positive-soft' : ''}`}>
                           <td className="px-3 py-2.5">
-                            <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                            <div className="font-medium text-fg">
                               {r.driverName}
                               {r.isOwner && (
-                                <span className="ms-1.5 text-xs px-1.5 py-0.5 rounded-full"
-                                  style={{ background: 'rgba(16,185,129,0.12)', color: '#047857' }}>
+                                <span className="ms-1.5 text-xs px-1.5 py-0.5 rounded-full bg-positive-soft text-positive"
+ >
                                   {t('rec2.owner')}
                                 </span>
                               )}
                             </div>
-                            {r.personalnummer && <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>#{r.personalnummer}</div>}
+                            {r.personalnummer && <div className="text-xs text-fg-subtle">#{r.personalnummer}</div>}
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          <td className="px-3 py-2.5 text-end font-mono text-xs text-fg-muted">
                             {(grundlohnMins / 60).toFixed(2).replace('.', ',')}h
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          <td className="px-3 py-2.5 text-end font-mono text-xs text-fg-muted">
                             {r.hourlyCents > 0 ? `${centsToDisplay(r.grundlohnCents)} €` : '—'}
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs" style={{ color: r.zuschlaegeCents > 0 ? '#b45309' : 'var(--text-tertiary)' }}>
+                          <td className={`px-3 py-2.5 text-end font-mono text-xs ${r.zuschlaegeCents > 0 ? 'text-caution' : 'text-fg-subtle'}`}>
                             {r.hourlyCents > 0 ? `${centsToDisplay(r.zuschlaegeCents)} €` : '—'}
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs font-semibold" style={{ color: r.overTarget ? '#dc2626' : 'var(--text-secondary)' }}>
+                          <td className={`px-3 py-2.5 text-end font-mono text-xs font-semibold ${r.overTarget ? 'text-critical' : 'text-fg-muted'}`}>
                             {r.hourlyCents > 0 ? `${centsToDisplay(r.grossFromRidesCents)} €` : '—'}
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs"
-                            style={{ color: r.ausgleichMinutes > 0 ? '#7c3aed' : 'var(--text-tertiary)' }}>
+                          <td className={`px-3 py-2.5 text-end font-mono text-xs ${r.ausgleichMinutes > 0 ? 'text-violet' : 'text-fg-subtle'}`}>
                             {(r.ausgleichMinutes / 60).toFixed(2).replace('.', ',')}h
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          <td className="px-3 py-2.5 text-end font-mono text-xs font-semibold text-fg">
                             {r.hourlyCents > 0 ? `${centsToDisplay(r.finalGrossCents)} €` : '—'}
                           </td>
-                          <td className="px-3 py-2.5 text-end font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                          <td className="px-3 py-2.5 text-end font-mono text-xs text-fg-subtle">
                             {r.targetGrossCents > 0 ? `${centsToDisplay(r.targetGrossCents)} €` : '—'}
                           </td>
                           <td className="px-3 py-2.5">
@@ -2120,12 +2111,12 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                           </td>
                         </tr>
                         {isExpanded && r.historicalGrossReconciliation && (
-                          <tr style={{ borderTop: '1px solid var(--border)' }}>
-                            <td colSpan={9} className="px-6 py-3" style={{ background: 'var(--bg-subtle)' }}>
-                              <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                          <tr className="border-t border-line">
+                            <td colSpan={9} className="px-6 py-3 bg-wash">
+                              <div className="text-xs font-semibold mb-2 text-fg-muted">
                                 {t('rec2.grossBreakdownFor', { driver: r.driverName })}
                               </div>
-                              <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs max-w-xl" style={{ color: 'var(--text-secondary)' }}>
+                              <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs max-w-xl text-fg-muted">
                                 {([
                                   ['rec2.breakdownBaseWage',   `${r.historicalGrossReconciliation.grundlohnH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.grundlohnCents)} €`],
                                   ['rec2.breakdownNight25',    `${r.historicalGrossReconciliation.nachtarbeitH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.nachtarbeitCents)} €`],
@@ -2136,24 +2127,24 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                                 ] as const).map(([labelKey, hours, amount]) => (
                                   <React.Fragment key={labelKey}>
                                     <span>{t(labelKey)}</span>
-                                    <span className="font-mono text-end" style={{ color: 'var(--text-primary)' }}>
+                                    <span className="font-mono text-end text-fg">
                                       {hours} · {amount}
                                     </span>
                                   </React.Fragment>
                                 ))}
-                                <span className="font-semibold pt-1 border-t" style={{ color: 'var(--text-primary)', borderColor: 'var(--border)' }}>{t('rec2.colFinalGross')}</span>
-                                <span className="font-semibold font-mono text-end pt-1 border-t" style={{ color: 'var(--text-primary)', borderColor: 'var(--border)' }}>
+                                <span className="font-semibold pt-1 border-t text-fg border-line">{t('rec2.colFinalGross')}</span>
+                                <span className="font-semibold font-mono text-end pt-1 border-t text-fg border-line">
                                   {centsToDisplay(r.historicalGrossReconciliation.finalGrossCents)} €
                                 </span>
-                                <span style={{ color: 'var(--text-secondary)' }}>{t('rec2.advisorTargetGross')}</span>
-                                <span className="font-mono text-end" style={{ color: 'var(--text-secondary)' }}>
+                                <span className="text-fg-muted">{t('rec2.advisorTargetGross')}</span>
+                                <span className="font-mono text-end text-fg-muted">
                                   {r.historicalGrossReconciliation.targetGrossCents > 0 ? `${centsToDisplay(r.historicalGrossReconciliation.targetGrossCents)} €` : '—'}
                                 </span>
-                                <span style={{ color: 'var(--text-secondary)' }}>{t('rec2.difference')}</span>
-                                <span className="font-mono text-end font-semibold" style={{
-                                  color: r.historicalGrossReconciliation.differenzCents === 0 ? '#047857'
-                                    : r.historicalGrossReconciliation.differenzCents > 0 ? '#dc2626' : '#b45309',
-                                }}>
+                                <span className="text-fg-muted">{t('rec2.difference')}</span>
+                                <span className={`font-mono text-end font-semibold ${
+                                  r.historicalGrossReconciliation.differenzCents === 0 ? 'text-positive'
+                                    : r.historicalGrossReconciliation.differenzCents > 0 ? 'text-critical' : 'text-caution'
+                                }`}>
                                   {r.historicalGrossReconciliation.differenzCents > 0 ? '+' : ''}{centsToDisplay(r.historicalGrossReconciliation.differenzCents)} €
                                 </span>
                               </div>
@@ -2169,8 +2160,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           </div>
 
           {blockedResults.length > 0 && (
-            <div className="px-4 py-3 rounded-xl flex items-start gap-2 text-sm"
-              style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            <div className="px-4 py-3 rounded-tile flex items-start gap-2 text-sm bg-critical-soft border border-critical/20 text-critical"
+ >
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <div>
                 <span className="font-semibold">{t('rec2.blockedDrivers', { count: blockedResults.length })}</span>
@@ -2188,8 +2179,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             <button
               onClick={() => setStep(4)}
               disabled={exportableResults.length === 0}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40 bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover [@media(pointer:coarse)]:min-h-11"
+
             >
               {t('rec2.nextToDocuments')} <ArrowRight size={15} className="rtl:-scale-x-100" />
             </button>
@@ -2200,15 +2191,15 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       {/* ── Step 4: Dokumente erstellen ────────────────────────────────────── */}
       {step === 4 && results && (
         <div className="space-y-5">
-          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="rounded-surface overflow-hidden glass-card">
+            <div className="px-6 py-4 border-b border-line">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                  <FileText size={18} style={{ color: '#7c3aed' }} />
+                <div className="w-9 h-9 rounded-tile flex items-center justify-center bg-violet-soft">
+                  <FileText size={18} className="text-violet" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step5Title')}</h2>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <h2 className="font-bold text-base text-fg">{t('rec2.step5Title')}</h2>
+                  <p className="text-xs text-fg-subtle">
                     {t('rec2.step5Subtitle', { month: monthLabel, year })}
                   </p>
                 </div>
@@ -2216,16 +2207,16 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             </div>
 
             {/* ── Export actions ────────────────────────────────────────────── */}
-            <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-subtle)' }}>
-              <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="px-6 py-4 border-b border-line bg-wash">
+              <div className="text-xs font-semibold uppercase tracking-wider mb-3 text-fg-subtle">
                 {t('rec2.export')}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleExportFahrtenbuch}
                   disabled={exportingFahrtenbuch || exportingAll || !tripAssignments}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40 glass-card text-fg"
+
                 >
                   {exportingFahrtenbuch
                     ? <RefreshCw size={13} className="animate-spin" />
@@ -2236,8 +2227,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 <button
                   onClick={handleExportAllPdfs}
                   disabled={exportingAllPdfs || exportingAll || exportableResults.length === 0}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40 glass-card text-fg"
+
                 >
                   {exportingAllPdfs
                     ? <RefreshCw size={13} className="animate-spin" />
@@ -2250,8 +2241,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 <button
                   onClick={handleExportAllItems}
                   disabled={exportingAll || exportingFahrtenbuch || exportingAllPdfs || exportableResults.length === 0 || !tripAssignments}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-                  style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-tile text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40 bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover [@media(pointer:coarse)]:min-h-11"
+
                 >
                   {exportingAll
                     ? <RefreshCw size={13} className="animate-spin" />
@@ -2261,37 +2252,37 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               </div>
 
               {!tripAssignments && (
-                <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                <p className="mt-2 text-xs text-fg-subtle">
                   {t('rec2.fahrtenbuchExportAfterCalc')}
                 </p>
               )}
 
               {fbValidation && (
-                <div className="mt-3 px-4 py-3 rounded-xl text-xs space-y-1"
-                  style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.18)' }}>
-                  <div className="font-semibold mb-1" style={{ color: '#047857' }}>
+                <div className="mt-3 px-4 py-3 rounded-tile text-xs space-y-1 bg-positive-soft border border-positive/20"
+ >
+                  <div className="font-semibold mb-1 text-positive">
                     {t('rec2.fahrtenbuchCheck')}
                   </div>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-fg-muted">
                     <span>{t('rec2.checkOriginalRows')}</span>
-                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.originalCount}</span>
+                    <span className="font-medium text-fg">{fbValidation.originalCount}</span>
                     <span>{t('rec2.checkExportRows')}</span>
-                    <span className="font-medium" style={{ color: fbValidation.exportCount === fbValidation.originalCount ? 'var(--text-primary)' : '#b91c1c' }}>{fbValidation.exportCount}</span>
+                    <span className={`font-medium ${fbValidation.exportCount === fbValidation.originalCount ? 'text-fg' : 'text-critical'}`}>{fbValidation.exportCount}</span>
                     <span>{t('rec2.checkRowOrder')}</span>
-                    <span className="font-medium" style={{ color: fbValidation.reihenfolgeOk ? '#047857' : '#b91c1c' }}>
+                    <span className={`font-medium ${fbValidation.reihenfolgeOk ? 'text-positive' : 'text-critical'}`}>
                       {fbValidation.reihenfolgeOk ? t('rec2.ok') : t('rec2.deviation')}
                     </span>
                     <span>{t('rec2.checkChangedAssignments')}</span>
-                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.changedCount}</span>
+                    <span className="font-medium text-fg">{fbValidation.changedCount}</span>
                     <span>{t('rec2.checkUnchangedRows')}</span>
-                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.unchangedCount}</span>
+                    <span className="font-medium text-fg">{fbValidation.unchangedCount}</span>
                     <span>{t('rec2.checkCanceledRows')}</span>
-                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.canceledCount}</span>
+                    <span className="font-medium text-fg">{fbValidation.canceledCount}</span>
                     <span>{t('rec2.checkUnassignedRows')}</span>
-                    <span className="font-medium" style={{ color: fbValidation.unassignedCount > 0 ? '#92400e' : 'var(--text-primary)' }}>{fbValidation.unassignedCount}</span>
+                    <span className={`font-medium ${fbValidation.unassignedCount > 0 ? 'text-caution' : 'text-fg'}`}>{fbValidation.unassignedCount}</span>
                   </div>
                   {fbValidation.ok && (
-                    <div className="mt-1 font-medium" style={{ color: '#047857' }}>
+                    <div className="mt-1 font-medium text-positive">
                       {t('rec2.fahrtenbuchFullyChecked')}
                     </div>
                   )}
@@ -2305,23 +2296,20 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 const canExport = isExportable(r, inhaberGeneratePdf);
                 return (
                   <div key={r.driverId}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl"
-                    style={{
-                      background: r.isOwner ? 'rgba(16,185,129,0.06)' : 'var(--bg-subtle)',
-                      border: `1px solid ${r.isOwner ? 'rgba(16,185,129,0.2)' : 'var(--border)'}`,
-                      opacity: canExport ? 1 : 0.5,
-                    }}>
+                    className={`flex items-center justify-between px-4 py-3 rounded-tile border ${
+                      r.isOwner ? 'bg-positive-soft border-positive/20' : 'bg-sunken border-line'
+                    } ${canExport ? '' : 'opacity-50'}`}>
                     <div>
-                      <div className="font-medium text-sm flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                      <div className="font-medium text-sm flex items-center gap-2 text-fg">
                         {r.driverName}
                         {r.isOwner && (
-                          <span className="text-xs px-1.5 py-0.5 rounded-full"
-                            style={{ background: 'rgba(16,185,129,0.12)', color: '#047857' }}>
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-positive-soft text-positive"
+ >
                             {t('rec2.owner')}
                           </span>
                         )}
                       </div>
-                      <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                      <div className="text-xs mt-0.5 text-fg-subtle">
                         {t('rec2.actualHoursValue', { hours: (r.totals.grundlohn / 60).toFixed(2).replace('.', ',') })}
                         {r.ausgleichMinutes > 0 && (
                           <> {t('rec2.plusBalancingValue', { hours: (r.ausgleichMinutes / 60).toFixed(2).replace('.', ',') })}</>
@@ -2336,8 +2324,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                     <button
                       onClick={() => handleExport(r)}
                       disabled={!canExport || exporting}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80 disabled:opacity-40"
-                      style={{ background: 'var(--accent, #06b6d4)', color: '#fff' }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-control text-xs font-semibold transition-all hover:opacity-80 disabled:opacity-40 bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover [@media(pointer:coarse)]:min-h-11"
+
                     >
                       <Download size={12} /> PDF
                     </button>
@@ -2347,8 +2335,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             </div>
 
             {exportError && (
-              <div className="mx-6 mb-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
-                style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+              <div className="mx-6 mb-4 px-4 py-3 rounded-tile flex items-center gap-2 text-sm bg-critical-soft border border-critical/20 text-critical"
+ >
                 <AlertTriangle size={14} /> {exportError}
               </div>
             )}

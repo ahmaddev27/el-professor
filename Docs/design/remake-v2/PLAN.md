@@ -334,7 +334,7 @@ primitives alone**, and is checked in the shots.
 | R2 | `NotesPage`, `WerkstattPage`, `NotificationsPage` — **done 27.11.2026** (below) |
 | R3 | `AccountPage`; then the OTP block's `ON_LEGACY_SURFACE` pairs retire — **done 27.11.2026** (below, with R4) |
 | R4 | the admin panel: `SuperAdminDashboard`, `CompaniesPage`, `PlatformDirectoriesPage`, `PlatformTeamPage`, `PlatformAuditPage`, `PlatformSettingsPage`, `PlatformPlansPage`, `SubscriptionBillingPage`, `AbnahmeDiagnosticPage` — **done 27.11.2026** (below; `PlatformPlansPage` was already on tokens) |
-| R5 | the components phase 5 left legacy on purpose: the salary dialogs, the planning and document builders' screen parts (never the documents), the toast, `ConfirmationModal` callers, and `LandingPage` |
+| R5 | the components phase 5 left legacy on purpose: the salary dialogs, the planning and document builders' screen parts (never the documents), the toast, `ConfirmationModal` callers, and `LandingPage` — **done 27.11.2026** (below) |
 | R6 | retire the legacy tokens once nothing reads them; the document components move their `var(--…)` reads to fixed values first, proved unchanged |
 
 **R1, as built (27.11.2026, branch `design/remake-r1`).**
@@ -398,6 +398,58 @@ primitives alone**, and is checked in the shots.
   - `ReferralCodesManagement.writeRefusal.test.ts` now mocks only `Alert`.
   - The typecheck baseline fell from 165 to 163. Two unused icon imports in `InvoiceDetailModal` went with the old markup, and three `React` imports the conversion left unused were removed.
 - **Harness.** `design-harness/r4/` (fixtures and routes) and `design-harness/shots-r4.mjs` add a platform owner with every capability. The fakes switch to it for `?screen=r4-*`, and every other batch is unchanged.
+
+**R5, as built (27.11.2026, branch `design/remake-r5`, one PR).**
+
+- **What moved.** The style ratchet fell from 2992 inline styles and 2228 colours in 33 files to 349 and 366 in 14. Counts are inline styles / colours, before → after:
+  - **Planning and documents, the screen parts only:**
+    - the Arbeitsstunden wizard (985 / 682 → 5 / 11);
+    - Monatsplanung's assignment preview (331 / 344 → 0 / 0) and Stundennachweis preview (207 / 139 → 0 / 0);
+    - the Brutto-Gehälter wizard (147 / 106 → 0 / 0);
+    - `FinalizePlanningModal` (50 / 32 → 0 / 0);
+    - `HistoricalHourTargetsManager` (70 / 41 → 0 / 0);
+    - `FahrtenbuchImportModal` (94 / 4 → 0 / 0);
+    - `CompanyPlannerPage` (29 / 15 → 0 / 0);
+    - `MonatsplanungAppliedRuns` (39 / 37 → 0 / 0);
+    - the Stundennachweis page around its `Timesheet` (154 / 71 → 72 / 29, every remaining one inside `Timesheet` but one field in `EditableCell`);
+    - the Trinkgeld-Quittung and Mietwagenauftrag dialogs around their `A4Document` (87 / 37 → 42 / 34 and 155 / 50 → 94 / 48, all remaining ones inside the sheet).
+  - **The three salary dialogs** (104 / 2, 37 / 1 and 20 / 1 → 0 / 0) are Radix `Dialog`s that ignore a close while they write.
+  - **`ConfirmationModal`** (11 / 2) is deleted. `SalariesManagement`'s status dialog, its last caller, is a `MessageDialog`.
+  - **The landing page** (325 / 369 → 0 / 0) follows the theme and draws `BrandLogo` beside the wordmark.
+  - **Smaller pieces:**
+    - the toast is `glass-strong`;
+    - App.tsx's loading and "profile unavailable" states are on `bg-canvas` and a glass card;
+    - `LanguageSwitcher` lost its `default` variant, and the legal pages ask for `ui`;
+    - the revenue-mix colours in `overviewHelpers.ts` are chart tokens;
+    - `warningCategories.ts`'s group colours are status tokens, with `classify()` untouched.
+- **What is left, on purpose.**
+  - Every document region named in `src/rtlClasses.test.ts`, byte for byte: both `A4Document`s, `Timesheet`, `GehaltsquittungDocument`, `DriverSalarySummaryCard` and the Abrechnung image.
+  - The Arbeitsstunden wizard's `DRIVER_COLORS` series and its three `#2563eb` fallbacks. The screen builds `colour + '18'` alphas from them, so they stay hex and feed five data-driven styles.
+  - The staging banner and Google's button. Their colours are measured from source.
+- **The proof.** Each payroll file has its own script, which ran after a negative control. These are `design-harness/identity-r5-hwh.mjs`, `-reconciliation`, `-assignment`, `-snpreview`, `-finalize`, `-planner`, `-stundennachweis`, `-quittung` (both dialogs) and `-landing`.
+  - The Arbeitsstunden wizard's script strips every `className` and `style` from both sides with the TypeScript parser and token-diffs the rest. It found 116 hunks: 99 colour literals swapped for token classes and 17 named entries, each with its reason. Every surviving `style` property is checked against the old file.
+  - The other files ran through `identity-proof.mjs`.
+  - A call checker extracted every call and every behaving attribute from the old markup and found none missing.
+  - The document regions are compared byte for byte against `origin/staging`.
+- **Behaviour that changed on purpose:**
+  - **The salary dialogs ignore Escape, a click beside them and the close button while a write runs.** The old overlays closed on a click beside them.
+  - **Colour no longer carries meaning on its own.** Each `FinalizePlanningModal` check row has an icon and a screen-reader word.
+  - **In the Arbeitsstunden wizard,** solid blue, green and violet buttons are the brand primary. Solid amber badges with dark text are `bg-caution-soft text-caution`. `short` and `long` stay distinguishable: `long` is the stronger fill. The amber "Originaldaten-Warnung" stays caution and an app-made overlap stays critical.
+  - **The landing page follows the theme** and is no longer always dark.
+- **Found by review.** An independent reviewer read the diff after the first build and found three real problems, all fixed:
+  - **The wizard's block stat strip lost its colours.** The codemod wrote `s.color ?? s.dim ? … : …`, and `??` binds tighter than `?:`, so every coloured figure (Gültig, Kurz, Lang, Ungültig) came out grey and the invalid count lost its red. A scan of every added line for `??` or `||` beside a ternary found no second case.
+  - **An unassigned block with a cross-vehicle conflict had the same fill as one without** (both branches `bg-caution-soft`). It is the faint fill again without a conflict, and the conflict badge has a fill of its own.
+  - **`SalaryDetailsModal` could be closed while it saved.** Its close runs `onUpdate()` at once, so Escape or the close button now waits for `savingPayroll` and `loadingWeekly`.
+
+  It also noted that `short` and `long` blocks are both amber now. They still differ in fill strength and carry their word, so they were left as they are.
+- **Tests.**
+  - `accentLabel.contrast.test.ts` ran its "finds the style objects" and "still wired into the scan" controls on the real source, and the real source no longer holds a `-solid` fill by name. Both controls are now fixtures run through the same functions (`indirectSolidFillsIn`). The rules themselves still scan `src/`.
+  - `ToastContext.render.test.ts` asserts `glass-strong` and no inline style.
+  - `landingFeatureCards.test.ts` asserts `accent-brand`.
+  - `SalaryDetailsModal.writeRefusal.test.ts` mocks `ConfirmDialog` with the real contract.
+  - `responsiveRules.test.ts` follows the converted frames.
+  - The typecheck baseline fell from 163 to 161: two unused names went with the old markup.
+- **Left for R6:** the landing page's hero keyframes in `src/index.css` are physical and do not mirror in Arabic.
 
 ## 9. Verification
 

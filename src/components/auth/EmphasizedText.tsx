@@ -6,7 +6,6 @@ interface EmphasizedTextProps {
   placeholder: string;
   value: string;
   className?: string;
-  style?: React.CSSProperties;
 }
 
 /**
@@ -14,14 +13,14 @@ interface EmphasizedTextProps {
  * "Code an **anna@firma.de** gesendet" — while the word order stays whatever
  * the dictionary says for that language.
  */
-const EmphasizedText: React.FC<EmphasizedTextProps> = ({ template, placeholder, value, className, style }) => {
+const EmphasizedText: React.FC<EmphasizedTextProps> = ({ template, placeholder, value, className }) => {
   const token = `{${placeholder}}`;
   const at = template.indexOf(token);
   if (at === -1) return <>{template}</>;
   return (
     <>
       {template.slice(0, at)}
-      <span className={className} style={style}>{value}</span>
+      <span className={className}>{value}</span>
       {template.slice(at + token.length)}
     </>
   );

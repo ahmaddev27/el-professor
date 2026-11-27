@@ -17,7 +17,6 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { format, getMonth, getYear } from 'date-fns';
-import ConfirmationModal from './ConfirmationModal';
 import SalaryDetailsModal from './SalaryDetailsModal';
 import SalaryPeriodsModal from './SalaryPeriodsModal';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -46,6 +45,7 @@ import {
   formatPercent,
   Input,
   KpiCard,
+  MessageDialog,
   PageHeader,
   Select,
   SelectContent,
@@ -744,14 +744,15 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         />
       </div>
 
-      {/* Status Confirmation Modal — still the legacy dialog: nothing opens it
-          (openStatusModal has no caller), so there is no state of it to draw. */}
-      <ConfirmationModal
-        isOpen={statusModal.isOpen}
+      {/* Status dialog: nothing opens it (openStatusModal has no caller). Its
+          legacy type was 'success' or 'warning', neither of which drew a cancel
+          button, so it is a MessageDialog: OK calls onConfirm, then onClose. */}
+      <MessageDialog
+        open={statusModal.isOpen}
         onClose={() => setStatusModal({ isOpen: false, salary: null, newStatus: 'unpaid' })}
         onConfirm={handleStatusChange}
         title={statusModal.newStatus === 'paid' ? t('sal.confirm.markPaidTitle') : t('sal.confirm.markUnpaidTitle')}
-        message={
+        description={
           statusModal.salary
             ? t(
                 statusModal.newStatus === 'paid' ? 'sal.confirm.markPaidMessage' : 'sal.confirm.markUnpaidMessage',
@@ -759,7 +760,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               )
             : ''
         }
-        type={statusModal.newStatus === 'paid' ? 'success' : 'warning'}
+        tone={statusModal.newStatus === 'paid' ? 'positive' : 'brand'}
       />
 
       {/* Salary Details and Payments Modal */}

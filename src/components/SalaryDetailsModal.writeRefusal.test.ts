@@ -59,10 +59,6 @@ vi.mock('./SalaryPaymentCashView', () => ({ default: () => null }));
 vi.mock('./DriverSalarySummaryCard', () => ({ default: () => null }));
 vi.mock('./SalaryRevenueDetails', () => ({ default: () => null }));
 vi.mock('./GehaltsquittungParts', () => ({ ReceiptAlert: () => null, useRefusalMessage: () => () => '' }));
-vi.mock('./ConfirmationModal', () => ({
-  default: (p: { isOpen: boolean; onConfirm: () => void }) =>
-    p.isOpen ? createElement('button', { onClick: p.onConfirm }, 'CONFIRM-DELETE') : null,
-}));
 vi.mock('../utils/driverSalaryPdf', () => ({ generateDriverSalaryPdf: vi.fn() }));
 vi.mock('./ui', async importOriginal => {
   const original = await importOriginal<typeof import('./ui')>();
@@ -75,6 +71,11 @@ vi.mock('./ui', async importOriginal => {
     DialogTitle: () => null,
     DialogDescription: () => null,
     DialogClose: (p: { children: unknown }) => p.children,
+    // The real contract: confirm calls onConfirm() then onClose(), unawaited.
+    ConfirmDialog: (p: { open: boolean; onConfirm: () => void; onClose: () => void }) =>
+      p.open
+        ? createElement('button', { onClick: () => { p.onConfirm(); p.onClose(); } }, 'CONFIRM-DELETE')
+        : null,
   };
 });
 
