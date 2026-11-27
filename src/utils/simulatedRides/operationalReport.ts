@@ -1,5 +1,5 @@
 import type { WorkbookPayload } from '../../lib/workbookContract';
-import type { FullMonthResult } from './fullMonth';
+import type { CapacityReason, FullMonthResult } from './fullMonth';
 import {
   REASON_TEXT,
   SHEET_SOURCE,
@@ -57,6 +57,7 @@ const PURPOSE_WORD: Record<RepositioningPurpose, string> = {
   from_base: 'Betriebssitz zur ersten Abholung',
   to_waiting_position: 'Zielort zum Warteplatz',
   to_pickup: 'zur naechsten Abholung',
+  to_base: 'letzter Zielort zurueck zum Betriebssitz',
 };
 
 export const LEG_HEADERS: readonly string[] = [
@@ -149,7 +150,7 @@ export function schedulingSheetRows(result: FullMonthResult): Row[] {
     Math.round((s.endMs - s.startMs) / 60_000), END_WORD[s.endedBy] ?? s.endedBy, s.refusedSteps.no_approach ?? 0,
     s.refusedSteps.no_budget ?? 0, s.refusedSteps.no_dropoff ?? 0, '', 1,
   ]);
-  const counts = new Map<string, { day: string; plate: string; driverId: string; reason: string; n: number }>();
+  const counts = new Map<string, { day: string; plate: string; driverId: string; reason: CapacityReason; n: number }>();
   for (const r of result.refusals) {
     const key = `${r.day}|${r.plate ?? ''}|${r.driverId ?? ''}|${r.reason}`;
     const entry = counts.get(key) ?? { day: r.day, plate: r.plate ?? '', driverId: r.driverId ?? '', reason: r.reason, n: 0 };

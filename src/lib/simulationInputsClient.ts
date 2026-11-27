@@ -1,11 +1,12 @@
 import type { StructuredNote } from '../utils/monatsplanungPhase3';
 import type { WerkstattCheckRow } from '../utils/constraintDecisionLog';
+import type { VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
 import { supabase } from './supabase';
 
 /**
  * What the simulator reads BEFORE it places a ride (decision 5 of 29.10.2026):
- * the drivers' notes, the planning columns of the drivers table, and the
- * workshop checks of the month.
+ * the drivers' notes, the planning columns of the drivers table, the workshop
+ * checks of the month and, since Round 8, the vehicles' unavailability windows.
  *
  * Every read pages (PostgREST stops at 1000 rows without an error) and every
  * failure throws. A note that could not be read is not "no note": the caller
@@ -52,22 +53,63 @@ export async function loadDriverNotes(companyId: string, fromDate: string): Prom
   return map;
 }
 
+/**
+ * The drivers-table columns a driver's month is planned from (Round 8, S4): his
+ * weekdays and window, his hours range (min and max salary over the hourly
+ * rate, `monthlyPlan/hoursRange.ts`), and the values printed beside it. Read by
+ * id only; the names come from the driver chooser's own reader.
+ */
 export interface DriverPlanningFacts {
   id: string;
+  status: string | null;
+  employment_type: string | null;
   allowed_weekdays: number[] | null;
   planning_enabled: boolean;
+  work_window_start: string | null;
+  work_window_end: string | null;
+  is_full_day_available: boolean | null;
+  planning_min_salary: number | null;
+  planning_max_salary: number | null;
+  planning_hourly_rate: number | null;
+  salary_ratio: number | null;
+  planning_target_salary: number | null;
+  target_monthly_hours: number | null;
+  max_monthly_hours: number | null;
 }
 
-/** The two planning columns the driver chooser's reader does not carry, consulted by id only. */
+const DRIVER_PLANNING_COLUMNS = [
+  'id', 'status', 'employment_type', 'allowed_weekdays', 'planning_enabled', 'work_window_start', 'work_window_end',
+  'is_full_day_available', 'planning_min_salary', 'planning_max_salary', 'planning_hourly_rate', 'salary_ratio',
+  'planning_target_salary', 'target_monthly_hours', 'max_monthly_hours',
+].join(', ');
+
 export async function loadDriverPlanningFacts(companyId: string): Promise<Map<string, DriverPlanningFacts>> {
   const rows = await fetchAll<DriverPlanningFacts>((from, to) =>
     supabase
       .from('drivers')
-      .select('id, allowed_weekdays, planning_enabled')
+      .select(DRIVER_PLANNING_COLUMNS)
       .eq('company_id', companyId)
       .order('id', { ascending: true })
       .range(from, to));
   return new Map(rows.map(r => [r.id, r]));
+}
+
+/**
+ * The cars' unavailability windows that can touch the month's operating days
+ * (`vehicle_unavailability`). The bounds are a day wider on both sides than the
+ * calendar month, because an operating day runs to 04:00 of the next one; an
+ * open end is fetched whatever its start. Too wide only costs rows.
+ */
+export async function loadVehicleUnavailability(companyId: string, dayBefore: string, twoDaysAfter: string): Promise<VehicleUnavailabilityRow[]> {
+  return fetchAll<VehicleUnavailabilityRow>((from, to) =>
+    supabase
+      .from('vehicle_unavailability')
+      .select('id, car_id, starts_local, ends_local, reason')
+      .eq('company_id', companyId)
+      .lt('starts_local', twoDaysAfter)
+      .or(`ends_local.is.null,ends_local.gt.${dayBefore}`)
+      .order('id', { ascending: true })
+      .range(from, to));
 }
 
 /** The month's workshop checks; a negative one is something to review, never a block. */

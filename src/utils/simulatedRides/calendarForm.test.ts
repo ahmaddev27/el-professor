@@ -7,7 +7,7 @@ describe('parseCalendarForm', () => {
   it('reads the scenario defaults: declined at 6,00 internal, a 6,00 cancellation fee, share on, tips out, cancellation fees in', () => {
     expect(parseCalendarForm(form())).toEqual({
       ok: true,
-      shiftsPerVehicleDay: 1,
+      shiftsPerVehicleDay: 3,
       options: { repositioningMarginSeconds: 60, repositioningMarginPercent: 15 },
       settings: {
         timeZone: 'Europe/Berlin', operatingDayStartHour: 4,

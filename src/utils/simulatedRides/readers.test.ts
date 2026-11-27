@@ -61,6 +61,13 @@ const INVENTORY: Record<string, Disposition> = {
   // inventory is deliberately textual: a file that mentions the Fahrtenbuch
   // should need a decision, even when the decision is "it does not touch it".
   'utils/simulatedRides/tenantSettings.ts': 'counts',
+  // Round 8 S6: reads the month's REAL trips only (`is_simulated = false`), and
+  // readRealTrips drops any simulated row that still reaches it.
+  'utils/simulatedRides/realTripsLoader.ts': 'marks',
+  // Round 8 S9: the Monatsabschluss queries nothing. It names the table as the
+  // source of its IMPORTIERT rows, and its file name, labels and notice sheet
+  // all say SIMULIERT.
+  'utils/simulatedRides/monthClosing.ts': 'marks',
   'utils/tripAnalysis/adapter.ts': 'counts', // pure adapter, no document
   'utils/tripAnalysis/types.ts': 'marks',
 };

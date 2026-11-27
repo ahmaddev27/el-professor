@@ -11,6 +11,8 @@ export interface PoolAddress extends GeoPoint {
 export interface SimVehicle {
   plate: string;
   type: string;
+  /** `cars.id`, when the caller knew it; the calendar month always does. */
+  id?: string;
 }
 
 export interface SimDriver {
@@ -63,8 +65,17 @@ export interface SimShift {
   /** The operating day (starts 04:00), YYYY-MM-DD. */
   operatingDay: string;
   startMs: number;
-  /** The last ride's end: the shift's real end. */
+  /**
+   * The shift's real end: the last ride's end or, when the company requires the
+   * car back at the base (round 8), its arrival there.
+   */
   endMs: number;
+  /**
+   * The end the shift was planned to, which the driver is on duty until. Set
+   * by the calendar month (Round 8), where it decides the driver's hours and
+   * his rest; the weeks generator leaves it out.
+   */
+  plannedEndMs?: number;
 }
 
 /**

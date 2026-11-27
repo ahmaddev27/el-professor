@@ -5,6 +5,7 @@ import { useTranslation } from '../../contexts/LanguageContext';
 import type { TranslationKey } from '../../i18n';
 import type { FullMonthResult } from '../../utils/simulatedRides/fullMonth';
 import { verifyMonth, type CheckOutcome, type ExportVerdict, type VerificationCheck } from '../../utils/simulatedRides/monthVerification';
+import type { FinancialReason, FinancialStatus } from '../../utils/simulatedRides/reconciliation';
 import { SimulatedBadge } from './SimulatedBadge';
 import { RoutingSummary } from './RoutingSummary';
 
@@ -25,6 +26,8 @@ interface Props {
   result: FullMonthResult;
   onDownload: () => void;
   onDownloadOperational: () => void;
+  /** Round 8: the month's closing, real trips beside the simulated ones. */
+  onDownloadClosing: () => void;
 }
 
 const VERDICT_TONE: Record<ExportVerdict, 'positive' | 'caution' | 'critical'> = {
@@ -50,6 +53,11 @@ const CHECK_KEY: Record<VerificationCheck['code'], TranslationKey> = {
   amounts_readable: 'simrides.cal.check.code.amountsReadable',
   events_reviewed: 'simrides.cal.check.code.eventsReviewed',
   monthly_share: 'simrides.cal.check.code.monthlyShare',
+  drivers_planned: 'simrides.cal.check.code.driversPlanned',
+  base_configured: 'simrides.cal.check.code.baseConfigured',
+  real_trips_kept: 'simrides.cal.check.code.realTripsKept',
+  tips_backed: 'simrides.cal.check.code.tipsBacked',
+  rides_generated: 'simrides.cal.check.code.ridesGenerated',
 };
 
 const OUTCOME_KEY: Record<CheckOutcome, TranslationKey> = {
@@ -90,6 +98,65 @@ function ShareBlock({ result }: { result: FullMonthResult }) {
   );
 }
 
+const FIN_TONE: Record<FinancialStatus, 'positive' | 'caution' | 'critical'> = {
+  RECONCILED: 'positive',
+  CONFIGURATION_REQUIRED: 'caution',
+  INCOMPLETE: 'caution',
+  FAILED: 'critical',
+};
+
+const FIN_STATUS_KEY: Record<FinancialStatus, TranslationKey> = {
+  RECONCILED: 'simrides.cal.fin.status.RECONCILED',
+  CONFIGURATION_REQUIRED: 'simrides.cal.fin.status.CONFIGURATION_REQUIRED',
+  INCOMPLETE: 'simrides.cal.fin.status.INCOMPLETE',
+  FAILED: 'simrides.cal.fin.status.FAILED',
+};
+
+const FIN_REASON_KEY: Record<FinancialReason, TranslationKey> = {
+  tip_mismatch: 'simrides.cal.fin.reason.tip_mismatch',
+  uber_not_read: 'simrides.cal.fin.reason.uber_not_read',
+  no_uber_figures: 'simrides.cal.fin.reason.no_uber_figures',
+  uber_row_issues: 'simrides.cal.fin.reason.uber_row_issues',
+  hand_rows: 'simrides.cal.fin.reason.hand_rows',
+  tip_conflict: 'simrides.cal.fin.reason.tip_conflict',
+  tip_week_across_boundary: 'simrides.cal.fin.reason.tip_week_across_boundary',
+  tip_negative: 'simrides.cal.fin.reason.tip_negative',
+  tip_no_simulated_ride: 'simrides.cal.fin.reason.tip_no_simulated_ride',
+  share_not_computable: 'simrides.cal.fin.reason.share_not_computable',
+  uber_negative_figure: 'simrides.cal.fin.reason.uber_negative_figure',
+  uber_day_in_period: 'simrides.cal.fin.reason.uber_day_in_period',
+  week_across_boundary: 'simrides.cal.fin.reason.week_across_boundary',
+  simulated_without_uber: 'simrides.cal.fin.reason.simulated_without_uber',
+  share_not_configured: 'simrides.cal.fin.reason.share_not_configured',
+  share_setting_invalid: 'simrides.cal.fin.reason.share_setting_invalid',
+};
+
+/**
+ * The money against Uber (section 5 and 6), apart from the export verdict
+ * (D10). The share is shown as computed and never as booked, and a status
+ * that is not a full reconciliation says which figures are open.
+ */
+function FinancialBlock({ result }: { result: FullMonthResult }) {
+  const { t } = useTranslation();
+  const fin = result.financial;
+  return (
+    <Alert tone={FIN_TONE[fin.status]} title={`${t('simrides.cal.fin.title')} - ${fin.status}: ${t(FIN_STATUS_KEY[fin.status])}`}>
+      <p>{t('simrides.cal.fin.separate')}</p>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+        <KpiCard label={t('simrides.cal.fin.umsatz')} value={formatEuroCents(fin.totals.umsatzCents)} />
+        <KpiCard label={t('simrides.cal.fin.share')} value={formatEuroCents(fin.totals.shareCents)} caption={t('simrides.cal.fin.shareCaption')} />
+        <KpiCard label={t('simrides.cal.fin.tipsImported')} value={formatEuroCents(fin.totals.tipsImportedCents)} />
+        <KpiCard label={t('simrides.cal.fin.tipsAllocated')} value={formatEuroCents(fin.totals.tipsAllocatedCents)} />
+        <KpiCard label={t('simrides.cal.fin.tipsUnallocated')} value={formatEuroCents(fin.totals.tipsUnallocatedCents)} />
+      </div>
+      <ul className="mt-3 grid grid-cols-1 gap-1">
+        {fin.reasons.map(r => <li key={r}>{t(FIN_REASON_KEY[r])}</li>)}
+      </ul>
+      <p className="mt-2 text-xs text-fg-subtle">{t('simrides.cal.fin.shareMeaning')}</p>
+    </Alert>
+  );
+}
+
 function VerificationBlock({ result }: { result: FullMonthResult }) {
   const { t } = useTranslation();
   const verification = useMemo(() => verifyMonth(result), [result]);
@@ -123,7 +190,7 @@ function RepositioningBlock({ result }: { result: FullMonthResult }) {
   );
 }
 
-export function CalendarResult({ result, onDownload, onDownloadOperational }: Props) {
+export function CalendarResult({ result, onDownload, onDownloadOperational, onDownloadClosing }: Props) {
   const { t } = useTranslation();
   const { counts } = result.revenue;
   const km = result.days.reduce((sum, d) => sum + d.km, 0);
@@ -146,6 +213,7 @@ export function CalendarResult({ result, onDownload, onDownloadOperational }: Pr
           </Alert>
         ) : null}
         <VerificationBlock result={result} />
+        <FinancialBlock result={result} />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <KpiCard label={t('simrides.cal.result.days')} value={String(result.days.length)}
             caption={t('simrides.cal.result.zeroDays', { count: result.days.filter(d => d.zeroRideDay).length })} />
@@ -174,6 +242,9 @@ export function CalendarResult({ result, onDownload, onDownloadOperational }: Pr
           </Button>
           <Button variant="secondary" onClick={onDownloadOperational} disabled={broken}>
             <Download aria-hidden /> {t('simrides.cal.result.downloadOperational')}
+          </Button>
+          <Button variant="secondary" onClick={onDownloadClosing} disabled={broken}>
+            <Download aria-hidden /> {t('simrides.cal.result.downloadClosing')}
           </Button>
         </div>
       </CardContent>

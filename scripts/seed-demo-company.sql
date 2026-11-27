@@ -47,6 +47,16 @@
 -- The November rides add an overlap, a Sunday, a cancelled ride, a ride longer
 -- than any six-hour ceiling, and a pair twelve minutes apart so the travel check
 -- has something it can actually judge rather than only gaps it cannot.
+--
+-- Section 6 (FleetBook round 8, the owner's go of 27.11.2026, D9) adds invented
+-- daily Uber figures for September and October 2026, in the nightly pull's own
+-- row shape, so the simulator's calendar month has Uber to reconcile against,
+-- and writes a Betriebssitz only when the caller names one:
+--
+--   ... psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+--     [-v demo_base_lat=<lat> -v demo_base_lon=<lon>] < scripts/seed-demo-company.sql
+--
+-- The read-only report at the very end lists what the round 8 months will read.
 
 \set ON_ERROR_STOP on
 
@@ -359,6 +369,160 @@ SELECT ctx.company_id, d.id, DATE '2026-11-01', DATE '2026-11-30',
       WHERE x.company_id = ctx.company_id AND x.driver_id = d.id
         AND x.period_start = DATE '2026-11-01');
 
+-- ═════════════════════════════════════════════════════════════════════════════
+-- 6 · Uber's daily figures for September and October 2026 (FleetBook round 8)
+-- ═════════════════════════════════════════════════════════════════════════════
+--
+-- The owner's go of 27.11.2026 (decision D9): invented daily Uber rows for this
+-- company, so the simulator's calendar month has Uber figures to reconcile
+-- against. **Every number below is invented.** The rows have exactly the shape
+-- the nightly pull writes (`uber-pull-core.ts` `buildDayRows`): `source 'uber'`,
+-- one operating day per row (`source_period_start = source_period_end`), one row
+-- per driver, type and day, the trip count on the `umsatz` row only, the
+-- description `Woche N - Uber` with N the business week of the day's Monday, and
+-- the partner's driver id in `source_driver_key`, resolved through
+-- `partner_driver_links` (partner `reidey`, as `uberImportLoader.ts` reads it).
+--
+-- Who drives, and when:
+--   * Anna Beispiel, Bert Nachtfahrt and Emil Normal. Not Clara and Dieter, whose
+--     planning ranges are deliberately unusable, and not the owner (§8: surplus
+--     only), so the example months keep their known refusals to themselves.
+--   * Only on the driver's own `allowed_weekdays` (every day when that is empty),
+--     never on a day an `exclude_from_plan` note covers — the simulator's own
+--     absence rule (`driverMonthPlan.ts`) — and not on every such day: a fixed
+--     pattern leaves about one in six out, as a real month does.
+-- Two cases are wrong on purpose, because the report must show them, not hide
+-- them:
+--   * Anna has one day of Uber activity on a weekday she is not allowed to work
+--     (the first such day in September), if her weekdays leave one out.
+--   * Emil has a refund day, 20.10.2026: a negative `umsatz` with no trips, which
+--     the reader keeps with its sign (`income_amount_check` admits it for uber).
+--
+-- A driver that already has a linked `reidey` link keeps it, and its id is the
+-- key of these rows; one without gets `demo-uber-<n>`. Every row is guarded by
+-- the database's own unique key (`income_source_period_key`), so a second run
+-- adds nothing and a row the pull may have written is never doubled.
+
+CREATE TEMP TABLE r8_uber_drivers ON COMMIT DROP AS
+SELECT d.id AS driver_id, d.name, v.n,
+       coalesce(d.allowed_weekdays, ARRAY[]::integer[]) AS allowed
+  FROM (VALUES ('Anna Beispiel', 1), ('Bert Nachtfahrt', 2), ('Emil Normal', 3)) AS v(name, n)
+  JOIN drivers d ON d.name = v.name
+  CROSS JOIN ctx
+ WHERE d.company_id = ctx.company_id;
+
+DO $r8_drivers$
+BEGIN
+  IF (SELECT count(*) FROM r8_uber_drivers) <> 3
+     OR (SELECT count(DISTINCT name) FROM r8_uber_drivers) <> 3 THEN
+    RAISE EXCEPTION 'seed-demo-company §6: expected exactly one each of Anna Beispiel, Bert Nachtfahrt and Emil Normal, found % rows', (SELECT count(*) FROM r8_uber_drivers);
+  END IF;
+END
+$r8_drivers$;
+
+INSERT INTO partner_driver_links (company_id, partner, external_driver_id, driver_id, status, proposed_name, linked_by, linked_at)
+SELECT ctx.company_id, 'reidey', 'demo-uber-' || u.n, u.driver_id, 'linked', u.name, ctx.admin_id, now()
+  FROM r8_uber_drivers u CROSS JOIN ctx
+ WHERE NOT EXISTS (SELECT 1 FROM partner_driver_links l
+                    WHERE l.company_id = ctx.company_id AND l.partner = 'reidey' AND l.driver_id = u.driver_id)
+   AND NOT EXISTS (SELECT 1 FROM partner_driver_links l
+                    WHERE l.company_id = ctx.company_id AND l.partner = 'reidey' AND l.external_driver_id = 'demo-uber-' || u.n);
+
+CREATE TEMP TABLE r8_uber_keys ON COMMIT DROP AS
+SELECT u.*, l.external_driver_id AS ext
+  FROM r8_uber_drivers u
+  JOIN partner_driver_links l ON l.driver_id = u.driver_id AND l.partner = 'reidey' AND l.status = 'linked'
+  CROSS JOIN ctx
+ WHERE l.company_id = ctx.company_id;
+
+-- One row per driver-day, in integer cents, before it is split by type.
+CREATE TEMP TABLE r8_uber_days ON COMMIT DROP AS
+WITH days AS (
+  SELECT g::date AS day FROM generate_series(DATE '2026-09-01', DATE '2026-10-31', INTERVAL '1 day') AS g
+), regular AS (
+  SELECT k.driver_id, k.name, k.n, k.ext, d.day,
+         8000 + ((extract(day FROM d.day)::int * 37 + k.n * 53) % 9000)       AS umsatz_cents,
+         5 + ((extract(day FROM d.day)::int + k.n * 2) % 8)                    AS trips
+    FROM r8_uber_keys k CROSS JOIN days d CROSS JOIN ctx
+   WHERE (cardinality(k.allowed) = 0 OR extract(isodow FROM d.day)::int = ANY (k.allowed))
+     AND (extract(doy FROM d.day)::int + k.n * 3) % 6 <> 0
+     AND NOT (k.name = 'Emil Normal' AND d.day = DATE '2026-10-20')
+     AND NOT EXISTS (SELECT 1 FROM driver_notes x
+                      WHERE x.company_id = ctx.company_id AND x.driver_id = k.driver_id
+                        AND x.note_planning_behavior = 'exclude_from_plan'
+                        AND d.day BETWEEN x.start_date AND coalesce(x.end_date, x.start_date))
+), forbidden AS (
+  -- Anna's one day on a weekday she may not work: the first in September.
+  SELECT k.driver_id, k.name, k.n, k.ext, min(d.day) AS day, 6430 AS umsatz_cents, 4 AS trips
+    FROM r8_uber_keys k CROSS JOIN days d
+   WHERE k.name = 'Anna Beispiel'
+     AND cardinality(k.allowed) BETWEEN 1 AND 6
+     AND d.day < DATE '2026-10-01'
+     AND NOT (extract(isodow FROM d.day)::int = ANY (k.allowed))
+   GROUP BY k.driver_id, k.name, k.n, k.ext
+)
+SELECT driver_id, name, n, ext, day, umsatz_cents, trips, 'regular' AS kind FROM regular
+UNION ALL
+SELECT driver_id, name, n, ext, day, umsatz_cents, trips, 'forbidden_weekday' FROM forbidden
+UNION ALL
+SELECT k.driver_id, k.name, k.n, k.ext, DATE '2026-10-20', -1250, 0, 'refund'
+  FROM r8_uber_keys k WHERE k.name = 'Emil Normal';
+
+DO $r8_cases$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM r8_uber_days WHERE kind = 'forbidden_weekday') THEN
+    RAISE NOTICE 'seed-demo-company §6: Anna Beispiel may work every weekday (or none is recorded), so the forbidden-weekday case is not seeded';
+  END IF;
+END
+$r8_cases$;
+
+INSERT INTO income (company_id, driver_name, type, amount, description, date, week, trip_count,
+                    source, source_period_start, source_period_end, source_driver_key)
+SELECT ctx.company_id, x.name, f.type, round(f.cents / 100.0, 2),
+       'Woche ' || w.week || ' - Uber', x.day, w.week,
+       CASE WHEN f.type = 'umsatz' THEN x.trips END,
+       'uber', x.day, x.day, x.ext
+  FROM r8_uber_days x
+  CROSS JOIN ctx
+  -- The business week of the day's Monday, as `businessWeekNumber(mondayOf(day))`.
+  CROSS JOIN LATERAL (
+    SELECT (extract(day FROM x.day - (extract(isodow FROM x.day)::int - 1))::int - 1) / 7 + 1 AS week
+  ) w
+  CROSS JOIN LATERAL (VALUES
+    ('umsatz',    x.umsatz_cents),
+    ('trinkgeld', CASE WHEN x.kind = 'regular' AND (extract(day FROM x.day)::int + x.n) % 3 = 0
+                       THEN 100 + ((extract(day FROM x.day)::int * 11 + x.n * 7) % 500) END),
+    ('aktionen',  CASE WHEN x.kind = 'regular' AND (extract(day FROM x.day)::int + x.n) % 10 = 0 THEN 500 END),
+    ('bargeld',   CASE WHEN x.kind <> 'refund' THEN (x.umsatz_cents * (25 + x.n * 5)) / 100 END)
+  ) AS f(type, cents)
+ WHERE f.cents IS NOT NULL
+   AND NOT EXISTS (
+     SELECT 1 FROM income i
+      WHERE i.company_id = ctx.company_id AND i.source = 'uber'
+        AND i.source_driver_key = x.ext AND i.source_period_start = x.day AND i.type = f.type);
+
+-- The Betriebssitz (§3). This script cannot geocode an address, and an invented
+-- point that does not match the company's address would be a base nobody chose,
+-- so it writes one only when the person running it names it, and only when none
+-- is saved:
+--   psql ... -v demo_base_lat=51.165200 -v demo_base_lon=7.067100 < seed-demo-company.sql
+-- Without it the simulator takes the company address from Einstellungen,
+-- geocoded and labelled as derived from it (D7), or reports
+-- CONFIGURATION_REQUIRED and generates nothing — which the report below says.
+\if :{?demo_base_lat}
+INSERT INTO trip_analysis_settings (company_id, base_latitude, base_longitude)
+SELECT ctx.company_id, :'demo_base_lat'::numeric(9,6), :'demo_base_lon'::numeric(9,6)
+  FROM ctx
+ WHERE NOT EXISTS (SELECT 1 FROM trip_analysis_settings t WHERE t.company_id = ctx.company_id);
+-- A settings row that exists without a base gets one; one that has a base keeps it.
+-- The second UPDATE of this script, and as narrow as the first: one company's one
+-- row, and only a column that is empty.
+UPDATE trip_analysis_settings t
+   SET base_latitude = :'demo_base_lat'::numeric(9,6), base_longitude = :'demo_base_lon'::numeric(9,6)
+  FROM ctx
+ WHERE t.company_id = ctx.company_id AND t.base_latitude IS NULL AND t.base_longitude IS NULL;
+\endif
+
 -- `row_count` is printed beside the file name on step 1 ("· 22 Fahrten"), so
 -- adding rides without it would make the screen state a number that contradicts
 -- the rows under it. It is **derived from the rows themselves**, not written as a
@@ -389,3 +553,35 @@ UNION ALL SELECT 'income',    count(*) FROM income    x, (SELECT id FROM compani
 UNION ALL SELECT 'receipts',  count(*) FROM receipts  x, (SELECT id FROM companies WHERE name='DEMO Monatsplanung GmbH') c WHERE x.company_id=c.id
 UNION ALL SELECT 'salaries',  count(*) FROM salaries  x, (SELECT id FROM companies WHERE name='DEMO Monatsplanung GmbH') c WHERE x.company_id=c.id
 ORDER BY 1;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- What the round 8 months will read (read-only; the inventory of PLAN.md W1)
+-- ═════════════════════════════════════════════════════════════════════════════
+\pset footer off
+SELECT 'uber rows' AS what, to_char(i.date, 'YYYY-MM') AS month, i.type, count(*) AS rows, sum(i.amount) AS euro,
+       count(*) FILTER (WHERE i.amount < 0) AS negative
+  FROM income i JOIN companies c ON c.id = i.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH' AND i.source = 'uber' AND i.date BETWEEN DATE '2026-08-25' AND DATE '2026-11-06'
+ GROUP BY 2, 3 ORDER BY 2, 3;
+SELECT l.external_driver_id, d.name, l.status
+  FROM partner_driver_links l JOIN companies c ON c.id = l.company_id LEFT JOIN drivers d ON d.id = l.driver_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH' AND l.partner = 'reidey' ORDER BY 1;
+SELECT d.name, d.status, d.employment_type, d.salary_ratio, d.allowed_weekdays,
+       d.planning_min_salary, d.planning_max_salary, d.planning_hourly_rate, d.work_window_start, d.work_window_end
+  FROM drivers d JOIN companies c ON c.id = d.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH' ORDER BY d.name;
+SELECT x.kennzeichen, x.status FROM cars x JOIN companies c ON c.id = x.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH' ORDER BY 1;
+SELECT 'saved base' AS what, t.base_latitude, t.base_longitude, t.base_radius_km
+  FROM trip_analysis_settings t JOIN companies c ON c.id = t.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH';
+SELECT 'address' AS what, s.street IS NOT NULL AND s.house_number IS NOT NULL AS has_street_and_number,
+       s.postal_code, s.city
+  FROM company_settings s JOIN companies c ON c.id = s.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH';
+SELECT 'real trips' AS what, to_char(t.trip_date, 'YYYY-MM') AS month, t.is_simulated, count(*) AS trips,
+       count(t.original_driver_id) AS with_driver
+  FROM fahrtenbuch_trips t JOIN companies c ON c.id = t.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH' AND t.trip_date BETWEEN DATE '2026-08-25' AND DATE '2026-11-05'
+ GROUP BY 2, 3 ORDER BY 2, 3;
+SELECT 'company_simulation_settings exists' AS what, to_regclass('public.company_simulation_settings') IS NOT NULL AS answer;

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { findBlockingNote } from '../driverNoteValidation';
 import type { StructuredNote } from '../monatsplanungPhase3';
 import {
+  CALENDAR_MAX_WAIT_SECONDS,
   FULL_MONTH_GENERATOR_VERSION,
   generateFullMonth,
   type FullMonthDriver,
@@ -26,10 +27,13 @@ const VEHICLES = [
 const ID_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ID_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ID_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+// Round 8: a driver is planned from his hours range (min/max salary over the
+// hourly rate), so every fixture driver carries one: 600-1200 EUR at 13 EUR/h.
+const RANGE = { planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 } as const;
 const DRIVERS: FullMonthDriver[] = [
-  { id: ID_A, name: 'Fahrer Alpha' },
-  { id: ID_B, name: 'Fahrer Beta' },
-  { id: ID_C, name: 'Fahrer Gamma' },
+  { id: ID_A, name: 'Fahrer Alpha', ...RANGE },
+  { id: ID_B, name: 'Fahrer Beta', ...RANGE },
+  { id: ID_C, name: 'Fahrer Gamma', ...RANGE },
 ];
 
 const note = (over: Partial<StructuredNote> & { driver_id: string }): StructuredNote => ({
@@ -55,7 +59,7 @@ const input = (over: Partial<FullMonthInput> = {}): FullMonthInput => ({
   drivers: DRIVERS,
   driverNotesMap: new Map(),
   seed: 4711,
-  shiftsPerVehicleDay: 1,
+  shiftsPerVehicleDay: 3,
   ...over,
 });
 
@@ -171,7 +175,10 @@ describe('no ride during a driver unavailability', () => {
       }
     }
     expect(r.violations).toEqual([]);
-    expect(r.refusals.some(x => x.reason === 'driver_blocked_by_note' && x.driverId === ID_A && x.noteType === 'Arzttermin')).toBe(true);
+    // Round 8: the note cuts the driver's window in his plan before any shift
+    // is drawn, so it shapes the day rather than refusing an attempt.
+    const alpha = r.driverPlans.find(p => p.driverId === ID_A)!;
+    expect(alpha.days.some(d => d.status === 'planned' && d.blockingNote?.type === 'Arzttermin')).toBe(true);
     expect(idsOf(r)).toContain(ID_A);
   });
 
@@ -206,7 +213,7 @@ describe('no operating capacity means no rides, with a reason', () => {
   });
 
   it('a weekend-only driver works weekends only', () => {
-    const r = run({ drivers: [{ id: ID_A, name: 'Fahrer Alpha', allowed_weekdays: [6, 7] }] });
+    const r = run({ drivers: [{ id: ID_A, name: 'Fahrer Alpha', allowed_weekdays: [6, 7], ...RANGE }] });
     expect(r.month.shifts.length).toBeGreaterThan(0);
     const weekdayOf = new Map(r.days.map(d => [d.day, d.isoWeekday]));
     for (const s of r.month.shifts) expect([6, 7]).toContain(weekdayOf.get(s.operatingDay));
@@ -237,6 +244,27 @@ describe('a healthy month', () => {
   });
 });
 
+describe('the wait for the next order (owner, 27.11.2026)', () => {
+  // A waiting leg is due when the order comes, so its slack is the wait plus under a second of jitter.
+  const waits = (x: FullMonthResult): number[] => x.repositioning
+    .filter(l => l.purpose === 'to_waiting_position' && l.slackSeconds !== null)
+    .map(l => l.slackSeconds as number);
+
+  it('is at most 30 minutes in a calendar month, and still spread out below it', () => {
+    const all = [run({ seed: 11 }), run({ seed: 12 }), run({ seed: 13 })].flatMap(waits);
+    expect(all.length).toBeGreaterThan(200);
+    expect(Math.max(...all)).toBeLessThanOrEqual(CALENDAR_MAX_WAIT_SECONDS + 1);
+    // The log-normal tail still reaches the cap, so the ceiling is binding rather than decorative.
+    expect(all.filter(w => w > CALENDAR_MAX_WAIT_SECONDS - 60).length).toBeGreaterThan(5);
+    expect(all.filter(w => w < 10 * 60).length).toBeGreaterThan(all.length / 3);
+  });
+
+  it('is named in the generator version, so an older month never shares a run id with a newer one', () => {
+    expect(FULL_MONTH_GENERATOR_VERSION).toBe('full-month/4.1.0');
+    expect(CALENDAR_MAX_WAIT_SECONDS).toBe(1_800);
+  });
+});
+
 describe('determinism', () => {
   const fingerprint = (r: FullMonthResult) =>
     JSON.stringify({
@@ -258,11 +286,12 @@ describe('provenance', () => {
     const r = run({ seed: 7, driverNotesMap: notes, options: { tipShare: 0.3 }, settings: { declinedFeeCents: 700 } });
     const p = r.provenance;
     expect(p.generatorVersion).toBe(FULL_MONTH_GENERATOR_VERSION);
-    expect(p).toMatchObject({ seed: 7, year: 2026, month: 9, inputSource: 'period_driven', simulated: true, shiftsPerVehicleDay: 1 });
+    expect(p).toMatchObject({ seed: 7, year: 2026, month: 9, inputSource: 'period_driven', simulated: true, shiftsPerVehicleDay: 3 });
     expect(p.settings).toEqual({ ...DEFAULT_SIMULATION_TENANT_SETTINGS, declinedFeeCents: 700 });
     expect(p.options).toEqual({ ...DEFAULT_OPTIONS, tipShare: 0.3 });
     expect(p.inputs).toEqual({
       drivers: 3, vehicles: 2, addressPool: 40, driversWithNotes: 1, structuredNotes: 1, werkstattChecks: 0,
+      vehicleUnavailability: 0, driversPlanned: 3, uberDays: 0, uberPeriods: 0,
     });
   });
 });

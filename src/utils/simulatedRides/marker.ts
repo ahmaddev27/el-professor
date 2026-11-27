@@ -73,6 +73,8 @@ export function appendSimulatedNoticeRows<T>(rows: T[][]): void {
 /** The header of the label column every row of a simulated report carries. */
 export const SIMULATED_LABEL_HEADER = 'Kennzeichnung';
 export const SIMULATED_LABEL_VALUE = 'SIMULIERT';
+/** Every word a label column of a generated report may hold (round 8's Monatsabschluss adds two). */
+export const REPORT_LABEL_VALUES: readonly string[] = [SIMULATED_LABEL_VALUE, 'IMPORTIERT', 'ABGELEITET'];
 
 export type SimulationMarkerKind = 'sheet' | 'label_column' | 'notice_text';
 
@@ -87,7 +89,11 @@ const norm = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
  * label column of a copied sheet) is not enough to launder it:
  *  - a sheet named `SIMULIERT`;
  *  - in the sheet that will be read, a `Kennzeichnung` header cell with a
- *    `SIMULIERT` cell below it in the same column;
+ *    `SIMULIERT`, `IMPORTIERT` or `ABGELEITET` cell below it in the same
+ *    column. The two other words are the Monatsabschluss's (round 8): its
+ *    Fahrtenbuch sheet holds a month's real trips labelled `IMPORTIERT`, and
+ *    a month with no simulated ride would otherwise pass once its notice
+ *    sheet was deleted — a copy of real trips is not a new import either;
  *  - any cell of the read sheet equal to the notice sentence.
  *
  * A real Uber export has none of them: its 18 headers (see `sheet.ts`) do not
@@ -110,7 +116,7 @@ export function findSimulationMarker(
     if (text === SIMULATED_NOTICE) return 'notice_text';
     const column = XLSX.utils.decode_cell(address).c;
     if (text === SIMULATED_LABEL_HEADER) labelColumns.add(column);
-    else if (text.toUpperCase() === SIMULATED_LABEL_VALUE) valueColumns.add(column);
+    else if (REPORT_LABEL_VALUES.includes(text.toUpperCase())) valueColumns.add(column);
   }
   return [...labelColumns].some(c => valueColumns.has(c)) ? 'label_column' : null;
 }

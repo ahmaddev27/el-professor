@@ -3,6 +3,7 @@
  *
  *   npx vite-node scripts/fleetbook-route-check.mts --evidence <auditor.csv> [--warnings <60 pairs.csv>] [--out <dir>]
  *   npx vite-node scripts/fleetbook-route-check.mts --rides <sheet.xlsx> [--out <dir>]
+ *   npx vite-node scripts/fleetbook-route-check.mts --legs <SIMULIERT_Monatsabschluss.xlsx> [--out <dir>]
  *   options: --backend staging|valhalla (default staging; --valhalla <url> adds a second engine)
  *
  * Geocoding and routing go ONLY through our staging edge functions
@@ -16,6 +17,12 @@
  * outputs hold real data (addresses, names): keep --out OUTSIDE the repository.
  * Driver and vehicle names are replaced by D01.. / V1.. in every output; the
  * mapping is written to names-mapping.local.csv, which must never leave the machine.
+ *
+ * --legs (round 8): the empty drives of a Monatsabschluss, base and return legs
+ * included, re-routed between the coordinates the generator routed them
+ * between (no second geocoding), written to legs.csv for the auditor's own
+ * engine. A shift with no return leg in a month that returns to the base is
+ * reported, and the script exits 4.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,6 +32,7 @@ import { addressKey, parseGeocodeResponse, INFRASTRUCTURE_REASONS, MAX_ADDRESSES
 import { parseRouteResponse, MAX_PAIRS_PER_CALL, type RouteResult } from '../supabase/functions/_shared/travel-route-core.ts';
 import { deadheadSeconds, roadKm } from '../src/utils/simulatedRides/geo.ts';
 import { DATETIME_RE, wallTimeToInstant } from '../src/utils/fahrtenbuchImportParser.ts';
+import { LEG_CSV_HEADERS, RETURN_PURPOSE, legCsvRow, legsFromVehicleSheet, pointLookup, recheckLeg, shiftsWithoutReturn, type ClosingLeg } from './lib/routeLegs.mts';
 import {
   buildTransitions, causeClass, classifyTransition, csvLine, parseCsv, percentile, wallHour, wallMs,
   type AuditRide, type GeocodeLookup, type RouteLookup, type Transition,
@@ -43,13 +51,14 @@ function arg(name: string): string | undefined {
 }
 const evidencePath = arg('evidence');
 const ridesPath = arg('rides');
+const legsPath = arg('legs');
 const warningsPath = arg('warnings');
 const valhallaUrl = arg('valhalla');
-if ((evidencePath === undefined) === (ridesPath === undefined)) {
-  console.error('give exactly one of --evidence <csv> or --rides <xlsx>');
+if ([evidencePath, ridesPath, legsPath].filter((x) => x !== undefined).length !== 1) {
+  console.error('give exactly one of --evidence <csv>, --rides <xlsx> or --legs <xlsx>');
   process.exit(2);
 }
-const name = path.basename((evidencePath ?? ridesPath)!).replace(/\.[^.]+$/u, '').replace(/[^\w-]+/gu, '_');
+const name = path.basename((evidencePath ?? ridesPath ?? legsPath)!).replace(/\.[^.]+$/u, '').replace(/[^\w-]+/gu, '_');
 const OUT = arg('out') ?? `${SCRATCH}/round4/route-check/${name}`;
 if (path.resolve(OUT).toLowerCase().startsWith(path.resolve(import.meta.dirname, '..').toLowerCase() + path.sep) && !path.resolve(OUT).includes('scratchpad')) {
   console.error('refusing an output directory inside the repository');
@@ -331,7 +340,62 @@ function alias(grouping: string, group: string): string {
 
 const f1 = (n: number) => (Number.isFinite(n) ? n.toFixed(3) : 'n/a');
 
+// -- --legs: the Monatsabschluss's empty drives --------------------------------
+
+function legsFromClosing(file: string): { legs: ClosingLeg[]; returnsToBase: boolean } {
+  const wb = XLSX.read(readFileSync(file), { type: 'buffer' });
+  const vehicles = wb.SheetNames.find((n) => n === 'Fahrzeuge und Leerfahrten');
+  const checks = wb.SheetNames.find((n) => n === 'Pruefung und Herkunft');
+  if (vehicles === undefined || checks === undefined) throw new Error('not a Monatsabschluss: sheets 5 and 7 missing');
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[vehicles], { header: 1, raw: true });
+  const checkRows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[checks], { header: 1, raw: true });
+  const setting = checkRows.find((r) => r[2] === 'Rueckkehr zum Betriebssitz am Schichtende')?.[3];
+  if (setting !== 'Ja' && setting !== 'Nein') throw new Error('sheet 7 does not say whether shifts return to the base');
+  return { legs: legsFromVehicleSheet(rows), returnsToBase: setting === 'Ja' };
+}
+
+async function legsMain(): Promise<void> {
+  const { legs, returnsToBase } = legsFromClosing(legsPath!);
+  console.log(`${legs.length} empty drives`);
+  if (!(await signIn('demo'))) { console.error('sign-in to staging failed (network or credentials)'); process.exit(3); }
+  const pairs = new Map<string, [GeocodeLookup & { kind: 'located' }, GeocodeLookup & { kind: 'located' }]>();
+  const keys = legs.map((leg) => {
+    const a = pointLookup(leg.from);
+    const b = pointLookup(leg.to);
+    if (a.kind !== 'located' || b.kind !== 'located') return null;
+    const key = `${pointKey(a)}>${pointKey(b)}`;
+    pairs.set(key, [a, b]);
+    return key;
+  });
+  await routeAll(pairs);
+  await valhallaAll(pairs);
+  const lines = [csvLine([...LEG_CSV_HEADERS])];
+  const statuses: string[] = [];
+  legs.forEach((leg, i) => {
+    const key = keys[i];
+    const route = key === null ? undefined : routeCache[key];
+    lines.push(csvLine(legCsvRow(leg, route, alias)));
+    statuses.push(recheckLeg(leg, route).status);
+  });
+  writeFileSync(path.join(OUT, 'legs.csv'), `\uFEFF${lines.join('\r\n')}\r\n`);
+  const count = (xs: string[]) => xs.reduce<Record<string, number>>((m, x) => ({ ...m, [x]: (m[x] ?? 0) + 1 }), {});
+  const missing = returnsToBase ? shiftsWithoutReturn(legs) : [];
+  const returns = legs.filter((l) => l.purpose === RETURN_PURPOSE).length;
+  const md = [`# Empty drives re-checked: ${name}`, '', `Account used: ${account}. Engine: OSRM via travel-route. All road times are free-flow ESTIMATES.`, '',
+    `Drives: ${legs.length}. By purpose: ${JSON.stringify(count(legs.map((l) => l.purpose)))}.`,
+    `Return to the base set: ${returnsToBase ? 'yes' : 'no'}. Return drives: ${returns}. Shifts without one: ${returnsToBase ? missing.length : 'n/a'}.`,
+    `Our stored status: ${JSON.stringify(count(legs.map((l) => l.status)))}.`,
+    `Re-check status: ${JSON.stringify(count(statuses))}.`, '', 'Per-drive rows, with both ends\' coordinates: legs.csv.'];
+  if (!returnsToBase && returns > 0) md.push('', `DEFECT: the month does not return to the base, yet holds ${returns} return drives.`);
+  if (missing.length > 0) md.push('', `DEFECT: ${missing.length} shifts have no return drive: ${missing.slice(0, 20).join(', ')}`);
+  writeFileSync(path.join(OUT, 'summary.md'), `${md.join('\n')}\n`);
+  writeFileSync(path.join(OUT, 'names-mapping.local.csv'), `${csvLine(['alias', 'real'])}\r\n${[...pseudo].map(([k, v]) => csvLine([v, k])).join('\r\n')}\r\n`);
+  console.log(md.join('\n'));
+  if (missing.length > 0 || (!returnsToBase && returns > 0)) process.exit(4);
+}
+
 async function main(): Promise<void> {
+  if (legsPath !== undefined) return legsMain();
   const transitions = evidencePath !== undefined ? transitionsFromEvidence(evidencePath) : buildTransitions(ridesFromWorkbook(ridesPath!));
   console.log(`${transitions.length} transitions`);
   if (!(await signIn('demo'))) { console.error('sign-in to staging failed (network or credentials)'); process.exit(3); }

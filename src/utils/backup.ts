@@ -150,6 +150,9 @@ export const BACKUP_TABLES: readonly string[] = [
   'notification_deliveries',
   'trip_analysis_settings',
   'driver_month_budget',
+  // The simulator's company settings (20261127200000): the share rate and the
+  // return to the base. One row per company, read like trip_analysis_settings.
+  'company_simulation_settings',
 
   // The forward plan per vehicle and operating day (20261022140000). Both carry
   // company_id, so both are read directly, in pages of 1000 like every other

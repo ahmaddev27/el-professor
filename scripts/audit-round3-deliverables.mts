@@ -79,9 +79,9 @@ const VEHICLES: FullMonthVehicle[] = [
  * reason. `fullMonth.test.ts` asserts the property; this makes it visible.
  */
 const DRIVERS: FullMonthDriver[] = [
-  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1', allowed_weekdays: [1, 2, 3, 4, 5] },
-  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2', allowed_weekdays: [1, 2, 3, 4, 5] },
-  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3', allowed_weekdays: [1, 2, 3, 4, 5], notes: 'keine Nachtschicht' },
+  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1', allowed_weekdays: [1, 2, 3, 4, 5], planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2', allowed_weekdays: [1, 2, 3, 4, 5], planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3', allowed_weekdays: [1, 2, 3, 4, 5], notes: 'keine Nachtschicht', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
 ];
 
 const note = (over: Partial<StructuredNote> & { id: string; driver_id: string; note_type: string }): StructuredNote => ({

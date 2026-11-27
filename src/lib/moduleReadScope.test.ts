@@ -142,6 +142,12 @@ const READER_MODULE: Readonly<Record<string, string | null>> = {
   // columns of drivers and the month's werkstatt_checks, all read BEFORE a ride
   // is placed (decision 5 of 29.10.2026). It serves the same module-less screen.
   'src/lib/simulationInputsClient.ts':  null,
+  // Round 8: the imported Uber figures of the month the simulator plans
+  // against (income, drivers, partner links), for the same module-less screen.
+  'src/utils/simulatedRides/uberImportLoader.ts': null,
+  // Round 8 S6: the month's real Fahrtenbuch trips and the drivers they name,
+  // read so the simulator never plans over a real driver-day. Same screen.
+  'src/utils/simulatedRides/realTripsLoader.ts': null,
 
   // components, whose module is the screen that mounts them
   'src/components/AbrechnungScheduleCard.tsx':             'abrechnung',
@@ -676,7 +682,7 @@ describe('three modules have no lexically visible blocker left', () => {
  * the gate reaches, and that one is the finding.
  */
 const VARIABLE_TABLE_READERS: Readonly<Record<string, string>> = {
-  // THE BLOCKER. `BACKUP_TABLES` + `BACKUP_CHILD_TABLES`, 49 tables, every one
+  // THE BLOCKER. `BACKUP_TABLES` + `BACKUP_CHILD_TABLES`, 50 tables, every one
   // of the gated ones among them. Module `datensicherung` — `lockable: false`.
   'src/utils/backup.ts': 'backup',
   // `drivers` and `cars`, as a literal union type, for the two head counts that
@@ -737,7 +743,7 @@ describe('every variable-table reader is accounted for', () => {
       iterates, so this cannot drift from the thing it describes.
     */
     const carried = [...BACKUP_TABLES, ...BACKUP_CHILD_TABLES.map(c => c.table)];
-    expect(carried.length).toBe(49);
+    expect(carried.length).toBe(50);
     expect(Object.keys(TABLE_PAGE).filter(table => !carried.includes(table))).toEqual([]);
   });
 
