@@ -24,20 +24,17 @@ import type { CompanyDriver } from '../lib/tripAnalysisView';
 import type { TranslationKey } from '../i18n';
 import type { WerkstattCheckRow } from '../utils/constraintDecisionLog';
 import { selectableDrivers } from '../utils/driverStatus';
-import type { StructuredNote } from '../utils/monatsplanungPhase3';
 import { PoolError, buildAddressPool, readCachedPool, writeCachedPool, type AddressPool } from '../utils/simulatedRides/addressPool';
 import {
   addDays, figuresOf, generateFromFigures, mondayOf, mondaysOfMonth, weekKey, type Finding, type FindingCode, type FiguresResult, type IncomeRow,
 } from '../utils/simulatedRides/figures';
 import { resolveBase, type BaseRefusal } from '../utils/simulatedRides/baseSelection';
+import { calendarMonthInput, savedBasePoint, type CalendarCar, type CalendarEvents, type CalendarSourcing } from '../utils/simulatedRides/calendarRun';
 import { DEFAULT_CALENDAR_FORM, parseCalendarForm, type CalendarForm, type CalendarFormField } from '../utils/simulatedRides/calendarForm';
 import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type RoutingProvenance } from '../utils/simulatedRides/fullMonth';
-import type { UberMonthImport } from '../utils/simulatedRides/uberImport';
 import { loadUberMonth } from '../utils/simulatedRides/uberImportLoader';
 import { loadRealTripRows } from '../utils/simulatedRides/realTripsLoader';
-import { readRealTrips, type RealTripDriverRef, type RealTripRow } from '../utils/simulatedRides/realTrips';
-import { resolveSettings } from '../utils/simulatedRides/tenantSettings';
-import { readUnavailability, type VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
+import type { VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
 import { buildMonthClosing } from '../utils/simulatedRides/monthClosing';
@@ -47,7 +44,7 @@ import { selectMonthlyShareRate, type ShareSetting } from '../utils/simulatedRid
 import { routeChecks, summariseRouteChecks, type RouteCheckSummary } from '../utils/simulatedRides/routeCheck';
 import { rideDate, ridesToRows } from '../utils/simulatedRides/sheet';
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from '../utils/simulatedRides/travelModel';
-import type { GeoPoint, PoolAddress } from '../utils/simulatedRides/types';
+import type { GeoPoint } from '../utils/simulatedRides/types';
 import { deliverWorkbookPayload } from '../utils/serviceWorkbookDownload';
 
 /**
@@ -74,7 +71,7 @@ import { deliverWorkbookPayload } from '../utils/serviceWorkbookDownload';
 type Phase = 'idle' | 'events' | 'pool' | 'verify' | 'route' | 'generating' | 'ready' | 'importing' | 'done';
 type Mode = 'calendar' | 'weeks';
 
-interface CarOption { id: string; plate: string; tuev: string | null }
+type CarOption = CalendarCar;
 
 /** How the drive times of one run were obtained, for the summary under the result. */
 interface RunRouting {
@@ -93,26 +90,9 @@ interface Result {
 }
 
 /** Everything read before generation. */
-interface RunEvents {
-  notes: Map<string, StructuredNote[]>;
-  facts: Awaited<ReturnType<typeof loadDriverPlanningFacts>>;
-  checks: WerkstattCheckRow[];
-  /** Calendar mode only: the cars' unavailability windows and the imported Uber figures (Round 8). */
-  unavailability: VehicleUnavailabilityRow[];
-  uber: UberMonthImport | null;
-  /** Calendar mode only: the month's real trips and the drivers they name (Round 8, §4). */
-  realTrips: { rows: RealTripRow[]; drivers: RealTripDriverRef[] } | null;
-  /** Calendar mode only: the company's simulation settings as stored now (Round 8, S8). */
-  simulation: CompanySimulationSettings | null;
-}
+type RunEvents = CalendarEvents;
 
-/** The pool a run draws from and the model that times it. `travel` absent is the labelled estimate. */
-interface Sourcing {
-  points: readonly PoolAddress[];
-  travel: TravelModel | undefined;
-  provenance: RoutingProvenance | null;
-  estimate: boolean;
-}
+type Sourcing = CalendarSourcing;
 
 const ROUTING_FAILURE_KEYS: Record<RoutingFailureReason, TranslationKey> = {
   verification_failed: 'simrides.error.routing.verification_failed',
@@ -179,12 +159,6 @@ function defaultMonthKey(): string {
 
 function toggled(list: readonly string[], id: string): string[] {
   return list.includes(id) ? list.filter(x => x !== id) : [...list, id];
-}
-
-function savedBase(row: Awaited<ReturnType<typeof loadSettings>>): GeoPoint | null {
-  const lat = Number(row?.base_latitude);
-  const lon = Number(row?.base_longitude);
-  return row?.base_latitude != null && row?.base_longitude != null && Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
 
 /** The books of the weeks that belong to the month, and the trips those weeks already hold. */
@@ -279,7 +253,7 @@ export default function SimulatedRidesPage() {
         // it is a chooser and the deactivated are dropped — a simulated month
         // must not put a driver who has left back on the road.
         setDrivers(selectableDrivers(driverRows));
-        setBase(savedBase(settingsRow));
+        setBase(savedBasePoint(settingsRow));
       } catch (err) {
         console.error('Fahrten simulieren: loading the company failed', err);
         if (live) setLoadFailed(true);
@@ -433,41 +407,11 @@ export default function SimulatedRidesPage() {
       if (!sourcing) return;
       setPhase('generating');
       await nextTick();
-      // Real trips are kept as read and their driver-days are not simulated
-      // over; their operating day is cut the way the month's settings cut it.
-      const cut = resolveSettings(parsed.settings);
-      const realTrips = events.realTrips && cut.ok
-        ? readRealTrips({ ...period, ...events.realTrips, timeZone: cut.settings.timeZone, operatingDayStartHour: cut.settings.operatingDayStartHour })
-        : undefined;
-      const outcome = generateFullMonth({
-        ...period, base: origin, baseSource: located.source, baseLabel: located.label, pool: sourcing.points, seed,
-        vehicles: cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev })),
-        // A driver whose row could not be read has no hours range, so he is
-        // reported as CONFIGURATION_REQUIRED rather than planned on a guess.
-        drivers: drivers.map(d => {
-          const f = events.facts.get(d.id);
-          return {
-            id: d.id, name: d.name, status: f?.status ?? null, employment_type: f?.employment_type ?? null,
-            allowed_weekdays: f?.allowed_weekdays ?? null, planning_enabled: f?.planning_enabled ?? true,
-            work_window_start: f?.work_window_start ?? null, work_window_end: f?.work_window_end ?? null,
-            is_full_day_available: f?.is_full_day_available ?? null,
-            planning_min_salary: f?.planning_min_salary ?? null, planning_max_salary: f?.planning_max_salary ?? null,
-            planning_hourly_rate: f?.planning_hourly_rate ?? null, salary_ratio: f?.salary_ratio ?? null,
-            planning_target_salary: f?.planning_target_salary ?? null,
-            target_monthly_hours: f?.target_monthly_hours ?? null, max_monthly_hours: f?.max_monthly_hours ?? null,
-          };
-        }),
-        driverNotesMap: events.notes, werkstattChecks: events.checks,
-        vehicleUnavailability: readUnavailability(events.unavailability), uber: events.uber ?? undefined, realTrips,
-        // Section 5's share on the imported umsatz, computed and never booked,
-        // at the company's stored rate. None stored is `share_not_configured`
-        // in the report, never a rate made up here. The return to the base is
-        // off unless the company turned it on (D8).
-        shareSetting: events.simulation?.shareSetting ?? null,
-        returnToBase: events.simulation?.returnToBase ?? false,
-        settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
-        travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
-      });
+      const outcome = generateFullMonth(calendarMonthInput({
+        ...period, seed, tenantId: companyId,
+        base: { point: origin, source: located.source, label: located.label },
+        cars, carIds, drivers, events, sourcing, form: parsed,
+      }));
       if (!outcome.ok) throw new Error(t(FULL_MONTH_FAILURE_KEY(outcome.failure)));
       setCalendarResult(outcome.result);
       setPhase('ready');

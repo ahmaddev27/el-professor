@@ -140,6 +140,9 @@ export interface FullMonthVehicle extends SimVehicle {
   tuev_gueltig_bis?: string | null;
 }
 
+/** Where a month's simulation settings came from (see `FullMonthInput.settingsSource`). */
+export type SettingsSource = 'company_settings' | 'script_arguments';
+
 export interface FullMonthInput {
   year: number;
   /** 1..12. */
@@ -196,6 +199,14 @@ export interface FullMonthInput {
    * the financial status says so.
    */
   shareSetting?: ShareSetting | null;
+  /**
+   * Where `shareSetting` and `returnToBase` were read: the company's stored
+   * settings (the screen, always), or the arguments of
+   * `scripts/fleetbook-round8-month.mts` on a stack whose settings table does
+   * not exist yet. Absent is the company's. Printed on the closing's sheet 7,
+   * because a month built on a typed-in rate must not read as the company's.
+   */
+  settingsSource?: SettingsSource;
   /** Operating days that already hold real trips, by driver UUID: never simulated over. */
   realTripDays?: ReadonlyMap<string, ReadonlySet<string>>;
   /**
@@ -328,7 +339,7 @@ export interface Provenance {
   /** The real trips read for the month; null when none were read. */
   realTrips: { trips: number; driverDays: number; unattributed: number; unreadableAmounts: number; digest: string } | null;
   /** What the tips and the share were reconciled against: the Uber figures' digest and the share setting. */
-  financial: { uberDigest: string | null; shareSetting: ShareSetting | null };
+  financial: { uberDigest: string | null; shareSetting: ShareSetting | null; settingsSource: SettingsSource };
   /**
    * The run's identity: a hash of everything that built the month, so the same
    * inputs give the same id and a record can be traced to its month.
@@ -772,7 +783,7 @@ export function generateFullMonth(
       unreadableAmounts: input.realTrips.unreadableAmounts.length,
       digest: fnv1a(input.realTrips.trips.map(t => `${t.tripId}|${t.operatingDay}|${t.driverId ?? ''}|${t.plate ?? ''}|${t.startMs ?? ''}|${t.endMs ?? ''}`).join('\n')),
     } : null,
-    financial: { uberDigest: uberDigestOf(input.uber), shareSetting: input.shareSetting ?? null },
+    financial: { uberDigest: uberDigestOf(input.uber), shareSetting: input.shareSetting ?? null, settingsSource: input.settingsSource ?? 'company_settings' },
     runId: '',
   };
   provenance.runId = runIdOf(provenance);

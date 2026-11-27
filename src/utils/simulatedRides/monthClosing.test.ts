@@ -412,6 +412,13 @@ describe('negatives: a missing input is said, never a fabricated zero', () => {
     expect(checkValue(sheetOf(unset, CLOSING_SHEET_CHECKS), 'Einstellung')).toMatch(/^nicht festgelegt/);
   });
 
+  it('sheet 7 names where the settings came from, and a typed-in rate never reads as the company\'s', () => {
+    expect(checkValue(sheetOf(month, CLOSING_SHEET_CHECKS), 'Einstellung aus')).toBe('Firmeneinstellung (company_simulation_settings)');
+    const typed = run({ settingsSource: 'script_arguments' });
+    expect(checkValue(sheetOf(typed, CLOSING_SHEET_CHECKS), 'Einstellung aus')).toMatch(/^Skriptargumente \(--share-percent/);
+    expect(typed.provenance.runId).not.toBe(month.provenance.runId);
+  });
+
   it('a tip Uber reported on a day with no simulated ride is INCOMPLETE, not a difference of zero', () => {
     const uber = sheetOf(month, CLOSING_SHEET_UBER);
     const row = uber.find(r => r[column(uber, 'Zeilenart')] === 'Tag' && r[column(uber, 'Fahrer-ID')] === ALPHA && r[column(uber, 'Datum')] === '2026-09-08')!;

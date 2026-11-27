@@ -1,5 +1,5 @@
 import { CONTRACT_VERSION, type WorkbookPayload } from '../../lib/workbookContract';
-import type { FullMonthResult } from './fullMonth';
+import type { FullMonthResult, SettingsSource } from './fullMonth';
 import { REPORT_LABEL_VALUES, SIMULATED_LABEL_HEADER, SIMULATED_LABEL_VALUE, SIMULATED_NOTICE, SIMULATED_SHEET_NAME } from './marker';
 import {
   BASE_SOURCE_TEXT,
@@ -582,6 +582,16 @@ export function shareSettingText(setting: ShareSetting | null): string {
   return `ungueltig (${String((setting as { mode?: unknown }).mode)})`;
 }
 
+/**
+ * Where the rate and the return to the base were read. A month built on a rate
+ * typed into the script says so, so it never reads as the company's setting.
+ */
+export function settingsSourceText(source: SettingsSource): string {
+  return source === 'script_arguments'
+    ? 'Skriptargumente (--share-percent, --return-to-base): Firmeneinstellung auf diesem Stand nicht vorhanden'
+    : 'Firmeneinstellung (company_simulation_settings)';
+}
+
 const section = (name: string, rows: Row[], label: RowLabel = LABEL.derived): Row[] =>
   rows.map(([what, value]) => [label, name, what ?? '', value ?? '']);
 
@@ -647,6 +657,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
     ...section('Satz', [
       ['Einstellung', shareSettingText(f.share.setting)],
       ['Einstellung Problem', f.share.settingProblem ?? ''],
+      ['Einstellung aus', settingsSourceText(p.financial.settingsSource)],
     ]),
     ...section('Pruefung', [
       ['Exportstatus', `${verification.verdict} - ${VERDICT_TEXT[verification.verdict]}`],
