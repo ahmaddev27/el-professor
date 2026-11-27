@@ -702,7 +702,7 @@ export default function SuperAdminDashboard() {
                       'sa.dash.col.company', 'sa.dash.col.approval',
                       'sa.dash.col.registered', 'sa.dash.col.referralCode', null,
                     ] as const).map((h, i) => (
-                      <th key={i} className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{h ? t(h) : ''}</th>
+                      <th key={i} className="whitespace-nowrap px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{h ? t(h) : ''}</th>
                     ))}
                   </tr>
                 </thead>
@@ -920,7 +920,7 @@ export default function SuperAdminDashboard() {
               {t('sa.dash.attentionTitle', { count: attentionItems.length })}
             </h3>
           </div>
-          <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+          <div className="max-h-64 space-y-2 overflow-y-auto pe-1">
             {attentionItems.map(item => (
               <Alert
                 key={item.id}
@@ -960,7 +960,7 @@ export default function SuperAdminDashboard() {
             to={`${ADMIN_BASE}/companies`}
             className="flex items-center gap-1.5 text-xs font-semibold text-brand-text transition-colors hover:underline [@media(pointer:coarse)]:min-h-10"
           >
-            {t('sa.dash.manageAll')} <ChevronRight aria-hidden size={13} />
+            {t('sa.dash.manageAll')} <ChevronRight aria-hidden size={13} className="rtl:-scale-x-100" />
           </Link>
         </div>
         <div className="relative overflow-x-auto">
@@ -972,7 +972,7 @@ export default function SuperAdminDashboard() {
                   'sa.dash.col.cars', 'sa.dash.col.drivers', 'sa.dash.col.price',
                   'common.status', 'sa.dash.col.created', null,
                 ] as const).map((h, i) => (
-                  <th key={i} className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{h ? t(h) : ''}</th>
+                  <th key={i} className="whitespace-nowrap px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{h ? t(h) : ''}</th>
                 ))}
               </tr>
             </thead>
@@ -1290,7 +1290,7 @@ export default function SuperAdminDashboard() {
             className={cn('relative', QUICK_ACTION_CLASS)}
           >
             {pendingCompanies.length > 0 && (
-              <Badge tone="caution" className="absolute right-2 top-2 h-[18px] px-1.5 text-[10px] font-bold">
+              <Badge tone="caution" className="absolute end-2 top-2 h-[18px] px-1.5 text-[10px] font-bold">
                 {pendingCompanies.length}
               </Badge>
             )}

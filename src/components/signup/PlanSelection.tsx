@@ -210,7 +210,7 @@ const DiscountCodeInput: React.FC<{
     <div className="grid gap-2 font-ui">
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
-          <Tag aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
+          <Tag aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
           <Input
             type="text"
             value={code}
@@ -218,7 +218,7 @@ const DiscountCodeInput: React.FC<{
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleApply(); } }}
             placeholder={t('signup.discount.label')}
             aria-label={t('signup.discount.label')}
-            className="pl-8 font-mono"
+            className="ps-8 font-mono"
           />
         </div>
         <Button
@@ -290,7 +290,7 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
             onClick={() => { onPlanChange(entry.id); onDiscountChange(null); }}
             aria-pressed={plan === entry.id}
             className={cn(
-              'relative rounded-surface border p-4 text-left transition-colors',
+              'relative rounded-surface border p-4 text-start transition-colors',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
               plan === entry.id ? 'border-brand bg-brand-soft' : 'border-line bg-raised hover:bg-sunken',
             )}
@@ -301,7 +301,7 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
               </Badge>
             )}
             {plan === entry.id && (
-              <span className="absolute right-2.5 top-2.5 flex size-5 items-center justify-center rounded-full bg-brand text-brand-fg">
+              <span className="absolute end-2.5 top-2.5 flex size-5 items-center justify-center rounded-full bg-brand text-brand-fg">
                 <Check aria-hidden className="size-3" />
               </span>
             )}
@@ -341,7 +341,7 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
         <p className="mt-1 text-xs text-fg-subtle">
           {t('signup.cars.driverLimit', { count: carLimit * 4 })}
           {fleetDiscountPercent(priceBook, carLimit) > 0 && (
-            <span className="ml-2 font-semibold text-positive">
+            <span className="ms-2 font-semibold text-positive">
               -{fleetDiscountPercent(priceBook, carLimit)}% {t('landing.pricing.fleetDiscount')}
             </span>
           )}

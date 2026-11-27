@@ -1935,7 +1935,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               ))}
             </select>
           </div>
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <div className="ms-auto flex items-center gap-2 flex-wrap">
             {selectedDriverId !== '__all__' && (
               <button
                 onClick={handleExportPdf}
@@ -1974,7 +1974,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
             >
               <FileSpreadsheet size={12} /> {fahreruebersichtExporting ? t('stn.preview.driverOverviewBuilding') : t('stn.preview.downloadDriverOverview')}
             </button>
-            <span className="text-xs pl-2" style={{ color: 'var(--text-secondary)', borderLeft: '1px solid var(--border)' }}>
+            <span className="text-xs ps-2" style={{ color: 'var(--text-secondary)', borderInlineStart: '1px solid var(--border)' }}>
               <strong style={{ color: 'var(--text-primary)' }}>{totalShifts}</strong> {t('stn.label.shifts')}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -2023,7 +2023,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                   />
                   <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('stn.select.all')}</span>
                 </label>
-                <div className="pl-1 flex flex-wrap gap-x-5 gap-y-1.5">
+                <div className="ps-1 flex flex-wrap gap-x-5 gap-y-1.5">
                   {driverGroups.map(g => (
                     <label key={g.driver_id} className="flex items-center gap-2 text-xs cursor-pointer select-none">
                       <input
@@ -2089,7 +2089,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           <div className="px-5 py-2 text-xs flex items-start gap-2" style={{ background: 'rgba(245,158,11,0.08)', color: '#fcd34d', borderBottom: '1px solid rgba(245,158,11,0.25)' }}>
             <AlertTriangle size={12} className="shrink-0 mt-0.5" />
             <span>{exportError}</span>
-            <button className="ml-auto shrink-0 opacity-70 hover:opacity-100" onClick={() => setExportError('')}>
+            <button className="ms-auto shrink-0 opacity-70 hover:opacity-100" onClick={() => setExportError('')}>
               <X size={12} />
             </button>
           </div>
@@ -2149,7 +2149,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               <div className="font-semibold inline-flex items-center gap-1">
                 <AlertTriangle size={13} /> {t('stn.issue.title')} ({validationIssues.length})
               </div>
-              <ul className="list-disc pl-5 space-y-0.5">
+              <ul className="list-disc ps-5 space-y-0.5">
                 {validationIssues.slice(0, 50).map((issue, idx) => (
                   <li key={idx} style={{ whiteSpace: 'pre-wrap' }}>
                     {[t(issue.detailKey, issue.detailVars), ...(issue.detailLines ?? [])].join('\n')}
@@ -2258,11 +2258,11 @@ function DriverCard({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-4 py-3 flex flex-wrap items-start justify-between gap-3 transition-colors hover:brightness-110"
+        className="w-full text-start px-4 py-3 flex flex-wrap items-start justify-between gap-3 transition-colors hover:brightness-110"
         style={{ background: 'var(--bg-surface)', borderBottom: expanded ? '1px solid var(--border)' : 'none' }}
       >
         <div className="flex items-start gap-2 min-w-0">
-          {expanded ? <ChevronDown size={16} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} />}
+          {expanded ? <ChevronDown size={16} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} className="rtl:-scale-x-100" />}
           <div className="min-w-0">
             <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>
               {group.driver_name}
@@ -2406,10 +2406,10 @@ function DayBlock({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors hover:brightness-110"
+        className="w-full text-start px-3 py-2 flex items-center justify-between gap-2 transition-colors hover:brightness-110"
       >
         <div className="flex items-center gap-2 min-w-0">
-          {expanded ? <ChevronDown size={13} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text-secondary)' }} />}
+          {expanded ? <ChevronDown size={13} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text-secondary)' }} className="rtl:-scale-x-100" />}
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
             {fmtDate(date)} · {t('stn.day.dayTotal')} {fmtDuration(dayMinutes)}
           </span>
@@ -2427,16 +2427,16 @@ function DayBlock({
           <table className="w-full text-xs">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.start')}</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.end')}</th>
-                <th className="px-2 py-1 text-right">{t('stn.day.col.duration')}</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.plate')}</th>
-                <th className="px-2 py-1 text-right">{t('stn.label.trips')}</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.source')}</th>
-                <th className="px-2 py-1 text-right">23–00</th>
-                <th className="px-2 py-1 text-right">00–04</th>
-                <th className="px-2 py-1 text-right">04–06</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.exception')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.start')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.end')}</th>
+                <th className="px-2 py-1 text-end">{t('stn.day.col.duration')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.plate')}</th>
+                <th className="px-2 py-1 text-end">{t('stn.label.trips')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.source')}</th>
+                <th className="px-2 py-1 text-end">23–00</th>
+                <th className="px-2 py-1 text-end">00–04</th>
+                <th className="px-2 py-1 text-end">04–06</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.exception')}</th>
               </tr>
             </thead>
             <tbody>
@@ -2448,11 +2448,11 @@ function DayBlock({
                   <tr key={s.block_id} style={{ borderTop: '1px dashed var(--border)' }}>
                     <td className="px-2 py-1 font-mono" style={{ color: 'var(--text-primary)' }}>{fmtTime(s.block_start_ms)}</td>
                     <td className="px-2 py-1 font-mono" style={{ color: 'var(--text-primary)' }}>{endLabel}</td>
-                    <td className="px-2 py-1 font-mono text-right" style={{ color: 'var(--text-primary)' }}>
+                    <td className="px-2 py-1 font-mono text-end" style={{ color: 'var(--text-primary)' }}>
                       {fmtDuration(s.paid_duration_minutes)}
                       {s.minimum_applied && (
                         <span
-                          className="ml-1.5 inline-block px-1 py-0 rounded text-[9px] font-bold uppercase"
+                          className="ms-1.5 inline-block px-1 py-0 rounded text-[9px] font-bold uppercase"
                           style={{ background: 'rgba(59,130,246,0.2)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.4)', verticalAlign: 'middle' }}
                           title={t('stn.day.minimumTitle', { actual: fmtDuration(s.duration_minutes), added: s.minimum_added_minutes })}
                         >
@@ -2466,11 +2466,11 @@ function DayBlock({
                       )}
                     </td>
                     <td className="px-2 py-1 font-mono" style={{ color: 'var(--text-secondary)' }}>{s.vehicle || '—'}</td>
-                    <td className="px-2 py-1 text-right" style={{ color: 'var(--text-secondary)' }}>{s.trip_count}</td>
+                    <td className="px-2 py-1 text-end" style={{ color: 'var(--text-secondary)' }}>{s.trip_count}</td>
                     <td className="px-2 py-1"><SourceBadge source={s.assignment_source} /></td>
-                    <td className="px-2 py-1 text-right font-mono" style={{ color: s.night_23_00 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_23_00 ? fmtDuration(s.night_23_00) : '—'}</td>
-                    <td className="px-2 py-1 text-right font-mono" style={{ color: s.night_00_04 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_00_04 ? fmtDuration(s.night_00_04) : '—'}</td>
-                    <td className="px-2 py-1 text-right font-mono" style={{ color: s.night_04_06 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_04_06 ? fmtDuration(s.night_04_06) : '—'}</td>
+                    <td className="px-2 py-1 text-end font-mono" style={{ color: s.night_23_00 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_23_00 ? fmtDuration(s.night_23_00) : '—'}</td>
+                    <td className="px-2 py-1 text-end font-mono" style={{ color: s.night_00_04 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_00_04 ? fmtDuration(s.night_00_04) : '—'}</td>
+                    <td className="px-2 py-1 text-end font-mono" style={{ color: s.night_04_06 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_04_06 ? fmtDuration(s.night_04_06) : '—'}</td>
                     <td className="px-2 py-1"><ExceptionBadges shift={s} /></td>
                   </tr>
                 );
@@ -2491,7 +2491,7 @@ function DayBlock({
             <button
               type="button"
               onClick={onToggleAllShifts}
-              className="mt-2 ml-2 text-xs font-semibold px-2 py-1 rounded"
+              className="mt-2 ms-2 text-xs font-semibold px-2 py-1 rounded"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
               {t('stn.day.showLess')}
@@ -3629,7 +3629,7 @@ function GehaltsabweichungSection({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:brightness-110 transition-all"
+        className="w-full flex items-center justify-between px-4 py-3 text-start hover:brightness-110 transition-all"
         style={{ background: 'var(--bg-surface)' }}
       >
         <div className="flex items-center gap-2">
@@ -3692,24 +3692,24 @@ function GehaltsabweichungSection({
               <table className="w-full text-xs">
                 <thead>
                   <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.salaryRange')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.expectedGross')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.difference')}</th>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</th>
+                    <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.salaryRange')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.expectedGross')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.difference')}</th>
+                    <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {deviations.map(d => (
                     <tr key={d.driver_id} style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
                       <td className="px-3 py-2 font-medium" style={{ color: 'var(--text-primary)' }}>{d.driver_name}</td>
-                      <td className="px-3 py-2 text-right font-mono" style={{ color: 'var(--text-secondary)' }}>
+                      <td className="px-3 py-2 text-end font-mono" style={{ color: 'var(--text-secondary)' }}>
                         {d.min_salary != null && d.max_salary != null
                           ? `${fmtEuroVal(d.min_salary)} – ${fmtEuroVal(d.max_salary)}`
                           : fmtEuroVal(d.target)}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono" style={{ color: 'var(--text-primary)' }}>{fmtEuroVal(d.actual)}</td>
-                      <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: statusColor(d.status) }}>
+                      <td className="px-3 py-2 text-end font-mono" style={{ color: 'var(--text-primary)' }}>{fmtEuroVal(d.actual)}</td>
+                      <td className="px-3 py-2 text-end font-mono font-semibold" style={{ color: statusColor(d.status) }}>
                         {fmtDiff(d.diff)}
                       </td>
                       <td className="px-3 py-2">
@@ -3790,7 +3790,7 @@ function GehaltsabweichungSection({
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{dev.driver_name}</span>
-                            <span className="ml-2" style={{ color: '#fcd34d' }}>
+                            <span className="ms-2" style={{ color: '#fcd34d' }}>
                               {t('stn.dev.underTarget')}: {fmtDiff(dev.diff)}
                             </span>
                           </div>
@@ -3946,7 +3946,7 @@ function GehaltsabweichungSection({
                               <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>
                                 ({t('stn.suggest.currentValue', { value: fmtDiff(s.target_diff) })})
                               </span>
-                              <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(134,239,172,0.12)', color: '#86efac' }}>
+                              <span className="ms-auto px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(134,239,172,0.12)', color: '#86efac' }}>
                                 {t('stn.suggest.impact', { value: s.impact_score.toFixed(0) })}
                               </span>
                             </div>
@@ -3976,7 +3976,7 @@ function GehaltsabweichungSection({
                               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: vBg, color: vColor }}>
                                 {vLabel}
                               </span>
-                              <ul className="text-[10px] space-y-0.5 pl-0 list-none" style={{ color: 'var(--text-tertiary)' }}>
+                              <ul className="text-[10px] space-y-0.5 ps-0 list-none" style={{ color: 'var(--text-tertiary)' }}>
                                 {s.validation.reasons.map((r, ri) => (
                                   <li key={ri} className="flex items-start gap-1">
                                     <span style={{ color: vColor, flexShrink: 0 }}>–</span>
@@ -4013,7 +4013,7 @@ function GehaltsabweichungSection({
                 {/* Beste Ausgleichsrichtung */}
                 {bestActionable && (
                   <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.25)' }}>
-                    <span className="font-semibold mr-2" style={{ color: '#86efac' }}>{t('stn.suggest.bestDirection')}</span>
+                    <span className="font-semibold me-2" style={{ color: '#86efac' }}>{t('stn.suggest.bestDirection')}</span>
                     <span style={{ color: 'var(--text-secondary)' }}>
                       {bestActionable.source_driver_name} → {bestActionable.target_driver_name}
                       {' '}({t('stn.suggest.impactLabel')} <span className="font-mono">{bestActionable.impact_score.toFixed(0)} €</span>)
@@ -4077,7 +4077,7 @@ function GehaltsabweichungSection({
                     <AlertTriangle size={12} />
                     {t('stn.applied.recheckTitle')}
                   </div>
-                  <ul className="space-y-1 pl-1" style={{ color: 'var(--text-secondary)' }}>
+                  <ul className="space-y-1 ps-1" style={{ color: 'var(--text-secondary)' }}>
                     <li>• {t('stn.applied.recheckQuality')}</li>
                     <li>• {t('stn.applied.recheckStundennachweis')}</li>
                     <li>• {t('stn.applied.recheckDocuments')}</li>

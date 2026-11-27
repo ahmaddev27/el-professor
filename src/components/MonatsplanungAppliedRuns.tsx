@@ -528,7 +528,7 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
   return (
     <div
       className={cn(
-        'w-full cursor-pointer rounded-control border border-line bg-raised text-left transition-colors hover:bg-sunken/50',
+        'w-full cursor-pointer rounded-control border border-line bg-raised text-start transition-colors hover:bg-sunken/50',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
       )}
       onClick={onOpen}
@@ -756,7 +756,7 @@ function RunDetailModal({
             >
               <Hash size={11} />
               {showTechnical ? t('mp.runs.hideTechnical') : t('mp.runs.showTechnical')}
-              <span className="ml-0.5">{showTechnical ? '▲' : '▼'}</span>
+              <span className="ms-0.5">{showTechnical ? '▲' : '▼'}</span>
             </button>
             {showTechnical && (
               <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
@@ -799,7 +799,7 @@ function RunDetailModal({
                 <div>{t('mp.runs.driverColumn')}: <strong>{validation.driver_column ?? '—'}</strong></div>
               </div>
               {actionableWarnings.length > 0 && (
-                <ul className="mt-1 list-disc pl-4">
+                <ul className="mt-1 list-disc ps-4">
                   {actionableWarnings.map((m, i) => <li key={i}>{m}</li>)}
                 </ul>
               )}

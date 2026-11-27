@@ -468,7 +468,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       header: t('common.driver'),
       value: calc => calc.driver_name,
       sortable: true,
-      className: 'pr-2 sm:pr-4',
+      className: 'pe-2 sm:pe-4',
       cell: calc => {
         const { overlaps, overlapHint } = overlapFor(calc);
         return (
@@ -663,7 +663,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           // A figure to act on, not a carry-forward.
           <Alert tone="caution" title={t('sal.unrecovered.title')}>
             <p>{t('sal.unrecovered.body')}</p>
-            <ul className="mt-2 list-disc pl-5">
+            <ul className="mt-2 list-disc ps-5">
               {unrecoveredRows.map(calc => (
                 <li key={calc.driver_id}>
                   {t('sal.unrecovered.item', {

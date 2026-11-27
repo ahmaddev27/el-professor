@@ -29,7 +29,7 @@ const RejectedPage: React.FC = () => {
       <p>{t('status.rejected.body')}</p>
 
       {rejectionReason && (
-        <div className="rounded-control border border-critical/30 bg-critical-soft p-4 text-left">
+        <div className="rounded-control border border-critical/30 bg-critical-soft p-4 text-start">
           <p className="mb-1.5 text-xs font-semibold text-critical">{t('status.rejected.reason')}</p>
           <p className="text-sm leading-relaxed text-fg">{rejectionReason}</p>
         </div>

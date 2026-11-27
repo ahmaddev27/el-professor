@@ -32,7 +32,7 @@ function RevenueTooltip({ point }: { point?: RevenuePoint }) {
  */
 export function RevenueChart({ data, label }: { data: RevenuePoint[]; label: string }) {
   return (
-    <div
+    <div dir="ltr"
       role="img"
       aria-label={label}
       className={cn(

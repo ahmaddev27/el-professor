@@ -548,7 +548,7 @@ const PlatformTeamPage: React.FC = () => {
   );
 };
 
-const THEAD_CELL = 'whitespace-nowrap px-4 py-3.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle';
+const THEAD_CELL = 'whitespace-nowrap px-4 py-3.5 text-start text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle';
 
 /**
  * Picking the new role, then confirming it.

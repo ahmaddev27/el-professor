@@ -24,7 +24,7 @@ const LINK_CLASS = [
 export function ImpressumDocument({ impressum }: { impressum: Impressum }) {
   const sections = impressumSections(impressum);
   return (
-    <div lang="de" className="space-y-6 font-ui">
+    <div lang="de" dir="ltr" className="space-y-6 font-ui">
       {sections.map(section => (
         <section key={section.heading} className="space-y-1.5">
           <h2 className="text-[15px] font-semibold leading-snug text-fg">{section.heading}</h2>
@@ -50,7 +50,7 @@ export function ImpressumDocument({ impressum }: { impressum: Impressum }) {
  */
 export function PrivacyDocument({ privacy }: { privacy: PrivacyContent }) {
   return (
-    <div lang="de" className="space-y-4 font-ui">
+    <div lang="de" dir="ltr" className="space-y-4 font-ui">
       {privacy.asOf ? <p className="text-sm text-fg-muted">{privacyAsOfLine(privacy.asOf)}</p> : null}
       {privacy.paragraphs.map((paragraph, index) => (
         <p key={index} className="whitespace-pre-line break-words text-sm leading-relaxed text-fg sm:text-[15px]">

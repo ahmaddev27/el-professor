@@ -37,7 +37,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
     <div className="min-h-dvh font-ui text-fg lg:flex">
       <Sidebar isSupportAdmin={isSupportAdmin} />
 
-      <div className="min-w-0 flex-1 lg:py-[10px] lg:pr-[10px]">
+      <div className="min-w-0 flex-1 lg:py-[10px] lg:pe-[10px]">
        <div className="glass-sheet min-h-dvh rounded-none border-0 lg:min-h-[calc(100dvh-20px)] lg:overflow-clip lg:rounded-pane lg:border">
         {/* Whose data this is comes before anything else. It renders nothing
             for a company user. */}
@@ -47,7 +47,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
         <header className="glass-topbar sticky top-0 z-20 h-[60px] lg:rounded-t-pane">
           {/* Below `lg` the sidebar's menu button is fixed over this row's
               left edge, so the first control starts clear of it. */}
-          <div className="flex h-full items-center justify-between pl-16 pr-4 sm:pr-6 lg:pl-6 lg:pr-5">
+          <div className="flex h-full items-center justify-between ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
             <div className="flex items-center gap-3">
               <Button
                 variant="ghost"

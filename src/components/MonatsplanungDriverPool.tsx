@@ -356,7 +356,7 @@ export default function MonatsplanungDriverPool({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="mr-0.5 text-sm font-semibold text-fg">
+                        <span className="me-0.5 text-sm font-semibold text-fg">
                           {d.name}
                         </span>
                         {d.driver_usage_type && (
@@ -432,7 +432,7 @@ function ChipBtn({
   icon?: React.ReactNode;
 }) {
   return (
-    <Button variant="secondary" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-left" onClick={onClick}>
+    <Button variant="secondary" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal py-1 text-start" onClick={onClick}>
       {icon}
       {children}
     </Button>
@@ -487,7 +487,7 @@ function Field({
 }) {
   return (
     <div className={`min-w-0 [overflow-wrap:anywhere] ${full ? 'sm:col-span-2' : ''}`}>
-      <span className="mr-1 inline-flex max-w-full items-center gap-1 text-fg-muted [&_svg]:size-3 [&_svg]:shrink-0">
+      <span className="me-1 inline-flex max-w-full items-center gap-1 text-fg-muted [&_svg]:size-3 [&_svg]:shrink-0">
         {icon}
         {label}:
       </span>

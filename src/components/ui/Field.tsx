@@ -71,7 +71,7 @@ export function Field({ label, hint, error, required = false, id, className, chi
           {label}
           {required ? (
             <>
-              <span aria-hidden className="ml-0.5 text-critical">*</span>
+              <span aria-hidden className="ms-0.5 text-critical">*</span>
               <span className="sr-only"> ({t('common.required')})</span>
             </>
           ) : null}

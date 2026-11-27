@@ -379,11 +379,11 @@ const DriverModal: React.FC<DriverModalProps> = ({
                   min="0"
                   max="100"
                   step="0.1"
-                  className="pr-8"
+                  className="pe-8"
                   placeholder="50"
                   required
                 />
-                <span aria-hidden className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">%</span>
+                <span aria-hidden className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">%</span>
               </div>
             </Field>
 
@@ -395,7 +395,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                 aria-expanded={showPlanning}
                 aria-controls="driver-planning-fields"
                 className={cn(
-                  'flex min-h-11 w-full items-center justify-between gap-3 bg-sunken px-4 py-3 text-left text-sm font-semibold text-fg transition-colors hover:bg-sunken/70',
+                  'flex min-h-11 w-full items-center justify-between gap-3 bg-sunken px-4 py-3 text-start text-sm font-semibold text-fg transition-colors hover:bg-sunken/70',
                   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
                 )}
               >
@@ -504,12 +504,12 @@ const DriverModal: React.FC<DriverModalProps> = ({
                         />
                         <span>{t('fleet.canCoverOthers')}</span>
                       </label>
-                      <p className="ml-7 text-xs text-fg-subtle">{t('fleet.canCoverOthersHint')}</p>
+                      <p className="ms-7 text-xs text-fg-subtle">{t('fleet.canCoverOthersHint')}</p>
                     </div>
                   </fieldset>
 
                   <fieldset className="grid gap-4 border-t border-line pt-4">
-                    <legend className="float-left mb-1 w-full text-sm font-semibold text-fg">{t('fleet.workWindowTitle')}</legend>
+                    <legend className="float-start mb-1 w-full text-sm font-semibold text-fg">{t('fleet.workWindowTitle')}</legend>
                     <p className="clear-both text-xs text-fg-subtle">{t('fleet.workWindowHint')}</p>
 
                     <div>
@@ -522,7 +522,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                         />
                         <span>{t('fleet.fullDayAvailable')}</span>
                       </label>
-                      <p className="ml-7 text-xs text-fg-subtle">{t('fleet.fullDayAvailableHint')}</p>
+                      <p className="ms-7 text-xs text-fg-subtle">{t('fleet.fullDayAvailableHint')}</p>
                     </div>
 
                     {planning.is_full_day_available ? (
@@ -591,7 +591,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                         />
                         <span>{t('fleet.allowOutsideExceptions')}</span>
                       </label>
-                      <p className="ml-7 text-xs text-fg-subtle">{t('fleet.allowOutsideExceptionsHint')}</p>
+                      <p className="ms-7 text-xs text-fg-subtle">{t('fleet.allowOutsideExceptionsHint')}</p>
                     </div>
                   </fieldset>
                 </div>

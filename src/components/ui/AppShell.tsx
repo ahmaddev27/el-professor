@@ -107,7 +107,7 @@ function NavItemLink({ item, collapsed, onNavigate }: { item: AppShellNavItem; c
     >
       <Icon aria-hidden className="size-[18px] shrink-0" />
       {collapsed ? null : <span className="truncate">{item.label}</span>}
-      {!collapsed && item.badge ? <span className="ml-auto">{item.badge}</span> : null}
+      {!collapsed && item.badge ? <span className="ms-auto">{item.badge}</span> : null}
     </NavLink>
   );
 
@@ -222,7 +222,7 @@ export function AppShell({ navGroups, homeTo, topBarStart, topBarEnd, sidebarFoo
     <div className="min-h-dvh bg-canvas font-ui text-fg">
       <a
         href="#app-shell-main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-control focus:bg-overlay focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:shadow-overlay"
+        className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[70] focus:rounded-control focus:bg-overlay focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:shadow-overlay"
       >
         {t('ui.shell.skipToContent')}
       </a>
@@ -230,7 +230,7 @@ export function AppShell({ navGroups, homeTo, topBarStart, topBarEnd, sidebarFoo
       {/* Below the staging banner when there is one; see EnvironmentBanner. */}
       <aside
         className={cn(
-          'fixed bottom-3 left-3 top-[calc(var(--env-banner-height,0px)+0.75rem)] z-40 hidden glass-sheet rounded-pane lg:block',
+          'fixed bottom-3 start-3 top-[calc(var(--env-banner-height,0px)+0.75rem)] z-40 hidden glass-sheet rounded-pane lg:block',
           'motion-safe:transition-[width] motion-safe:duration-200',
           collapsed ? 'w-[4.5rem]' : 'w-[17rem]',
         )}
@@ -259,8 +259,8 @@ export function AppShell({ navGroups, homeTo, topBarStart, topBarEnd, sidebarFoo
 
       <div
         className={cn(
-          'flex min-h-dvh flex-col motion-safe:transition-[padding] motion-safe:duration-200 lg:py-3 lg:pr-3',
-          collapsed ? 'lg:pl-[6rem]' : 'lg:pl-[18.5rem]',
+          'flex min-h-dvh flex-col motion-safe:transition-[padding] motion-safe:duration-200 lg:py-3 lg:pe-3',
+          collapsed ? 'lg:ps-[6rem]' : 'lg:ps-[18.5rem]',
         )}
       >
         <div className="glass-sheet flex flex-1 flex-col lg:rounded-pane">

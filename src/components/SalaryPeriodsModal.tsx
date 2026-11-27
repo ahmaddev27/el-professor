@@ -396,25 +396,25 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
                     <th
-                      className="px-3 py-2 text-left text-xs font-medium uppercase"
+                      className="px-3 py-2 text-start text-xs font-medium uppercase"
                       style={{ color: 'var(--text-secondary)' }}
                     >
                       {t('sal.periods.col.period')}
                     </th>
                     <th
-                      className="px-3 py-2 text-right text-xs font-medium uppercase"
+                      className="px-3 py-2 text-end text-xs font-medium uppercase"
                       style={{ color: 'var(--text-secondary)' }}
                     >
                       {t('sal.periods.col.amount')}
                     </th>
                     <th
-                      className="px-3 py-2 text-left text-xs font-medium uppercase"
+                      className="px-3 py-2 text-start text-xs font-medium uppercase"
                       style={{ color: 'var(--text-secondary)' }}
                     >
                       {t('sal.periods.col.attached')}
                     </th>
                     <th
-                      className="px-3 py-2 text-right text-xs font-medium uppercase"
+                      className="px-3 py-2 text-end text-xs font-medium uppercase"
                       style={{ color: 'var(--text-secondary)' }}
                     >
                       {t('sal.periods.col.actions')}
@@ -445,7 +445,7 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
                           </div>
                         </td>
                         <td
-                          className="px-3 py-3 text-sm text-right whitespace-nowrap"
+                          className="px-3 py-3 text-sm text-end whitespace-nowrap"
                           style={{ color: 'var(--text-primary)' }}
                         >
                           {formatSalaryDue(row)} €
@@ -459,7 +459,7 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
                                 ? t('sal.periods.attached.none')
                                 : t('sal.periods.checkFailed')}
                         </td>
-                        <td className="px-3 py-3 text-right text-sm">
+                        <td className="px-3 py-3 text-end text-sm">
                           <div className="flex justify-end gap-2">
                             <button
                               className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"

@@ -259,7 +259,7 @@ const SignupPage: React.FC = () => {
 
               <Button size="lg" className="w-full" onClick={() => setStep('company')}>
                 {t('signup.continueWith', { plan: selectedPlanDef.name })}
-                <ArrowRight aria-hidden />
+                <ArrowRight aria-hidden className="rtl:-scale-x-100" />
               </Button>
             </div>
           )}
@@ -268,8 +268,8 @@ const SignupPage: React.FC = () => {
           {step === 'company' && (
             <form onSubmit={e => { e.preventDefault(); if (companyName.trim()) setStep('account'); }} className="grid gap-5">
               <div className="grid gap-4">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setStep('plan')} className="-ml-2 justify-self-start">
-                  <ArrowLeft aria-hidden />
+                <Button type="button" variant="ghost" size="sm" onClick={() => setStep('plan')} className="-ms-2 justify-self-start">
+                  <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
                   {selectedPlanDef.name} · {carLimit} {t('signup.vehiclesUnit')}
                 </Button>
                 {heading(t('signup.company.heading'), t('signup.company.subheading'))}
@@ -290,7 +290,7 @@ const SignupPage: React.FC = () => {
               </Field>
               <Button type="submit" size="lg" disabled={!companyName.trim()} className="w-full">
                 {t('signup.next')}
-                <ArrowRight aria-hidden />
+                <ArrowRight aria-hidden className="rtl:-scale-x-100" />
               </Button>
             </form>
           )}
@@ -300,8 +300,8 @@ const SignupPage: React.FC = () => {
             <>
               <form onSubmit={handleSubmit} className="grid gap-4">
                 <div className="grid gap-4">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => { setStep('company'); setError(''); }} className="-ml-2 max-w-full justify-self-start">
-                    <ArrowLeft aria-hidden />
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setStep('company'); setError(''); }} className="-ms-2 max-w-full justify-self-start">
+                    <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
                     <span className="truncate">{companyName}</span>
                   </Button>
                   {heading(t('signup.account.heading'), t('signup.account.subheading'))}
@@ -317,7 +317,7 @@ const SignupPage: React.FC = () => {
                 </Field>
 
                 <Field label={t('auth.email')}>
-                  <div className="relative">
+                  <div className="relative" dir="ltr">
                     <Mail aria-hidden className={authFieldIconClass} />
                     <Input type="email" value={email} onChange={e => setEmail(e.target.value)} className={authFieldWithIconClass} placeholder={t('signup.account.emailPlaceholder')} required />
                   </div>
@@ -330,7 +330,7 @@ const SignupPage: React.FC = () => {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      className={cn(authFieldWithIconClass, 'pr-11')}
+                      className={cn(authFieldWithIconClass, 'pe-11')}
                       placeholder={t('signup.account.passwordPlaceholder')}
                       required
                       minLength={8}
@@ -341,7 +341,7 @@ const SignupPage: React.FC = () => {
                       size="icon-sm"
                       onClick={() => setShowPassword(v => !v)}
                       aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
-                      className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                      className="absolute end-0.5 top-1/2 -translate-y-1/2"
                     >
                       {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
                     </Button>

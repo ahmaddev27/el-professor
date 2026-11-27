@@ -74,7 +74,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
       >
         <div className="p-6">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3 rtl:space-x-reverse">
               {getIcon()}
               <h3 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
             </div>
@@ -92,7 +92,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             <p className="leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{message}</p>
           </div>
 
-          <div className="flex justify-end space-x-3">
+          <div className="flex justify-end space-x-3 rtl:space-x-reverse">
             {type === 'confirm' && (
               <button
                 onClick={onClose}

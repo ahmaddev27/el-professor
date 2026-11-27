@@ -290,7 +290,7 @@ export default function WerkstattCheckModal({
                   onClick={() => handleMonthChange('prev')}
                   disabled={loading}
                 >
-                  ←
+                  <span aria-hidden className="inline-block rtl:-scale-x-100">←</span>
                 </Button>
                 <div className="min-w-[120px] whitespace-nowrap text-center font-semibold text-fg sm:min-w-[140px]">
                   {selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
@@ -303,7 +303,7 @@ export default function WerkstattCheckModal({
                   onClick={() => handleMonthChange('next')}
                   disabled={loading}
                 >
-                  →
+                  <span aria-hidden className="inline-block rtl:-scale-x-100">→</span>
                 </Button>
               </div>
               <Button
@@ -343,7 +343,7 @@ export default function WerkstattCheckModal({
 
           <fieldset className="grid gap-1.5">
             <legend className="mb-1.5 text-[13px] font-[550] text-fg-muted">
-              {t('common.status')}<span aria-hidden className="ml-0.5 text-critical">*</span>
+              {t('common.status')}<span aria-hidden className="ms-0.5 text-critical">*</span>
             </legend>
             <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-3">
               {statusOptions.map(option => (

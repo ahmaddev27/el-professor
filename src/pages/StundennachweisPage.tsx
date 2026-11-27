@@ -2302,7 +2302,7 @@ const Step1: React.FC<{
           onClick={() => driverId && onNext(driverId, month, year)}
           disabled={!driverId}
         >
-          {t('stn.step1.next')} <ArrowRight aria-hidden />
+          {t('stn.step1.next')} <ArrowRight aria-hidden className="rtl:-scale-x-100" />
         </Button>
       </CardContent>
     </Card>
@@ -2588,7 +2588,7 @@ const Step2: React.FC<Step2Props> = ({
             {t('common.back')}
           </Button>
           <Button size="lg" className="sm:flex-[2]" onClick={tab === 'salary' ? goSalary : goTotals}>
-            {t('stn.step2.generate')} <ArrowRight aria-hidden />
+            {t('stn.step2.generate')} <ArrowRight aria-hidden className="rtl:-scale-x-100" />
           </Button>
         </div>
       </CardContent>
@@ -2662,6 +2662,7 @@ export const Timesheet: React.FC<{
   return (
     <div
       id="stundennachweis-print"
+      dir="ltr" lang="de"
       style={{
         background: '#fff',
         padding: '16px 20px 16px 20px',
@@ -3019,7 +3020,7 @@ const NotesCarousel: React.FC<{
               transition: 'all 0.15s',
             }}
           >
-            <ChevronLeft size={15} />
+            <ChevronLeft size={15} className="rtl:-scale-x-100" />
           </button>
           <button
             onClick={next} disabled={idx === sorted.length - 1}
@@ -3032,7 +3033,7 @@ const NotesCarousel: React.FC<{
               transition: 'all 0.15s',
             }}
           >
-            <ChevronRight size={15} />
+            <ChevronRight size={15} className="rtl:-scale-x-100" />
           </button>
         </div>
       </div>
@@ -3771,8 +3772,8 @@ const StundennachweisPage: React.FC = () => {
 
       {/* ── Header ── */}
       <div className="font-ui">
-        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={goBack}>
-          <ChevronLeft aria-hidden />
+        <Button variant="ghost" size="sm" className="-ms-2 mb-2" onClick={goBack}>
+          <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
           {t('common.back')}
         </Button>
         <PageHeader
@@ -3787,7 +3788,7 @@ const StundennachweisPage: React.FC = () => {
                 <>
                   {`${selDriver.name} — ${t(MONTH_NAME_KEYS[selMonth-1])} ${selYear}`}
                   {isFromArchive && savedAt && (
-                    <span className="ml-2 text-fg-subtle">
+                    <span className="ms-2 text-fg-subtle">
                       {t('stn.header.lastSaved', {
                         timestamp: new Date(savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
                       })}
@@ -4033,7 +4034,8 @@ const StundennachweisPage: React.FC = () => {
           )}
 
           {/* ── Document ── */}
-          <div className="rounded-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflowX: 'auto' }}>
+          {/* dir="ltr": an RTL scroller would open the 740 px sheet at its right edge. */}
+          <div dir="ltr" className="rounded-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflowX: 'auto' }}>
             <div style={{ padding: '8px 4px' }}>
               <Timesheet
                 driver={selDriver}

@@ -121,7 +121,7 @@ export function TripAnalysisDriverView({
       header: t('ta.col.start'),
       value: block => block.startMs,
       sortable: true,
-      className: 'pl-3 pr-2 sm:px-4',
+      className: 'ps-3 pe-2 sm:px-4',
       cell: block => <span className="block py-1 tabular-nums">{formatBerlinDateTime(block.startMs)}</span>,
     },
     {
@@ -141,7 +141,7 @@ export function TripAnalysisDriverView({
       id: 'trips',
       header: t('ta.col.trips'),
       kind: 'number',
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
       cell: block => (
         <Button
           variant="link"

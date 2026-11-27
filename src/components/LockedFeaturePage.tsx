@@ -57,7 +57,7 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
 
       <div className="flex flex-wrap items-center justify-center gap-3">
         <Button variant="secondary" onClick={() => navigate('/overview')}>
-          <ArrowLeft aria-hidden />
+          <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
           {t('locked.backToOverview')}
         </Button>
 
@@ -70,7 +70,7 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
       </div>
 
       {/* Plan comparison hint */}
-      <div className="glass-card mt-8 w-full max-w-sm rounded-surface p-4 text-left">
+      <div className="glass-card mt-8 w-full max-w-sm rounded-surface p-4 text-start">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
           {t('locked.availableIn', { plan: PLAN_LABELS[requiredPlan] })}
         </p>

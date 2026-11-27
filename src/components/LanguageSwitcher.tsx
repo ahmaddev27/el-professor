@@ -63,8 +63,8 @@ const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 
       {isOpen && (
         <div
           className={isUi
-            ? 'absolute right-0 z-50 mt-1.5 w-40 overflow-hidden rounded-control border border-line bg-overlay p-1 shadow-overlay'
-            : 'absolute right-0 mt-1.5 w-40 rounded-xl overflow-hidden z-50 p-1'}
+            ? 'absolute end-0 z-50 mt-1.5 w-40 overflow-hidden rounded-control border border-line bg-overlay p-1 shadow-overlay'
+            : 'absolute end-0 mt-1.5 w-40 rounded-xl overflow-hidden z-50 p-1'}
           style={isUi ? undefined : menuStyle}
           role="listbox"
         >
@@ -88,7 +88,7 @@ const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 
                 }}
               >
                 <span aria-hidden="true">{option.flag}</span>
-                <span className="flex-1 text-left">{option.label}</span>
+                <span className="flex-1 text-start">{option.label}</span>
                 {selected && <Check size={14} className="flex-shrink-0" />}
               </button>
             );

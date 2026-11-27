@@ -826,7 +826,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
       <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
         {t(MONTH_KEYS[month - 1])} {year}
         {selectedVehicle !== '__all__' && <span style={{ color: '#0891b2' }}> · {selectedVehicle}</span>}
-        <span className="ml-2 font-normal" style={{ color: 'var(--text-secondary)' }}>
+        <span className="ms-2 font-normal" style={{ color: 'var(--text-secondary)' }}>
           — {tPlural({ one: 'hwh.blockCountOne', other: 'hwh.blockCountOther' }, visibleBlocks.length)}
         </span>
       </div>
@@ -863,7 +863,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
                         : isWeekend
                           ? 'rgba(124,58,237,0.03)'
                           : 'var(--bg-surface)',
-                      borderRight: ci < 6 ? '1px solid var(--border)' : undefined,
+                      borderInlineEnd: ci < 6 ? '1px solid var(--border)' : undefined,
                       padding: '6px 5px 4px',
                       verticalAlign: 'top',
                     }}
@@ -894,7 +894,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
                           <button
                             key={block.blockId}
                             onClick={() => setModalBlock(block)}
-                            className="w-full text-left rounded px-1.5 py-0.5 text-xs transition-all hover:brightness-90 leading-snug"
+                            className="w-full text-start rounded px-1.5 py-0.5 text-xs transition-all hover:brightness-90 leading-snug"
                             style={{ background: sc.bg, border: `1px solid ${sc.border}`, color: sc.text }}
                           >
                             <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
@@ -921,14 +921,14 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
           className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10"
           style={{ color: 'var(--text-secondary)' }}
         >
-          <ArrowLeft size={15} /> {t('hwh.recompute')}
+          <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('hwh.recompute')}
         </button>
         <button
           onClick={onAssign}
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
           style={{ background: '#2563eb', color: '#fff' }}
         >
-          <ArrowRight size={15} /> {t('hwh.assignRegularDrivers')}
+          <ArrowRight size={15} className="rtl:-scale-x-100" /> {t('hwh.assignRegularDrivers')}
         </button>
       </div>
 
@@ -1259,9 +1259,9 @@ function RegularDriverAssignmentView({
               <div key={sk.name}>
                 <span className="font-semibold">{sk.name}</span>
                 {sk.labels.size > 0 && (
-                  <span className="ml-1 opacity-80">— {Array.from(sk.labels).join(', ')}</span>
+                  <span className="ms-1 opacity-80">— {Array.from(sk.labels).join(', ')}</span>
                 )}
-                <span className="ml-1 opacity-60">({tPlural({ one: 'hwh.blocksRejectedOne', other: 'hwh.blocksRejectedOther' }, sk.blockCount)})</span>
+                <span className="ms-1 opacity-60">({tPlural({ one: 'hwh.blocksRejectedOne', other: 'hwh.blocksRejectedOther' }, sk.blockCount)})</span>
               </div>
             ))}
           </div>
@@ -1329,7 +1329,7 @@ function RegularDriverAssignmentView({
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                     {[t('common.driver'), t('hwh.colMaxHours'), t('hwh.statAssigned'), t('hwh.colRemainder'), t('hwh.colUtilization')].map(h => (
-                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                      <th key={h} className="px-3 py-2 text-start text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1348,7 +1348,7 @@ function RegularDriverAssignmentView({
                             <div className="flex-1 rounded-full overflow-hidden" style={{ height: 6, background: 'var(--border)' }}>
                               <div style={{ width: Math.min(pct, 100) + '%', height: '100%', background: barColor, borderRadius: 9999, transition: 'width 0.3s ease' }} />
                             </div>
-                            <span className="font-bold w-12 text-right" style={{ color: barColor }}>{pct.toFixed(1)}%</span>
+                            <span className="font-bold w-12 text-end" style={{ color: barColor }}>{pct.toFixed(1)}%</span>
                           </div>
                         </td>
                       </tr>
@@ -1371,7 +1371,7 @@ function RegularDriverAssignmentView({
             <thead>
               <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
                 {[t('common.driver'), t('hwh.colMaxHours'), t('hwh.colLimit1000'), t('hwh.colLimit1500'), t('hwh.colLimit1501'), t('hwh.colLimit1510'), t('hwh.colLimitHoliday')].map(h => (
-                  <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th key={h} className="px-3 py-2 text-start text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1402,7 +1402,7 @@ function RegularDriverAssignmentView({
             <thead>
               <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
                 {[t('common.driver'), t('hwh.colMaxHours'), t('hwh.statAssigned'), t('hwh.colRemainder'), t('hwh.colBlocks'), t('hwh.colRides'), t('common.status'), t('hwh.colOverlaps'), t('hwh.statHourLimitOverrun')].map(h => (
-                  <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th key={h} className="px-3 py-2 text-start text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1443,7 +1443,7 @@ function RegularDriverAssignmentView({
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('common.driver')}</th>
+                <th className="px-3 py-2 text-start text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('common.driver')}</th>
                 {(['1000', '1500', '1501', '1510'] as const).flatMap(code => [
                   `${code} ${t('hwh.colLimitShort')}`,
                   `${code} ${t('hwh.colAssignedShort')}`,
@@ -1453,7 +1453,7 @@ function RegularDriverAssignmentView({
                   t('hwh.colHolidayAssignedShort'),
                   t('hwh.colHolidayRemainder'),
                 ]).map(h => (
-                  <th key={h} className="px-2 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th key={h} className="px-2 py-2 text-start text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1521,7 +1521,7 @@ function RegularDriverAssignmentView({
                   <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < grid.length - 1 ? '1px solid var(--border)' : undefined }}>
                     {week.map((cell, ci) => {
                       return (
-                        <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderRight: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
+                        <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderInlineEnd: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
                           <div className="flex justify-end mb-1">
                             <span className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full" style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}>
                               {cell.date.getDate()}
@@ -1536,7 +1536,7 @@ function RegularDriverAssignmentView({
                               if (isAssigned && dColor) {
                                 return (
                                   <button key={block.blockId} onClick={() => setModalBlock(block)}
-                                    className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
+                                    className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
                                     style={{ background: dColor + '18', border: `1px solid ${dColor}55`, color: dColor }}>
                                     <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                     {' · '}<span className="font-semibold">{asgn.driverName.split(' ')[0]}</span>
@@ -1551,12 +1551,12 @@ function RegularDriverAssignmentView({
                               const hasConf = confInfo?.hasCrossVehicleConflict ?? false;
                               return (
                                 <button key={block.blockId} onClick={() => setModalBlock(block)}
-                                  className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
+                                  className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
                                   style={{ background: hasConf ? '#fef3c7' : '#fef3c733', border: `1.5px solid ${hasConf ? '#f59e0b' : '#f59e0b88'}`, color: '#92400e' }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                   {' · '}<span className="italic opacity-80">{reason}</span>
                                   {' · '}{rides}{t('hwh.ridesSuffix')}
-                                  {hasConf && <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')}</span>}
+                                  {hasConf && <span className="ms-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')}</span>}
                                 </button>
                               );
                             })}
@@ -1632,7 +1632,7 @@ function RegularDriverAssignmentView({
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
                 onClick={() => setConflictListOpen(o => !o)}
               >
-                <span>{t('hwh.unassignedBlocksConflictCheck')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksWithConflictSummary', { blocks: unassignedBlocks.length, conflicts: withConflict.length })}</span></span>
+                <span>{t('hwh.unassignedBlocksConflictCheck')} <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksWithConflictSummary', { blocks: unassignedBlocks.length, conflicts: withConflict.length })}</span></span>
                 <span style={{ color: 'var(--text-secondary)' }}>{conflictListOpen ? '▲' : '▼'}</span>
               </button>
               {conflictListOpen && (
@@ -1641,7 +1641,7 @@ function RegularDriverAssignmentView({
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                         {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRidesShort'), t('hwh.colReason'), t('hwh.unassignedConflictBadge'), t('hwh.colConflictCount'), t('hwh.colConflictVehicles')].map(h => (
-                          <th key={h} className="px-2 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                          <th key={h} className="px-2 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1696,7 +1696,7 @@ function RegularDriverAssignmentView({
                                     <thead>
                                       <tr style={{ borderBottom: '1px solid var(--border)' }}>
                                         {[t('hwh.colConflictBlock'), t('hwh.colVehicle'), t('common.driver'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colOverlap')].map(h => (
-                                          <th key={h} className="text-left text-xs font-semibold px-2 py-1" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                          <th key={h} className="text-start text-xs font-semibold px-2 py-1" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                         ))}
                                       </tr>
                                     </thead>
@@ -1764,17 +1764,17 @@ function RegularDriverAssignmentView({
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2 flex-wrap">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> {t('hwh.backToVehicleBlocks')}
+          <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('hwh.backToVehicleBlocks')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         <button
           onClick={onApplyNonConflictStep}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ms-auto"
           style={{ background: '#7c3aed', color: '#fff', border: '1px solid #7c3aed' }}
         >
-          <ArrowRight size={15} /> {t('hwh.giveNonConflictToOwner')}
+          <ArrowRight size={15} className="rtl:-scale-x-100" /> {t('hwh.giveNonConflictToOwner')}
         </button>
       </div>
 
@@ -2001,7 +2001,7 @@ function InhaberNonConflictView({
                 {grid.map((week, wi) => (
                   <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < grid.length - 1 ? '1px solid var(--border)' : undefined }}>
                     {week.map((cell, ci) => (
-                      <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderRight: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
+                      <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderInlineEnd: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
                         <div className="flex justify-end mb-1">
                           <span className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full" style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}>
                             {cell.date.getDate()}
@@ -2014,7 +2014,7 @@ function InhaberNonConflictView({
                             if (regAsgn) {
                               const dColor = regularColorMap.get(regAsgn.driverId) ?? '#2563eb';
                               return (
-                                <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: dColor + '18', border: `1px solid ${dColor}55`, color: dColor }}>
+                                <div key={block.blockId} className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: dColor + '18', border: `1px solid ${dColor}55`, color: dColor }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                   {' · '}<span className="font-semibold">{regAsgn.driverName.split(' ')[0]}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
@@ -2024,7 +2024,7 @@ function InhaberNonConflictView({
                             }
                             if (inhaberSet.has(block.blockId)) {
                               return (
-                                <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#ede9fe', border: `1.5px solid ${INHABER_COLOR}66`, color: INHABER_COLOR }}>
+                                <div key={block.blockId} className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#ede9fe', border: `1.5px solid ${INHABER_COLOR}66`, color: INHABER_COLOR }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                   {' · '}<span className="font-semibold">{inhaberName || t('hwh.owner')}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
@@ -2034,12 +2034,12 @@ function InhaberNonConflictView({
                             }
                             // Still not assigned — must be NZ-conflict
                             return (
-                              <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#fef3c7', border: '1.5px solid #f59e0b', color: '#92400e' }}>
+                              <div key={block.blockId} className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#fef3c7', border: '1.5px solid #f59e0b', color: '#92400e' }}>
                                 <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                 {' · '}<span className="italic opacity-80">{t('hwh.unassigned')}</span>
                                 {' · '}{formatBlockDuration(block.blockDurationSec)}
                                 {' · '}{rides}{t('hwh.ridesSuffix')}
-                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')}</span>
+                                <span className="ms-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')}</span>
                               </div>
                             );
                           })}
@@ -2064,7 +2064,7 @@ function InhaberNonConflictView({
           >
             <span>
               {t('hwh.remainingNzConflicts')}
-              <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>
+              <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>
                 {t('hwh.blocksCount', { count: remainingConflictedBlocks.length })}
               </span>
             </span>
@@ -2076,7 +2076,7 @@ function InhaberNonConflictView({
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                     {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colConflictWith'), t('hwh.colConflictCountLong')].map(h => (
-                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                      <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -2134,7 +2134,7 @@ function InhaberNonConflictView({
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> {t('hwh.backToRegularDrivers')}
+          <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('hwh.backToRegularDrivers')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
@@ -2142,10 +2142,10 @@ function InhaberNonConflictView({
         {remainingConflictedBlocks.length > 0 && (
           <button
             onClick={onApplyLongestConflictStep}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ms-auto"
             style={{ background: '#0891b2', color: '#fff', border: '1px solid #0891b2' }}
           >
-            <ArrowRight size={15} /> {t('hwh.giveLongestConflictToOwner')}
+            <ArrowRight size={15} className="rtl:-scale-x-100" /> {t('hwh.giveLongestConflictToOwner')}
           </button>
         )}
       </div>
@@ -2259,7 +2259,7 @@ function InhaberLongestConflictView({
           style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
           onClick={() => setGroupTableOpen(o => !o)}
         >
-          <span>{t('hwh.decisionPerConflictGroup')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.groupsCount', { count: conflictGroups.length })}</span></span>
+          <span>{t('hwh.decisionPerConflictGroup')} <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.groupsCount', { count: conflictGroups.length })}</span></span>
           <span style={{ color: 'var(--text-secondary)' }}>{groupTableOpen ? '▲' : '▼'}</span>
         </button>
         {groupTableOpen && (
@@ -2268,7 +2268,7 @@ function InhaberLongestConflictView({
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                   {[t('hwh.colGroup'), t('hwh.colBlocks'), t('hwh.statVehicles'), t('common.period'), t('hwh.colLongestBlock'), t('hwh.colSelectedBlock'), t('hwh.colDecision'), t('hwh.colRestStaysUnassigned')].map(h => (
-                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                    <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -2305,7 +2305,7 @@ function InhaberLongestConflictView({
                                 <thead>
                                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
                                     {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colRank'), t('hwh.colDecision'), t('hwh.colRejectionReason')].map(h => (
-                                      <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                      <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                     ))}
                                   </tr>
                                 </thead>
@@ -2368,7 +2368,7 @@ function InhaberLongestConflictView({
                 {grid.map((week, wi) => (
                   <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < grid.length - 1 ? '1px solid var(--border)' : undefined }}>
                     {week.map((cell, ci) => (
-                      <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderRight: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
+                      <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderInlineEnd: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
                         <div className="flex justify-end mb-1">
                           <span className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full" style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}>
                             {cell.date.getDate()}
@@ -2396,7 +2396,7 @@ function InhaberLongestConflictView({
                                   {' · '}<span className="font-semibold">{inhaberName || t('hwh.owner')}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
                                   {' · '}{rides}{t('hwh.ridesSuffix')}
-                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: INHABER_COLOR + '22', color: INHABER_COLOR, fontSize: '0.6rem' }}>{t('hwh.owner')}</span>
+                                  <span className="ms-1 px-1 py-px rounded text-xs font-bold" style={{ background: INHABER_COLOR + '22', color: INHABER_COLOR, fontSize: '0.6rem' }}>{t('hwh.owner')}</span>
                                 </div>
                               );
                             }
@@ -2408,7 +2408,7 @@ function InhaberLongestConflictView({
                                   {' · '}<span className="font-semibold">{inhaberName || t('hwh.owner')}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
                                   {' · '}{rides}{t('hwh.ridesSuffix')}
-                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#0891b2', color: '#fff', fontSize: '0.6rem' }}>{t('hwh.ownerConflictPick', { group: groupId })}</span>
+                                  <span className="ms-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#0891b2', color: '#fff', fontSize: '0.6rem' }}>{t('hwh.ownerConflictPick', { group: groupId })}</span>
                                 </div>
                               );
                             }
@@ -2420,7 +2420,7 @@ function InhaberLongestConflictView({
                                 {' · '}<span className="italic opacity-80">{t('hwh.unassigned')}</span>
                                 {' · '}{formatBlockDuration(block.blockDurationSec)}
                                 {' · '}{rides}{t('hwh.ridesSuffix')}
-                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')} {groupId}</span>
+                                <span className="ms-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')} {groupId}</span>
                               </div>
                             );
                           })}
@@ -2442,7 +2442,7 @@ function InhaberLongestConflictView({
           style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
           onClick={() => setSelectedTableOpen(o => !o)}
         >
-          <span>{t('hwh.newlyGivenToOwner')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: selectedBlocks.length })}</span></span>
+          <span>{t('hwh.newlyGivenToOwner')} <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: selectedBlocks.length })}</span></span>
           <span style={{ color: 'var(--text-secondary)' }}>{selectedTableOpen ? '▲' : '▼'}</span>
         </button>
         {selectedTableOpen && (
@@ -2451,7 +2451,7 @@ function InhaberLongestConflictView({
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                   {[t('hwh.colGroup'), t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colRows'), t('hwh.colReason')].map(h => (
-                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                    <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -2483,7 +2483,7 @@ function InhaberLongestConflictView({
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
             onClick={() => setRemainingTableOpen(o => !o)}
           >
-            <span>{t('hwh.remainingUnassignedConflictBlocks')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: remainingUnassignedBlocks.length })}</span></span>
+            <span>{t('hwh.remainingUnassignedConflictBlocks')} <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: remainingUnassignedBlocks.length })}</span></span>
             <span style={{ color: 'var(--text-secondary)' }}>{remainingTableOpen ? '▲' : '▼'}</span>
           </button>
           {remainingTableOpen && (
@@ -2492,7 +2492,7 @@ function InhaberLongestConflictView({
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                     {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colConflictGroup'), t('hwh.colReason')].map(h => (
-                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                      <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -2553,7 +2553,7 @@ function InhaberLongestConflictView({
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> {t('hwh.backToOwnerNonConflict')}
+          <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('hwh.backToOwnerNonConflict')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
@@ -2561,10 +2561,10 @@ function InhaberLongestConflictView({
         {remainingUnassignedBlocks.length > 0 && (
           <button
             onClick={onApplyFreeWindowSearch}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ms-auto"
             style={{ background: '#15803d', color: '#fff', border: '1px solid #15803d' }}
           >
-            <ArrowRight size={15} /> {t('hwh.searchFreeOwnerWindows')}
+            <ArrowRight size={15} className="rtl:-scale-x-100" /> {t('hwh.searchFreeOwnerWindows')}
           </button>
         )}
       </div>
@@ -4703,7 +4703,7 @@ function InhaberFreeWindowSearchView({
                     style={{
                       minHeight: 90,
                       background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)',
-                      borderRight: ci < 6 ? '1px solid var(--border)' : undefined,
+                      borderInlineEnd: ci < 6 ? '1px solid var(--border)' : undefined,
                       padding: '5px 4px 3px',
                     }}
                   >
@@ -4727,7 +4727,7 @@ function InhaberFreeWindowSearchView({
                             <button
                               key={ei}
                               onClick={() => setModalData({ kind: 'occupied', interval: o })}
-                              className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-95"
+                              className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-95"
                               style={{
                                 background: isStep3 ? '#ede9fe' : '#cffafe',
                                 border: `1.5px solid ${isStep3 ? INHABER_COLOR + '66' : '#0891b2'}`,
@@ -4739,7 +4739,7 @@ function InhaberFreeWindowSearchView({
                               <span className="font-mono">…{o.blockId.slice(-6)}</span>
                               {' · '}{o.vehicle}
                               {' · '}{formatBlockDuration(o.durationSec)}
-                              <span className="ml-1 px-1 py-px rounded font-bold" style={{ background: isStep3 ? INHABER_COLOR + '22' : '#0891b2', color: isStep3 ? INHABER_COLOR : '#fff', fontSize: '0.55rem' }}>
+                              <span className="ms-1 px-1 py-px rounded font-bold" style={{ background: isStep3 ? INHABER_COLOR + '22' : '#0891b2', color: isStep3 ? INHABER_COLOR : '#fff', fontSize: '0.55rem' }}>
                                 {o.sourceStep}
                               </span>
                             </button>
@@ -4766,7 +4766,7 @@ function InhaberFreeWindowSearchView({
                                 nextBlockId: w.nextBlockId,
                                 candidates,
                               })}
-                              className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-95"
+                              className="w-full text-start rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-95"
                               style={{
                                 background: 'rgba(16,185,129,0.08)',
                                 border: '1.5px dashed #10b981',
@@ -4776,7 +4776,7 @@ function InhaberFreeWindowSearchView({
                             >
                               <span className="font-semibold">{fmtTime(w.startMs)}–{fmtTime(w.endMs)}</span>
                               {' · '}{t('hwh.free')}{' · '}{formatBlockDuration(w.durationSec)}
-                              <span className="ml-1 px-1 py-px rounded font-bold" style={{ background: badgeColor + '22', color: badgeColor, border: `1px solid ${badgeColor}55`, fontSize: '0.55rem' }}>
+                              <span className="ms-1 px-1 py-px rounded font-bold" style={{ background: badgeColor + '22', color: badgeColor, border: `1px solid ${badgeColor}55`, fontSize: '0.55rem' }}>
                                 {badge}
                               </span>
                             </button>
@@ -4806,7 +4806,7 @@ function InhaberFreeWindowSearchView({
             <span className="w-3 h-3 rounded" style={{ background: 'rgba(16,185,129,0.08)', border: '1.5px dashed #10b981' }} />
             {t('hwh.legendFreeWindow')}
           </span>
-          <span className="inline-flex items-center gap-1.5 ml-2 font-semibold" style={{ color: '#15803d' }}>{t('hwh.badgeVehicleFree')}</span>
+          <span className="inline-flex items-center gap-1.5 ms-2 font-semibold" style={{ color: '#15803d' }}>{t('hwh.badgeVehicleFree')}</span>
           <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.legendVehicleAlsoAvailable')}</span>
           <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: '#0891b2' }}>{t('hwh.badgeCandidate')}</span>
           <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.legendMatchingWindowExists')}</span>
@@ -4822,7 +4822,7 @@ function InhaberFreeWindowSearchView({
         >
           <span>
             {t('hwh.openBlocksWithWindows')}
-            <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: remainingOpenBlocks.length })}</span>
+            <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: remainingOpenBlocks.length })}</span>
           </span>
           <span style={{ color: 'var(--text-secondary)' }}>{openBlocksOpen ? '▲' : '▼'}</span>
         </button>
@@ -4832,7 +4832,7 @@ function InhaberFreeWindowSearchView({
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                   {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colDuration'), t('hwh.colPossibleWindows'), t('hwh.colOfWhichVehicleFree'), t('common.status')].map(h => (
-                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                    <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -4865,7 +4865,7 @@ function InhaberFreeWindowSearchView({
                                 <thead>
                                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
                                     {[t('common.date'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colWindowDuration'), t('hwh.colVehicleFree')].map(h => (
-                                      <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                      <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                     ))}
                                   </tr>
                                 </thead>
@@ -4901,7 +4901,7 @@ function InhaberFreeWindowSearchView({
           style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', color: 'var(--text-primary)' }}
           onClick={() => setDiagOpen(o => !o)}
         >
-          <span>{t('hwh.fwsCheckTitle')}{diagClean && <span className="ml-2 text-xs font-normal" style={{ color: '#15803d' }}>— {t('hwh.allOk')}</span>}</span>
+          <span>{t('hwh.fwsCheckTitle')}{diagClean && <span className="ms-2 text-xs font-normal" style={{ color: '#15803d' }}>— {t('hwh.allOk')}</span>}</span>
           <span style={{ color: 'var(--text-secondary)' }}>{diagOpen ? '▲' : '▼'}</span>
         </button>
         {diagOpen && (
@@ -4931,7 +4931,7 @@ function InhaberFreeWindowSearchView({
         >
           <span>
             {t('hwh.conflictBlocksAndWindows')}
-            <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>
+            <span className="font-normal text-xs ms-2" style={{ color: 'var(--text-secondary)' }}>
               {t('hwh.openBlocksFreeWindowsSummary', { blocks: remainingOpenBlocks.length, windows: sortedFreeWindows.length })}
             </span>
           </span>
@@ -4962,7 +4962,7 @@ function InhaberFreeWindowSearchView({
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                           {[t('hwh.colBlockId'), t('common.date'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('common.status')].map(h => (
-                            <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                            <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -4986,7 +4986,7 @@ function InhaberFreeWindowSearchView({
                               <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{blk.rides?.length ?? 0}</td>
                               <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>
                                 {t(FWS_STATUS_KEYS[statusLabel])}
-                                {!hasCand && <span className="ml-1 text-xs font-normal" style={{ color: '#6b7280' }}>({t('hwh.noWindowShort')})</span>}
+                                {!hasCand && <span className="ms-1 text-xs font-normal" style={{ color: '#6b7280' }}>({t('hwh.noWindowShort')})</span>}
                               </td>
                             </tr>
                           );
@@ -5019,7 +5019,7 @@ function InhaberFreeWindowSearchView({
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                           {[t('common.date'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colPrevBlock'), t('hwh.colNextBlock'), t('hwh.colCandidates'), t('hwh.badgeVehicleFree'), t('hwh.colSource')].map(h => (
-                            <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                            <th key={h} className="px-3 py-2 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -5096,7 +5096,7 @@ function InhaberFreeWindowSearchView({
                                 <thead>
                                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                                     {[t('hwh.colWindowDate'), t('hwh.colWindowStart'), t('hwh.colWindowEnd'), t('hwh.colProposalStart'), t('hwh.colProposalEnd'), t('hwh.colBlockDuration'), t('hwh.colBufferBefore'), t('hwh.colBufferAfter'), t('hwh.colOwnerFree'), t('hwh.colVehicleFree'), t('common.status'), t('hwh.colScore')].map(h => (
-                                      <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                      <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                     ))}
                                   </tr>
                                 </thead>
@@ -5163,7 +5163,7 @@ function InhaberFreeWindowSearchView({
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
                         {[t('common.driver'), t('hwh.colVehicle'), t('hwh.colRideStart'), t('hwh.colRideEnd'), t('hwh.colNoteDetails')].map(h => (
-                          <th key={h} className="px-3 py-1.5 text-left font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={h} className="px-3 py-1.5 text-start font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -5216,11 +5216,11 @@ function InhaberFreeWindowSearchView({
                     const usedWins  = new Set(autoSelection.filter(e => e.chosen).map(e => e.chosen!.cw.windowId)).size;
                     return (
                       <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statTotalConflictBlocks')}</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{autoSelection.length}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAutoSelected')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{selCount}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.selStatusNotSelected')}</span><span className="font-bold ml-1" style={{ color: nselCount > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{nselCount}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(totalSec)}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statUsedWindows')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{usedWins}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statTotalConflictBlocks')}</span><span className="font-bold ms-1" style={{ color: 'var(--text-primary)' }}>{autoSelection.length}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAutoSelected')}</span><span className="font-bold ms-1" style={{ color: '#15803d' }}>{selCount}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.selStatusNotSelected')}</span><span className="font-bold ms-1" style={{ color: nselCount > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{nselCount}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ms-1" style={{ color: '#0e7490' }}>{fmtDurSec(totalSec)}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statUsedWindows')}</span><span className="font-bold ms-1" style={{ color: '#0e7490' }}>{usedWins}</span></div>
                       </div>
                     );
                   })()}
@@ -5230,7 +5230,7 @@ function InhaberFreeWindowSearchView({
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                           {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOriginalDate'), t('hwh.colOriginalTime'), t('hwh.colDuration'), t('hwh.colCandidates'), t('hwh.colSelectedWindow'), t('hwh.colNewPlacement'), t('hwh.colBufferBefore'), t('hwh.colBufferAfter'), t('hwh.colScore'), t('hwh.colSelectionReason'), t('common.status')].map(h => (
-                            <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                            <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -5281,7 +5281,7 @@ function InhaberFreeWindowSearchView({
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
                         {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colCandidateStart'), t('hwh.colCandidateEnd'), t('hwh.colErrorType'), t('hwh.colDetails')].map(h => (
-                          <th key={h} className="px-3 py-1.5 text-left font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={h} className="px-3 py-1.5 text-start font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -5317,13 +5317,13 @@ function InhaberFreeWindowSearchView({
                 <div>
                   {/* Summary cards */}
                   <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statSelectedBlocks')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionEData.selected.length}</span></div>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.selStatusNotSelected')}</span><span className="font-bold ml-1" style={{ color: autoSelection.length - sectionEData.selected.length > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{autoSelection.length - sectionEData.selected.length}</span></div>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionEData.totalSec)}</span></div>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAffectedVehicles')}</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionEData.uniqueVehicles}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statSelectedBlocks')}</span><span className="font-bold ms-1" style={{ color: '#15803d' }}>{sectionEData.selected.length}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.selStatusNotSelected')}</span><span className="font-bold ms-1" style={{ color: autoSelection.length - sectionEData.selected.length > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{autoSelection.length - sectionEData.selected.length}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ms-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionEData.totalSec)}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAffectedVehicles')}</span><span className="font-bold ms-1" style={{ color: 'var(--text-primary)' }}>{sectionEData.uniqueVehicles}</span></div>
                     <div>
                       <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statCheckStatus')}</span>
-                      <span className="font-bold ml-1" style={{ color: sectionEData.allOk ? '#15803d' : '#b91c1c' }}>
+                      <span className="font-bold ms-1" style={{ color: sectionEData.allOk ? '#15803d' : '#b91c1c' }}>
                         {sectionEData.allOk ? t('hwh.ok') : t('common.error')}
                       </span>
                     </div>
@@ -5445,7 +5445,7 @@ function InhaberFreeWindowSearchView({
                         <thead>
                           <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                             {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOriginalDate'), t('hwh.colOriginalTime'), t('hwh.colNewPlacement'), t('hwh.colDuration'), t('hwh.colBufferBefore'), t('hwh.colBufferAfter'), t('hwh.colCheck'), t('hwh.colHint')].map(h => (
-                              <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                              <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
@@ -5569,13 +5569,13 @@ function InhaberFreeWindowSearchView({
                   <div>
                     {/* Summary cards */}
                     <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statShiftedBlocks')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionFData.blockApps.length}</span></div>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statShiftedRides')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{sectionFData.totalRidesChanged}</span></div>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionFData.totalSec)}</span></div>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAffectedVehicles')}</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionFData.uniqueVehicles}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statShiftedBlocks')}</span><span className="font-bold ms-1" style={{ color: '#15803d' }}>{sectionFData.blockApps.length}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statShiftedRides')}</span><span className="font-bold ms-1" style={{ color: '#0e7490' }}>{sectionFData.totalRidesChanged}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ms-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionFData.totalSec)}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAffectedVehicles')}</span><span className="font-bold ms-1" style={{ color: 'var(--text-primary)' }}>{sectionFData.uniqueVehicles}</span></div>
                       <div>
                         <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statCheckStatus')}</span>
-                        <span className="font-bold ml-1" style={{ color: sectionFData.allOk ? '#15803d' : '#b91c1c' }}>
+                        <span className="font-bold ms-1" style={{ color: sectionFData.allOk ? '#15803d' : '#b91c1c' }}>
                           {sectionFData.allOk ? t('hwh.ok') : t('common.error')}
                         </span>
                       </div>
@@ -5689,7 +5689,7 @@ function InhaberFreeWindowSearchView({
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                               {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOrigBlockTime'), t('hwh.colNewBlockTime'), t('hwh.colRides'), t('hwh.colOffset'), t('hwh.colCheck'), t('hwh.colHint')].map(h => (
-                                <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -5716,8 +5716,8 @@ function InhaberFreeWindowSearchView({
                       <div style={{ borderBottom: '1px solid var(--border)' }}>
                         <div className="px-4 py-2 flex items-center gap-2 text-xs font-semibold" style={{ color: '#b91c1c', background: 'rgba(185,28,28,0.06)', borderBottom: '1px solid rgba(185,28,28,0.25)' }}>
                           <span style={{ fontWeight: 700 }}>{t('hwh.nonExportableRides')}</span>
-                          <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'rgba(185,28,28,0.15)', color: '#b91c1c' }}>{effectiveUnresolvedRides.length}</span>
-                          <span className="ml-1 font-normal" style={{ color: '#b91c1c' }}>
+                          <span className="ms-1 px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'rgba(185,28,28,0.15)', color: '#b91c1c' }}>{effectiveUnresolvedRides.length}</span>
+                          <span className="ms-1 font-normal" style={{ color: '#b91c1c' }}>
                             {t('hwh.nonExportableRidesHint')}
                           </span>
                         </div>
@@ -5726,7 +5726,7 @@ function InhaberFreeWindowSearchView({
                             <thead>
                               <tr style={{ background: 'rgba(185,28,28,0.06)', borderBottom: '1px solid rgba(185,28,28,0.2)' }}>
                                 {[t('hwh.colTripId'), t('hwh.colVehicle'), t('hwh.colDriverOriginal'), t('hwh.colRideStart'), t('hwh.colRideEnd'), t('hwh.colNoteDetail'), t('hwh.colAction')].map(h => (
-                                  <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>{h}</th>
+                                  <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>{h}</th>
                                 ))}
                               </tr>
                             </thead>
@@ -5758,22 +5758,22 @@ function InhaberFreeWindowSearchView({
                             <button
                               onClick={handleApplyNoteAlternatives}
                               className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-opacity hover:opacity-90"
-                              style={{ background: '#15803d', color: '#fff', marginLeft: 'auto' }}
+                              style={{ background: '#15803d', color: '#fff', marginInlineStart: 'auto' }}
                             >
                               {t('hwh.applyBestNoteAlternatives')}
                             </button>
                           )}
                           {effectiveUnresolvedRides.length === 0 && noteReassignments.size > 0 && (
-                            <span className="ml-auto text-xs font-bold" style={{ color: '#15803d' }}>{t('hwh.allConflictsResolved')}</span>
+                            <span className="ms-auto text-xs font-bold" style={{ color: '#15803d' }}>{t('hwh.allConflictsResolved')}</span>
                           )}
                         </div>
                         {/* Summary cards */}
                         <div className="px-4 py-2 flex flex-wrap gap-4 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statConflictBlocks')}</span><span className="font-bold ml-1" style={{ color: '#92400e' }}>{driverNoteAlternatives.totalBlocks}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statWithValidAlternative')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{driverNoteAlternatives.blocksWithAlternative}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statWithoutValidAlternative')}</span><span className="font-bold ml-1" style={{ color: driverNoteAlternatives.blocksWithout > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{driverNoteAlternatives.blocksWithout}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAlreadyApplied')}</span><span className="font-bold ml-1" style={{ color: noteReassignments.size > 0 ? '#15803d' : 'var(--text-secondary)' }}>{noteReassignments.size}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statExportStillLocked')}</span><span className="font-bold ml-1" style={{ color: effectiveUnresolvedRides.length > 0 ? '#b91c1c' : '#15803d' }}>{effectiveUnresolvedRides.length > 0 ? t('common.yes') : t('common.no')}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statConflictBlocks')}</span><span className="font-bold ms-1" style={{ color: '#92400e' }}>{driverNoteAlternatives.totalBlocks}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statWithValidAlternative')}</span><span className="font-bold ms-1" style={{ color: '#15803d' }}>{driverNoteAlternatives.blocksWithAlternative}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statWithoutValidAlternative')}</span><span className="font-bold ms-1" style={{ color: driverNoteAlternatives.blocksWithout > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{driverNoteAlternatives.blocksWithout}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAlreadyApplied')}</span><span className="font-bold ms-1" style={{ color: noteReassignments.size > 0 ? '#15803d' : 'var(--text-secondary)' }}>{noteReassignments.size}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statExportStillLocked')}</span><span className="font-bold ms-1" style={{ color: effectiveUnresolvedRides.length > 0 ? '#b91c1c' : '#15803d' }}>{effectiveUnresolvedRides.length > 0 ? t('common.yes') : t('common.no')}</span></div>
                         </div>
 
                         {/* Per-block alternative breakdown */}
@@ -5804,7 +5804,7 @@ function InhaberFreeWindowSearchView({
                                     <thead>
                                       <tr style={{ background: 'rgba(245,158,11,0.04)', borderBottom: '1px solid rgba(245,158,11,0.15)' }}>
                                         {[t('hwh.colTargetDriver'), t('hwh.colTargetKind'), t('hwh.colDriverFree'), t('hwh.colOwnerFree'), t('hwh.colDriverNoteConflict'), t('hwh.colOwnerConflict'), t('hwh.colScore'), t('common.status'), t('hwh.colRejectionReason')].map(h => (
-                                          <th key={h} className="px-2 py-1.5 text-left font-semibold whitespace-nowrap" style={{ color: '#92400e' }}>{h}</th>
+                                          <th key={h} className="px-2 py-1.5 text-start font-semibold whitespace-nowrap" style={{ color: '#92400e' }}>{h}</th>
                                         ))}
                                       </tr>
                                     </thead>
@@ -5849,7 +5849,7 @@ function InhaberFreeWindowSearchView({
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                               {[t('hwh.colBlockId'), t('hwh.colTripIdRow'), t('hwh.colVehicle'), t('hwh.colOldDriver'), t('hwh.colNewDriver'), t('hwh.colOrigStart'), t('hwh.colOrigEnd'), t('hwh.colNewStart'), t('hwh.colNewEnd'), t('hwh.colDuration'), t('common.status')].map(h => (
-                                <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -5885,7 +5885,7 @@ function InhaberFreeWindowSearchView({
       {/* Bottom nav */}
       <div className="flex flex-wrap items-center gap-4 pt-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> {t('hwh.backToOwnerConflictPick')}
+          <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('hwh.backToOwnerConflictPick')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
           <RefreshCw size={13} /> {t('hwh.recompute')}
@@ -5925,7 +5925,7 @@ function InhaberFreeWindowSearchView({
                     ].map(([k, v]) => (
                       <div key={k} className="flex items-start justify-between gap-4">
                         <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
-                        <span className="font-semibold text-right" style={{ color: 'var(--text-primary)' }}>{v}</span>
+                        <span className="font-semibold text-end" style={{ color: 'var(--text-primary)' }}>{v}</span>
                       </div>
                     ))}
                   </div>
@@ -5969,7 +5969,7 @@ function InhaberFreeWindowSearchView({
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                               {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOrigStart'), t('hwh.colOrigEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.badgeVehicleFree')].map(h => (
-                                <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                <th key={h} className="px-2 py-1.5 text-start text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -6280,7 +6280,7 @@ function DriverHourSummaryTable({ rows }: DriverHourSummaryTableProps) {
         <thead>
           <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
             {cols.map(c => (
-              <th key={c.key} className={`px-3 py-2 font-semibold whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'}`} style={{ color: 'var(--text-secondary)' }}>
+              <th key={c.key} className={`px-3 py-2 font-semibold whitespace-nowrap ${c.align === 'right' ? 'text-end' : 'text-start'}`} style={{ color: 'var(--text-secondary)' }}>
                 {c.label}
               </th>
             ))}
@@ -6290,13 +6290,13 @@ function DriverHourSummaryTable({ rows }: DriverHourSummaryTableProps) {
           {rows.map((row, i) => (
             <tr key={row.driverName} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : undefined }}>
               <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{row.driverName}</td>
-              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtRate(row.hourlyCents)}</td>
-              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.baseSec)}</td>
-              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.night25Sec)}</td>
-              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.night40Sec)}</td>
-              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.sundaySec)}</td>
-              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.holidaySec)}</td>
-              <td className="px-3 py-2 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.totalSec)}</td>
+              <td className="px-3 py-2 text-end tabular-nums whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtRate(row.hourlyCents)}</td>
+              <td className="px-3 py-2 text-end tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.baseSec)}</td>
+              <td className="px-3 py-2 text-end tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.night25Sec)}</td>
+              <td className="px-3 py-2 text-end tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.night40Sec)}</td>
+              <td className="px-3 py-2 text-end tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.sundaySec)}</td>
+              <td className="px-3 py-2 text-end tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.holidaySec)}</td>
+              <td className="px-3 py-2 text-end tabular-nums font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.totalSec)}</td>
             </tr>
           ))}
         </tbody>
@@ -6348,7 +6348,7 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
           <div key={row.driverName} className="rounded-xl overflow-hidden" style={{ border: `1px solid ${s.border}` }}>
             {/* Main row */}
             <button
-              className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:brightness-95"
+              className="w-full flex items-center gap-3 px-4 py-3 text-start transition-all hover:brightness-95"
               style={{ background: s.bg }}
               onClick={() => onToggleExpand(row.driverName)}
             >
@@ -6357,27 +6357,27 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
               {/* Driver name */}
               <span className="font-semibold text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{row.driverName}</span>
               {/* Mindestgehalt */}
-              <div className="text-right hidden sm:block flex-shrink-0">
+              <div className="text-end hidden sm:block flex-shrink-0">
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.minShort')}</div>
                 <div className="text-xs font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
                   {row.minSalaryCents != null ? fmtEur(row.minSalaryCents) : '—'}
                 </div>
               </div>
               {/* Maximalgehalt */}
-              <div className="text-right hidden sm:block flex-shrink-0">
+              <div className="text-end hidden sm:block flex-shrink-0">
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.maxShort')}</div>
                 <div className="text-xs font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
                   {row.maxSalaryCents != null ? fmtEur(row.maxSalaryCents) : '—'}
                 </div>
               </div>
               {/* Ist-Gehalt */}
-              <div className="text-right flex-shrink-0">
+              <div className="text-end flex-shrink-0">
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.actualSalary')}</div>
                 <div className="text-xs font-bold tabular-nums" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</div>
               </div>
               {/* Differenz */}
               {row.status !== 'ok' && (
-                <div className="text-right flex-shrink-0">
+                <div className="text-end flex-shrink-0">
                   <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.difference')}</div>
                   <div className="text-xs font-bold tabular-nums" style={{ color: s.text }}>
                     {diff < 0 ? `−${fmtEur(-diff)}` : `+${fmtEur(diff)}`}
@@ -6404,7 +6404,7 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                         {['Lohnart', t('hwh.colHours'), t('hwh.colFactor'), t('common.amount')].map((h, hi) => (
-                          <th key={h} className={`px-3 py-2 font-semibold whitespace-nowrap ${hi === 0 ? 'text-left' : 'text-right'}`} style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                          <th key={h} className={`px-3 py-2 font-semibold whitespace-nowrap ${hi === 0 ? 'text-start' : 'text-end'}`} style={{ color: 'var(--text-secondary)' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -6418,14 +6418,14 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
                       ].map((item, idx) => (
                         <tr key={item.label} style={{ borderBottom: idx < 4 ? '1px solid var(--border)' : undefined }}>
                           <td className="px-3 py-1.5 font-medium" style={{ color: 'var(--text-primary)' }}>{item.label}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>{fmtHDecimal(item.hours)} h</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>{item.factor}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtEur(item.amountCents)}</td>
+                          <td className="px-3 py-1.5 text-end tabular-nums" style={{ color: 'var(--text-secondary)' }}>{fmtHDecimal(item.hours)} h</td>
+                          <td className="px-3 py-1.5 text-end tabular-nums" style={{ color: 'var(--text-secondary)' }}>{item.factor}</td>
+                          <td className="px-3 py-1.5 text-end tabular-nums font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtEur(item.amountCents)}</td>
                         </tr>
                       ))}
                       <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-subtle)' }}>
                         <td className="px-3 py-2 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>{t('hwh.total')}</td>
-                        <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</td>
+                        <td className="px-3 py-2 text-end tabular-nums font-bold" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -6872,7 +6872,7 @@ function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps)
           <thead>
             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
               {[t('hwh.colVehicle'), t('hwh.colFirstDriver'), t('hwh.colFirstTrip'), t('hwh.colLastDriver'), t('hwh.colLastTrip')].map(h => (
-                <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                <th key={h} className="text-start px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -6881,13 +6881,13 @@ function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps)
               <tr key={row.vehicle} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : undefined }}>
                 <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{row.vehicle}</td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: row.firstDriver ? 'var(--text-primary)' : 'var(--text-tertiary, #9ca3af)' }}>
-                  {row.firstDriver ?? <span className="italic">{t('hwh.notDeterminable')} <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>{t('hwh.checkRequired')}</span></span>}
+                  {row.firstDriver ?? <span className="italic">{t('hwh.notDeterminable')} <span className="ms-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>{t('hwh.checkRequired')}</span></span>}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                   {row.firstTripMs ? fmtBoundaryMs(row.firstTripMs) : '—'}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: row.lastDriver ? 'var(--text-primary)' : 'var(--text-tertiary, #9ca3af)' }}>
-                  {row.lastDriver ?? <span className="italic">{t('hwh.notDeterminable')} <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>{t('hwh.checkRequired')}</span></span>}
+                  {row.lastDriver ?? <span className="italic">{t('hwh.notDeterminable')} <span className="ms-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>{t('hwh.checkRequired')}</span></span>}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                   {row.lastTripMs ? fmtBoundaryMs(row.lastTripMs) : '—'}
@@ -7753,7 +7753,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> {t('hwh.backToSelection')}
+          <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('hwh.backToSelection')}
         </button>
         <StepDots current={step} total={5} />
       </div>
@@ -7801,7 +7801,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
               style={{ background: '#2563eb', color: '#fff' }}
             >
-              {t('hwh.next')} <ArrowRight size={15} />
+              {t('hwh.next')} <ArrowRight size={15} className="rtl:-scale-x-100" />
             </button>
           </div>
 
@@ -7831,15 +7831,15 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                       <div className="flex flex-wrap items-start gap-x-6 gap-y-1 text-xs">
                         <div>
                           <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('hwh.monthYear')}</span>
-                          <span className="ml-2 font-semibold" style={{ color: 'var(--text-primary)' }}>{t(MONTH_KEYS[(plan.month ?? month) - 1])} {plan.year ?? year}</span>
+                          <span className="ms-2 font-semibold" style={{ color: 'var(--text-primary)' }}>{t(MONTH_KEYS[(plan.month ?? month) - 1])} {plan.year ?? year}</span>
                         </div>
                         <div>
                           <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('hwh.fileName')}</span>
-                          <span className="ml-2" style={{ color: 'var(--text-primary)' }}>{plan.original_file_name ?? '—'}</span>
+                          <span className="ms-2" style={{ color: 'var(--text-primary)' }}>{plan.original_file_name ?? '—'}</span>
                         </div>
                         <div>
                           <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</span>
-                          <span className="ml-2">
+                          <span className="ms-2">
                             {plan.export_ready ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}>
                                 <CheckCircle2 size={11} /> {t('hwh.exportable')}
@@ -7853,7 +7853,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                         </div>
                         <div>
                           <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('hwh.savedAt')}</span>
-                          <span className="ml-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>{savedFmt}</span>
+                          <span className="ms-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>{savedFmt}</span>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -7956,14 +7956,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               <table className="w-full text-xs">
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)' }}>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hwh.colIncluded')}</th>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>{t('hwh.colRatePerHour')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.colHours1000')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1500 N25%</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1501 N40%</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.colHours1510')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.holiday')}</th>
+                    <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hwh.colIncluded')}</th>
+                    <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>{t('hwh.colRatePerHour')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.colHours1000')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1500 N25%</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1501 N40%</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.colHours1510')}</th>
+                    <th className="px-3 py-2 text-end font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.holiday')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7978,8 +7978,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                         </td>
                         <td className="px-3 py-1.5 font-medium" style={{ color: 'var(--text-primary)' }}>
                           {cfg.driverName}
-                          {isOwner && <span className="ml-1 text-xs px-1 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>{t('hwh.owner')}</span>}
-                          {cfg.personalnummer && <span className="ml-1 text-xs" style={{ color: 'var(--text-secondary)' }}>#{cfg.personalnummer}</span>}
+                          {isOwner && <span className="ms-1 text-xs px-1 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>{t('hwh.owner')}</span>}
+                          {cfg.personalnummer && <span className="ms-1 text-xs" style={{ color: 'var(--text-secondary)' }}>#{cfg.personalnummer}</span>}
                         </td>
                         {['hourly','baseH','nacht25H','nacht40H','sunH','holH'].map(field => (
                           <td key={field} className="px-2 py-1">
@@ -7990,7 +7990,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                               disabled={isOwner && field !== 'hourly'}
                               onChange={e => updateDraft(cfg.driverId, field as keyof WzDraft, e.target.value)}
                               onBlur={e => commitDraft(cfg.driverId, field as keyof WzDraft, e.target.value)}
-                              style={{ ...inp, textAlign: 'right' }}
+                              style={{ ...inp, textAlign: 'end' }}
                               placeholder="0,00"
                             />
                           </td>
@@ -8005,7 +8005,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button onClick={() => setStep(0)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-              <ArrowLeft size={15} /> {t('common.back')}
+              <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
             </button>
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -8038,7 +8038,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
                 style={{ background: '#2563eb', color: '#fff' }}
               >
-                {saving ? t('common.saving') : debugMode ? t('hwh.next') : t('hwh.calculate')} <ArrowRight size={15} />
+                {saving ? t('common.saving') : debugMode ? t('hwh.next') : t('hwh.calculate')} <ArrowRight size={15} className="rtl:-scale-x-100" />
               </button>
             </div>
           </div>
@@ -8131,7 +8131,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                           })}
                         </div>
                         {rowStart === 0 && AUTO_RUN_STEPS.length > 5 && (
-                          <div className="flex justify-end pr-2 my-0.5" style={{ height: 16 }}>
+                          <div className="flex justify-end pe-2 my-0.5" style={{ height: 16 }}>
                             <div className="flex flex-col items-end">
                               <div className="h-px w-0" />
                               <svg width="20" height="16" viewBox="0 0 20 16" fill="none">
@@ -8169,12 +8169,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                               color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-secondary)',
                               fontWeight: active ? 600 : 400,
                             }}>{t(labelKey)}</span>
-                            <span className="text-right flex-shrink-0" style={{ fontSize: '0.6rem', color: done ? '#16a34a' : 'var(--text-tertiary, #9ca3af)', opacity: 0.65 }}>
+                            <span className="text-end flex-shrink-0" style={{ fontSize: '0.6rem', color: done ? '#16a34a' : 'var(--text-tertiary, #9ca3af)', opacity: 0.65 }}>
                               {idx + 1}/{AUTO_RUN_STEPS.length}
                             </span>
                           </div>
                           {!isLast && (
-                            <div className="flex justify-start pl-4" style={{ height: 14 }}>
+                            <div className="flex justify-start ps-4" style={{ height: 14 }}>
                               <div className="w-px" style={{ background: done ? '#16a34a' : 'var(--border)', height: '100%', transition: 'background 0.3s' }} />
                             </div>
                           )}
@@ -8208,7 +8208,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                   style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >
-                  <ArrowLeft size={15} /> {t('common.back')}
+                  <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
                 </button>
               </div>
             )}
@@ -8252,14 +8252,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   })()
                 : (
                   <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', color: '#b45309' }}>
-                    <AlertTriangle size={12} className="inline mr-1" />
+                    <AlertTriangle size={12} className="inline me-1" />
                     {t('hwh.pleaseSelectOwner')}
                   </div>
                 )
             ) : null}
             {computeError && (
               <div className="mb-3 px-4 py-2 rounded-xl text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-                <AlertTriangle size={14} className="inline mr-1" /> {computeError}
+                <AlertTriangle size={14} className="inline me-1" /> {computeError}
               </div>
             )}
             {/* Strategy selector in compute step */}
@@ -8304,7 +8304,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             )}
           </div>
           <button onClick={() => setStep(1)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80 [@media(pointer:coarse)]:min-h-10" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}
@@ -8324,7 +8324,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {t('hwh.vehicleBlocksLoadFailed')}
           </div>
           <button onClick={() => setStep(2)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}
@@ -8386,7 +8386,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {t('hwh.regularAssignmentImpossible')}
           </div>
           <button onClick={() => setStep(3)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}
@@ -8511,7 +8511,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {t('hwh.noResultBackToRegular')}
           </div>
           <button onClick={() => setStep(4)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}
@@ -8570,7 +8570,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {t('hwh.noResultBackToNonConflict')}
           </div>
           <button onClick={() => setStep(5)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}
@@ -8719,7 +8719,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                   style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >
-                  <ArrowLeft size={15} /> {t('common.back')}
+                  <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
                 </button>
                 {autoRunExportReady === true && (
                   <button
@@ -8793,7 +8793,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {t('hwh.noResultBackToConflictPick')}
           </div>
           <button onClick={() => setStep(6)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}
@@ -8805,7 +8805,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {t('hwh.nextStepRebuilding')}
           </div>
           <button onClick={() => setStep(7)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> {t('common.back')}
+            <ArrowLeft size={15} className="rtl:-scale-x-100" /> {t('common.back')}
           </button>
         </div>
       )}

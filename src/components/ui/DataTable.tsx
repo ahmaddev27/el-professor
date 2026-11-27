@@ -166,10 +166,10 @@ export function DataTable<Row>({
           {columns.map((column, columnIndex) => (
             <td
               key={column.id}
-              className={cn('border-b border-line px-3.5 first:pl-[18px] last:pr-[18px]', cellHeight, column.hideBelow && HIDE_BELOW[column.hideBelow])}
+              className={cn('border-b border-line px-3.5 first:ps-[18px] last:pe-[18px]', cellHeight, column.hideBelow && HIDE_BELOW[column.hideBelow])}
             >
               <Skeleton
-                className={cn('h-4', SKELETON_WIDTHS[(rowIndex + columnIndex) % SKELETON_WIDTHS.length], isNumeric(column.kind) && 'ml-auto')}
+                className={cn('h-4', SKELETON_WIDTHS[(rowIndex + columnIndex) % SKELETON_WIDTHS.length], isNumeric(column.kind) && 'ms-auto')}
               />
             </td>
           ))}
@@ -233,9 +233,9 @@ export function DataTable<Row>({
           <td
             key={column.id}
             className={cn(
-              'border-b border-line px-3.5 align-middle text-[13.5px] text-fg first:pl-[18px] last:pr-[18px]',
+              'border-b border-line px-3.5 align-middle text-[13.5px] text-fg first:ps-[18px] last:pe-[18px]',
               cellHeight,
-              isNumeric(column.kind) && 'whitespace-nowrap text-right tabular-nums',
+              isNumeric(column.kind) && 'whitespace-nowrap text-end tabular-nums',
               column.kind === 'date' && 'whitespace-nowrap tabular-nums',
               column.hideBelow && HIDE_BELOW[column.hideBelow],
               column.className,
@@ -300,8 +300,8 @@ export function DataTable<Row>({
                     className={cn(
                       // Separate borders, not collapsed ones: a collapsed border
                       // does not travel with a sticky header cell.
-                      'sticky top-0 z-10 h-10 whitespace-nowrap border-b border-line bg-wash px-3.5 text-left text-[12.5px] font-[550] text-fg-subtle first:pl-[18px] last:pr-[18px]',
-                      isNumeric(column.kind) && 'text-right',
+                      'sticky top-0 z-10 h-10 whitespace-nowrap border-b border-line bg-wash px-3.5 text-start text-[12.5px] font-[550] text-fg-subtle first:ps-[18px] last:pe-[18px]',
+                      isNumeric(column.kind) && 'text-end',
                       column.hideBelow && HIDE_BELOW[column.hideBelow],
                       column.className,
                     )}
@@ -342,8 +342,8 @@ export function DataTable<Row>({
                   <td
                     key={column.id}
                     className={cn(
-                      'h-11 bg-wash px-3.5 font-semibold text-fg first:pl-[18px] last:pr-[18px]',
-                      isNumeric(column.kind) && 'whitespace-nowrap text-right tabular-nums',
+                      'h-11 bg-wash px-3.5 font-semibold text-fg first:ps-[18px] last:pe-[18px]',
+                      isNumeric(column.kind) && 'whitespace-nowrap text-end tabular-nums',
                       column.hideBelow && HIDE_BELOW[column.hideBelow],
                     )}
                   >
@@ -351,7 +351,7 @@ export function DataTable<Row>({
                   </td>
                 ))}
                 {rowActions ? (
-                  <td className="bg-wash px-2 text-right">{totalsActions}</td>
+                  <td className="bg-wash px-2 text-end">{totalsActions}</td>
                 ) : null}
               </tr>
             </tfoot>

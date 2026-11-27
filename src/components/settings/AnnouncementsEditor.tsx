@@ -383,7 +383,7 @@ const AnnouncementFormCard: React.FC<{
         </div>
 
         {form.audience === 'plans' && (
-          <div className="flex flex-wrap gap-4 pl-1">
+          <div className="flex flex-wrap gap-4 ps-1">
             {ANNOUNCEMENT_PLANS.map(plan => (
               <label key={plan} className="flex items-center gap-2 text-sm text-fg-muted">
                 <input type="checkbox" className="size-4 cursor-pointer accent-brand" checked={form.plans.includes(plan)}

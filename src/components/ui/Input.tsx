@@ -17,6 +17,9 @@ export const controlFrameClass = [
   'disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-subtle',
 ].join(' ');
 
+// Addresses, URLs and phone numbers read left to right in every UI language.
+const LTR_INPUT_TYPES = new Set(['email', 'url', 'tel']);
+
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
 }
@@ -27,6 +30,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <input
         ref={ref}
+        dir={props.type && LTR_INPUT_TYPES.has(props.type) ? 'ltr' : undefined}
         className={cn(
           controlFrameClass,
           // Native date pickers follow the page's colour scheme only when told.

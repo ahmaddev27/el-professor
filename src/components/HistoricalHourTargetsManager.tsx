@@ -595,7 +595,7 @@ export default function HistoricalHourTargetsManager({
                               'common.month', 'hrt.year', 'common.driver',
                               ...HOUR_COLUMN_KEYS, 'common.status',
                             ] as TranslationKey[]).map(h => (
-                              <th key={h} className="px-3 py-2 text-left font-semibold whitespace-nowrap"
+                              <th key={h} className="px-3 py-2 text-start font-semibold whitespace-nowrap"
                                 style={{ color: 'var(--text-secondary)' }}>{t(h)}</th>
                             ))}
                           </tr>
@@ -625,7 +625,7 @@ export default function HistoricalHourTargetsManager({
                                 {row.errorMsg && <span className="block text-xs mt-0.5" style={{ color: '#b91c1c' }}>{row.errorMsg}</span>}
                               </td>
                               {[row.baseH, row.night25H, row.night40H, row.sunH, row.holH].map((h, i) => (
-                                <td key={i} className="px-3 py-2 font-mono text-right"
+                                <td key={i} className="px-3 py-2 font-mono text-end"
                                   style={{ color: h < 0 ? '#b91c1c' : 'var(--text-primary)' }}>
                                   {h !== 0 ? h.toFixed(2).replace('.', ',') : ''}
                                 </td>
@@ -709,11 +709,11 @@ export default function HistoricalHourTargetsManager({
                     <table className="w-full text-xs">
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)' }}>
-                          <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</th>
-                          <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hrt.year')}</th>
-                          <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 150 }}>{t('common.driver')}</th>
+                          <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</th>
+                          <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hrt.year')}</th>
+                          <th className="px-3 py-2 text-start font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 150 }}>{t('common.driver')}</th>
                           {HOUR_COLUMN_KEYS.map((key, i) => (
-                            <th key={key} className="px-3 py-2 text-right font-semibold"
+                            <th key={key} className="px-3 py-2 text-end font-semibold"
                               style={{ color: 'var(--text-secondary)', minWidth: i === 0 ? 80 : 75 }}>{t(key)}</th>
                           ))}
                           <th className="px-3 py-2 text-center font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>{t('common.status')}</th>
@@ -756,7 +756,7 @@ export default function HistoricalHourTargetsManager({
                                     onChange={e => setEditVal(rec.id, field, e.target.value)}
                                     onBlur={e => commitEdit(rec, field, e.target.value)}
                                     placeholder="0,00"
-                                    style={{ ...inp, textAlign: 'right', width: 70 }}
+                                    style={{ ...inp, textAlign: 'end', width: 70 }}
                                   />
                                 </td>
                               ))}

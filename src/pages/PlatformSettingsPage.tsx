@@ -485,7 +485,7 @@ const PlanFeaturesEditor: React.FC = () => {
               <thead>
                 <tr className="border-b border-line">
                   {(['admin.settings.col.feature', 'admin.settings.col.minPlan'] as const).map(key => (
-                    <th key={key} className="px-5 py-3.5 text-left text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
+                    <th key={key} className="px-5 py-3.5 text-start text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
                       {t(key)}
                     </th>
                   ))}

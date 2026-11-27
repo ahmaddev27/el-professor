@@ -33,6 +33,7 @@ const rule = (weight: string, color: string, margin: string): CSSProperties => (
 export function GehaltsquittungSheet({ text }: { text: ReceiptDocumentText }) {
   return (
     <div
+      dir="ltr" lang="de"
       style={{
         fontFamily: FONT,
         background: '#ffffff',

@@ -273,9 +273,9 @@ export default function WerkstattPage() {
     { key: 'positive' as const, label: t('werkstatt.positive'), active: 'bg-positive-soft text-positive' },
   ];
 
-  // `mr-1`: the dictionary's labels end in a colon with no space, and the value
+  // `me-1`: the dictionary's labels end in a colon with no space, and the value
   // follows inline, so without it a card read „Datum:17.9.2026“.
-  const labelClass = 'mr-1 font-medium text-fg-muted';
+  const labelClass = 'me-1 font-medium text-fg-muted';
 
   return (
     <div className="space-y-6 font-ui">
@@ -311,7 +311,7 @@ export default function WerkstattPage() {
               onClick={() => handleMonthChange('prev')}
               className={cn(
                 'inline-flex h-[30px] items-center justify-center rounded-tight border border-edge bg-raised px-3 text-sm text-fg shadow-raised transition-colors hover:bg-raised/[1.4] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus rtl:-scale-x-100',
               )}
             >←</button>
             <div className="min-w-[140px] whitespace-nowrap text-center text-sm font-semibold text-fg">
@@ -322,7 +322,7 @@ export default function WerkstattPage() {
               onClick={() => handleMonthChange('next')}
               className={cn(
                 'inline-flex h-[30px] items-center justify-center rounded-tight border border-edge bg-raised px-3 text-sm text-fg shadow-raised transition-colors hover:bg-raised/[1.4] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus rtl:-scale-x-100',
               )}
             >→</button>
             <Button variant="secondary" size="sm" className="[@media(pointer:coarse)]:min-w-10" onClick={() => setSelectedMonth(new Date())}>{t('common.today')}</Button>

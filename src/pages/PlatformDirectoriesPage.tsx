@@ -358,13 +358,13 @@ const PlatformDirectoriesPage: React.FC = () => {
       <div className="flex flex-wrap items-center gap-3">
         <form onSubmit={submitSearch} className="relative flex min-w-[220px] flex-1 gap-2">
           <div className="relative flex-1">
-            <Search size={14} aria-hidden className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-fg-subtle" />
+            <Search size={14} aria-hidden className="pointer-events-none absolute start-3 top-1/2 z-10 -translate-y-1/2 text-fg-subtle" />
             <Input
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
               placeholder={t(SEARCH_PLACEHOLDERS[tab])}
               maxLength={100}
-              className="pl-8"
+              className="ps-8"
             />
           </div>
           <Button type="submit">{t('admin.common.search')}</Button>
@@ -439,7 +439,7 @@ const PlatformDirectoriesPage: React.FC = () => {
               onClick={() => setQuery(q => ({ ...q, pageIndex: Math.max(0, q.pageIndex - 1) }))}
               disabled={query.pageIndex === 0}
             >
-              <ChevronLeft size={14} />{t('admin.common.prev')}
+              <ChevronLeft size={14} className="rtl:-scale-x-100" />{t('admin.common.prev')}
             </Button>
             <span className="whitespace-nowrap text-xs tabular-nums text-fg-muted">
               {t('admin.common.pageOf', { page: deCount(query.pageIndex + 1), pages: deCount(pages) })}
@@ -449,7 +449,7 @@ const PlatformDirectoriesPage: React.FC = () => {
               onClick={() => setQuery(q => ({ ...q, pageIndex: q.pageIndex + 1 }))}
               disabled={!hasNext}
             >
-              {t('admin.common.next')}<ChevronRight size={14} />
+              {t('admin.common.next')}<ChevronRight size={14} className="rtl:-scale-x-100" />
             </Button>
           </div>
         </div>
@@ -474,7 +474,7 @@ const StatusPill: React.FC<{ status: string | null }> = ({ status }) => {
 const Th: React.FC<{ labelKey: TranslationKey }> = ({ labelKey }) => {
   const { t } = useTranslation();
   return (
-    <th className="whitespace-nowrap px-5 py-3.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
+    <th className="whitespace-nowrap px-5 py-3.5 text-start text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
       {t(labelKey)}
     </th>
   );

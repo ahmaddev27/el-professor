@@ -4,7 +4,8 @@
  * German is the source language and the fallback. Every key is defined in
  * `de`; `en` is a Partial, so a screen can be translated incrementally without
  * ever showing a raw key to a user — a missing English string renders the
- * German one.
+ * German one. `ar` (Arabic, right-to-left, added 27.11.2026) is a Partial in the
+ * same way and falls back to German key by key.
  *
  * ## What is deliberately NOT translated
  *
@@ -20,7 +21,7 @@
  * is built in utils/salaryCashReceiptDocument.ts), the Mietwagenauftrag, and the
  * two legal pages — the Impressum and the Datenschutzerklärung, German legal
  * documents whose headings and labels live in lib/legalPages.ts; the English UI
- * says in one line that they are German. A
+ * says in one line that they are German (the Arabic UI says it too). A
  * `exportTableToExcel(...)` dump of vehicles, drivers, users, Fixkosten, the
  * Bargeldbestand or Werkstatt checks is **not** one of them — it is a
  * convenience export of an operational list, it satisfies no statutory form,
@@ -43,30 +44,58 @@
  * UI read like a half-finished job rather than a considered choice.
  *
  * **Money and date formatting.** German conventions (decimal comma, DD.MM.YYYY)
- * are kept in both languages. The figures on screen correspond one-to-one with
- * figures on German documents; switching the decimal separator with the UI
- * language would invite transcription errors.
+ * and Latin digits are kept in every language, Arabic included (owner,
+ * 27.11.2026: `41,47 €`, `27.11.2026`, never Arabic-Indic digits). The figures
+ * on screen correspond one-to-one with figures on German documents; switching
+ * the decimal separator or the digits with the UI language would invite
+ * transcription errors. Only WORDS follow the language — weekday and month
+ * names — and they go through `wordLocale()` below.
+ *
+ * **Arabic** is a full UI language, right-to-left (`<html dir="rtl">`, set by
+ * LanguageContext). German domain terms appear as Arabic with the German in
+ * brackets at their first mention in a string, e.g. "كشف الساعات (Stundennachweis)",
+ * so the screen and the paperwork still agree. Anything a second consumer reads
+ * stays German, as in English.
  */
 
 import { de } from './de';
 import { en } from './en';
+import { ar } from './ar';
 
-export type Language = 'de' | 'en';
+export type Language = 'de' | 'en' | 'ar';
 
 export const LANGUAGES: { code: Language; label: string; flag: string }[] = [
   { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
   { code: 'en', label: 'English', flag: '🇬🇧' },
+  // Arabic is spoken in many countries, so no flag: the letter ع stands in.
+  { code: 'ar', label: 'العربية', flag: 'ع' },
 ];
+
+/** Whether a language is written right to left. */
+export const isRtl = (language: Language): boolean => language === 'ar';
+
+/** The `dir` attribute value for a language. */
+export const textDirection = (language: Language): 'rtl' | 'ltr' => (isRtl(language) ? 'rtl' : 'ltr');
+
+/**
+ * The Intl locale for formatting WORDS (weekday and month names) in the UI
+ * language. Never use it for a number, an amount or a date written in digits:
+ * those stay German whatever the language. `-u-nu-latn` keeps the digits Latin
+ * for Arabic, so even a month label with a year carries no Arabic-Indic digit.
+ */
+export const wordLocale = (language: Language): string =>
+  language === 'en' ? 'en-GB' : language === 'ar' ? 'ar-u-nu-latn' : 'de-DE';
 
 /** The canonical key set, derived from the German dictionary. */
 export type TranslationKey = keyof typeof de;
 
-/** English may lag behind German; missing keys fall back. */
+/** English and Arabic may lag behind German; missing keys fall back. */
 export type PartialDictionary = Partial<Record<TranslationKey, string>>;
 
 const DICTIONARIES: Record<Language, PartialDictionary> = {
   de,
   en: en as PartialDictionary,
+  ar,
 };
 
 /** Values substituted into `{placeholder}` slots. */
@@ -96,7 +125,10 @@ export const translate = (
 /**
  * Pick a singular or plural key by count and interpolate `{count}`.
  * German and English share the same one/other rule, so no plural engine is
- * needed. A language with a different rule would need one.
+ * needed. Arabic has six plural categories, but we keep the one/other key pair
+ * on purpose: its `.other` strings are phrased to read correctly for any count
+ * (a numeral and a singular noun, or a form that needs no agreement). A
+ * language that needed more than two forms would need an engine.
  */
 export const translatePlural = (
   language: Language,
@@ -106,4 +138,4 @@ export const translatePlural = (
 ): string =>
   translate(language, count === 1 ? keys.one : keys.other, { count, ...vars });
 
-export { de, en };
+export { de, en, ar };

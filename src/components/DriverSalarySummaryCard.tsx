@@ -317,6 +317,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
       ══════════════════════════════════════════ */}
       <div
         ref={cardRef}
+        dir="ltr" lang="de"
         style={{
           background: 'linear-gradient(145deg, #0f1729 0%, #111827 55%, #0d1520 100%)',
           borderRadius: '1.125rem',

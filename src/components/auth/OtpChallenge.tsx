@@ -278,8 +278,8 @@ const OtpChallenge: React.FC<OtpChallengeProps> = ({
 
       <div className={cn('mt-4 flex flex-wrap items-center gap-x-4 gap-y-2', onBack ? 'justify-between' : 'justify-end')}>
         {onBack && (
-          <Button type="button" variant="ghost" size="sm" onClick={onBack} disabled={busy !== null} className="-ml-2">
-            <ArrowLeft aria-hidden />
+          <Button type="button" variant="ghost" size="sm" onClick={onBack} disabled={busy !== null} className="-ms-2">
+            <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
             {backLabel ?? t('common.back')}
           </Button>
         )}

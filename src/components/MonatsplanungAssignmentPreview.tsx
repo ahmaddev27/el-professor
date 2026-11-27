@@ -1749,7 +1749,7 @@ export default function MonatsplanungAssignmentPreview({
                 <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid #fca5a5' }}>
                   <XCircle size={14} style={{ color: '#dc2626' }} />
                   <span className="text-sm font-semibold" style={{ color: '#991b1b' }}>{t('mp.phase4Blocker')}</span>
-                  <span className="text-xs ml-1" style={{ color: '#b91c1c' }}>
+                  <span className="text-xs ms-1" style={{ color: '#b91c1c' }}>
                     — {tPlural({ one: 'mp.phase4BlockerCount.one', other: 'mp.phase4BlockerCount.other' }, result.window_violation_details.length)}
                   </span>
                 </div>
@@ -1760,14 +1760,14 @@ export default function MonatsplanungAssignmentPreview({
                         <div className="space-y-0.5 min-w-0">
                           <div className="text-sm font-semibold" style={{ color: '#7f1d1d' }}>
                             {v.driver_name}
-                            <span className="font-normal ml-2 text-xs" style={{ color: '#b91c1c' }}>
+                            <span className="font-normal ms-2 text-xs" style={{ color: '#b91c1c' }}>
                               {v.service_date} · {v.vehicle_identifier} · {v.block_start}–{v.block_end}
                             </span>
                           </div>
                           <div className="text-xs" style={{ color: '#991b1b' }}>
                             {eng(v.detail, v.detailKey, v.detailVars)}
                             {v.work_window_start && v.work_window_end && (
-                              <span className="ml-1 opacity-70">({t('mp.workingTime')} {v.work_window_start}–{v.work_window_end})</span>
+                              <span className="ms-1 opacity-70">({t('mp.workingTime')} {v.work_window_start}–{v.work_window_end})</span>
                             )}
                           </div>
                         </div>
@@ -2020,7 +2020,7 @@ export default function MonatsplanungAssignmentPreview({
                 ]).map(({ key, value, neutral }) => (
                   <div key={key} className="text-xs flex items-center justify-between px-2 py-1 rounded" style={{ background: 'var(--bg-subtle)' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>{t(key)}</span>
-                    <span className="font-bold ml-2" style={{ color: value > 0 && !neutral ? '#dc2626' : 'var(--text-primary)' }}>{value}</span>
+                    <span className="font-bold ms-2" style={{ color: value > 0 && !neutral ? '#dc2626' : 'var(--text-primary)' }}>{value}</span>
                   </div>
                 ))}
               </div>
@@ -2153,7 +2153,7 @@ export default function MonatsplanungAssignmentPreview({
                         <Td align="right">
                           {s.effective_max_daily_hours}h
                           {s.used_default_max_daily && (
-                            <span className="ml-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>({t('mp.defaultLabel')})</span>
+                            <span className="ms-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>({t('mp.defaultLabel')})</span>
                           )}
                         </Td>
                         <Td>
@@ -2218,12 +2218,12 @@ export default function MonatsplanungAssignmentPreview({
                                   <Wrench size={11} /> {t('mp.repairAttempted', { reason: eng(b.repair_reason, b.repair_reason_key, b.repair_reason_vars) })}
                                 </div>
                                 {b.repair_attempts.slice(0, 5).map((ra, k) => (
-                                  <div key={k} className="text-[10px] pl-4" style={{ color: 'var(--text-tertiary)' }}>
+                                  <div key={k} className="text-[10px] ps-4" style={{ color: 'var(--text-tertiary)' }}>
                                     {ra.strategy} → {ra.driver}: {ra.rejection_reason}
                                   </div>
                                 ))}
                                 {b.repair_attempts.length > 5 && (
-                                  <div className="text-[10px] pl-4" style={{ color: 'var(--text-tertiary)' }}>
+                                  <div className="text-[10px] ps-4" style={{ color: 'var(--text-tertiary)' }}>
                                     {t('mp.andMoreRejectedAttempts', { count: b.repair_attempts.length - 5 })}
                                   </div>
                                 )}
@@ -2328,25 +2328,25 @@ export default function MonatsplanungAssignmentPreview({
                       <Td>
                         <span className="font-semibold">{b.driver_name}</span>
                         {b.used_default_max_daily && (
-                          <span className="ml-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>({t('mp.defaultHours', { hours: 8 })})</span>
+                          <span className="ms-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>({t('mp.defaultHours', { hours: 8 })})</span>
                         )}
                         {isRepairedMove && (
-                          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>
+                          <span className="ms-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>
                             <Wrench size={10} /> {t('mp.repaired')}
                           </span>
                         )}
                         {!isRepairedMove && (b.repair_applied || b.repair_moved) && (
-                          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>
+                          <span className="ms-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>
                             <Wrench size={10} /> {b.repair_moved ? t('mp.movedLower') : t('mp.repairedLower')}
                           </span>
                         )}
                         {hasConflict && (
-                          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
+                          <span className="ms-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
                             <AlertTriangle size={10} /> {t('mp.conflict')}
                           </span>
                         )}
                         {b.manual_exception?.confirmed_by_user && (
-                          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }} title={b.manual_exception.reason}>
+                          <span className="ms-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }} title={b.manual_exception.reason}>
                             <ShieldAlert size={10} /> {t('mp.manualException')}
                           </span>
                         )}
@@ -2629,7 +2629,7 @@ export default function MonatsplanungAssignmentPreview({
                                               {(trip.srcStart || trip.srcEnd) && (
                                                 <div className="col-span-2">
                                                   {t('mp.overlap.source')}: <span className="font-mono">{trip.srcStart || '?'}–{trip.srcEnd || '?'}</span>
-                                                  {trip.usedFullDatetime && <span className="ml-1" style={{ color: '#15803d' }}>✓ {t('mp.overlap.fullTimestamp')}</span>}
+                                                  {trip.usedFullDatetime && <span className="ms-1" style={{ color: '#15803d' }}>✓ {t('mp.overlap.fullTimestamp')}</span>}
                                                 </div>
                                               )}
                                               <div className="col-span-2">
@@ -2661,10 +2661,10 @@ export default function MonatsplanungAssignmentPreview({
                               /* Other issue types: simple list */
                               <ul className="space-y-0.5">
                                 {issue.details.slice(0, 10).map((d, j) => (
-                                  <li key={j} className="text-[11px] font-mono pl-2" style={{ color: '#991b1b' }}>• {d}</li>
+                                  <li key={j} className="text-[11px] font-mono ps-2" style={{ color: '#991b1b' }}>• {d}</li>
                                 ))}
                                 {issue.details.length > 10 && (
-                                  <li className="text-[11px] pl-2" style={{ color: '#b91c1c' }}>{t('mp.andMore', { count: issue.details.length - 10 })}</li>
+                                  <li className="text-[11px] ps-2" style={{ color: '#b91c1c' }}>{t('mp.andMore', { count: issue.details.length - 10 })}</li>
                                 )}
                               </ul>
                             )}
@@ -2837,7 +2837,7 @@ export default function MonatsplanungAssignmentPreview({
                             <Td>
                               <span className="font-semibold">{r.new_driver_name}</span>
                               {r.changed && (
-                                <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>{t('mp.changed')}</span>
+                                <span className="ms-1 text-[10px] px-1 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>{t('mp.changed')}</span>
                               )}
                             </Td>
                             <Td><span className="font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{r.block_id.slice(0, 10)}…</span></Td>
@@ -2879,7 +2879,7 @@ export default function MonatsplanungAssignmentPreview({
                   <span className="text-sm font-semibold" style={{ color: noteViolationsOk ? '#15803d' : '#991b1b' }}>
                     {t('mp.notes.sectionTitle')}
                   </span>
-                  <span className="text-xs ml-1" style={{ color: noteViolationsOk ? '#166534' : '#b91c1c' }}>
+                  <span className="text-xs ms-1" style={{ color: noteViolationsOk ? '#166534' : '#b91c1c' }}>
                     {notesLoadFailed
                       ? `— ${t('common.errorLoad')}`
                       : noteViolationsOk
@@ -3401,7 +3401,7 @@ export default function MonatsplanungAssignmentPreview({
                           key={c.driver.id}
                           type="button"
                           onClick={() => { setResolverDriverId(c.driver.id); setResolverError(''); }}
-                          className="w-full px-3 py-2.5 text-left flex items-center justify-between gap-3 text-sm transition-colors border-b last:border-b-0"
+                          className="w-full px-3 py-2.5 text-start flex items-center justify-between gap-3 text-sm transition-colors border-b last:border-b-0"
                           style={{
                             background: sel ? 'var(--bg-elevated, var(--bg-subtle))' : 'var(--bg-surface)',
                             borderColor: 'var(--border)',

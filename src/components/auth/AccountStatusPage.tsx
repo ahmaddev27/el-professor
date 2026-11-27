@@ -41,7 +41,7 @@ const AccountStatusPage: React.FC<AccountStatusPageProps> = ({ tone, icon: Icon,
         </div>
         <h1 className="mb-3 text-xl font-semibold tracking-tight">{title}</h1>
         <div className="grid gap-4 text-sm leading-relaxed text-fg-muted">{children}</div>
-        <div className="mt-6 flex items-start gap-3 rounded-control border border-line bg-sunken p-4 text-left text-sm text-fg-muted">
+        <div className="mt-6 flex items-start gap-3 rounded-control border border-line bg-sunken p-4 text-start text-sm text-fg-muted">
           <Mail aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
           <p>
             {contactLead}{' '}

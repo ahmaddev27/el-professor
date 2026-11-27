@@ -908,7 +908,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         color: split.cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
                       }}>
                         {fmtEur(split.cash)}
-                        {split.cashIsNegative && <span className="ml-1 text-xs">⚠</span>}
+                        {split.cashIsNegative && <span className="ms-1 text-xs">⚠</span>}
                       </span>
                     </div>
 
@@ -933,7 +933,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       }}>
                         {fmtEur(split.payout)}
                         {split.cashIsNegative && (
-                          <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginLeft: '0.5rem', fontWeight: 400 }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginInlineStart: '0.5rem', fontWeight: 400 }}>
                             {t('sal.payroll.cashNegative')}
                           </span>
                         )}
@@ -947,7 +947,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPayrollData(prev => ({ ...prev, tax_review_confirmed: !prev.tax_review_confirmed }))}
-                    className="flex items-center gap-2 text-left text-sm [@media(pointer:coarse)]:min-h-10"
+                    className="flex items-center gap-2 text-start text-sm [@media(pointer:coarse)]:min-h-10"
                     style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   >
                     {payrollData.tax_review_confirmed
@@ -1013,7 +1013,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
                   onMouseEnter={e => { if (remainingBalance > 0) e.currentTarget.style.background = 'var(--accent-hover)'; }}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-                  className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed [@media(pointer:coarse)]:min-h-10"
+                  className="flex items-center space-x-2 rtl:space-x-reverse disabled:opacity-50 disabled:cursor-not-allowed [@media(pointer:coarse)]:min-h-10"
                 >
                   <Plus size={20} />
                   <span>{t('sal.payment.add')}</span>
@@ -1035,11 +1035,11 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   <table className="w-full">
                     <thead style={{ background: 'var(--bg-subtle)' }}>
                       <tr>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.date')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.payment.type')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.amount')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.description')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.col.actions')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'start', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.date')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'start', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.payment.type')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'end', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.amount')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'start', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.description')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'end', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.col.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1158,13 +1158,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                               )}
                             </div>
                           </td>
-                          <td style={{ color: 'var(--text-primary)', padding: '0.75rem 1rem', fontSize: '0.875rem', textAlign: 'right', fontWeight: 600 }}>
+                          <td style={{ color: 'var(--text-primary)', padding: '0.75rem 1rem', fontSize: '0.875rem', textAlign: 'end', fontWeight: 600 }}>
                             {Number(payment.amount).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                           </td>
                           <td style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
                             {payment.description || '-'}
                           </td>
-                          <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                          <td style={{ padding: '0.75rem 1rem', textAlign: 'end' }}>
                             {rowActions.kind === 'receipt' ? (
                               // Written by confirm_salary_cash_payment; a trigger refuses any edit or
                               // delete, so the row changes only by voiding its receipt. The preview
@@ -1214,7 +1214,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 )}
                               </div>
                             ) : (
-                            <div className="flex items-center justify-end space-x-2">
+                            <div className="flex items-center justify-end space-x-2 rtl:space-x-reverse">
                               {viewOffered && viewButton}
                               <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                 onClick={() => { setSelectedPayment(paymentRow); setIsPaymentModalOpen(true); }}

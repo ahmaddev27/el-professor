@@ -299,8 +299,8 @@ export default function CompanyPlannerPage() {
       {planningMode === 'hist_mode_selection' && (
         <div className="mx-auto grid max-w-3xl grid-cols-1 gap-5 font-ui">
           <div>
-            <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setPlanningMode('selection')}>
-              <ArrowLeft aria-hidden />
+            <Button variant="ghost" size="sm" className="-ms-2" onClick={() => setPlanningMode('selection')}>
+              <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
               {t('mp.planner.backToSelection')}
             </Button>
           </div>
@@ -372,8 +372,8 @@ export default function CompanyPlannerPage() {
       {/* ── Normal planning workflow (new_month) ── */}
       {planningMode === 'new_month' && (
         <div>
-          <Button variant="ghost" size="sm" className="-ml-2 mb-3 font-ui" onClick={() => setPlanningMode('selection')}>
-            <ArrowLeft aria-hidden />
+          <Button variant="ghost" size="sm" className="-ms-2 mb-3 font-ui" onClick={() => setPlanningMode('selection')}>
+            <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
             {t('mp.planner.backToSelection')}
           </Button>
 
@@ -434,7 +434,7 @@ export default function CompanyPlannerPage() {
                     const v = parseInt(e.target.value, 10);
                     setBlockSeparatorGap(Number.isFinite(v) && v > 0 ? v : VEHICLE_BLOCK_GAP_MINUTES);
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
               </div>
@@ -455,7 +455,7 @@ export default function CompanyPlannerPage() {
                       setMinBlockDuration(Math.max(0, Math.min(120, v)));
                     }
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">
                   {t('mp.minShort')}{minBlockDuration === 0 ? ` ${t('mp.planner.disabledSuffix')}` : ''}
@@ -478,7 +478,7 @@ export default function CompanyPlannerPage() {
                       setMaxBlockDuration(Math.max(MAX_BLOCK_DURATION_LOWER_BOUND, Math.min(MAX_BLOCK_DURATION_UPPER_BOUND, v)));
                     }
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
               </div>
@@ -495,7 +495,7 @@ export default function CompanyPlannerPage() {
                     const v = parseInt(e.target.value, 10);
                     setVehicleSwitchBuffer(Number.isFinite(v) && v >= 0 ? v : DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES);
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
               </div>
@@ -738,12 +738,12 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
         <button
           type="button"
           onClick={() => setBlocksOpen(o => !o)}
-          className="w-full px-5 py-4 border-b flex items-center justify-between text-left transition-colors hover:bg-[color:var(--bg-subtle)]"
+          className="w-full px-5 py-4 border-b flex items-center justify-between text-start transition-colors hover:bg-[color:var(--bg-subtle)]"
           style={{ borderColor: 'var(--border)' }}
           aria-expanded={blocksOpen}
         >
           <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            {blocksOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            {blocksOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} className="rtl:-scale-x-100" />}
             <Clock size={16} /> {t('mp.vehicleBlocks')} ({result.blocks.length})
           </h2>
           <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
@@ -777,7 +777,7 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                     <span title={crossMidnight ? t('mp.planner.endsOn', { date: formatDate(endDate) }) : undefined}>
                       {formatDate(b.service_date)}
                       {crossMidnight && (
-                        <span className="ml-1 text-[9px] font-semibold px-1 rounded"
+                        <span className="ms-1 text-[9px] font-semibold px-1 rounded"
                           style={{ background: 'rgba(234,88,12,0.12)', color: '#c2410c' }}>
                           →{formatDate(endDate)}
                         </span>

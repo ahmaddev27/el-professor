@@ -120,13 +120,13 @@ function Pager({
   return (
     <div className="flex items-center justify-end gap-3 font-ui">
       <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => onPage(Math.max(0, page - 1))}>
-        <ChevronLeft size={14} />{t('admin.common.prev')}
+        <ChevronLeft size={14} className="rtl:-scale-x-100" />{t('admin.common.prev')}
       </Button>
       <span className="text-xs text-fg-muted tabular-nums">
         {t('admin.common.pageOf', { page: page + 1, pages })}
       </span>
       <Button variant="secondary" size="sm" disabled={!hasNext} onClick={() => onPage(page + 1)}>
-        {t('admin.common.next')}<ChevronRight size={14} />
+        {t('admin.common.next')}<ChevronRight size={14} className="rtl:-scale-x-100" />
       </Button>
     </div>
   );
@@ -559,7 +559,7 @@ export default function SubscriptionBillingPage() {
   };
 
   const menuItemClass =
-    'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-sunken focus-visible:outline-none focus-visible:bg-sunken [@media(pointer:coarse)]:min-h-11';
+    'flex w-full items-center gap-2 px-3 py-2 text-start text-sm transition-colors hover:bg-sunken focus-visible:outline-none focus-visible:bg-sunken [@media(pointer:coarse)]:min-h-11';
 
   // ── Actions dropdown ──
   const InvoiceActions = ({ inv }: { inv: PlatformInvoiceRow }) => {
@@ -579,7 +579,7 @@ export default function SubscriptionBillingPage() {
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="glass-strong absolute right-0 top-8 z-50 w-52 rounded-tile py-1.5 font-ui">
+            <div className="glass-strong absolute end-0 top-8 z-50 w-52 rounded-tile py-1.5 font-ui">
               <button className={cn(menuItemClass, 'text-fg')}
                 onClick={() => { setOpen(false); setDetailInvoice(inv); }}
               >
@@ -658,7 +658,7 @@ export default function SubscriptionBillingPage() {
   const subscriptionPages = directoryReachablePageCount(subscriptionTotal, BILLING_PAGE_SIZE);
   const subscriptionHasNext = directoryHasNextPage(subscriptionPage, subscriptionTotal, BILLING_PAGE_SIZE);
 
-  const thClass = 'px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-fg-subtle';
+  const thClass = 'px-4 py-3 text-start text-xs font-semibold uppercase tracking-wider text-fg-subtle';
   const tableFrameClass = 'glass-card relative overflow-x-auto rounded-surface';
   const rowClass = 'border-b border-line transition-colors last:border-b-0 hover:bg-sunken';
   const filterSelectClass = 'h-10';
@@ -759,14 +759,14 @@ export default function SubscriptionBillingPage() {
           <div className="flex flex-wrap items-center gap-3">
             <form onSubmit={submitSearch} className="relative flex min-w-[220px] max-w-md flex-1 gap-2">
               <div className="relative flex-1">
-                <Search aria-hidden size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+                <Search aria-hidden size={16} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                 <Input
                   type="text"
                   placeholder={t('sa.subs.searchPlaceholder')}
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
                   maxLength={100}
-                  className="pl-9"
+                  className="ps-9"
                 />
               </div>
               {/* `type="submit"` is explicit: the primitive defaults to "button",

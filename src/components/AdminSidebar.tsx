@@ -79,7 +79,7 @@ const AdminSidebar: React.FC = () => {
     <div className="flex h-full flex-col px-[10px] pb-[10px] pt-[14px]">
       {/* Identity — deliberately distinct from the company shell so it is always
           obvious which context is being operated in. */}
-      <div className="flex items-center gap-3 pb-3 pl-[46px] pr-2 lg:pl-1.5">
+      <div className="flex items-center gap-3 pb-3 ps-[46px] pe-2 lg:ps-1.5">
         <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mark shadow-mark">
           {/* The El-Professor mark, as the owner asked on 28.09.2026. The warning
               tint, the border and the warning-coloured subtitle below all stay:
@@ -156,7 +156,7 @@ const AdminSidebar: React.FC = () => {
     <>
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        className="fixed left-4 top-3 z-50 rounded-control border border-line bg-raised p-2 text-fg-muted shadow-raised transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
+        className="fixed start-4 top-3 z-50 rounded-control border border-line bg-raised p-2 text-fg-muted shadow-raised transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
       >
         {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
@@ -169,8 +169,8 @@ const AdminSidebar: React.FC = () => {
       )}
 
       <aside
-        className={`glass-drawer fixed left-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-l-0 motion-safe:transition-transform motion-safe:duration-[320ms] motion-safe:ease-glass lg:sticky lg:top-[10px] lg:ml-[10px] lg:mt-[10px] lg:h-[calc(100dvh-20px)] lg:w-[254px] lg:shrink-0 lg:translate-x-0 lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised ${
-          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`glass-drawer fixed start-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-s-0 motion-safe:transition-transform motion-safe:duration-[320ms] motion-safe:ease-glass lg:sticky lg:top-[10px] lg:ms-[10px] lg:mt-[10px] lg:h-[calc(100dvh-20px)] lg:w-[254px] lg:shrink-0 lg:translate-x-0 lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised ${
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full'
         }`}
       >
         <SidebarContent />

@@ -275,7 +275,7 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
               className={cn('relative h-6 w-11 rounded-full transition-colors', form.active ? 'bg-positive-dot' : 'bg-sunken')}
               onClick={() => set('active', !form.active)}
             >
-              <div className={cn('absolute left-0.5 top-0.5 size-5 rounded-full bg-solid shadow-elev-xs motion-safe:transition-transform', form.active ? 'translate-x-5' : 'translate-x-0')} />
+              <div className={cn('absolute start-0.5 top-0.5 size-5 rounded-full bg-solid shadow-elev-xs motion-safe:transition-transform', form.active ? 'translate-x-5 rtl:-translate-x-5' : 'translate-x-0')} />
             </div>
             <span className="text-sm font-medium text-fg">{t('codes.status.active')}</span>
           </label>
@@ -345,21 +345,21 @@ const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
       <table className="w-full text-xs">
         <thead>
           <tr className="text-fg-subtle">
-            <th className="text-left py-1.5 pr-3 font-semibold">{t('codes.col.firm')}</th>
-            <th className="text-left py-1.5 pr-3 font-semibold">{t('codes.col.plan')}</th>
-            <th className="text-right py-1.5 pr-3 font-semibold">{t('codes.col.original')}</th>
-            <th className="text-right py-1.5 pr-3 font-semibold">{t('codes.col.discount')}</th>
-            <th className="text-right py-1.5 font-semibold">{t('codes.col.finalPrice')}</th>
+            <th className="text-start py-1.5 pe-3 font-semibold">{t('codes.col.firm')}</th>
+            <th className="text-start py-1.5 pe-3 font-semibold">{t('codes.col.plan')}</th>
+            <th className="text-end py-1.5 pe-3 font-semibold">{t('codes.col.original')}</th>
+            <th className="text-end py-1.5 pe-3 font-semibold">{t('codes.col.discount')}</th>
+            <th className="text-end py-1.5 font-semibold">{t('codes.col.finalPrice')}</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(r => (
             <tr key={r.id} className="border-t border-line">
-              <td className="py-1.5 pr-3 text-fg">{r.company_name ?? r.company_id.slice(0, 8)}</td>
-              <td className="py-1.5 pr-3 capitalize text-fg-muted">{r.plan}</td>
-              <td className="py-1.5 pr-3 text-right whitespace-nowrap tabular-nums text-fg-muted">{fmtPrice(r.original_price)} €</td>
-              <td className="py-1.5 pr-3 text-right whitespace-nowrap tabular-nums text-positive">-{fmtPrice(r.discount_amount)} €</td>
-              <td className="py-1.5 text-right whitespace-nowrap tabular-nums font-semibold text-fg">{fmtPrice(r.final_price)} €</td>
+              <td className="py-1.5 pe-3 text-fg">{r.company_name ?? r.company_id.slice(0, 8)}</td>
+              <td className="py-1.5 pe-3 capitalize text-fg-muted">{r.plan}</td>
+              <td className="py-1.5 pe-3 text-end whitespace-nowrap tabular-nums text-fg-muted">{fmtPrice(r.original_price)} €</td>
+              <td className="py-1.5 pe-3 text-end whitespace-nowrap tabular-nums text-positive">-{fmtPrice(r.discount_amount)} €</td>
+              <td className="py-1.5 text-end whitespace-nowrap tabular-nums font-semibold text-fg">{fmtPrice(r.final_price)} €</td>
             </tr>
           ))}
           {/*
@@ -543,7 +543,7 @@ const DiscountCodesManagement: React.FC = () => {
               <thead className="bg-wash">
                 <tr>
                   {TABLE_HEADER_KEYS.map(key => (
-                    <th key={key} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-fg-muted">{t(key)}</th>
+                    <th key={key} className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-fg-muted">{t(key)}</th>
                   ))}
                 </tr>
               </thead>

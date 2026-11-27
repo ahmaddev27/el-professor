@@ -167,7 +167,7 @@ const SupportSessionBar: React.FC = () => {
               onClick={() => navigate(TENANT_HOME)}
               className="inline-flex items-center gap-1 underline underline-offset-2 disabled:opacity-50"
             >
-              <ArrowRight size={14} />
+              <ArrowRight size={14} className="rtl:-scale-x-100" />
               {t('support.bar.openCompanyView')}
             </button>
           </>

@@ -443,7 +443,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       ),
       // At 375 px the Beleg, the amount and both row actions share the width;
       // 10rem left the table 12 px wider than the phone.
-      className: 'min-w-[8rem] pl-3 pr-1 sm:min-w-[10rem] sm:px-3',
+      className: 'min-w-[8rem] ps-3 pe-1 sm:min-w-[10rem] sm:px-3',
     },
     // One column per datum a Beleg from the driver app carries. Always defined,
     // so the table's shape does not change with the filter; an absent value is an
@@ -538,7 +538,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       header: sortHeader('expense', t('common.expenses')),
       kind: 'currency',
       cell: receipt => (receipt.expense > 0 ? euro(receipt.expense) : null),
-      className: 'pl-1 pr-2 sm:px-3',
+      className: 'ps-1 pe-2 sm:px-3',
     },
     {
       id: 'vat',
@@ -610,13 +610,13 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       <div className="flex flex-wrap items-end gap-3">
         <Field label={t('common.search')} className="w-full min-w-0 sm:w-auto sm:min-w-72 sm:flex-1">
           <div className="relative">
-            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
             <Input
               type="text"
               placeholder={t('rec.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9"
+              className="ps-9"
             />
           </div>
         </Field>

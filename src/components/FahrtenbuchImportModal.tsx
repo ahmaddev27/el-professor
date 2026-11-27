@@ -879,7 +879,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       <thead style={{ background: 'var(--bg-subtle)' }}>
                         <tr>
                           {headers.slice(0, 8).map(h => (
-                            <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap"
+                            <th key={h} className="px-3 py-2 text-start font-medium whitespace-nowrap"
                               style={{ color: 'var(--text-tertiary)' }}>{h}</th>
                           ))}
                         </tr>
@@ -1057,7 +1057,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                     <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{dm.importedName}</p>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('imp.nameFoundInFile')}</p>
                   </div>
-                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} className="rtl:-scale-x-100" />
                   <div className="flex-1 min-w-0">
                     <select
                       value={dm.matchedDriverId || ''}
@@ -1133,7 +1133,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                     <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{cm.importedPlate}</p>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('imp.plateFromFile')}</p>
                   </div>
-                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} className="rtl:-scale-x-100" />
                   <div className="flex-1 min-w-0">
                     <select
                       value={cm.matchedCarId || ''}
@@ -1208,7 +1208,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
                         <div>
                           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{imp.file_name}</span>
-                          <span className="text-xs ml-2" style={{ color: 'var(--text-tertiary)' }}>
+                          <span className="text-xs ms-2" style={{ color: 'var(--text-tertiary)' }}>
                             {t('imp.tripCount', { count: imp.row_count })} — {format(new Date(imp.imported_at), 'dd.MM.yyyy HH:mm')}
                           </span>
                         </div>
@@ -1306,7 +1306,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                     {summary.needsReview > 0 && (
                       <Notice tone="warning">
                         <p>{t('imp.notice.needsReview', { count: summary.needsReview })}</p>
-                        <ul className="list-disc pl-5 text-xs text-[color:var(--text-secondary)]">
+                        <ul className="list-disc ps-5 text-xs text-[color:var(--text-secondary)]">
                           {reasons.map(reason => (
                             <li key={reason}>
                               {t('imp.reasonCount', { label: t(REASON_LABEL_KEYS[reason]), count: summary.reasons[reason] })}
@@ -1413,7 +1413,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                             'imp.th.plate', 'imp.th.price', 'imp.th.status',
                           ] as TranslationKey[]).map(headerKey => (
                             <th key={headerKey}
-                              className="px-2 py-2 text-left font-medium whitespace-nowrap text-[color:var(--text-tertiary)]">
+                              className="px-2 py-2 text-start font-medium whitespace-nowrap text-[color:var(--text-tertiary)]">
                               {t(headerKey)}
                             </th>
                           ))}
@@ -1430,7 +1430,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                             <td className="px-2 py-1.5 whitespace-nowrap tabular-nums text-[color:var(--accent-text)]">{formatEuro(r.price_amount)}</td>
                             <td className="px-2 py-1.5 whitespace-nowrap">
                               {t(STATUS_LABEL_KEYS[r.trip_status])}
-                              {r.needs_review && <span className="ml-1 text-[color:var(--warning)]">· {t('imp.th.review')}</span>}
+                              {r.needs_review && <span className="ms-1 text-[color:var(--warning)]">· {t('imp.th.review')}</span>}
                             </td>
                           </tr>
                         ))}
@@ -1456,7 +1456,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
-            <ChevronLeft size={16} />
+            <ChevronLeft size={16} className="rtl:-scale-x-100" />
             {step === 0 ? t('common.cancel') : t('common.back')}
           </button>
 
@@ -1473,7 +1473,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-opacity"
               style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: canGoNext() ? 1 : 0.45 }}
             >
-              {t('imp.next')} <ChevronRight size={16} />
+              {t('imp.next')} <ChevronRight size={16} className="rtl:-scale-x-100" />
             </button>
           ) : (
             <button

@@ -233,7 +233,7 @@ export default function CompanyModulesCard({ companyId, canEdit }: CompanyModule
                         {t(definition.labelKey)}
                       </label>
                       {/* The raw key, because it is what the audit row says. */}
-                      <code className="ml-2 text-[11px] text-fg-subtle">{definition.key}</code>
+                      <code className="ms-2 text-[11px] text-fg-subtle">{definition.key}</code>
                       <p className="mt-0.5 text-[12px] text-fg-muted">
                         {state === 'locked'
                           ? t(LOCKED_REASON_KEYS[definition.key as keyof typeof LOCKED_REASON_KEYS])

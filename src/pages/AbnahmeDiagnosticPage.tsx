@@ -469,7 +469,7 @@ export default function AbnahmeDiagnosticPage() {
 
   // ── Presentation (phase 5)
   const sectionGrid = 'grid grid-cols-1 gap-4';
-  const tableTh = 'whitespace-nowrap px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-subtle';
+  const tableTh = 'whitespace-nowrap px-2.5 py-1.5 text-start text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-subtle';
   const tdMuted = 'px-2.5 py-[7px] tabular-nums whitespace-nowrap text-fg-muted';
   const tdTotal = 'px-2.5 py-[7px] tabular-nums whitespace-nowrap text-brand-text';
   const tile = 'rounded-tile border px-4 py-3.5';
@@ -723,11 +723,11 @@ export default function AbnahmeDiagnosticPage() {
                 {result.stundennachweis.filter(d => d.maxShiftsViolation).map(d => (
                   <div key={d.name} className="mb-3">
                     <p className="mb-1.5 text-[13px] font-bold text-critical">
-                      <XCircle aria-hidden className="mr-1.5 inline size-[13px]" />
+                      <XCircle aria-hidden className="me-1.5 inline size-[13px]" />
                       {t('diag.driverViolationDays', { driver: d.name, count: d.daysWith4Plus.length })}
                     </p>
                     {d.daysWith4Plus.map(day => (
-                      <p key={day.date} className="my-0.5 ml-5 text-xs tabular-nums text-fg-muted">
+                      <p key={day.date} className="my-0.5 ms-5 text-xs tabular-nums text-fg-muted">
                         {t('diag.dayShiftCount', { date: fmtDate(day.date), count: day.shifts })}
                       </p>
                     ))}
@@ -788,7 +788,7 @@ function Row({ label, value, ok, warn, error }: { label: string; value: string |
   return (
     <div className="flex items-center justify-between gap-3 border-b border-line py-1.5">
       <span className="min-w-0 text-[13px] text-fg-muted">{label}</span>
-      <span className={`flex min-w-0 items-center gap-1.5 break-all text-right text-[13px] font-bold tabular-nums ${color}`}>
+      <span className={`flex min-w-0 items-center gap-1.5 break-all text-end text-[13px] font-bold tabular-nums ${color}`}>
         {Icon ? <Icon aria-hidden className="size-3.5 shrink-0" /> : null}
         {word ? <span className="sr-only">{word}</span> : null}
         {value}

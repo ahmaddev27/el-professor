@@ -32,7 +32,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(
           className={cn(
             controlFrameClass,
             // The open list follows the page's colour scheme only when told.
-            'cursor-pointer appearance-none pr-9 [color-scheme:light] dark:[color-scheme:dark]',
+            'cursor-pointer appearance-none pe-9 [color-scheme:light] dark:[color-scheme:dark]',
             className,
           )}
           {...props}
@@ -40,7 +40,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(
         >
           {children}
         </select>
-        <ChevronDown aria-hidden className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+        <ChevronDown aria-hidden className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
       </div>
     );
   },
