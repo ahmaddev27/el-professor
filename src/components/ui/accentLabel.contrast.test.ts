@@ -286,26 +286,22 @@ function findSolidFillsWithInverseLabel(): string[] {
   return [...new Set(offences)].sort();
 }
 
-/** Backgrounds that reach a `-solid` token only through a name. */
-function indirectSolidFills(): string[] {
+/** The sites in one source text whose background reaches a `-solid` token only through a name. */
+function indirectSolidFillsIn(src: string, rel: string): string[] {
   const found: string[] = [];
-  for (const file of sourceFiles(SRC)) {
-    const src = readFileSync(file, 'utf8');
-    const rel = file.slice(SRC.length).replace(/\\/g, '/');
-    for (const [start, end] of braceSpans(src)) {
-      const body = src.slice(start + 1, end);
-      if (body.length > 2500) continue;
-      const entries = topLevelEntries(body);
-      const backgroundKey = BACKGROUND_KEYS.find(key => entries[key]);
-      if (!backgroundKey) continue;
-      const expression = entries[backgroundKey];
-      if (!INDIRECT_BACKGROUND.test(expression.trim())) continue;
-      if (usesToken(expression, SOLID_FILL_TOKENS)) continue;
-      if (!backgroundValues(src, expression).some(value => usesToken(value, SOLID_FILL_TOKENS))) continue;
-      found.push(`${rel}:${src.slice(0, start).split('\n').length}`);
-    }
+  for (const [start, end] of braceSpans(src)) {
+    const body = src.slice(start + 1, end);
+    if (body.length > 2500) continue;
+    const entries = topLevelEntries(body);
+    const backgroundKey = BACKGROUND_KEYS.find(key => entries[key]);
+    if (!backgroundKey) continue;
+    const expression = entries[backgroundKey];
+    if (!INDIRECT_BACKGROUND.test(expression.trim())) continue;
+    if (usesToken(expression, SOLID_FILL_TOKENS)) continue;
+    if (!backgroundValues(src, expression).some(value => usesToken(value, SOLID_FILL_TOKENS))) continue;
+    found.push(`${rel}:${src.slice(0, start).split('\n').length}`);
   }
-  return [...new Set(found)].sort();
+  return found;
 }
 
 describe('accent label pairing', () => {
@@ -326,11 +322,16 @@ describe('accent label pairing', () => {
 
 describe('status fill tokens', () => {
   it('finds the style objects it is meant to read', () => {
-    // Same self-check as above: a parser that stopped matching would report no
-    // offences and the rule below would pass while checking nothing.
-    const anySolidFill = sourceFiles(SRC).some(f =>
-      /background:\s*'var\(--(success|warning|danger)-solid\)'/.test(readFileSync(f, 'utf8')));
-    expect(anySolidFill).toBe(true);
+    // Same self-check as above, on a fixture: the last legacy screen that filled
+    // a background with a -solid token literally was converted in the R5 batch,
+    // so the real source no longer holds one to find. A parser that stopped
+    // matching would report no offences and the rule below would pass while
+    // checking nothing; the fixture is what keeps that visible.
+    const fixture = "const a = { background: 'var(--danger-solid)', color: '#fff' };";
+    const spans = braceSpans(fixture);
+    expect(spans).toHaveLength(1);
+    const entries = topLevelEntries(fixture.slice(spans[0][0] + 1, spans[0][1]));
+    expect(usesToken(entries.background, SOLID_FILL_TOKENS)).toBe(true);
   });
 
   it('resolves a ternary and an arrow body behind a name', () => {
@@ -351,13 +352,18 @@ describe('status fill tokens', () => {
     expect(usesToken(initializersOf(fixture, 'pick')[0], ['danger-solid'])).toBe(true);
   });
 
-  it('is still wired into the scan of the real source', () => {
-    // A parser that works on a fixture but is no longer reached by
-    // findStatusFills() would leave the three sites that hid from PR #76
-    // unguarded — TrialBanner.tsx:59, ConfirmationModal.tsx:117 (and
-    // CompaniesPage.tsx:268 until the Glass remake) — and the rule below would
-    // still report [].
-    expect(indirectSolidFills().length).toBeGreaterThan(0);
+  it('is still wired into the scan', () => {
+    // A parser that works on one fixture but no longer reaches the indirect case
+    // would leave a fill behind a name (the shape TrialBanner, ConfirmationModal
+    // and CompaniesPage once had) unguarded while the rule below still reported
+    // []. The real source holds no such site any more — ConfirmationModal, the
+    // last one, was deleted in the R5 batch — so the control is a fixture run
+    // through the same function the real scan uses.
+    const fixture = [
+      "const fill = ok ? 'var(--success)' : 'var(--danger-solid)';",
+      "const view = <div style={{ background: fill, color: 'var(--text-inverse)' }} />;",
+    ].join('\n');
+    expect(indirectSolidFillsIn(fixture, 'fixture.tsx')).toHaveLength(1);
   });
 
   it('fills with the -solid token, never with the status text token', () => {

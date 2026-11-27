@@ -79,7 +79,7 @@ export function LegalPageView({ page, state, onRetry }: {
             <img src="/brand/wordmark-on-light.png" alt="El-Professor" className="h-4 w-auto dark:hidden" />
             <img src="/brand/wordmark-on-dark.png" alt="El-Professor" className="hidden h-4 w-auto dark:block" />
           </a>
-          <LanguageSwitcher />
+          <LanguageSwitcher variant="ui" />
         </div>
       </header>
 

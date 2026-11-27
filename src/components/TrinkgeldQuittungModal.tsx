@@ -12,6 +12,7 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
 import { amountInWordsFromCents } from '../utils/germanAmountInWords';
 import { formatCentsDe, formatCentsForInput, toCents } from '../utils/money';
+import { Button, Field, Input, NativeSelect } from './ui';
 import { parseQuittungAmountCents } from '../utils/quittungAmount';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -57,19 +58,6 @@ function firstDayNextMonth(month: number, year: number): string {
   const d = new Date(month === 12 ? year + 1 : year, month === 12 ? 0 : month, 1);
   return format(d, 'dd.MM.yyyy');
 }
-
-// ─── Input style ─────────────────────────────────────────────────────────────
-
-const IS: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.625rem 0.875rem',
-  outline: 'none',
-  width: '100%',
-};
 
 // ─── Shared A4 document component ────────────────────────────────────────────
 // Single source of truth for both the screen preview and the PDF export.
@@ -461,83 +449,60 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)' }}
+      className="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="w-full flex flex-col"
-        style={{
-          maxWidth: step === 'preview' ? '960px' : '560px',
-          background: 'var(--bg-surface)',
-          boxShadow: 'var(--shadow-xl)',
-          border: '1px solid var(--border)',
-          borderRadius: '1rem',
-          maxHeight: '94vh',
-          transition: 'max-width 0.25s ease',
-        }}
+        role="dialog"
+        aria-modal="true"
+        className={`glass-strong flex max-h-[94dvh] w-full flex-col rounded-pane font-ui text-fg transition-[max-width] duration-200 ${step === 'preview' ? 'max-w-[960px]' : 'max-w-[560px]'}`}
       >
         {/* Modal header */}
-        <div
-          className="flex items-center justify-between px-6 py-4"
-          style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}
-        >
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg p-2" style={{ background: 'var(--accent-subtle)' }}>
-              <FileText size={18} style={{ color: 'var(--accent-text)' }} />
+            <div className="rounded-tile bg-brand-soft p-2 text-brand-text">
+              <FileText size={18} aria-hidden />
             </div>
             <div>
-              <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
+              <h2 className="text-base font-semibold text-fg">
                 {t('a4.tqTitle')}
               </h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              <p className="text-xs text-fg-subtle">
                 {step === 'select' ? t('a4.tqStepSelect') : t('a4.tqStepPreview')}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg hover:opacity-70 transition-opacity">
-            <X size={18} style={{ color: 'var(--text-tertiary)' }} />
-          </button>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t('common.close')}>
+            <X aria-hidden />
+          </Button>
         </div>
 
-        <div style={{ overflowY: 'auto', flex: 1 }}>
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {/* ── Step 1: select ── */}
           {step === 'select' && (
-            <div className="p-6 space-y-5">
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('common.driver')} *
-                </label>
-                <select value={driverId} onChange={e => setDriverId(e.target.value)} style={IS}>
+            <div className="grid grid-cols-1 gap-5 p-6">
+              <Field label={t('common.driver')} required>
+                <NativeSelect value={driverId} onChange={e => setDriverId(e.target.value)}>
                   <option value="">{t('a4.tqDriverPlaceholder')}</option>
                   {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </div>
+                </NativeSelect>
+              </Field>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    {t('common.month')} *
-                  </label>
-                  <select value={month} onChange={e => setMonth(Number(e.target.value))} style={IS}>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label={t('common.month')} required>
+                  <NativeSelect value={month} onChange={e => setMonth(Number(e.target.value))}>
                     {MONTH_NAMES_DE.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    {t('bill.field.year')} *
-                  </label>
-                  <select value={year} onChange={e => setYear(Number(e.target.value))} style={IS}>
+                  </NativeSelect>
+                </Field>
+                <Field label={t('bill.field.year')} required>
+                  <NativeSelect value={year} onChange={e => setYear(Number(e.target.value))}>
                     {years.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
-                </div>
+                  </NativeSelect>
+                </Field>
               </div>
 
-              <div
-                className="rounded-lg p-4 text-sm"
-                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}
-              >
-                <p style={{ color: 'var(--text-secondary)' }}>
+              <div className="rounded-tile border border-line bg-sunken p-4 text-sm">
+                <p className="text-fg-muted">
                   {t('a4.tqHint')}
                 </p>
               </div>
@@ -546,134 +511,86 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
           {/* ── Step 2: preview ── */}
           {step === 'preview' && previewData && (
-            <div style={{ display: 'flex', height: '100%' }}>
+            <div className="flex h-full flex-col md:flex-row">
               {/* Left: A4 preview */}
-              <div style={{
-                flex: '1 1 0',
-                overflowY: 'auto',
-                padding: '24px',
-                background: 'var(--bg-muted)',
-                borderRight: '1px solid var(--border)',
-              }}>
-                <div style={{
-                  background: '#fff',
-                  boxShadow: '0 4px 32px rgba(0,0,0,0.18)',
-                  borderRadius: '4px',
-                  overflow: 'hidden',
-                  aspectRatio: '210 / 297',
-                  width: '100%',
-                }}>
+              <div className="min-w-0 flex-1 overflow-y-auto border-line bg-sunken p-6 md:border-e">
+                <div className="aspect-[210/297] w-full overflow-hidden rounded-tight shadow-overlay">
                   <A4Document data={previewData} settings={settings} />
                 </div>
               </div>
 
               {/* Right: editable fields */}
-              <div style={{
-                width: '280px',
-                flexShrink: 0,
-                overflowY: 'auto',
-                padding: '24px 20px',
-              }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color: 'var(--text-tertiary)' }}>
+              <div className="w-full shrink-0 overflow-y-auto px-5 py-6 md:w-[280px]">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-fg-subtle">
                   {t('a4.tqAdjustFields')}
                 </p>
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      {t('common.driver')}
-                    </label>
-                    <select
+                <div className="grid grid-cols-1 gap-4">
+                  <Field label={t('common.driver')}>
+                    <NativeSelect
                       value={driverId}
                       onChange={e => handlePreviewDriverChange(e.target.value)}
-                      style={IS}
                     >
                       {drivers.map(d => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      {t('common.month')}
-                    </label>
+                    </NativeSelect>
+                  </Field>
+                  <Field label={t('common.month')}>
                     <div className="grid grid-cols-2 gap-2">
-                      <select
+                      <NativeSelect
                         value={month}
                         onChange={e => handlePreviewMonthChange(Number(e.target.value), year)}
-                        style={IS}
                       >
                         {MONTH_NAMES_DE.map((m, i) => (
                           <option key={i + 1} value={i + 1}>{m}</option>
                         ))}
-                      </select>
-                      <select
+                      </NativeSelect>
+                      <NativeSelect
                         value={year}
                         onChange={e => handlePreviewMonthChange(month, Number(e.target.value))}
-                        style={IS}
                       >
                         {years.map(y => (
                           <option key={y} value={y}>{y}</option>
                         ))}
-                      </select>
+                      </NativeSelect>
                     </div>
-                  </div>
-                  <div>
-                    {/* Reproduces the "Betrag (EUR)" caption printed on the Quittung sheet
-                        itself, so the editor and the document read identically. */}
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      Betrag (EUR)
-                    </label>
-                    <input
+                  </Field>
+                  {/* Reproduces the "Betrag (EUR)" caption printed on the Quittung sheet
+                      itself, so the editor and the document read identically. */}
+                  <Field label="Betrag (EUR)" error={amountIsPrintable ? undefined : t('a4.tqAmountInvalid')}>
+                    <Input
                       type="text"
                       inputMode="decimal"
                       value={amount}
                       onChange={e => setAmount(e.target.value)}
                       aria-invalid={!amountIsPrintable}
-                      style={amountIsPrintable ? IS : { ...IS, borderColor: 'var(--danger)' }}
                     />
-                    {!amountIsPrintable && (
-                      <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>
-                        {t('a4.tqAmountInvalid')}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      {t('a4.tqFieldDocDate')}
-                    </label>
-                    <input
+                  </Field>
+                  <Field label={t('a4.tqFieldDocDate')}>
+                    <Input
                       type="text"
                       placeholder="dd.MM.yyyy"
                       value={docDate}
                       onChange={e => setDocDate(e.target.value)}
-                      style={IS}
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      {t('a4.tqFieldCity')}
-                    </label>
-                    <input
+                  </Field>
+                  <Field label={t('a4.tqFieldCity')}>
+                    <Input
                       type="text"
                       value={city}
                       onChange={e => setCity(e.target.value)}
-                      style={IS}
                     />
-                  </div>
-                  <div>
-                    {/* Reproduces the "Arbeitgeber" signature caption printed on the Quittung
-                        sheet itself, so the editor and the document read identically. */}
-                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      Arbeitgeber (Unterschrift)
-                    </label>
-                    <input
+                  </Field>
+                  {/* Reproduces the "Arbeitgeber" signature caption printed on the Quittung
+                      sheet itself, so the editor and the document read identically. */}
+                  <Field label="Arbeitgeber (Unterschrift)">
+                    <Input
                       type="text"
                       value={signatory}
                       onChange={e => setSignatory(e.target.value)}
-                      style={IS}
                     />
-                  </div>
+                  </Field>
                 </div>
               </div>
             </div>
@@ -681,56 +598,33 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Modal footer */}
-        <div
-          className="flex items-center justify-between px-6 py-4"
-          style={{ borderTop: '1px solid var(--border)', flexShrink: 0 }}
-        >
+        <div className="flex shrink-0 items-center justify-between border-t border-line px-6 py-4">
           {step === 'select' ? (
             <>
-              <button
-                onClick={onClose}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-              >
+              <Button variant="secondary" onClick={onClose}>
                 {t('common.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleGenerate}
                 disabled={!driverId || loading}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all"
-                style={driverId
-                  ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                  : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
               >
                 {loading
                   ? <><RefreshCw size={14} className="animate-spin" /> {t('a4.tqLoading')}</>
                   : <>{t('a4.tqGeneratePreview')} <ChevronRight size={14} className="rtl:-scale-x-100" /></>}
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
-                onClick={() => setStep('select')}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-              >
+              <Button variant="secondary" onClick={() => setStep('select')}>
                 <ArrowLeft size={14} className="rtl:-scale-x-100" /> {t('common.back')}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleExport}
                 disabled={exporting || !amountIsPrintable}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all"
-                style={amountIsPrintable
-                  ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                  : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
               >
                 <Download size={14} />
                 {exporting ? t('a4.tqExporting') : t('a4.tqExportPdf')}
-              </button>
+              </Button>
             </>
           )}
         </div>

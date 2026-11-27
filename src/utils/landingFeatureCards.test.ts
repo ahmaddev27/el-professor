@@ -109,16 +109,16 @@ describe('LandingPage — every feature card is passed the props the card declar
   });
 
   it('never builds a colour out of a prop name no card passes', () => {
-    // NEGATIVE CONTROL for the exact defect. `accentColor` survives in this file
-    // only as the CSS property of the pricing slider's range input
-    // (`style={{ width: 140, accentColor: '#06b6d4' }}`) — a real CSS key that
-    // must stay. What must not come back is the *prop*.
+    // NEGATIVE CONTROL for the exact defect. The pricing slider's range input
+    // keeps its accent colour as the `accent-brand` class (it was the CSS
+    // property `accentColor: '#06b6d4'` in an inline style until the Glass
+    // remake). What must not come back is the *prop* `accentColor`.
     expect(source).not.toContain('accentColor: string');
     expect(source).not.toMatch(/\$\{accentColor\}/);
     expect(source).not.toMatch(/color:\s*accentColor\s*,/);
 
-    // The slider's CSS property is still there, so this is not passing by having
+    // The slider's accent is still there, so this is not passing by having
     // deleted the wrong thing.
-    expect(source).toContain("accentColor: '#06b6d4'");
+    expect(source).toContain('accent-brand');
   });
 });

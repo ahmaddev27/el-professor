@@ -658,9 +658,9 @@ export interface RevenueCompositionItem {
 
 export function buildRevenueComposition(metrics: PeriodMetrics): RevenueCompositionItem[] {
   return [
-    { name: 'Netto-Fahrpreis', nameKey: 'engine.revenue.nettoFahrpreis', value: metrics.nettoFahrpreis, color: '#3b82f6' },
-    { name: 'Aktionen', nameKey: 'engine.revenue.aktionen', value: metrics.aktionen, color: '#f59e0b' },
-    { name: 'Trinkgeld', nameKey: 'engine.revenue.trinkgeld', value: metrics.trinkgeld, color: '#8b5cf6' },
-    { name: 'Bargeld', nameKey: 'engine.revenue.bargeld', value: metrics.bargeld, color: '#10b981' },
+    { name: 'Netto-Fahrpreis', nameKey: 'engine.revenue.nettoFahrpreis', value: metrics.nettoFahrpreis, color: 'rgb(var(--chart-2))' },
+    { name: 'Aktionen', nameKey: 'engine.revenue.aktionen', value: metrics.aktionen, color: 'rgb(var(--chart-3))' },
+    { name: 'Trinkgeld', nameKey: 'engine.revenue.trinkgeld', value: metrics.trinkgeld, color: 'rgb(var(--chart-4))' },
+    { name: 'Bargeld', nameKey: 'engine.revenue.bargeld', value: metrics.bargeld, color: 'rgb(var(--chart-1))' },
   ].filter(i => i.value > 0);
 }

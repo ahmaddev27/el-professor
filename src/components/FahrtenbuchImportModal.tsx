@@ -42,6 +42,7 @@ import {
   type MissingMappedColumn,
 } from '../utils/importColumnMapping';
 import { formatEuro } from './ui/format';
+import { Button, NativeSelect, cn } from './ui';
 
 // ── Driver / Car types passed in from parent ──────────────────────────────────
 export interface DriverOption { id: string; name: string; }
@@ -195,16 +196,16 @@ function formatIsoDate(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-// Notices in the legacy palette, drawn with classes rather than inline styles.
+// Notices drawn with the design system's tone tokens.
 type NoticeTone = 'warning' | 'danger' | 'info';
 const NOTICE_TONE: Record<NoticeTone, string> = {
-  warning: 'border-[color:var(--warning)] bg-[color:var(--warning-subtle)] text-[color:var(--warning)]',
-  danger:  'border-[color:var(--danger)] bg-[color:var(--danger-subtle)] text-[color:var(--danger)]',
-  info:    'border-[color:var(--border)] bg-[color:var(--bg-subtle)] text-[color:var(--text-secondary)]',
+  warning: 'border-caution/40 bg-caution-soft text-caution',
+  danger:  'border-critical/40 bg-critical-soft text-critical',
+  info:    'border-line bg-sunken text-fg-muted',
 };
 
 const Notice: React.FC<{ tone: NoticeTone; children: React.ReactNode }> = ({ tone, children }) => (
-  <div className={`flex items-start gap-2 p-3 rounded-lg border ${NOTICE_TONE[tone]}`}>
+  <div className={`flex items-start gap-2 rounded-control border p-3 ${NOTICE_TONE[tone]}`}>
     {tone === 'info'
       ? <Info size={14} className="shrink-0 mt-0.5" />
       : <AlertTriangle size={14} className="shrink-0 mt-0.5" />}
@@ -732,55 +733,44 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  const inputSt: React.CSSProperties = {
-    background: 'var(--bg-subtle)', border: '1px solid var(--border)',
-    borderRadius: '0.5rem', color: 'var(--text-primary)',
-    fontSize: '0.875rem', padding: '0.5rem 0.75rem', outline: 'none', width: '100%',
-  };
-  const selectSt: React.CSSProperties = { ...inputSt, cursor: 'pointer' };
-
   const validRows  = preview?.rows ?? [];
   const unmatchedDrivers = driverMatches.filter(d => !d.matchedDriverId).length;
   const unmatchedCars    = carMatches.filter(c => !c.matchedCarId).length;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)' }}
+      className="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
       <div
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }}
+        className="glass-strong flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-pane font-ui text-fg"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg p-2" style={{ background: 'var(--accent-subtle)' }}>
-              <FileSpreadsheet size={20} style={{ color: 'var(--accent-text)' }} />
+            <div className="rounded-control bg-brand-soft p-2 text-brand-text">
+              <FileSpreadsheet aria-hidden size={20} />
             </div>
             <div>
-              <h2 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
+              <h2 className="text-base font-semibold text-fg">
                 {t('imp.title')}
               </h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              <p className="text-xs text-fg-subtle">
                 {t('imp.stepIndicator', { current: step + 1, total: STEP_KEYS.length, label: t(STEP_KEYS[step]) })}
               </p>
             </div>
           </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={handleClose} style={{ color: 'var(--text-tertiary)' }}>
-            <X size={20} />
-          </button>
+          <Button variant="ghost" size="icon" onClick={handleClose} aria-label={t('common.close')}>
+            <X aria-hidden size={20} />
+          </Button>
         </div>
 
         {/* Step progress */}
         <div className="flex gap-1 px-6 pt-4">
           {STEP_KEYS.map((stepKey, i) => (
-            <div key={stepKey} className="flex-1 flex flex-col items-center gap-1">
-              <div className="h-1.5 w-full rounded-full"
-                style={{ background: i <= step ? 'var(--accent)' : 'var(--border)' }} />
-              <span className="text-xs hidden sm:block"
-                style={{ color: i === step ? 'var(--accent-text)' : 'var(--text-tertiary)' }}>
+            <div key={stepKey} className="flex flex-1 flex-col items-center gap-1">
+              <div className={cn('h-1.5 w-full rounded-full', i <= step ? 'bg-brand' : 'bg-line')} />
+              <span className={cn('hidden text-xs sm:block', i === step ? 'text-brand-text' : 'text-fg-subtle')}>
                 {t(stepKey)}
               </span>
             </div>
@@ -788,46 +778,48 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
 
           {/* ── Step 0: Datei ─────────────────────────────────────────────── */}
           {step === 0 && (
             <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</label>
-                  <select value={month} onChange={e => setMonth(Number(e.target.value))} style={selectSt}>
+                  <label className="mb-1 block text-sm font-medium text-fg-muted">{t('common.month')}</label>
+                  <NativeSelect value={month} onChange={e => setMonth(Number(e.target.value))}>
                     {MONTH_KEYS.map((monthKey, i) => <option key={monthKey} value={i + 1}>{t(monthKey)}</option>)}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('imp.year')}</label>
-                  <select value={year} onChange={e => setYear(Number(e.target.value))} style={selectSt}>
+                  <label className="mb-1 block text-sm font-medium text-fg-muted">{t('imp.year')}</label>
+                  <NativeSelect value={year} onChange={e => setYear(Number(e.target.value))}>
                     {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
+                  </NativeSelect>
                 </div>
               </div>
 
               <div
-                className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-3 py-10 cursor-pointer"
-                style={{ borderColor: rawRows.length ? 'var(--success)' : 'var(--border)', background: 'var(--bg-subtle)' }}
+                className={cn(
+                  'flex cursor-pointer flex-col items-center justify-center gap-3 rounded-surface border-2 border-dashed bg-sunken py-10',
+                  rawRows.length ? 'border-positive' : 'border-line',
+                )}
                 onDragOver={e => e.preventDefault()}
                 onDrop={onDrop}
                 onClick={() => fileRef.current?.click()}
               >
                 {rawRows.length > 0 ? (
                   <>
-                    <div className="rounded-full p-3" style={{ background: 'var(--success-subtle)' }}>
-                      <Check size={28} style={{ color: 'var(--success)' }} />
+                    <div className="rounded-full bg-positive-soft p-3 text-positive">
+                      <Check aria-hidden size={28} />
                     </div>
-                    <p className="font-medium" style={{ color: 'var(--success)' }}>{fileName}</p>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('imp.rowsRead', { count: rawRows.length })}</p>
+                    <p className="font-medium text-positive">{fileName}</p>
+                    <p className="text-sm text-fg-subtle">{t('imp.rowsRead', { count: rawRows.length })}</p>
                   </>
                 ) : (
                   <>
-                    <Upload size={32} style={{ color: 'var(--text-tertiary)' }} />
-                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('imp.dropzoneTitle')}</p>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('imp.dropzoneHint')}</p>
+                    <Upload aria-hidden size={32} className="text-fg-subtle" />
+                    <p className="font-medium text-fg">{t('imp.dropzoneTitle')}</p>
+                    <p className="text-sm text-fg-subtle">{t('imp.dropzoneHint')}</p>
                   </>
                 )}
               </div>
@@ -835,15 +827,14 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
 
               {parseError && (
-                <div className="flex items-center gap-2 p-3 rounded-lg"
-                  style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}>
-                  <AlertTriangle size={16} style={{ color: 'var(--danger)' }} />
-                  <span className="text-sm" style={{ color: 'var(--danger)' }}>{parseError}</span>
+                <div className="flex items-center gap-2 rounded-control border border-critical/40 bg-critical-soft p-3 text-critical">
+                  <AlertTriangle aria-hidden size={16} />
+                  <span className="text-sm">{parseError}</span>
                 </div>
               )}
 
               {hashChecking && (
-                <p className="text-sm text-[color:var(--text-tertiary)]">{t('imp.hashChecking')}</p>
+                <p className="text-sm text-fg-subtle">{t('imp.hashChecking')}</p>
               )}
 
               {existingForFile && (
@@ -859,37 +850,37 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                     })}
                   </p>
                   <p>{t('imp.duplicateFile.hint')}</p>
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => openExistingImport(existingForFile.id)}
-                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--danger)] px-3 py-1.5 text-xs font-medium [@media(pointer:coarse)]:min-h-[40px]"
+                    className="mt-1 border-critical/40"
                   >
-                    <ExternalLink size={13} /> {t('imp.duplicateFile.open')}
-                  </button>
+                    <ExternalLink aria-hidden /> {t('imp.duplicateFile.open')}
+                  </Button>
                 </Notice>
               )}
 
               {rawRows.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium mb-2 flex items-center gap-1" style={{ color: 'var(--text-tertiary)' }}>
-                    <Eye size={13} /> {t('imp.previewRaw')}
+                  <p className="mb-2 flex items-center gap-1 text-xs font-medium text-fg-subtle">
+                    <Eye aria-hidden size={13} /> {t('imp.previewRaw')}
                   </p>
-                  <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+                  <div className="overflow-x-auto rounded-control border border-line">
                     <table className="w-full text-xs">
-                      <thead style={{ background: 'var(--bg-subtle)' }}>
+                      <thead className="bg-sunken">
                         <tr>
                           {headers.slice(0, 8).map(h => (
-                            <th key={h} className="px-3 py-2 text-start font-medium whitespace-nowrap"
-                              style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                            <th key={h} className="whitespace-nowrap px-3 py-2 text-start font-medium text-fg-subtle">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {previewRows.map((row, i) => (
-                          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                          <tr key={i} className="border-t border-line">
                             {headers.slice(0, 8).map(h => (
-                              <td key={h} className="px-3 py-2 whitespace-nowrap"
-                                style={{ color: 'var(--text-primary)' }}>
+                              <td key={h} className="whitespace-nowrap px-3 py-2 text-fg">
                                 {String(row[h] ?? '').slice(0, 24)}
                               </td>
                             ))}
@@ -906,7 +897,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {/* ── Step 1: Spalten ──────────────────────────────────────────── */}
           {step === 1 && (
             <div className="space-y-4">
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <p className="text-sm text-fg-muted">
                 {t('imp.mappingIntro')}
               </p>
 
@@ -955,26 +946,23 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {(Object.keys(COL_LABEL_KEYS) as (keyof ColMap)[]).map(key => (
                   <div key={key}>
-                    <label className="block text-xs font-medium mb-1"
-                      style={{ color: REQUIRED_COLS.includes(key) ? 'var(--accent-text)' : 'var(--text-secondary)' }}>
+                    <label className={cn('mb-1 block text-xs font-medium', REQUIRED_COLS.includes(key) ? 'text-brand-text' : 'text-fg-muted')}>
                       {t(COL_LABEL_KEYS[key])}{REQUIRED_COLS.includes(key) ? ' *' : ''}
                     </label>
-                    <select
+                    <NativeSelect
                       value={colMap[key]}
                       onChange={e => setColMap(prev => ({ ...prev, [key]: e.target.value }))}
-                      style={selectSt}
                     >
                       <option value="">{t('imp.optionUnmapped')}</option>
                       {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                    </select>
+                    </NativeSelect>
                   </div>
                 ))}
               </div>
               {!REQUIRED_COLS.every(k => colMap[k]) && (
-                <div className="flex items-center gap-2 p-3 rounded-lg"
-                  style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
-                  <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />
-                  <span className="text-sm" style={{ color: 'var(--warning)' }}>
+                <div className="flex items-center gap-2 rounded-control border border-caution/40 bg-caution-soft p-3 text-caution">
+                  <AlertTriangle aria-hidden size={14} />
+                  <span className="text-sm">
                     {t('imp.warnRequiredCols')}
                   </span>
                 </div>
@@ -994,7 +982,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
                 return (
                   <div className="space-y-2">
-                    <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>
+                    <p className="text-xs font-medium text-fg-subtle">
                       {t('imp.mappingDebugHeading')}
                     </p>
                     {fields.map(({ key, parser }) => {
@@ -1004,25 +992,23 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         : [];
                       const parsed  = samples.map(v => parser(v));
                       const allParsed = parsed.every(p => p !== null);
-                      const bg  = !col ? 'var(--bg-subtle)' : allParsed ? 'var(--success-subtle)' : 'var(--danger-subtle)';
-                      const bdr = !col ? 'var(--border)'    : allParsed ? 'var(--success)'         : 'var(--danger)';
-                      const tc  = !col ? 'var(--text-tertiary)' : allParsed ? 'var(--success)' : 'var(--danger)';
+                      const frame = !col ? 'border-line bg-sunken' : allParsed ? 'border-positive/40 bg-positive-soft' : 'border-critical/40 bg-critical-soft';
+                      const tc  = !col ? 'text-fg-subtle' : allParsed ? 'text-positive' : 'text-critical';
                       return (
-                        <div key={key} className="rounded-lg p-3 text-xs"
-                          style={{ background: bg, border: `1px solid ${bdr}` }}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-medium" style={{ color: tc }}>{t(COL_LABEL_KEYS[key])}</span>
-                            <span style={{ color: 'var(--text-tertiary)' }}>
+                        <div key={key} className={cn('rounded-control border p-3 text-xs', frame)}>
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className={cn('font-medium', tc)}>{t(COL_LABEL_KEYS[key])}</span>
+                            <span className="text-fg-subtle">
                               {col ? t('imp.columnNamed', { column: col }) : t('imp.unmapped')}
                             </span>
                           </div>
                           {col && (
-                            <div className="space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
+                            <div className="space-y-0.5 text-fg-muted">
                               {samples.map((raw, i) => (
                                 <div key={i}>
                                   {t('imp.rawValue')}: <code className="font-mono">{String(raw ?? 'null')}</code>
                                   {' → '}
-                                  <b style={{ color: parsed[i] ? 'var(--success)' : 'var(--danger)' }}>
+                                  <b className={parsed[i] ? 'text-positive' : 'text-critical'}>
                                     {parsed[i] ?? t('imp.parseFailed')}
                                   </b>
                                 </div>
@@ -1041,25 +1027,24 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {/* ── Step 2: Fahrer ───────────────────────────────────────────── */}
           {step === 2 && (
             <div className="space-y-4">
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <p className="text-sm text-fg-muted">
                 {t('imp.driversIntro')}
               </p>
               {driverMatches.length === 0 && (
-                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('imp.noDriverNames')}</p>
+                <p className="text-sm text-fg-subtle">{t('imp.noDriverNames')}</p>
               )}
               {driverMatches.map((dm, idx) => (
-                <div key={dm.importedName} className="rounded-lg p-4 flex items-center gap-4"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                  <div className="rounded-full p-2" style={{ background: 'var(--accent-subtle)', flexShrink: 0 }}>
-                    <User size={16} style={{ color: 'var(--accent-text)' }} />
+                <div key={dm.importedName} className="flex items-center gap-4 rounded-control border border-line bg-sunken p-4">
+                  <div className="shrink-0 rounded-full bg-brand-soft p-2 text-brand-text">
+                    <User aria-hidden size={16} />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{dm.importedName}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('imp.nameFoundInFile')}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-fg">{dm.importedName}</p>
+                    <p className="text-xs text-fg-subtle">{t('imp.nameFoundInFile')}</p>
                   </div>
-                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} className="rtl:-scale-x-100" />
-                  <div className="flex-1 min-w-0">
-                    <select
+                  <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle rtl:-scale-x-100" />
+                  <div className="min-w-0 flex-1">
+                    <NativeSelect
                       value={dm.matchedDriverId || ''}
                       onChange={e => {
                         const drv = drivers.find(d => d.id === e.target.value);
@@ -1070,29 +1055,26 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                           confirmed: true,
                         } : d));
                       }}
-                      style={selectSt}
                     >
                       <option value="">{t('imp.optionNoDriver')}</option>
                       {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                    </select>
+                    </NativeSelect>
                   </div>
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setDriverMatches(prev => prev.map((d, i) =>
                       i === idx ? { ...d, confirmed: true } : d))}
-                    className="rounded-lg px-3 py-1.5 text-xs font-medium"
-                    style={dm.confirmed
-                      ? { background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid var(--success)' }
-                      : { background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                    className={dm.confirmed ? 'border-positive/40 bg-positive-soft text-positive' : undefined}
                   >
-                    {dm.confirmed ? <Check size={14} /> : 'OK'}
-                  </button>
+                    {dm.confirmed ? <Check aria-hidden /> : 'OK'}
+                  </Button>
                 </div>
               ))}
               {driverMatches.some(d => !d.confirmed) && (
-                <div className="flex items-center gap-2 p-3 rounded-lg"
-                  style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
-                  <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />
-                  <span className="text-sm" style={{ color: 'var(--warning)' }}>
+                <div className="flex items-center gap-2 rounded-control border border-caution/40 bg-caution-soft p-3 text-caution">
+                  <AlertTriangle aria-hidden size={14} />
+                  <span className="text-sm">
                     {t('imp.warnConfirmDrivers')}
                   </span>
                 </div>
@@ -1103,18 +1085,17 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {/* ── Step 3: Fahrzeuge ────────────────────────────────────────── */}
           {step === 3 && (
             <div className="space-y-4">
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <p className="text-sm text-fg-muted">
                 {t('imp.carsIntro')}
               </p>
               {carMatches.length === 0 && (
-                <div className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                  <CarIcon size={18} style={{ color: 'var(--text-tertiary)', flexShrink: 0, marginTop: 2 }} />
+                <div className="flex items-start gap-3 rounded-control border border-line bg-sunken p-4">
+                  <CarIcon aria-hidden size={18} className="mt-0.5 shrink-0 text-fg-subtle" />
                   <div>
-                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    <p className="text-sm font-medium text-fg">
                       {t('imp.noPlateColumnTitle')}
                     </p>
-                    <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                    <p className="mt-1 text-sm text-fg-subtle">
                       {colMap.car_identifier
                         ? t('imp.noPlateColumnMapped', { column: colMap.car_identifier })
                         : t('imp.noPlateColumnUnmapped')}
@@ -1124,29 +1105,27 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 </div>
               )}
               {carMatches.map((cm, idx) => (
-                <div key={cm.importedPlate} className="rounded-lg p-4 flex items-center gap-4"
-                  style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                  <div className="rounded-full p-2" style={{ background: 'var(--warning-subtle)', flexShrink: 0 }}>
-                    <CarIcon size={16} style={{ color: 'var(--warning)' }} />
+                <div key={cm.importedPlate} className="flex items-center gap-4 rounded-control border border-line bg-sunken p-4">
+                  <div className="shrink-0 rounded-full bg-caution-soft p-2 text-caution">
+                    <CarIcon aria-hidden size={16} />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{cm.importedPlate}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('imp.plateFromFile')}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-fg">{cm.importedPlate}</p>
+                    <p className="text-xs text-fg-subtle">{t('imp.plateFromFile')}</p>
                   </div>
-                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} className="rtl:-scale-x-100" />
-                  <div className="flex-1 min-w-0">
-                    <select
+                  <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle rtl:-scale-x-100" />
+                  <div className="min-w-0 flex-1">
+                    <NativeSelect
                       value={cm.matchedCarId || ''}
                       onChange={e => {
                         setCarMatches(prev => prev.map((c, i) => i === idx
                           ? { ...c, matchedCarId: e.target.value || null }
                           : c));
                       }}
-                      style={selectSt}
                     >
                       <option value="">{t('imp.optionNoCar')}</option>
                       {cars.map(c => <option key={c.id} value={c.id}>{c.plate}{c.model ? ` — ${c.model}` : ''}</option>)}
-                    </select>
+                    </NativeSelect>
                   </div>
                 </div>
               ))}
@@ -1157,7 +1136,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {step === 4 && (
             <div className="space-y-4">
               {previewLoading && (
-                <p className="text-sm text-[color:var(--text-tertiary)]">{t('imp.previewLoading')}</p>
+                <p className="text-sm text-fg-subtle">{t('imp.previewLoading')}</p>
               )}
 
               {/* Summary cards — the rows that will be written, by status */}
@@ -1165,19 +1144,19 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 const { summary } = preview;
                 const duplicates = preview.inFileDuplicates + preview.storedDuplicates;
                 const cards: { labelKey: TranslationKey; value: string | number; tone: string }[] = [
-                  { labelKey: 'imp.card.completed',     value: summary.completed,   tone: 'text-[color:var(--accent)]' },
-                  { labelKey: 'imp.card.canceledTrips', value: summary.cancelled,   tone: summary.cancelled > 0 ? 'text-[color:var(--warning)]' : 'text-[color:var(--text-tertiary)]' },
-                  { labelKey: 'imp.card.unknownStatus', value: summary.unknown,     tone: summary.unknown > 0 ? 'text-[color:var(--danger)]' : 'text-[color:var(--text-tertiary)]' },
-                  { labelKey: 'imp.card.needsReview',   value: summary.needsReview, tone: summary.needsReview > 0 ? 'text-[color:var(--warning)]' : 'text-[color:var(--success)]' },
-                  { labelKey: 'imp.card.duplicates',    value: duplicates,          tone: duplicates > 0 ? 'text-[color:var(--warning)]' : 'text-[color:var(--text-tertiary)]' },
-                  { labelKey: 'imp.card.monthYear',     value: `${month}/${year}`,  tone: 'text-[color:var(--text-primary)]' },
+                  { labelKey: 'imp.card.completed',     value: summary.completed,   tone: 'text-brand-text' },
+                  { labelKey: 'imp.card.canceledTrips', value: summary.cancelled,   tone: summary.cancelled > 0 ? 'text-caution' : 'text-fg-subtle' },
+                  { labelKey: 'imp.card.unknownStatus', value: summary.unknown,     tone: summary.unknown > 0 ? 'text-critical' : 'text-fg-subtle' },
+                  { labelKey: 'imp.card.needsReview',   value: summary.needsReview, tone: summary.needsReview > 0 ? 'text-caution' : 'text-positive' },
+                  { labelKey: 'imp.card.duplicates',    value: duplicates,          tone: duplicates > 0 ? 'text-caution' : 'text-fg-subtle' },
+                  { labelKey: 'imp.card.monthYear',     value: `${month}/${year}`,  tone: 'text-fg' },
                 ];
                 return (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     {cards.map(card => (
-                      <div key={card.labelKey} className="rounded-lg p-3 border border-[color:var(--border)] bg-[color:var(--bg-subtle)]">
-                        <p className="text-xs text-[color:var(--text-tertiary)]">{t(card.labelKey)}</p>
-                        <p className={`text-xl font-bold mt-1 tabular-nums ${card.tone}`}>{card.value}</p>
+                      <div key={card.labelKey} className="rounded-control border border-line bg-sunken p-3">
+                        <p className="text-xs text-fg-subtle">{t(card.labelKey)}</p>
+                        <p className={`mt-1 text-xl font-bold tabular-nums ${card.tone}`}>{card.value}</p>
                       </div>
                     ))}
                   </div>
@@ -1186,34 +1165,33 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
               {/* Duplicate import warning overlay */}
               {showDuplicateWarning && conflictingImports.length > 0 && (
-                <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--bg-surface)', border: '2px solid var(--warning)', boxShadow: 'var(--shadow-lg)' }}>
+                <div className="glass-card space-y-4 rounded-surface border-2 border-caution p-5">
                   <div className="flex items-center gap-3">
-                    <div className="rounded-lg p-2" style={{ background: 'var(--warning-subtle)' }}>
-                      <AlertTriangle size={20} style={{ color: 'var(--warning)' }} />
+                    <div className="rounded-control bg-caution-soft p-2 text-caution">
+                      <AlertTriangle aria-hidden size={20} />
                     </div>
                     <div>
-                      <h4 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                      <h4 className="text-sm font-semibold text-fg">
                         {t('imp.duplicateTitle')}
                       </h4>
-                      <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                      <p className="mt-0.5 text-xs text-fg-subtle">
                         {t(MONTH_KEYS[month - 1])} {year}
                       </p>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>{t('imp.existingImports')}</p>
+                    <p className="text-xs font-medium text-fg-subtle">{t('imp.existingImports')}</p>
                     {conflictingImports.map(imp => (
-                      <div key={imp.id} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm"
-                        style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                      <div key={imp.id} className="flex items-center justify-between rounded-control border border-line bg-sunken px-3 py-2 text-sm">
                         <div>
-                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{imp.file_name}</span>
-                          <span className="text-xs ms-2" style={{ color: 'var(--text-tertiary)' }}>
+                          <span className="font-medium text-fg">{imp.file_name}</span>
+                          <span className="ms-2 text-xs text-fg-subtle">
                             {t('imp.tripCount', { count: imp.row_count })} — {format(new Date(imp.imported_at), 'dd.MM.yyyy HH:mm')}
                           </span>
                         </div>
                         {onDeleteImport && (
-                          <label className="flex items-center gap-1.5 cursor-pointer">
+                          <label className="flex cursor-pointer items-center gap-1.5">
                             <input
                               type="radio"
                               name="replaceImport"
@@ -1221,7 +1199,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                               onChange={() => setReplaceImportId(replaceImportId === imp.id ? null : imp.id)}
                               className="w-3.5 h-3.5"
                             />
-                            <span className="text-xs" style={{ color: 'var(--danger)' }}>{t('imp.replace')}</span>
+                            <span className="text-xs text-critical">{t('imp.replace')}</span>
                           </label>
                         )}
                       </div>
@@ -1229,20 +1207,19 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   </div>
 
                   {replaceImportId && (
-                    <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
+                    <div className="rounded-control bg-critical-soft px-3 py-2.5 text-xs text-critical">
                       {t('imp.replaceWarning')}
                     </div>
                   )}
 
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <button
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
+                      variant="secondary"
                       onClick={() => { setShowDuplicateWarning(false); setReplaceImportId(null); }}
-                      className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                      style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                     >
                       {t('common.cancel')}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => {
                         setShowDuplicateWarning(false);
                         setReplaceImportId(null);
@@ -1250,24 +1227,21 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         if (preview) void doImport(preview.rows, null);
                       }}
                       disabled={importing || !preview}
-                      className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                      style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                     >
-                      <Plus size={14} /> {t('imp.importAdditionally')}
-                    </button>
+                      <Plus aria-hidden /> {t('imp.importAdditionally')}
+                    </Button>
                     {replaceImportId && onDeleteImport && (
-                      <button
+                      <Button
+                        variant="danger"
                         onClick={() => {
                           setShowDuplicateWarning(false);
                           if (preview) void doImport(preview.rows, replaceImportId);
                         }}
                         disabled={importing || replacingImport || previewLoading || !preview}
-                        className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                        style={{ background: 'var(--danger-solid)', color: 'white' }}
                       >
-                        <RefreshCw size={14} />
+                        <RefreshCw aria-hidden />
                         {replacingImport ? t('imp.replacing') : t('imp.replaceExisting')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -1306,7 +1280,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                     {summary.needsReview > 0 && (
                       <Notice tone="warning">
                         <p>{t('imp.notice.needsReview', { count: summary.needsReview })}</p>
-                        <ul className="list-disc ps-5 text-xs text-[color:var(--text-secondary)]">
+                        <ul className="list-disc ps-5 text-xs text-fg-muted">
                           {reasons.map(reason => (
                             <li key={reason}>
                               {t('imp.reasonCount', { label: t(REASON_LABEL_KEYS[reason]), count: summary.reasons[reason] })}
@@ -1314,7 +1288,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                           ))}
                         </ul>
                         {build.sampleUnreadableStart.length > 0 && (
-                          <p className="text-xs text-[color:var(--text-secondary)]">
+                          <p className="text-xs text-fg-muted">
                             {t('imp.column')}: <b>"{colMap.start_time}"</b> — {t('imp.examples')}:{' '}
                             <span className="font-mono">{build.sampleUnreadableStart.map(v => `"${String(v)}"`).join(', ')}</span>
                           </p>
@@ -1351,7 +1325,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                           })}
                         </p>
                         {build.sampleUnreadableOrderTransmission.length > 0 && (
-                          <p className="text-xs text-[color:var(--text-secondary)]">
+                          <p className="text-xs text-fg-muted">
                             {t('imp.examples')}:{' '}
                             <span className="font-mono">
                               {build.sampleUnreadableOrderTransmission.map(v => `"${String(v)}"`).join(', ')}
@@ -1374,24 +1348,22 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               })()}
 
               {unmatchedDrivers > 0 && (
-                <div className="flex items-start gap-2 p-3 rounded-lg"
-                  style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
-                  <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 2 }} />
-                  <p className="text-sm" style={{ color: 'var(--warning)' }}>
+                <div className="flex items-start gap-2 rounded-control border border-caution/40 bg-caution-soft p-3 text-caution">
+                  <AlertTriangle aria-hidden size={14} className="mt-0.5 shrink-0" />
+                  <p className="text-sm">
                     {t('imp.unmatchedDriversNotice', { count: unmatchedDrivers })}
                   </p>
                 </div>
               )}
 
               {preview && validRows.length === 0 && (
-                <div className="flex items-start gap-2 p-4 rounded-lg"
-                  style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}>
-                  <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
+                <div className="flex items-start gap-2 rounded-control border border-critical/40 bg-critical-soft p-4">
+                  <AlertTriangle aria-hidden size={16} className="mt-0.5 shrink-0 text-critical" />
                   <div>
-                    <p className="text-sm font-medium" style={{ color: 'var(--danger)' }}>
+                    <p className="text-sm font-medium text-critical">
                       {t('imp.noValidTripsTitle')}
                     </p>
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                    <p className="mt-1 text-xs text-fg-muted">
                       {t('imp.noValidTripsHint')}
                     </p>
                   </div>
@@ -1401,19 +1373,19 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               {/* Preview table: the start as the file's clock read it, seconds kept */}
               {validRows.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium mb-2 text-[color:var(--text-tertiary)]">
+                  <p className="mb-2 text-xs font-medium text-fg-subtle">
                     {t('imp.previewTrips')}
                   </p>
-                  <div className="overflow-x-auto rounded-lg border border-[color:var(--border)]">
+                  <div className="overflow-x-auto rounded-control border border-line">
                     <table className="w-full text-xs">
-                      <thead className="bg-[color:var(--bg-subtle)]">
+                      <thead className="bg-sunken">
                         <tr>
                           {([
                             'common.date', 'imp.th.startAt', 'imp.th.endAt', 'imp.th.originalDriver',
                             'imp.th.plate', 'imp.th.price', 'imp.th.status',
                           ] as TranslationKey[]).map(headerKey => (
                             <th key={headerKey}
-                              className="px-2 py-2 text-start font-medium whitespace-nowrap text-[color:var(--text-tertiary)]">
+                              className="whitespace-nowrap px-2 py-2 text-start font-medium text-fg-subtle">
                               {t(headerKey)}
                             </th>
                           ))}
@@ -1421,16 +1393,16 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       </thead>
                       <tbody>
                         {validRows.slice(0, 10).map((r, i) => (
-                          <tr key={i} className="border-t border-[color:var(--border)] text-[color:var(--text-primary)]">
+                          <tr key={i} className="border-t border-line text-fg">
                             <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">{formatIsoDate(r.trip_date)}</td>
                             <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">{r.start_at ? formatSourceWall(r.start_at) : (r.start_time ?? '—')}</td>
                             <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">{r.end_at ? formatSourceWall(r.end_at) : (r.end_time ?? '—')}</td>
                             <td className="px-2 py-1.5 whitespace-nowrap">{r.original_driver_name || '—'}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap text-[color:var(--text-secondary)]">{r.car_identifier || '-'}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap tabular-nums text-[color:var(--accent-text)]">{formatEuro(r.price_amount)}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap text-fg-muted">{r.car_identifier || '-'}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap tabular-nums text-brand-text">{formatEuro(r.price_amount)}</td>
                             <td className="px-2 py-1.5 whitespace-nowrap">
                               {t(STATUS_LABEL_KEYS[r.trip_status])}
-                              {r.needs_review && <span className="ms-1 text-[color:var(--warning)]">· {t('imp.th.review')}</span>}
+                              {r.needs_review && <span className="ms-1 text-caution">· {t('imp.th.review')}</span>}
                             </td>
                           </tr>
                         ))}
@@ -1440,8 +1412,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 </div>
               )}
 
-              <div className="p-3 rounded-lg text-sm"
-                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              <div className="rounded-control border border-line bg-sunken p-3 text-sm text-fg-muted">
                 {t('imp.immutableNote')}
               </div>
             </div>
@@ -1449,19 +1420,17 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4"
-          style={{ borderTop: '1px solid var(--border)' }}>
-          <button
+        <div className="flex items-center justify-between border-t border-line px-6 py-4">
+          <Button
+            variant="secondary"
             onClick={step === 0 ? handleClose : () => setStep(s => s - 1)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
-            <ChevronLeft size={16} className="rtl:-scale-x-100" />
+            <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
             {step === 0 ? t('common.cancel') : t('common.back')}
-          </button>
+          </Button>
 
           {step < STEP_KEYS.length - 1 ? (
-            <button
+            <Button
               onClick={() => {
                 if (step === 1) buildDriverMatches();
                 if (step === 2) buildCarMatches();
@@ -1470,20 +1439,16 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 setStep(next);
               }}
               disabled={!canGoNext()}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-opacity"
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: canGoNext() ? 1 : 0.45 }}
             >
-              {t('imp.next')} <ChevronRight size={16} className="rtl:-scale-x-100" />
-            </button>
+              {t('imp.next')} <ChevronRight aria-hidden className="rtl:-scale-x-100" />
+            </Button>
           ) : (
-            <button
+            <Button
               onClick={handleImport}
               disabled={importing || previewLoading || validRows.length === 0}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-opacity"
-              style={{ background: 'var(--success-solid)', color: 'white', opacity: importing || previewLoading || validRows.length === 0 ? 0.5 : 1 }}
             >
               {importing ? t('imp.importing') : t('imp.importTrips', { count: validRows.length })}
-            </button>
+            </Button>
           )}
         </div>
       </div>

@@ -119,15 +119,16 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
     warning: AlertTriangle,
   };
 
-  const colorMap: Record<ToastType, { bg: string; border: string; text: string; icon: string }> = {
-    success: { bg: 'var(--success-subtle, rgba(22,163,74,0.1))', border: 'var(--success, #16a34a)', text: 'var(--success, #16a34a)', icon: 'var(--success, #16a34a)' },
-    error:   { bg: 'var(--danger-subtle, rgba(220,38,38,0.1))', border: 'var(--danger, #dc2626)', text: 'var(--danger, #dc2626)', icon: 'var(--danger, #dc2626)' },
-    info:    { bg: 'var(--accent-subtle, rgba(59,130,246,0.1))', border: 'var(--accent, #3b82f6)', text: 'var(--accent-text, #3b82f6)', icon: 'var(--accent-text, #3b82f6)' },
-    warning: { bg: 'var(--warning-subtle, rgba(217,119,6,0.1))', border: 'var(--warning, #d97706)', text: 'var(--warning, #d97706)', icon: 'var(--warning, #d97706)' },
+  // Presentation (phase 5): status by token, icon and words, never colour alone.
+  const toneMap: Record<ToastType, { ring: string; text: string }> = {
+    success: { ring: 'border-positive/30', text: 'text-positive' },
+    error: { ring: 'border-critical/30', text: 'text-critical' },
+    info: { ring: 'border-brand/30', text: 'text-brand-text' },
+    warning: { ring: 'border-caution/30', text: 'text-caution' },
   };
 
   const Icon = icons[toast.type] || Info;
-  const colors = colorMap[toast.type] || colorMap.info;
+  const tone = toneMap[toast.type] || toneMap.info;
 
   return (
     <div
@@ -135,25 +136,18 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
       // outside it. This toast is outside it, so it switches them back on and keeps
       // its presses from the document: closing a message must not close the form.
       onPointerDown={(event) => event.stopPropagation()}
-      className="pointer-events-auto flex max-w-full items-start gap-3 rounded-lg bg-overlay p-4 shadow-overlay motion-safe:animate-ui-fade-in"
-      style={{
-        // Over a solid surface: the dark theme's tints are 10 % washes, and a toast
-        // in the middle of the page has text behind it.
-        backgroundImage: `linear-gradient(${colors.bg}, ${colors.bg})`,
-        border: `1px solid ${colors.border}`,
-        color: colors.text,
-      }}
+      className={`pointer-events-auto flex max-w-full items-start gap-3 rounded-tile border glass-strong p-4 font-ui motion-safe:animate-ui-fade-in ${tone.ring}`}
       role="alert"
       aria-live="polite"
     >
-      <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: colors.icon }} />
+      <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${tone.text}`} aria-hidden="true" />
       <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{toast.title}</p>
-        {toast.message && <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{toast.message}</p>}
+        <p className="font-semibold text-sm text-fg">{toast.title}</p>
+        {toast.message && <p className="text-sm mt-1 text-fg-muted">{toast.message}</p>}
         {toast.action && (
           <button
             type="button"
-            className="mt-2 text-sm font-semibold underline"
+            className={`mt-2 text-sm font-semibold underline ${tone.text}`}
             onClick={() => {
               onRemove(toast.id);
               toast.action?.onClick();
@@ -165,8 +159,7 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
       </div>
       <button
         onClick={() => onRemove(toast.id)}
-        className="flex-shrink-0 transition-colors inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:-m-2"
-        style={{ color: 'var(--text-tertiary)' }}
+        className="flex-shrink-0 transition-colors text-fg-subtle hover:text-fg inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:-m-2"
         aria-label={t('common.close')}
       >
         <X className="w-4 h-4" />

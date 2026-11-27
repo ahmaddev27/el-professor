@@ -9,6 +9,7 @@ import type { CompanySettings } from '../types/settings';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { ACTIVE_DRIVER_STATUS } from '../utils/driverStatus';
+import { Button, Field, Input, NativeSelect } from './ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -431,19 +432,6 @@ async function exportPDF(data: MietwagenData, settings: CompanySettings | null):
   pdf.save(`Mietwagenauftrag_${safeNr}.pdf`);
 }
 
-// ─── Input style ──────────────────────────────────────────────────────────────
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-  width: '100%',
-};
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
@@ -568,237 +556,181 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black bg-opacity-60 overflow-y-auto py-6 px-4">
-      <div
-        className="w-full max-w-6xl rounded-xl flex flex-col"
-        style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-lg)' }}
-      >
+    <div className="glass-scrim fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-6">
+      <div className="glass-strong flex w-full max-w-6xl flex-col rounded-pane font-ui text-fg">
         {/* ── Modal header ── */}
-        <div
-          className="flex items-center justify-between px-6 py-4 shrink-0"
-          style={{ borderBottom: '1px solid var(--border)' }}
-        >
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <div style={{ background: 'var(--accent-subtle)', borderRadius: '0.5rem', padding: '0.5rem' }}>
-              <Car style={{ color: 'var(--accent-text)' }} className="w-6 h-6" />
+            <div className="rounded-tile bg-brand-soft p-2 text-brand-text">
+              <Car className="h-6 w-6" aria-hidden />
             </div>
             <div>
-              <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+              <h2 className="text-xl font-semibold text-fg">
                 {t('a4.mwTitle')}
               </h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              <p className="text-xs text-fg-subtle">
                 {t('a4.mwSubtitle')}
               </p>
             </div>
           </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-            onClick={onClose}
-            style={{ color: 'var(--text-tertiary)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t('common.close')}>
+            <X aria-hidden />
+          </Button>
         </div>
 
         {/* ── Two-column layout: form + preview ── */}
-        <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
 
           {/* ── Left: Form ── */}
-          <div
-            className="w-full lg:w-96 shrink-0 overflow-y-auto p-5 space-y-5"
-            style={{ borderRight: '1px solid var(--border)' }}
-          >
+          <div className="grid w-full shrink-0 grid-cols-1 content-start gap-5 overflow-y-auto border-line p-5 lg:w-96 lg:border-e">
             {/* Auftragsdaten */}
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                 {t('a4.mwSectionOrder')}
               </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldOrderNo')}</label>
-                  <input style={inputStyle} value={data.auftragNr} onChange={set('auftragNr')} />
+              <div className="grid grid-cols-1 gap-3">
+                <Field label={t('a4.mwFieldOrderNo')}>
+                  <Input value={data.auftragNr} onChange={set('auftragNr')} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label={t('a4.mwFieldReceivedDate')}>
+                    <Input type="date" value={data.datumAuftragseingang} onChange={set('datumAuftragseingang')} />
+                  </Field>
+                  <Field label={t('a4.mwFieldTime')}>
+                    <Input type="time" value={data.uhrzeitAuftragseingang} onChange={set('uhrzeitAuftragseingang')} />
+                  </Field>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldReceivedDate')}</label>
-                    <input type="date" style={inputStyle} value={data.datumAuftragseingang} onChange={set('datumAuftragseingang')} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldTime')}</label>
-                    <input type="time" style={inputStyle} value={data.uhrzeitAuftragseingang} onChange={set('uhrzeitAuftragseingang')} />
-                  </div>
+                  <Field label={t('a4.mwFieldTripStartDate')}>
+                    <Input type="date" value={data.fahrtbeginnDatum} onChange={set('fahrtbeginnDatum')} />
+                  </Field>
+                  <Field label={t('a4.mwFieldTripStartTime')}>
+                    <Input type="time" value={data.fahrtbeginnUhrzeit} onChange={set('fahrtbeginnUhrzeit')} />
+                  </Field>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldTripStartDate')}</label>
-                    <input type="date" style={inputStyle} value={data.fahrtbeginnDatum} onChange={set('fahrtbeginnDatum')} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldTripStartTime')}</label>
-                    <input type="time" style={inputStyle} value={data.fahrtbeginnUhrzeit} onChange={set('fahrtbeginnUhrzeit')} />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldAcceptedBy')}</label>
-                  <input style={inputStyle} value={data.angenommenDurch} onChange={set('angenommenDurch')} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldOrderType')}</label>
-                  <input style={inputStyle} value={data.artDesAuftrags} onChange={set('artDesAuftrags')} />
-                </div>
+                <Field label={t('a4.mwFieldAcceptedBy')}>
+                  <Input value={data.angenommenDurch} onChange={set('angenommenDurch')} />
+                </Field>
+                <Field label={t('a4.mwFieldOrderType')}>
+                  <Input value={data.artDesAuftrags} onChange={set('artDesAuftrags')} />
+                </Field>
               </div>
             </section>
 
             {/* Fahrer & Fahrzeug */}
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                 {t('a4.mwSectionDriverVehicle')}
               </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
-                  <select style={{ ...inputStyle, appearance: 'none' }} value={selectedDriverId} onChange={e => handleDriverChange(e.target.value)}>
+              <div className="grid grid-cols-1 gap-3">
+                <Field label={t('common.driver')}>
+                  <NativeSelect value={selectedDriverId} onChange={e => handleDriverChange(e.target.value)}>
                     <option value="">{t('a4.mwSelectDriver')}</option>
                     {drivers.map(d => (
                       <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldVehiclePlate')}</label>
-                  <select style={{ ...inputStyle, appearance: 'none' }} value={selectedCarId} onChange={e => handleCarChange(e.target.value)}>
+                  </NativeSelect>
+                </Field>
+                <Field
+                  label={t('a4.mwFieldVehiclePlate')}
+                  hint={data.kennzeichen ? t('a4.mwPlateHint', { plate: data.kennzeichen }) : undefined}
+                >
+                  <NativeSelect value={selectedCarId} onChange={e => handleCarChange(e.target.value)}>
                     <option value="">{t('a4.mwSelectVehicle')}</option>
                     {cars.map(c => (
                       <option key={c.id} value={c.id}>{c.kennzeichen}</option>
                     ))}
-                  </select>
-                  {data.kennzeichen && (
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('a4.mwPlateHint', { plate: data.kennzeichen })}</p>
-                  )}
-                </div>
+                  </NativeSelect>
+                </Field>
               </div>
             </section>
 
             {/* Fahrgast */}
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                 {t('a4.mwSectionPassenger')}
               </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldName')}</label>
-                  <input style={inputStyle} value={data.fahrgast} onChange={set('fahrgast')} placeholder={t('a4.mwSectionPassenger')} />
-                </div>
+              <div className="grid grid-cols-1 gap-3">
+                <Field label={t('a4.mwFieldName')}>
+                  <Input value={data.fahrgast} onChange={set('fahrgast')} placeholder={t('a4.mwSectionPassenger')} />
+                </Field>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPhone')}</label>
-                    <input style={inputStyle} value={data.telefon} onChange={set('telefon')} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPassengerCount')}</label>
-                    <input type="number" min="1" style={inputStyle} value={data.anzahlFahrgaeste} onChange={set('anzahlFahrgaeste')} />
-                  </div>
+                  <Field label={t('a4.mwFieldPhone')}>
+                    <Input value={data.telefon} onChange={set('telefon')} />
+                  </Field>
+                  <Field label={t('a4.mwFieldPassengerCount')}>
+                    <Input type="number" min="1" value={data.anzahlFahrgaeste} onChange={set('anzahlFahrgaeste')} />
+                  </Field>
                 </div>
               </div>
             </section>
 
             {/* Route */}
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                 {t('a4.mwSectionRoute')}
               </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPickup')}</label>
-                  <input style={inputStyle} value={data.abholadresse} onChange={set('abholadresse')} placeholder={t('a4.mwAddressPlaceholder')} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldDestination')}</label>
-                  <input style={inputStyle} value={data.zieladresse} onChange={set('zieladresse')} placeholder={t('a4.mwAddressPlaceholder')} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldStopovers')}</label>
-                  <input style={inputStyle} value={data.zwischenziele} onChange={set('zwischenziele')} placeholder={t('a4.mwOptional')} />
-                </div>
+              <div className="grid grid-cols-1 gap-3">
+                <Field label={t('a4.mwFieldPickup')}>
+                  <Input value={data.abholadresse} onChange={set('abholadresse')} placeholder={t('a4.mwAddressPlaceholder')} />
+                </Field>
+                <Field label={t('a4.mwFieldDestination')}>
+                  <Input value={data.zieladresse} onChange={set('zieladresse')} placeholder={t('a4.mwAddressPlaceholder')} />
+                </Field>
+                <Field label={t('a4.mwFieldStopovers')}>
+                  <Input value={data.zwischenziele} onChange={set('zwischenziele')} placeholder={t('a4.mwOptional')} />
+                </Field>
               </div>
             </section>
 
             {/* Zahlung */}
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                 {t('a4.mwSectionPayment')}
               </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPaymentMethod')}</label>
+              <div className="grid grid-cols-1 gap-3">
+                <Field label={t('a4.mwFieldPaymentMethod')}>
                   {/* The option is also the value, and that value is printed verbatim on the
                       Mietwagenauftrag — so these stay German in both languages. */}
-                  <select style={{ ...inputStyle, appearance: 'none' }} value={data.zahlungsart} onChange={set('zahlungsart')}>
+                  <NativeSelect value={data.zahlungsart} onChange={set('zahlungsart')}>
                     {['Bargeld', 'Karte', 'Überweisung', 'Rechnung', 'Sonstiges'].map(z => (
                       <option key={z} value={z}>{z}</option>
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldFare')}</label>
-                  <input type="number" min="0" step="0.01" style={inputStyle} value={data.betrag} onChange={set('betrag')} placeholder="0,00" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldRemarks')}</label>
-                  <select style={{ ...inputStyle, appearance: 'none' }} value={data.bemerkungen} onChange={set('bemerkungen')}>
+                  </NativeSelect>
+                </Field>
+                <Field label={t('a4.mwFieldFare')}>
+                  <Input type="number" min="0" step="0.01" value={data.betrag} onChange={set('betrag')} placeholder="0,00" />
+                </Field>
+                <Field label={t('a4.mwFieldRemarks')}>
+                  <NativeSelect value={data.bemerkungen} onChange={set('bemerkungen')}>
                     <option value="">{t('a4.mwRemarkNone')}</option>
                     {/* Printed verbatim on the Mietwagenauftrag — German in both languages. */}
                     {['Auslandsfahrt', 'Flughafenfahrt', 'Wartezeit', 'Sonderfahrt', 'Sonstiges'].map(b => (
                       <option key={b} value={b}>{b}</option>
                     ))}
-                  </select>
-                </div>
+                  </NativeSelect>
+                </Field>
               </div>
             </section>
           </div>
 
           {/* ── Right: Preview ── */}
-          <div className="flex-1 overflow-y-auto p-5" style={{ background: 'var(--bg-subtle)' }}>
-            <div
-              className="mx-auto shadow-lg"
-              style={{
-                maxWidth: 794,
-                background: '#fff',
-                borderRadius: 4,
-                overflow: 'hidden',
-              }}
-            >
+          <div className="min-w-0 flex-1 overflow-y-auto bg-sunken p-5">
+            <div className="mx-auto max-w-[794px] overflow-hidden rounded-tight shadow-overlay">
               <A4Document data={data} settings={settings} />
             </div>
           </div>
         </div>
 
         {/* ── Footer actions ── */}
-        <div
-          className="flex items-center justify-end gap-3 px-6 py-4 shrink-0"
-          style={{ borderTop: '1px solid var(--border)' }}
-        >
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg transition-colors text-sm"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-          >
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-line px-6 py-4">
+          <Button variant="secondary" onClick={onClose}>
             {t('common.close')}
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={exporting}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-opacity"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: exporting ? 0.7 : 1 }}
-            onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = 'var(--accent-hover)'; }}
-            onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-          >
-            <Download className="w-4 h-4" />
+          </Button>
+          <Button onClick={handleExport} disabled={exporting}>
+            <Download className="h-4 w-4" />
             {exporting ? t('a4.mwExporting') : t('a4.mwExportPdf')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

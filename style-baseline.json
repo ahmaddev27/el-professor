@@ -1,14 +1,6 @@
 {
   "note": "Per-file counts of inline styles and hard-coded colours (scripts/style-ratchet.mjs). Lower them as screens move to the design system; they must never rise.",
   "files": {
-    "src/App.tsx": {
-      "style": 0,
-      "color": 16
-    },
-    "src/components/ConfirmationModal.tsx": {
-      "style": 11,
-      "color": 2
-    },
     "src/components/DriverSalarySummaryCard.tsx": {
       "style": 35,
       "color": 74
@@ -17,73 +9,25 @@
       "style": 6,
       "color": 2
     },
-    "src/components/FahrtenbuchImportModal.tsx": {
-      "style": 94,
-      "color": 4
-    },
-    "src/components/FinalizePlanningModal.tsx": {
-      "style": 50,
-      "color": 32
-    },
     "src/components/GehaltsquittungDocument.tsx": {
       "style": 39,
       "color": 31
     },
-    "src/components/HistoricalHourTargetsManager.tsx": {
-      "style": 70,
-      "color": 41
-    },
-    "src/components/HistoricalReconciliationWizard.tsx": {
-      "style": 147,
-      "color": 106
-    },
     "src/components/HistoricalWorkingHoursWizard.tsx": {
-      "style": 985,
-      "color": 682
-    },
-    "src/components/LanguageSwitcher.tsx": {
       "style": 5,
-      "color": 0
+      "color": 11
     },
     "src/components/MietwagenauftragModal.tsx": {
-      "style": 155,
-      "color": 50
-    },
-    "src/components/MonatsplanungAppliedRuns.tsx": {
-      "style": 39,
-      "color": 37
-    },
-    "src/components/MonatsplanungAssignmentPreview.tsx": {
-      "style": 331,
-      "color": 344
-    },
-    "src/components/MonatsplanungStundennachweisPreview.tsx": {
-      "style": 207,
-      "color": 139
+      "style": 94,
+      "color": 48
     },
     "src/components/RoleModal.tsx": {
       "style": 2,
       "color": 0
     },
-    "src/components/SalaryDetailsModal.tsx": {
-      "style": 104,
-      "color": 2
-    },
-    "src/components/SalaryPaymentModal.tsx": {
-      "style": 37,
-      "color": 1
-    },
-    "src/components/SalaryPeriodsModal.tsx": {
-      "style": 20,
-      "color": 1
-    },
     "src/components/TrinkgeldQuittungModal.tsx": {
-      "style": 87,
-      "color": 37
-    },
-    "src/components/auth/EmphasizedText.tsx": {
-      "style": 1,
-      "color": 0
+      "style": 42,
+      "color": 34
     },
     "src/components/auth/GoogleButton.tsx": {
       "style": 0,
@@ -93,21 +37,9 @@
       "style": 1,
       "color": 0
     },
-    "src/contexts/ToastContext.tsx": {
-      "style": 5,
-      "color": 16
-    },
     "src/pages/AbrechnungPage.tsx": {
       "style": 48,
       "color": 121
-    },
-    "src/pages/CompanyPlannerPage.tsx": {
-      "style": 29,
-      "color": 15
-    },
-    "src/pages/LandingPage.tsx": {
-      "style": 325,
-      "color": 369
     },
     "src/pages/OverviewPage.tsx": {
       "style": 2,
@@ -118,20 +50,12 @@
       "color": 6
     },
     "src/pages/StundennachweisPage.tsx": {
-      "style": 154,
-      "color": 71
+      "style": 72,
+      "color": 29
     },
     "src/pages/SuperAdminDashboard.tsx": {
       "style": 1,
       "color": 0
-    },
-    "src/utils/overviewHelpers.ts": {
-      "style": 0,
-      "color": 4
-    },
-    "src/utils/warningCategories.ts": {
-      "style": 0,
-      "color": 15
     }
   }
 }

@@ -8,14 +8,12 @@ import { cn } from './ui';
  * Compact language picker for the app headers and the sign-in screen.
  *
  * `variant="ui"` is the design-system look, for the signed-out screens since
- * phase 5 batch 4 and for AppLayout's header since the frame moved: token
- * classes that follow the theme, a 40 px target on a touch screen, and
- * AdminLayout's header since 27.11.2026. `default` is the legacy header look,
- * and only the legal pages still draw it.
- * (A third variant, `dark`, painted the old always-dark sign-in screens;
- * nothing uses it any more.)
+ * phase 5 batch 4, for AppLayout's header since the frame moved, for
+ * AdminLayout's header since 27.11.2026 and for the legal pages since R5: token
+ * classes that follow the theme, a 40 px target on a touch screen. It is the
+ * only variant; the legacy `default` and the old `dark` one are gone.
  */
-const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 'default' }) => {
+const LanguageSwitcher: React.FC<{ variant?: 'ui' }> = ({ variant = 'ui' }) => {
   const { language, setLanguage, t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,18 +37,11 @@ const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 
   const isUi = variant === 'ui';
   const active = LANGUAGES.find(l => l.code === language);
 
-  // The legacy look, drawn with the legacy tokens; only `default` reads these.
-  const triggerStyle: React.CSSProperties = { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' };
-  const menuStyle: React.CSSProperties = { background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' };
-
   return (
     <div className={cn('relative', isUi && 'font-ui')} ref={containerRef}>
       <button
         onClick={() => setIsOpen(open => !open)}
-        className={isUi
-          ? 'flex h-9 items-center gap-1.5 rounded-control border border-line bg-raised px-2.5 text-xs font-semibold text-fg-muted transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:h-10'
-          : 'flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80'}
-        style={isUi ? undefined : triggerStyle}
+        className="flex h-9 items-center gap-1.5 rounded-control border border-line bg-raised px-2.5 text-xs font-semibold text-fg-muted transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:h-10"
         title={t('shell.language')}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
@@ -62,10 +53,7 @@ const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 
 
       {isOpen && (
         <div
-          className={isUi
-            ? 'absolute end-0 z-50 mt-1.5 w-40 overflow-hidden rounded-control border border-line bg-overlay p-1 shadow-overlay'
-            : 'absolute end-0 mt-1.5 w-40 rounded-xl overflow-hidden z-50 p-1'}
-          style={isUi ? undefined : menuStyle}
+          className="absolute end-0 z-50 mt-1.5 w-40 overflow-hidden rounded-control border border-line bg-overlay p-1 shadow-overlay"
           role="listbox"
         >
           {LANGUAGES.map(option => {
@@ -76,16 +64,7 @@ const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 
                 role="option"
                 aria-selected={selected}
                 onClick={() => { setLanguage(option.code); setIsOpen(false); }}
-                className={isUi
-                  ? 'flex h-9 w-full items-center gap-2.5 rounded-[calc(var(--radius-control)-2px)] px-2.5 text-sm text-fg-muted transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11'
-                  : 'w-full px-2.5 py-2 rounded-lg flex items-center gap-2.5 text-sm transition-colors'}
-                style={isUi ? undefined : { color: 'var(--text-secondary)' }}
-                onMouseEnter={isUi ? undefined : e => {
-                  (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)';
-                }}
-                onMouseLeave={isUi ? undefined : e => {
-                  (e.currentTarget as HTMLElement).style.background = 'transparent';
-                }}
+                className="flex h-9 w-full items-center gap-2.5 rounded-[calc(var(--radius-control)-2px)] px-2.5 text-sm text-fg-muted transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11"
               >
                 <span aria-hidden="true">{option.flag}</span>
                 <span className="flex-1 text-start">{option.label}</span>
