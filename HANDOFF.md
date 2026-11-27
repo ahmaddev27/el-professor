@@ -2,7 +2,7 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — the Glass remake, stage 1** (branch `design/remake-v2`, PR against `staging`; no migration, look only; **no CI ran**, the repository is private; the owner's approval point: the batches wait for it). Plan and decisions: `Docs/design/remake-v2/PLAN.md`.
+- **27.11.2026 (latest) — the Glass remake, stage 1** (PR #380, `design/remake-v2` into `staging`; no migration, look only). **The owner approved the look on 27.11 and the PR is merged into `staging`, but staging is NOT deployed**: no GitHub Actions run while the repository is private, so the deploy job never started. Since CI ran nothing, the full `npm run build` was run here on the PR head instead, under `nice`, in 127 s. The typecheck count is 165 and the style counts are 4670 inline styles and 2607 colours in 57 files, all at their baselines. 336 test files passed and 2 were skipped; 7417 tests passed and 7 were skipped. `vite build` and the mail templates also passed. The screen batches R1–R6 are next. Plan and decisions: `Docs/design/remake-v2/PLAN.md`.
   - **What moved:**
     - The tokens (`src/index.css` `@tokens light|dark`) and `tailwind.config.js`.
     - Geist and Geist Mono, self-hosted in `src/assets/fonts/`.
