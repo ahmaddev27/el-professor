@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **The Glass remake, batch R6, and two Arabic fixes (27.11.2026, branch `design/remake-r6`, one PR against `staging`, no migration, look only).** The legacy theme tokens are retired, the sidebar shows again in Arabic on wide screens in both shells, and the Arabic face is Tajawal. See `Docs/design/remake-v2/PLAN.md` §8.
+
 > **The Glass remake, batch R5 (27.11.2026, branch `design/remake-r5`, one PR against `staging`, no migration, look only).** The salary dialogs, the planning and document builders' screen parts, both historical wizards, the landing page, the toast and App.tsx's two full-page states are on tokens and primitives; `ConfirmationModal` is deleted. Only the statutory documents keep hand-written styles, for good. What is left is R6, retiring the legacy tokens. See `Docs/design/remake-v2/PLAN.md` §8.
 
 > **Mein Konto in tabs (27.11.2026, merged into `staging` as #386, no migration, look only).** Profil, E-Mail, Passwort and, while GoTrue reports them, Passkeys, on `/admin/konto` and `/mein-konto` alike. Every panel stays mounted, so a pending email code survives a switch.

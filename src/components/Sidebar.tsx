@@ -233,7 +233,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       <aside
         className={cn(
           'glass-drawer fixed start-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-s-0 motion-safe:transition-transform motion-safe:duration-[320ms] motion-safe:ease-glass lg:sticky lg:top-[10px] lg:ms-[10px] lg:mt-[10px] lg:h-[calc(100dvh-20px)] lg:w-[254px] lg:shrink-0 lg:translate-x-0 lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised',
-          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
+          isMobileMenuOpen ? 'translate-x-0' : 'max-lg:-translate-x-full max-lg:rtl:translate-x-full',
         )}
       >
         <SidebarContent />

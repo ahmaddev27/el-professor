@@ -18,6 +18,7 @@ import {
   ArrowRightLeft,
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import { Button } from './ui';
 import { useTranslation } from '../contexts/LanguageContext';
 
 export interface DriverSalarySummaryProps {
@@ -276,40 +277,14 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
     <div className="space-y-3">
       {/* Export buttons — outside ref, not exported */}
       <div className="flex items-center gap-2 justify-end">
-        <button
-          onClick={handleCopy}
-          disabled={copying}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium"
-          style={{
-            background: 'var(--bg-subtle)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-secondary)',
-            cursor: copying ? 'not-allowed' : 'pointer',
-            opacity: copying ? 0.7 : 1,
-          }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-        >
+        <Button variant="secondary" size="sm" onClick={handleCopy} disabled={copying}>
           {copying ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
           {t('sal.summary.copyImage')}
-        </button>
-        <button
-          onClick={handleDownload}
-          disabled={downloading}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium"
-          style={{
-            background: 'var(--accent)',
-            color: 'var(--text-inverse)',
-            border: 'none',
-            cursor: downloading ? 'not-allowed' : 'pointer',
-            opacity: downloading ? 0.7 : 1,
-          }}
-          onMouseEnter={e => { if (!downloading) e.currentTarget.style.background = 'var(--accent-hover)'; }}
-          onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-        >
+        </Button>
+        <Button size="sm" onClick={handleDownload} disabled={downloading}>
           {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {t('sal.summary.downloadImage')}
-        </button>
+        </Button>
       </div>
 
       {/* ══════════════════════════════════════════

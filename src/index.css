@@ -5,13 +5,13 @@
 @import '@fontsource/barlow/600.css';
 @import '@fontsource/barlow/700.css';
 
-/* IBM Plex Sans Arabic (SIL OFL 1.1), the Arabic UI's face. Only the Arabic-subset files are imported
-   (the 4 weights the UI uses); the package's own Latin and Cyrillic subsets are not, so nothing but Arabic
-   glyphs ever comes from it. Self-hosted through @fontsource, nothing loads from a font CDN. */
-@import '@fontsource/ibm-plex-sans-arabic/arabic-400.css';
-@import '@fontsource/ibm-plex-sans-arabic/arabic-500.css';
-@import '@fontsource/ibm-plex-sans-arabic/arabic-600.css';
-@import '@fontsource/ibm-plex-sans-arabic/arabic-700.css';
+/* Tajawal (SIL OFL 1.1), the Arabic UI's face (owner, 27.11.2026). Only the Arabic-subset files are
+   imported, so nothing but Arabic glyphs ever comes from it: Latin text and every figure stay Geist, as
+   the German documents print them. Tajawal has no 600, so `font-semibold` draws its 700 in Arabic.
+   Self-hosted through @fontsource, nothing loads from a font CDN. */
+@import '@fontsource/tajawal/arabic-400.css';
+@import '@fontsource/tajawal/arabic-500.css';
+@import '@fontsource/tajawal/arabic-700.css';
 
 /* Geist and Geist Mono, self-hosted (src/assets/fonts, SIL OFL 1.1): the design remake's faces
    (Docs/design/remake-v2/PLAN.md §4). Nothing loads from a font CDN, and a browser downloads a face
@@ -267,114 +267,9 @@ td select, th select { max-width: none; }
   --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.4), 0 8px 24px -10px rgb(52 211 153 / 0.55);
 }
 
-/* ── Legacy theme tokens (every screen built before Phase 2) ─────────────── */
-/* Remapped 27.11.2026 onto the remake's palette (owner: "the colours and everything"), so no
-   screen still on these tokens shows the retired blue or cyan, or a blue-grey neutral: the
-   accent family is the emerald brand and the neutrals are the remake's green-greys. Same
-   names, same roles, so no screen's markup changed; the status colours below were already
-   the remake's red and kept their values. No generated document reads a variable (the
-   Quittungen, the Mietwagenauftrag and both images paint fixed colours), so nothing printed
-   moves. These blocks retire with the last legacy screen (Docs/design/remake-v2/PLAN.md, R6). */
-/* @legacy-tokens light */
-:root {
-  /* Light */
-  --bg-base:        #e8efec;
-  --bg-surface:     #ffffff;
-  --bg-elevated:    #ffffff;
-  --bg-subtle:      #f4f8f6;
-  --bg-muted:       #eef1f0;
-  --border:         #dfe6e3;
-  --border-subtle:  #ebf0ee;
-  --text-primary:   #111916;
-  --text-secondary: #4f5b56;
-  --text-tertiary:  #6f7b76;
-  --text-inverse:   #ffffff;
-  --accent:         #047857;
-  --accent-hover:   #065f46;
-  --accent-subtle:  #e2f3eb;
-  --accent-text:    #05603f;
-  /* Darkened 17.09.2026 (owner's decision) from #059669 / #d97706, which were
-     too light to carry a white label: 3.77:1 and 3.19:1. See the note above the
-     dark block for why the fill needs its own token.
-
-     --danger followed on 18.09.2026, from #dc2626. It was the last status colour
-     still failing as text on its own -subtle fill (4.41:1), and here one value
-     serves both roles: a white label needs the fill at luminance <= 0.1833, and
-     reading on --danger-subtle needs the token at <= 0.1633, which is the
-     tighter of the two. #C0262D is the Phase-2 --critical / --critical-solid,
-     already approved, so the two palettes hold one red. */
-  --success:        #0A7A45;
-  --success-solid:  #0A7A45;
-  --success-subtle: #ecfdf5;
-  --warning:        #8F5200;
-  --warning-solid:  #8F5200;
-  --warning-subtle: #fffbeb;
-  --danger:         #C0262D;
-  --danger-solid:   #C0262D;
-  --danger-subtle:  #fef2f2;
-  --shadow-sm:      0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md:      0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-  --shadow-lg:      0 8px 24px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.04);
-}
-
-/* @legacy-tokens dark */
-.dark {
-  --bg-base:        #050a08;
-  --bg-surface:     #111715;
-  --bg-elevated:    #18201d;
-  --bg-subtle:      #141b18;
-  --bg-muted:       #1d2522;
-  --border:         rgba(255,255,255,0.08);
-  --border-subtle:  rgba(255,255,255,0.05);
-  --text-primary:   #e5ebe8;
-  --text-secondary: #a3afaa;
-  --text-tertiary:  #7d8984;
-  --text-inverse:   #04261a;
-  --accent:         #34d399;
-  --accent-hover:   #6ee7b7;
-  --accent-subtle:  rgba(52,211,153,0.1);
-  --accent-text:    #74e3b8;
-  /* --success / --warning are TEXT here and keep their values: on a dark
-     surface a status colour has to be light, and they already reach 5.35:1 to
-     8.93:1 that way.
-
-     --success-solid / --warning-solid are the same status colour as a FILL
-     under a white label, and in the dark theme they cannot be the same value.
-     A label needs the fill at luminance <= 0.183; reading as text on
-     --bg-surface needs the token at >= 0.237. Those windows do not overlap, so
-     one token cannot do both — which is why the fill has its own name, exactly
-     as --critical-solid does in the Phase-2 block above. In the light theme
-     both roles want the same darkness and the two tokens hold one value.
-
-     --danger is the same arithmetic, with a wider gap. #ef4444 was too dark for
-     the text role — 4.21:1 on --bg-elevated and 3.87:1 on its own -subtle fill
-     over it — and too light for the fill role, 3.76:1 under white. The text
-     role needs luminance >= 0.2741 (the -subtle fill over --bg-elevated is the
-     binding surface) and the white label needs <= 0.1833, so the split is
-     forced here too. #FF8A8A and #D63A40 are the Phase-2 --critical and
-     --critical-solid.
-
-     --danger-subtle keeps rgba(239,68,68,0.1): the wash is the same hue (0°) as
-     the new text colour, it reaches 6.42:1 to 7.81:1 under it, and moving it
-     would repaint some forty badges for no contrast gain. */
-  --success:        #10b981;
-  --success-solid:  #0B824A;
-  --success-subtle: rgba(16,185,129,0.1);
-  --warning:        #f59e0b;
-  --warning-solid:  #A85F00;
-  --warning-subtle: rgba(245,158,11,0.1);
-  --danger:         #FF8A8A;
-  --danger-solid:   #D63A40;
-  --danger-subtle:  rgba(239,68,68,0.1);
-  --shadow-sm:      0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
-  --shadow-md:      0 4px 16px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.3);
-  --shadow-lg:      0 8px 32px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.3);
-}
-
 /* ── Base: the canvas, the ambient field and the grain ────────────────────── */
 /* The canvas is painted on html and the page body is transparent, so the two fixed
-   pseudo-elements below sit behind every screen and scrolling never repaints them. A
-   legacy screen that paints its own --bg-base or --bg-surface simply covers them. */
+   pseudo-elements below sit behind every screen and scrolling never repaints them. */
 html {
   background-color: rgb(var(--canvas));
   color-scheme: light;
@@ -461,10 +356,11 @@ table { font-variant-numeric: tabular-nums; }
   }
   /* The sheet and the topbar blur through a `::before` layer, never on the element itself.
      An element with a backdrop-filter becomes the containing block of every `position:
-     fixed` descendant, and the content sheet holds every page: the legacy screens' inline
-     `fixed inset-0` dialogs would open inside the sheet instead of over the viewport, and
-     UserMenu's click-outside layer would shrink to the 60px topbar. The layer adds no
-     stacking context either, so a legacy dialog's z-50 still covers the sidebar. The
+     fixed` descendant, and the content sheet holds every page: the hand-built
+     `fixed inset-0` overlays a few dialogs still draw would open inside the sheet instead of
+     over the viewport, and UserMenu's click-outside layer would shrink to the 60px topbar.
+     The layer adds no stacking context either, so such a dialog's z-50 still covers the
+     sidebar. The
      topbar is sticky with a z-index, so its layer stays inside it; the sheet's layer
      joins the body's stacking context, above the glow (-3) and the grain (-2). */
   .glass-sheet {
@@ -526,7 +422,7 @@ table { font-variant-numeric: tabular-nums; }
 
 /* A page's direct children settle into place once, staggered. `backwards`, not the spec's
    `both`: a transform left in effect after the animation would make each child a containing
-   block for position: fixed, and a legacy dialog rendered inside a page would open inside
+   block for position: fixed, and a hand-built dialog rendered inside a page would open inside
    that child instead of over the viewport. Nothing moves for a person who asks for less
    motion. */
 @media (prefers-reduced-motion: no-preference) {
@@ -545,68 +441,62 @@ table { font-variant-numeric: tabular-nums; }
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--line-strong) / var(--line-strong-a)); }
 
 /* ── Native select dropdown readability ───────────────────────────────────── */
+/* The option list is drawn by the browser over everything, so it takes the opaque
+   surface: a translucent field fill would leave it see-through. */
 select {
-  color: var(--text-primary);
-  background-color: var(--bg-surface);
+  color: rgb(var(--fg));
+  background-color: rgb(var(--solid));
 }
 select option {
-  color: #111916;
-  background-color: #ffffff;
+  color: rgb(var(--fg));
+  background-color: rgb(var(--solid));
 }
 select option:disabled {
-  color: #6f7b76;
-  background-color: #ffffff;
+  color: rgb(var(--fg-subtle));
 }
-.dark select option {
-  color: #e5ebe8;
-  background-color: #1d2522;
-}
-.dark select option:disabled {
-  color: #7d8984;
-  background-color: #1d2522;
-}
+
+/* The landing hero's three cards sit at start and end, so in Arabic they stand on the
+   other side and every sideways move and tilt below has to mirror with them. --hero-x is 1
+   left to right and -1 right to left; it inherits, so a nested dir resets it. Outside the
+   layer, because Tailwind keeps a layer's rules only for classes it finds in the source. */
+:root, [dir='ltr'] { --hero-x: 1; }
+[dir='rtl'] { --hero-x: -1; }
 
 /* ── Utility animations ───────────────────────────────────────────────────── */
 @layer utilities {
-  @keyframes slide-in-right {
-    from { transform: translateX(100%); opacity: 0; }
-    to   { transform: translateX(0);    opacity: 1; }
-  }
-  .animate-slide-in-right { animation: slide-in-right 0.3s ease-out; }
-
   @keyframes hero-card-enter-left {
-    from { opacity: 0; transform: translateX(-24px) translateY(12px) rotate(-4deg) scale(0.92); }
-    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(-4deg) scale(1); }
+    from { opacity: 0; transform: translateX(calc(var(--hero-x) * -24px)) translateY(12px) rotate(calc(var(--hero-x) * -4deg)) scale(0.92); }
+    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(calc(var(--hero-x) * -4deg)) scale(1); }
   }
   @keyframes hero-card-enter-right {
-    from { opacity: 0; transform: translateX(24px)  translateY(12px) rotate(3deg)  scale(0.92); }
-    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(3deg)  scale(1); }
+    from { opacity: 0; transform: translateX(calc(var(--hero-x) * 24px))  translateY(12px) rotate(calc(var(--hero-x) * 3deg))  scale(0.92); }
+    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(calc(var(--hero-x) * 3deg))  scale(1); }
   }
   @keyframes hero-card-enter-bottom-right {
-    from { opacity: 0; transform: translateX(24px)  translateY(20px) rotate(-2deg) scale(0.92); }
-    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(-2deg) scale(1); }
+    from { opacity: 0; transform: translateX(calc(var(--hero-x) * 24px))  translateY(20px) rotate(calc(var(--hero-x) * -2deg)) scale(0.92); }
+    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(calc(var(--hero-x) * -2deg)) scale(1); }
   }
 
   @keyframes float-card-1 {
-    0%   { transform: rotate(-4deg) translateY(0px)    translateX(0px); }
-    25%  { transform: rotate(-4.4deg) translateY(-7px) translateX(1.5px); }
-    50%  { transform: rotate(-3.7deg) translateY(-11px) translateX(-1px); }
-    75%  { transform: rotate(-4.2deg) translateY(-5px)  translateX(2px); }
-    100% { transform: rotate(-4deg) translateY(0px)    translateX(0px); }
+    0%   { transform: rotate(calc(var(--hero-x) * -4deg)) translateY(0px)    translateX(0px); }
+    25%  { transform: rotate(calc(var(--hero-x) * -4.4deg)) translateY(-7px) translateX(calc(var(--hero-x) * 1.5px)); }
+    50%  { transform: rotate(calc(var(--hero-x) * -3.7deg)) translateY(-11px) translateX(calc(var(--hero-x) * -1px)); }
+    75%  { transform: rotate(calc(var(--hero-x) * -4.2deg)) translateY(-5px)  translateX(calc(var(--hero-x) * 2px)); }
+    100% { transform: rotate(calc(var(--hero-x) * -4deg)) translateY(0px)    translateX(0px); }
   }
   @keyframes float-card-2 {
-    0%   { transform: rotate(3deg)   translateY(0px)    translateX(0px); }
-    30%  { transform: rotate(3.3deg) translateY(-9px)   translateX(-2px); }
-    60%  { transform: rotate(2.8deg) translateY(-13px)  translateX(1.5px); }
-    85%  { transform: rotate(3.1deg) translateY(-6px)   translateX(-1px); }
-    100% { transform: rotate(3deg)   translateY(0px)    translateX(0px); }
+    0%   { transform: rotate(calc(var(--hero-x) * 3deg))   translateY(0px)    translateX(0px); }
+    30%  { transform: rotate(calc(var(--hero-x) * 3.3deg)) translateY(-9px)   translateX(calc(var(--hero-x) * -2px)); }
+    60%  { transform: rotate(calc(var(--hero-x) * 2.8deg)) translateY(-13px)  translateX(calc(var(--hero-x) * 1.5px)); }
+    85%  { transform: rotate(calc(var(--hero-x) * 3.1deg)) translateY(-6px)   translateX(calc(var(--hero-x) * -1px)); }
+    100% { transform: rotate(calc(var(--hero-x) * 3deg))   translateY(0px)    translateX(0px); }
   }
   @keyframes float-card-3 {
-    0%   { transform: rotate(-2deg)   translateY(0px)    translateX(0px); }
-    35%  { transform: rotate(-2.5deg) translateY(-8px)   translateX(1px); }
-    65%  { transform: rotate(-1.8deg) translateY(-12px)  translateX(-2px); }
-    90%  { transform: rotate(-2.2deg) translateY(-4px)   translateX(1.5px); }
-    100% { transform: rotate(-2deg)   translateY(0px)    translateX(0px); }
+    0%   { transform: rotate(calc(var(--hero-x) * -2deg))   translateY(0px)    translateX(0px); }
+    35%  { transform: rotate(calc(var(--hero-x) * -2.5deg)) translateY(-8px)   translateX(calc(var(--hero-x) * 1px)); }
+    65%  { transform: rotate(calc(var(--hero-x) * -1.8deg)) translateY(-12px)  translateX(calc(var(--hero-x) * -2px)); }
+    90%  { transform: rotate(calc(var(--hero-x) * -2.2deg)) translateY(-4px)   translateX(calc(var(--hero-x) * 1.5px)); }
+    100% { transform: rotate(calc(var(--hero-x) * -2deg))   translateY(0px)    translateX(0px); }
   }
 
   @keyframes dot-pulse {
@@ -645,103 +535,8 @@ select option:disabled {
     .hero-float-card-3 {
       animation: none !important;
     }
-    .hero-float-card-1 { transform: rotate(-4deg); opacity: 1; }
-    .hero-float-card-2 { transform: rotate(3deg);  opacity: 1; }
-    .hero-float-card-3 { transform: rotate(-2deg); opacity: 1; }
-  }
-
-  .animate-float-slow   { animation: float-card-1 5.8s ease-in-out infinite; }
-  .animate-float-medium { animation: float-card-2 6.4s ease-in-out infinite; }
-  .animate-float-fast   { animation: float-card-3 5.2s ease-in-out infinite; }
-
-  @keyframes fade-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .animate-fade-in { animation: fade-in 0.25s ease-out both; }
-
-  /* ── Theme-aware component classes ── */
-
-  .panel {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s ease;
-  }
-  .panel:hover { box-shadow: var(--shadow-md); }
-
-  .panel-elevated {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    box-shadow: var(--shadow-md);
-  }
-
-  .panel-subtle {
-    background: var(--bg-subtle);
-    border: 1px solid var(--border-subtle);
-    border-radius: 0.75rem;
-  }
-
-  .text-main    { color: var(--text-primary); }
-  .text-sub     { color: var(--text-secondary); }
-  .text-muted   { color: var(--text-tertiary); }
-  .text-accent  { color: var(--accent-text); }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--text-inverse);
-    border-radius: 0.625rem;
-    font-weight: 600;
-    font-size: 0.875rem;
-    padding: 0.5rem 1rem;
-    transition: all 0.15s ease;
-    border: none;
-    cursor: pointer;
-  }
-  .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow-md); }
-
-  .btn-ghost {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    border-radius: 0.625rem;
-    font-weight: 500;
-    font-size: 0.875rem;
-    padding: 0.5rem 1rem;
-    transition: all 0.15s ease;
-    cursor: pointer;
-  }
-  .btn-ghost:hover { background: var(--bg-muted); color: var(--text-primary); }
-
-  .input-base {
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 0.625rem;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    padding: 0.5rem 0.75rem;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    width: 100%;
-    outline: none;
-  }
-  .input-base::placeholder { color: var(--text-tertiary); }
-  .input-base:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-subtle);
-  }
-
-  .badge-success { background: var(--success-subtle); color: var(--success); border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-  .badge-warning { background: var(--warning-subtle); color: var(--warning); border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-  .badge-danger  { background: var(--danger-subtle);  color: var(--danger);  border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-  .badge-accent  { background: var(--accent-subtle);  color: var(--accent-text); border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-
-  .divider { border-color: var(--border); }
-
-  /* dark utility overrides for Tailwind classes */
-  .dark .dark\:panel {
-    background: var(--bg-surface);
-    border-color: var(--border);
+    .hero-float-card-1 { transform: rotate(calc(var(--hero-x) * -4deg)); opacity: 1; }
+    .hero-float-card-2 { transform: rotate(calc(var(--hero-x) * 3deg));  opacity: 1; }
+    .hero-float-card-3 { transform: rotate(calc(var(--hero-x) * -2deg)); opacity: 1; }
   }
 }

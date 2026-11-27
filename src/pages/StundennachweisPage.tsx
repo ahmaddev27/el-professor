@@ -2758,7 +2758,7 @@ export const Timesheet: React.FC<{
                   {row.isHol && <span style={{ marginLeft: 3, fontSize: 7.5, color: '#92400e' }}>F</span>}
                   {isHighlighted && <span style={{ marginLeft: 4, fontSize: 7, color: '#b45309', fontWeight: 800 }}>◀ Notiz</span>}
                   {absentDays?.has(row.dayIndex) && !row.grundlohn && (
-                    <span className="ml-1 text-[7px] font-extrabold text-fg-subtle">{t('stn.badge.absence')}</span>
+                    <span className="ml-1 text-[7px] font-extrabold text-[#525e59]">{t('stn.badge.absence')}</span>
                   )}
                 </td>
                 <td style={{ ...TD, background: bg }}>

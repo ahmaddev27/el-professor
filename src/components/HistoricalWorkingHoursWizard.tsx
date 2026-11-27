@@ -1278,7 +1278,7 @@ function RegularDriverAssignmentView({
                 { label: t('hwh.minUtilization'), value: minR.toFixed(1) + '%',  color: 'text-brand-text' },
                 { label: t('hwh.maxUtilization'), value: maxR.toFixed(1) + '%',  color: 'text-violet' },
                 { label: t('hwh.spread'),         value: spread.toFixed(1) + '%', color: spread > 25 ? 'text-caution' : 'text-positive' },
-                { label: t('hwh.lowestHighest'),  value: `${minDriver} / ${maxDriver}`, color: 'var(--text-secondary)' },
+                { label: t('hwh.lowestHighest'),  value: `${minDriver} / ${maxDriver}`, color: 'text-fg-muted' },
               ].map(c => (
                 <div key={c.label}>
                   <div className="font-semibold mb-0.5 text-fg-muted">{c.label}</div>
@@ -1569,12 +1569,12 @@ function RegularDriverAssignmentView({
               </div>
               <div className="px-4 py-3 grid grid-cols-2 gap-3 sm:grid-cols-3 text-xs bg-raised">
                 {[
-                  { label: t('hwh.statUnassignedBlocks'),   value: String(unassignedBlocks.length),    color: 'var(--text-primary)' },
+                  { label: t('hwh.statUnassignedBlocks'),   value: String(unassignedBlocks.length),    color: 'text-fg' },
                   { label: t('hwh.statWithConflictToOther'), value: String(withConflict.length),       color: withConflict.length > 0 ? 'text-caution' : 'text-positive' },
-                  { label: t('hwh.statWithoutSuchConflict'), value: String(withoutConflict.length),    color: 'var(--text-secondary)' },
+                  { label: t('hwh.statWithoutSuchConflict'), value: String(withoutConflict.length),    color: 'text-fg-muted' },
                   { label: t('hwh.statConflictPairs'),      value: String(conflictPairs),              color: conflictPairs > 0 ? 'text-caution' : 'text-fg-muted' },
-                  { label: t('hwh.statAffectedVehicles'),   value: affectedVehicles.length > 0 ? affectedVehicles.join(', ') : '—', color: 'var(--text-secondary)' },
-                  { label: t('hwh.statTotalConflictTime'),  value: totalConflictSec > 0 ? `${Math.round(totalConflictSec / 60)} min` : '—', color: 'var(--text-secondary)' },
+                  { label: t('hwh.statAffectedVehicles'),   value: affectedVehicles.length > 0 ? affectedVehicles.join(', ') : '—', color: 'text-fg-muted' },
+                  { label: t('hwh.statTotalConflictTime'),  value: totalConflictSec > 0 ? `${Math.round(totalConflictSec / 60)} min` : '—', color: 'text-fg-muted' },
                 ].map(c => (
                   <div key={c.label}>
                     <div className="font-semibold mb-0.5 text-fg-muted">{c.label}</div>
@@ -1849,7 +1849,7 @@ function InhaberNonConflictView({
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: t('hwh.statUnassignedFromStep2'), value: step2NotAssigned,                 color: 'var(--text-primary)' },
+          { label: t('hwh.statUnassignedFromStep2'), value: step2NotAssigned,                 color: 'text-fg' },
           { label: t('hwh.statWithoutNzConflict'),   value: nonConflict,                      color: nonConflict > 0 ? 'text-violet' : 'text-fg-muted' },
           { label: t('hwh.statWithNzConflict'),      value: withConflict,                     color: withConflict > 0 ? 'text-caution' : 'text-positive' },
           { label: t('hwh.statGivenToOwner'),        value: assignedToInhaberBlocks.length,   color: 'text-violet' },
@@ -2178,8 +2178,8 @@ function InhaberLongestConflictView({
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: t('hwh.statRemainingNzFromStep3'), value: lcResult.conflictGroups.reduce((s, g) => s + g.blockIds.length, 0), color: 'var(--text-primary)' },
-          { label: t('hwh.statConflictGroups'),       value: conflictGroups.length,                 color: 'var(--text-primary)' },
+          { label: t('hwh.statRemainingNzFromStep3'), value: lcResult.conflictGroups.reduce((s, g) => s + g.blockIds.length, 0), color: 'text-fg' },
+          { label: t('hwh.statConflictGroups'),       value: conflictGroups.length,                 color: 'text-fg' },
           { label: t('hwh.statSelectedForOwner'),     value: selectedBlocks.length,                 color: 'text-brand-text' },
           { label: t('hwh.statRejectedOwnerTime'),    value: diagnostics.inhaberTimeConflicts,      color: diagnostics.inhaberTimeConflicts > 0 ? 'text-caution' : 'text-positive' },
           { label: t('hwh.statRejectedVehicle'),      value: diagnostics.inhaberVehicleConflicts,   color: diagnostics.inhaberVehicleConflicts > 0 ? 'text-caution' : 'text-positive' },
