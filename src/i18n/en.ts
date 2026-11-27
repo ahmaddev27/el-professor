@@ -376,6 +376,7 @@ export const en: PartialDictionary = {
   'ui.shell.collapseSidebar': 'Collapse sidebar',
   'ui.shell.expandSidebar':   'Expand sidebar',
   'ui.shell.mainNavigation':  'Main navigation',
+  'ui.shell.closeNavigation': 'Close navigation',
   'ui.shell.openNavigation':  'Open navigation',
   'ui.shell.skipToContent':   'Skip to content',
   'ui.table.emptyTitle':      'No entries',

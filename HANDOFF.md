@@ -2,7 +2,14 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — the Glass remake, batch R6, and two Arabic fixes** (branch `design/remake-r6`, PR #388 into `staging`; no migration, look only).
+- **27.11.2026 (latest) — the collapsible sidebar rail and the 10 px gutter, both shells** (branch `design/shell-rail`, one PR into `staging`; no migration, look and one stored setting).
+  - **Rail:** `Sidebar` and `AdminSidebar` collapse to Reidey's 68 px icon rail from `lg` up, through `src/components/ui/sidebarRail.tsx` (`useSidebarRail`, `RailTip`, `SidebarToggle`), which `AppShell` now shares. One key, `ya-shell-collapsed`. Every item is named in the rail (aria-label plus a tooltip on the side away from the sidebar, left in Arabic); the legal links become two named icons.
+  - **Gutter:** the sidebar pane had no inline-end margin, so it touched the sheet. It is `lg:m-[10px]` now, as in the spec.
+  - **Menu button** (drawer, below `lg`): labelled open/close, with `aria-expanded` — the default answer to the open question.
+  - Not built: Ctrl/⌘+B. Before/after shots are outside the repo in `/home/ahmad/design-inputs/owner-shots/shell-rail-2026-11-27/`.
+  - After review: one tooltip provider per sidebar, labels truncate instead of wrapping while the pane widens back, no scrollbar in the rail, the group hairline keeps its spacing, and the tip on `z-[60]` under the toasts. The shots found one defect the first test missed: the company `Sidebar`'s `NavLink` used a `className` function, which Radix's `asChild` turns into text, so its items lost every style; it is a string with `aria-[current=page]:` now, and the test checks it (negative-controlled).
+  - Checks: full `npm run build` green under the flock (343 test files, 7427 tests passed, typecheck 161 and styles 343/367 at their baselines); `sidebarRail.render.test.ts` (25 tests) negative-controlled twice — the old gutter plus a missing aria-label, and the `className` function — each failing as expected.
+- **27.11.2026 — the Glass remake, batch R6, and two Arabic fixes** (branch `design/remake-r6`, PR #388 into `staging`; no migration, look only).
   - **Sidebar missing in Arabic on wide screens, both shells:** the drawer's closed `rtl:translate-x-full` outranked `lg:translate-x-0` (Tailwind 3.4 emits `rtl:` after the screens at equal specificity), so the sticky sidebar slid out past the right edge. Now `max-lg:-translate-x-full max-lg:rtl:translate-x-full` in `Sidebar` and `AdminSidebar`.
   - **Arabic face is Tajawal** (`@fontsource/tajawal`, Arabic subset 400/500/700, replacing `@fontsource/ibm-plex-sans-arabic`); Latin text and figures stay Geist.
   - **R6:** the legacy tokens are gone from `src/index.css` with the unused legacy classes and animations; the last readers (note components, `DriverSalarySummaryCard`'s export buttons, seven `HistoricalWorkingHoursWizard` figures that passed a `var()` as a class) are on tokens; the Timesheet's absence badge has a fixed colour. `legacyTokensRetired.test.ts` replaces `accentLabel.contrast.test.ts`. The landing hero mirrors in RTL through `--hero-x`.
