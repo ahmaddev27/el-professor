@@ -1,0 +1,17 @@
+{
+  "fileName": "SIMULIERT_Monatsabschluss_2026-02_20261127_VALIDATED_FOR_EXPORT.xlsx",
+  "verdict": "VALIDATED_FOR_EXPORT",
+  "financialStatus": "INCOMPLETE",
+  "shifts": 55,
+  "legs": 517,
+  "returnLegs": 55,
+  "realTripsBooked": 3,
+  "realTripsDeclined": 1,
+  "simulatedFareCents": 413288,
+  "uberUmsatzCents": 859920,
+  "shareCents": 275175,
+  "base": {
+    "lat": 51.12,
+    "lon": 7.05
+  }
+}

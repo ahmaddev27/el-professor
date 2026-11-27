@@ -5,7 +5,9 @@ import { generateFullMonth, type FullMonthInput, type FullMonthResult } from '..
 import { haversineKm } from '../../src/utils/simulatedRides/geo';
 import { buildRoutedMatrix, matrixTravelModel, selectRoutingPoints } from '../../src/utils/simulatedRides/travelModel';
 import type { PoolAddress } from '../../src/utils/simulatedRides/types';
-import { noRealTrips } from '../../src/utils/simulatedRides/realTrips';
+import { noRealTrips, readRealTrips, type RealTripsRead, type RealTripRow } from '../../src/utils/simulatedRides/realTrips';
+import type { ReconcileUber } from '../../src/utils/simulatedRides/reconciliation';
+import type { UberDriverDay, UberFigures, UberPeriodTotal } from '../../src/utils/simulatedRides/uberImport';
 
 /**
  * An invented month for the report's tests and for the committed fixture of the
@@ -66,6 +68,8 @@ export interface FixtureOptions {
   /** Share declined fee and monthly share on, as the owner's decisions 3 and 4 ask. */
   settings?: FullMonthInput['settings'];
   options?: FullMonthInput['options'];
+  /** Round 8: anything else of the month's input (Uber, real trips, share, return to base). */
+  extra?: Partial<FullMonthInput>;
 }
 
 /** An invented company id: the fixture is no real tenant. */
@@ -93,6 +97,7 @@ export async function buildFixtureMonth(o: FixtureOptions): Promise<FullMonthRes
     },
     options: { cancellationShare: 0.1, ...o.options },
     tenantId: FIXTURE_TENANT_ID,
+    ...o.extra,
     travel: matrixTravelModel(matrix),
     routing: {
       points: matrix.points.length,
@@ -104,4 +109,76 @@ export async function buildFixtureMonth(o: FixtureOptions): Promise<FullMonthRes
   });
   if (!out.ok) throw new Error(`generation failed: ${JSON.stringify(out.failure)}`);
   return out.result;
+}
+
+// ── Round 8: the Monatsabschluss's month ─────────────────────────────────────
+
+const figures = (over: Partial<UberFigures>): UberFigures =>
+  ({ umsatzCents: 0, aktionenCents: 0, trinkgeldCents: 0, bargeldCents: 0, tripCount: null, ...over });
+
+/**
+ * Invented daily Uber figures for the three fixture drivers on every weekday,
+ * except Fahrer 2's last week, which comes as one week running into the next
+ * month and so is never counted inside it.
+ */
+export function fixtureUber(year: number, month: number): ReconcileUber {
+  const mm = String(month).padStart(2, '0');
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const days: UberDriverDay[] = [];
+  for (let d = 1; d <= last; d++) {
+    const weekday = new Date(Date.UTC(year, month - 1, d)).getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    const date = `${year}-${mm}-${String(d).padStart(2, '0')}`;
+    FIXTURE_DRIVERS.forEach((driver, k) => {
+      if (k === 1 && d >= last - 5) return;
+      days.push({
+        driverId: driver.id, driverName: driver.name, date, identity: 'partner_link', rowIds: [`uber-${k}-${date}`],
+        negativeTypes: [], overlapsPeriod: false,
+        figures: figures({ umsatzCents: 14_000 + d * 53 + k * 917, aktionenCents: k === 0 ? 400 : 0, trinkgeldCents: d % 3 === 0 ? 0 : 150 + d * 9 + k, tripCount: 8 }),
+      });
+    });
+  }
+  const next = new Date(Date.UTC(year, month, 1));
+  const period: UberPeriodTotal = {
+    driverId: FIXTURE_DRIVERS[1].id, driverName: FIXTURE_DRIVERS[1].name,
+    periodStart: `${year}-${mm}-${String(last - 5).padStart(2, '0')}`,
+    periodEnd: `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`,
+    days: 7, placement: 'crosses_month_boundary', identity: 'partner_link', rowIds: ['uber-week-boundary'],
+    negativeTypes: [], overlappingDailyDates: [], figures: figures({ umsatzCents: 65_000, trinkgeldCents: 800 }),
+  };
+  return { days, periods: [period], handRows: [], issues: [] };
+}
+
+/** Fahrer 3 drove for real on the 10th: two rides, one cancelled, one order declined. */
+export function fixtureRealTrips(year: number, month: number): RealTripsRead {
+  const day = `${year}-${String(month).padStart(2, '0')}-10`;
+  const driver = FIXTURE_DRIVERS[2];
+  const row = (id: string, startUtc: string, endUtc: string, over: Partial<RealTripRow> = {}): RealTripRow => ({
+    id, import_id: 'import-fixture', trip_date: day, start_at: `${day}T${startUtc}Z`, end_at: `${day}T${endUtc}Z`,
+    start_time: null, end_time: null, original_driver_id: driver.id, original_driver_name: driver.name, car_identifier: 'XX-TEST-1',
+    route_start: 'Teststraße 3, 40210 Demostadt', route_end: 'Teststraße 11, 40210 Demostadt', price_amount: '12.40', tip_amount: '1.00',
+    cash_amount: '0.00', online_amount: '12.40', action_amount: '0.00', is_canceled: false, trip_status: 'completed',
+    declined_fee_cents: null, source_row_key: `fixture:${id}`, is_simulated: false, ...over,
+  });
+  return readRealTrips({
+    year, month, timeZone: 'Europe/Berlin', operatingDayStartHour: 4,
+    drivers: FIXTURE_DRIVERS.map(d => ({ id: d.id, name: d.name })),
+    rows: [
+      row('real-1', '07:00:00', '07:22:00'),
+      row('real-2', '08:05:00', '08:41:00', { price_amount: '23.90', tip_amount: '0.00' }),
+      row('real-3', '10:00:00', '10:15:00', { is_canceled: true, trip_status: 'cancelled', price_amount: '5.00', tip_amount: '0.00' }),
+      row('real-4', '12:00:00', '12:00:00', { trip_status: 'declined', price_amount: '0.00', tip_amount: '0.00', declined_fee_cents: 600 }),
+    ],
+  });
+}
+
+/** The closing's month: return to the base on, a fixed share, Uber and real trips read; Fahrer 1 alone has a rate. */
+export function closingExtra(year: number, month: number): Partial<FullMonthInput> {
+  return {
+    returnToBase: true,
+    shareSetting: { mode: 'fixed', percent: 32 },
+    uber: fixtureUber(year, month),
+    realTrips: fixtureRealTrips(year, month),
+    drivers: FIXTURE_DRIVERS.map((d, k) => (k === 0 ? { ...d, salary_ratio: 0.45 } : d)),
+  };
 }

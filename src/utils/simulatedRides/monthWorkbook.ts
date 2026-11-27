@@ -101,7 +101,7 @@ export function labelled(rows: readonly Row[]): Row[] {
 const euro = (cents: number): number => cents / 100;
 export const yesNo = (v: boolean): string => (v ? 'Ja' : 'Nein');
 
-const dayOfRide = (ride: SimRide, s: SimulationTenantSettings): string =>
+export const dayOfRide = (ride: SimRide, s: SimulationTenantSettings): string =>
   operatingDayIn(ride.startMs ?? ride.orderTransmittedMs, s.timeZone, s.operatingDayStartHour);
 
 const stampOrEmpty = (ms: number | null, millis = false): string => (ms === null ? '' : formatStamp(ms, millis));
@@ -158,7 +158,7 @@ export function ridesSheetRows(result: FullMonthResult): Row[] {
 
 // ── Sheets B, C, D: the breakdowns ─────────────────────────────────────────
 
-const WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+export const WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
 export const REASON_TEXT: Record<CapacityReason, string> = {
   no_vehicle_in_fleet: 'kein Fahrzeug im Bestand',
@@ -437,11 +437,11 @@ function scalar(v: unknown): Cell {
   return JSON.stringify(v);
 }
 
-function settingLines(prefix: string, values: object): Row[] {
+export function settingLines(prefix: string, values: object): Row[] {
   return Object.entries(values).map(([k, v]): Row => [`${prefix}${k}`, scalar(v)]);
 }
 
-function routingLines(result: FullMonthResult): Row[] {
+export function routingLines(result: FullMonthResult): Row[] {
   const p = result.provenance;
   const r = p.routing;
   const rs = result.routeSummary;
@@ -475,14 +475,14 @@ function routingLines(result: FullMonthResult): Row[] {
   ];
 }
 
-const BASE_SOURCE_TEXT: Record<NonNullable<FullMonthResult['provenance']['base']['source']> | 'none', string> = {
+export const BASE_SOURCE_TEXT: Record<NonNullable<FullMonthResult['provenance']['base']['source']> | 'none', string> = {
   saved_point: 'gespeicherter Punkt (Fahrtenanalyse)',
   company_address: 'aus der Firmenadresse abgeleitet, auf Hausnummer genau geocodiert',
   none: 'nicht angegeben (CONFIGURATION_REQUIRED)',
 };
 
 /** The financial reconciliation's headline: its status, why, the tips and the share, never booked. */
-function financialLines(result: FullMonthResult): Row[] {
+export function financialLines(result: FullMonthResult): Row[] {
   const f = result.financial;
   return [
     ['Finanzabgleich mit Uber (getrennt vom Exportstatus)', f.status],

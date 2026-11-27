@@ -165,6 +165,10 @@ vi.mock('../utils/simulatedRides/operationalReport', async importActual => ({
   ...(await importActual<typeof import('../utils/simulatedRides/operationalReport')>()),
   buildOperationalReport: (result: unknown) => { world.built.push(result); return { fileName: 'SIMULIERT_betrieb.xlsx', payload: { version: 1, sheets: [] } }; },
 }));
+vi.mock('../utils/simulatedRides/monthClosing', async importActual => ({
+  ...(await importActual<typeof import('../utils/simulatedRides/monthClosing')>()),
+  buildMonthClosing: (result: unknown) => { world.built.push(result); return { fileName: 'SIMULIERT_abschluss.xlsx', payload: { version: 1, sheets: [] } }; },
+}));
 vi.mock('../utils/serviceWorkbookDownload', () => ({
   deliverWorkbookPayload: (payload: unknown, name: string) => { world.delivered.push([payload, name]); },
 }));
@@ -257,10 +261,15 @@ describe('SimulatedRidesPage, calendar mode', () => {
     await act(async () => { download.props.onClick(); });
     const operational = button(renderer.root, 'Betriebsbericht herunterladen (intern, SIMULIERT)');
     await act(async () => { operational.props.onClick(); });
+    const closing = button(renderer.root, 'Monatsabschluss herunterladen (SIMULIERT, mit echten Fahrten)');
+    await act(async () => { closing.props.onClick(); });
     expect(world.delivered).toEqual([
       [{ version: 1, sheets: [] }, 'SIMULIERT_test.xlsx'],
       [{ version: 1, sheets: [] }, 'SIMULIERT_betrieb.xlsx'],
+      [{ version: 1, sheets: [] }, 'SIMULIERT_abschluss.xlsx'],
     ]);
+    // All three are built from the month on screen, never from a second run.
+    expect(new Set(world.built).size).toBe(1);
     // The saved point is the base, and the geocoder was never asked for the address.
     expect(world.bases).toEqual([{ base: SAVED_BASE, source: 'saved_point', label: 'Betriebssitz (gespeicherter Punkt)' }]);
     expect(world.addressQueries).toEqual([]);
@@ -324,6 +333,7 @@ describe('SimulatedRidesPage, calendar mode', () => {
     expect(collect(renderer.root)).toContain('verletzt 1 Regel(n)');
     expect(button(renderer.root, 'Fahrtenbuch-Bericht herunterladen (SIMULIERT)').props.disabled).toBe(true);
     expect(button(renderer.root, 'Betriebsbericht herunterladen (intern, SIMULIERT)').props.disabled).toBe(true);
+    expect(button(renderer.root, 'Monatsabschluss herunterladen (SIMULIERT, mit echten Fahrten)').props.disabled).toBe(true);
     expect(collect(renderer.root)).toContain('NOT_VALIDATED');
   });
 

@@ -7575,4 +7575,7 @@ export const de = {
   'simrides.settings.seed':             'Startwert',
   'simrides.settings.seedInvalid':      'Der Startwert muss eine ganze Zahl von 0 bis {max} sein.',
   'simrides.settings.title':            'Simulationseinstellungen des Unternehmens',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.result.downloadClosing': 'Monatsabschluss herunterladen (SIMULIERT, mit echten Fahrten)',
 } as const;

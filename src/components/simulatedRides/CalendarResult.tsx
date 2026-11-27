@@ -26,6 +26,8 @@ interface Props {
   result: FullMonthResult;
   onDownload: () => void;
   onDownloadOperational: () => void;
+  /** Round 8: the month's closing, real trips beside the simulated ones. */
+  onDownloadClosing: () => void;
 }
 
 const VERDICT_TONE: Record<ExportVerdict, 'positive' | 'caution' | 'critical'> = {
@@ -183,7 +185,7 @@ function RepositioningBlock({ result }: { result: FullMonthResult }) {
   );
 }
 
-export function CalendarResult({ result, onDownload, onDownloadOperational }: Props) {
+export function CalendarResult({ result, onDownload, onDownloadOperational, onDownloadClosing }: Props) {
   const { t } = useTranslation();
   const { counts } = result.revenue;
   const km = result.days.reduce((sum, d) => sum + d.km, 0);
@@ -235,6 +237,9 @@ export function CalendarResult({ result, onDownload, onDownloadOperational }: Pr
           </Button>
           <Button variant="secondary" onClick={onDownloadOperational} disabled={broken}>
             <Download aria-hidden /> {t('simrides.cal.result.downloadOperational')}
+          </Button>
+          <Button variant="secondary" onClick={onDownloadClosing} disabled={broken}>
+            <Download aria-hidden /> {t('simrides.cal.result.downloadClosing')}
           </Button>
         </div>
       </CardContent>

@@ -470,14 +470,17 @@ export function checkRealTrips(month: GeneratedMonth, real: RealTripsRead | null
   const restMs = opts.minDriverRestMinutes * 60_000;
   for (const s of month.shifts) {
     const end = s.plannedEndMs ?? s.endMs;
-    if (real.days.get(s.driver.id)?.has(s.operatingDay)) {
-      out.push(`${s.id}: driver ${s.driver.id} has real trips on ${s.operatingDay} and was simulated over`);
+    const driverId = s.driver.id;
+    // Never produced in calendar mode; if it were, the rules below could not be checked, so it is reported, not passed.
+    if (driverId === undefined) out.push(`${s.id}: the shift names no driver id, so it cannot be checked against the real trips`);
+    else if (real.days.get(driverId)?.has(s.operatingDay)) {
+      out.push(`${s.id}: driver ${driverId} has real trips on ${s.operatingDay} and was simulated over`);
     }
     if (clash(held.byPlate.get(plateKey(s.vehicle.plate)), s.startMs, end, gapMs)) {
       out.push(`${s.id}: vehicle ${s.vehicle.plate} is held by a real trip during the shift`);
     }
-    if (clash(held.byDriver.get(s.driver.id), s.startMs, end, restMs)) {
-      out.push(`${s.id}: driver ${s.driver.id} has a real trip within the rest before or after the shift`);
+    if (driverId !== undefined && clash(held.byDriver.get(driverId), s.startMs, end, restMs)) {
+      out.push(`${s.id}: driver ${driverId} has a real trip within the rest before or after the shift`);
     }
   }
   const realIds = new Set(real.trips.map(t => t.tripId));

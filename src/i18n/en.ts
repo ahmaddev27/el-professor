@@ -7501,4 +7501,7 @@ export const en: PartialDictionary = {
   'simrides.settings.seed':             'Seed',
   'simrides.settings.seedInvalid':      'The seed must be a whole number from 0 to {max}.',
   'simrides.settings.title':            'Company simulation settings',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.result.downloadClosing': 'Download month closing (SIMULIERT, with the real trips)',
 };

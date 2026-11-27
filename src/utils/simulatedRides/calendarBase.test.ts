@@ -178,11 +178,12 @@ describe('return to the base at shift end (D8: a company setting, off by default
     const byShift = completedByShift(home.month.rides);
     const legs = new Map(home.repositioning.filter(l => l.purpose === 'to_base').map(l => [l.shiftId, l]));
     let checked = 0;
+    let atBaseShifts = 0;
     for (const s of home.month.shifts) {
       const list = byShift.get(s.id);
       if (!list) continue;
       const last = list[list.length - 1];
-      if (atBase(last.dropoff)) { expect(legs.has(s.id)).toBe(false); expect(s.endMs).toBe(last.endMs); continue; }
+      if (atBase(last.dropoff)) { atBaseShifts += 1; expect(legs.get(s.id)).toMatchObject({ roadKm: 0, roadSeconds: 0 }); expect(s.endMs).toBe(last.endMs); continue; }
       const leg = legs.get(s.id)!;
       expect(leg).toMatchObject({ previousTripId: last.tripId, nextTripId: '', departMs: last.endMs });
       expect(pointKey(leg.from)).toBe(pointKey(last.dropoff));
@@ -195,8 +196,32 @@ describe('return to the base at shift end (D8: a company setting, off by default
       checked += 1;
     }
     expect(checked).toBeGreaterThan(20);
-    expect(legs.size).toBe(checked);
-    expect(home.repositioningSummary.byPurpose.to_base).toBe(checked);
+    expect(legs.size).toBe(checked + atBaseShifts);
+    expect(home.repositioningSummary.byPurpose.to_base).toBe(checked + atBaseShifts);
+  });
+
+  it('a shift whose last ride already ends at the base still records its return, as a drive of nothing (S9)', () => {
+    // The base is a pool address and no road leads home from anywhere else, so every ride must end there.
+    const homePool: PoolAddress[] = [...POOL, { label: 'Betriebssitz, 42651 Solingen, Deutschland', ...BASE }];
+    const onlyFromBase: TravelModel = {
+      source: 'test-only-from-base', measured: true,
+      drive: (from, to, hour) => (atBase(to) && !atBase(from) ? null : ROUTED.drive(from, to, hour)),
+      ride: ROUTED.ride,
+    };
+    const r = run({ pool: homePool, travel: onlyFromBase, returnToBase: true, month: 2, drivers: [DRIVERS[0]] });
+    expect(r.violations).toEqual([]);
+    const byShift = completedByShift(r.month.rides);
+    expect(byShift.size).toBeGreaterThan(3);
+    const legs = r.repositioning.filter(l => l.purpose === 'to_base');
+    expect(legs.length).toBe(byShift.size);
+    for (const leg of legs) {
+      const list = byShift.get(leg.shiftId)!;
+      const last = list[list.length - 1];
+      expect(atBase(last.dropoff)).toBe(true);
+      expect(leg).toMatchObject({ previousTripId: last.tripId, nextTripId: '', departMs: last.endMs, arriveMs: last.endMs, roadKm: 0, roadSeconds: 0 });
+      expect(leg.slackSeconds as number).toBeGreaterThanOrEqual(0);
+      expect(r.month.shifts.find(s => s.id === leg.shiftId)!.endMs).toBe(last.endMs);
+    }
   });
 
   it('the base check names the rule on the verdict', () => {
@@ -224,7 +249,8 @@ describe('return to the base at shift end (D8: a company setting, off by default
     const target = home.repositioning.find(l => l.purpose === 'to_base')!;
     const forged = home.month.shifts.map(s => {
       if (s.id !== target.shiftId) return s;
-      const last = byShift.get(s.id)!.at(-1)!;
+      const shiftRides = byShift.get(s.id)!;
+      const last = shiftRides[shiftRides.length - 1];
       return { ...s, plannedEndMs: (last.endMs as number) + 60_000 };
     });
     expect(revalidate(home, forged, true).some(v => v.startsWith(`${target.shiftId}: the drive back to the base and its margin need`))).toBe(true);

@@ -309,8 +309,9 @@ export function reconcileMonth(args: {
   for (const r of rides) {
     const day = dayOf.get(r.shiftId);
     if (day === undefined || !completed(r)) continue;
-    const key = `${r.driver.id}|${day}`;
-    const s = simulated.get(key) ?? { driverId: r.driver.id, driverName: r.driver.name, day, completed: 0, fareCents: 0, tipCents: 0 };
+    // A driver without an id (never in calendar mode) is kept under its name, where no Uber row can match it.
+    const key = `${r.driver.id ?? `ohne-id:${r.driver.name}`}|${day}`;
+    const s = simulated.get(key) ?? { driverId: r.driver.id ?? '', driverName: r.driver.name, day, completed: 0, fareCents: 0, tipCents: 0 };
     s.completed += 1;
     s.fareCents += toCents(r.fare);
     s.tipCents += tipCents(r);

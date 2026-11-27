@@ -38,6 +38,14 @@ describe('findSimulationMarker', () => {
     expect(first(wb)).toBe('notice_text');
   });
 
+  it('refuses the Monatsabschluss\'s other two labels under the same header (round 8), and only there', () => {
+    expect(first(book([['Kennzeichnung', 'Fahrt-ID'], ['IMPORTIERT', 'r-1']]))).toBe('label_column');
+    expect(first(book([['Kennzeichnung', 'Datum'], ['abgeleitet', '2026-09-08']]))).toBe('label_column');
+    // A real Uber export's plate column is `Kennzeichen`; a value that happens to read IMPORTIERT there is no label.
+    expect(first(book([['Kennzeichen', 'Fahrername'], ['IMPORTIERT', 'Fahrer 1']]))).toBeNull();
+    expect(first(book([['Kennzeichnung', 'Status'], ['', 'IMPORTIERT']]))).toBeNull();
+  });
+
   it('does not take a header alone, or the word in another column, for the label', () => {
     expect(first(book([['Kennzeichnung', 'Fahrername'], ['', 'SIMULIERT']]))).toBeNull();
     expect(first(book([['Kennzeichnung'], ['normal']]))).toBeNull();

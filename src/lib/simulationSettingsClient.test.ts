@@ -125,7 +125,7 @@ describe('loadSimulationSettings and saveSimulationSettings', () => {
     expect(saved).toMatchObject({ shareSetting: { mode: 'random', scope: 'day', seed: 5 }, returnToBase: true, stored: true });
     const upsert = fake.calls.find(c => c.method === 'upsert')!;
     expect(upsert.args[1]).toEqual({ onConflict: 'company_id' });
-    expect(fake.calls.at(-1)!.method).toBe('single');
+    expect(fake.calls[fake.calls.length - 1].method).toBe('single');
   });
 
   it('a refused save throws with the database\'s reason, never reports success', async () => {

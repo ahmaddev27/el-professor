@@ -40,6 +40,7 @@ import { resolveSettings } from '../utils/simulatedRides/tenantSettings';
 import { readUnavailability, type VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
+import { buildMonthClosing } from '../utils/simulatedRides/monthClosing';
 import { buildMonthReport } from '../utils/simulatedRides/monthWorkbook';
 import { buildOperationalReport } from '../utils/simulatedRides/operationalReport';
 import { selectMonthlyShareRate, type ShareSetting } from '../utils/simulatedRides/monthlyRate';
@@ -101,6 +102,8 @@ interface RunEvents {
   uber: UberMonthImport | null;
   /** Calendar mode only: the month's real trips and the drivers they name (Round 8, §4). */
   realTrips: { rows: RealTripRow[]; drivers: RealTripDriverRef[] } | null;
+  /** Calendar mode only: the company's simulation settings as stored now (Round 8, S8). */
+  simulation: CompanySimulationSettings | null;
 }
 
 /** The pool a run draws from and the model that times it. `travel` absent is the labelled estimate. */
@@ -541,7 +544,7 @@ export default function SimulatedRidesPage() {
     }
   };
 
-  const downloadReport = (build: typeof buildMonthReport | typeof buildOperationalReport) => {
+  const downloadReport = (build: typeof buildMonthReport | typeof buildOperationalReport | typeof buildMonthClosing) => {
     if (!calendarResult) return;
     try {
       const { fileName, payload } = build(calendarResult);
@@ -637,7 +640,8 @@ export default function SimulatedRidesPage() {
 
       {mode === 'calendar' && calendarResult ? (
         <CalendarResult result={calendarResult} onDownload={() => downloadReport(buildMonthReport)}
-          onDownloadOperational={() => downloadReport(buildOperationalReport)} />
+          onDownloadOperational={() => downloadReport(buildOperationalReport)}
+          onDownloadClosing={() => downloadReport(buildMonthClosing)} />
       ) : null}
       {mode === 'weeks' && result ? <ResultCard result={result} phase={phase} onImport={runImport} /> : null}
     </div>

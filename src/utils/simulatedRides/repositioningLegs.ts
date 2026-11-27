@@ -35,8 +35,11 @@ import type { GeoPoint, PoolAddress, SimRide, SimShift } from './types';
  * - `to_base`: the last Zielort back to the Betriebssitz, when the company
  *   requires the car back at the end of a shift (round 8, D8). It leaves when
  *   the last ride ends and must be done, with its margin, by the shift's
- *   planned end. A last drop-off at the base itself drove nowhere and is left
- *   out, like the waiting leg.
+ *   planned end. Every shift with a completed ride gets exactly one, a last
+ *   drop-off at the base itself included, recorded as a drive of nothing:
+ *   unlike the waiting leg, its absence would read as a shift that never came
+ *   back, and no sheet holds the drop-off's coordinates to tell the two apart
+ *   (round 8, S9). The validator already asks that 0 s and its margin fit.
  *
  * The status is the route check's vocabulary: a leg the model has no route for
  * is UNVERIFIABLE, never zero and never a pass; a leg of the straight-line
@@ -211,7 +214,7 @@ export function buildRepositioningLegs(
     }
     const last = list[list.length - 1];
     const home = placeOf(ctx.base, ctx.baseLabel);
-    if (ctx.returnToBase && pointKey(last.dropoff) !== pointKey(home)) {
+    if (ctx.returnToBase) {
       const lastEnd = last.endMs as number;
       specs.push({
         purpose: 'to_base', shift, previous: last, next: null,
