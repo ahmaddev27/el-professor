@@ -8,7 +8,13 @@ import {
   formatRateBasisPointsDe,
   rateProblem,
 } from './monthlyRevenueShare';
-import { applyMonthlyShare } from './simulatedRides/monthlyRate';
+import { SHARE_RATE_CHOICES_BP, applyMonthlyShare } from './simulatedRides/monthlyRate';
+
+// Since Round 8 the simulator admits only 30, 31, 32 and 33 %. The arithmetic
+// is still one function, so the band-wide comparison passes a band with no
+// list of allowed values; the four the simulator admits are compared through
+// its own default range as well.
+const BAND = { minBp: 3000, maxBp: 3300 };
 
 function share(basis: number, bp: number) {
   const r = computeStoredShare(basis, { rate_basis_points: bp });
@@ -98,12 +104,22 @@ describe('the product range', () => {
 });
 
 describe('one formula, two rate sources: the simulator cross-check', () => {
+  it('gives the identical amountCents for each of the simulator\'s four rates, through its own range', () => {
+    for (const basis of [0, 1, 7, 99, 12_345, 1_000_000, 987_654_321, -12_345]) {
+      for (const bp of SHARE_RATE_CHOICES_BP) {
+        const sim = applyMonthlyShare(basis, bp);
+        if (!sim.ok) throw new Error(`simulator refused ${bp}`);
+        expect(share(basis, bp)).toEqual(sim.result);
+      }
+    }
+  });
+
   it('gives the identical amountCents for every rate in [3000, 3300] over several bases', () => {
     const bases = [0, 1, 7, 99, 12_345, 1_000_000, 987_654_321, -12_345];
     let pairs = 0;
     for (const basis of bases) {
       for (let bp = 3000; bp <= 3300; bp += 7) {
-        const sim = applyMonthlyShare(basis, bp);
+        const sim = applyMonthlyShare(basis, bp, BAND);
         if (!sim.ok) throw new Error(`simulator refused ${bp}`);
         const prod = share(basis, bp);
         expect(prod.amountCents).toBe(sim.result.amountCents);
@@ -116,7 +132,7 @@ describe('one formula, two rate sources: the simulator cross-check', () => {
 
   it('agrees on every single rate in the band for one awkward basis', () => {
     for (let bp = 3000; bp <= 3300; bp += 1) {
-      const sim = applyMonthlyShare(33_333_333, bp);
+      const sim = applyMonthlyShare(33_333_333, bp, BAND);
       if (!sim.ok) throw new Error('simulator refused');
       expect(share(33_333_333, bp).amountCents).toBe(sim.result.amountCents);
     }

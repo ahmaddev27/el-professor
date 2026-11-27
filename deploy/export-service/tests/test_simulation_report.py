@@ -131,7 +131,7 @@ def test_ride_fares_resum_to_b_c_d_and_the_basis(book, expected):
         basis += value("Stornogebuehren (EUR)")
     assert value("Anspruchsberechtigte Einnahmen (EUR)") == basis
     assert value("Betrag (EUR)") + value("Rest, falls Abzug (EUR)") == basis
-    assert 30 <= float(posten["Satz (%)"]["Wert / Summe der Teile"]) <= 33
+    assert float(posten["Satz (%)"]["Wert / Summe der Teile"]) in (30, 31, 32, 33)
     assert "weder eine Steuer noch eine Provision" in posten["Hinweis Monatsanteil"]["Wert / Summe der Teile"]
     assert all(r["Ergebnis"] == "OK" and r["Differenz"] == 0 for r in checks if r["Abschnitt"] == "Abgleich")
 

@@ -176,8 +176,8 @@ def verify(report_path, ops_path):
         rate = float(posten["Satz (%)"])
         bp = round(rate * 100)
         check(amount + rest == basis, "F: amount + remainder = basis", f"{amount / 100:.2f} + {rest / 100:.2f}")
-        check(30.0 <= rate <= 33.0 and amount == (basis * bp + 5000) // 10000, "F: rate in [30 %, 33 %] and amount = basis x rate",
-              f"{rate} %")
+        check(bp in (3000, 3100, 3200, 3300) and amount == (basis * bp + 5000) // 10000,
+              "F: rate is 30, 31, 32 or 33 % and amount = basis x rate", f"{rate} %")
     else:
         check(False, "F: the monthly share is in the file", "no 'Satz (%)' line")
     verdict = verify_rows.get("Exportstatus", {}).get("Wert / Summe der Teile")

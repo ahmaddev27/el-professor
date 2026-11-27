@@ -1,4 +1,4 @@
-import { MONTHLY_SHARE_MAX_BP, MONTHLY_SHARE_MIN_BP } from './monthlyRate';
+import { isShareRateAllowed } from './monthlyRate';
 import type { FullMonthResult } from './fullMonth';
 import { SHIFT_LIMITS } from './generator';
 import { reconcile } from './monthTotals';
@@ -99,12 +99,12 @@ function eventsReviewed(result: FullMonthResult): VerificationCheck {
 }
 
 function monthlyShare(result: FullMonthResult): VerificationCheck {
-  const label = 'Monatsanteil 30-33 % auf der Grundlage des Berichts';
+  const label = 'Monatsanteil 30, 31, 32 oder 33 % auf der Grundlage des Berichts';
   if (!result.provenance.settings.monthlyRevenueShareEnabled) return check('monthly_share', label, 'passed', 'abgeschaltet');
   if (!result.share) return check('monthly_share', label, 'failed', 'nicht berechenbar');
   const { rate, result: share } = result.share;
   const adds = share.amountCents + share.remainderCents === share.basisCents && share.basisCents === result.basis.basisCents;
-  const ok = adds && rate.rateBasisPoints >= MONTHLY_SHARE_MIN_BP && rate.rateBasisPoints <= MONTHLY_SHARE_MAX_BP;
+  const ok = adds && isShareRateAllowed(rate.rateBasisPoints);
   return check('monthly_share', label, ok ? 'passed' : 'failed',
     `Satz ${rate.ratePercent} %, Betrag + Rest ${adds ? '=' : '≠'} Grundlage`);
 }

@@ -1,14 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_BASIS_CENTS,
-  MONTHLY_SHARE_MAX_BP,
-  MONTHLY_SHARE_MIN_BP,
+  SHARE_PERCENT_CHOICES,
+  SHARE_RATE_CHOICES_BP,
+  SIMULATOR_RATE_RANGE,
   applyMonthlyShare,
+  isShareRateAllowed,
+  resolveShareRate,
+  selectDailyShareRate,
   selectMonthlyShareRate,
+  shareSettingProblem,
+  type ShareRateRange,
+  type ShareSetting,
 } from './monthlyRate';
 
+// The arithmetic is the same for every caller; only which rates are admitted
+// differs. These tests exercise the arithmetic over the whole 30-33 band, so
+// they pass a band with no list of allowed values. The simulator's own range,
+// which admits only the four values, has its own tests below.
+const ARITHMETIC_BAND: ShareRateRange = { minBp: 3000, maxBp: 3300 };
+
 const share = (basis: number, bp: number) => {
-  const r = applyMonthlyShare(basis, bp);
+  const r = applyMonthlyShare(basis, bp, ARITHMETIC_BAND);
   if (!r.ok) throw new Error(`refused: ${r.problem}`);
   return r.result;
 };
@@ -25,11 +38,36 @@ const bigShare = (basis: number, bp: number): bigint => {
   return n < 0n ? -rounded : rounded;
 };
 
-describe('applyMonthlyShare: the audit worked example', () => {
-  it('10,000.00 EUR x 31.42 % = 3,142.00 EUR with 6,858.00 EUR remainder', () => {
-    const r = share(1_000_000, 3142);
-    expect(r.amountCents).toBe(314_200);
-    expect(r.remainderCents).toBe(685_800);
+describe('the Round 8 worked example (section 5)', () => {
+  it('500.00 EUR x 32 % = 160.00 EUR, a percentage and not a multiplier', () => {
+    const r = applyMonthlyShare(50_000, 3200);
+    expect(r).toEqual({ ok: true, result: { basisCents: 50_000, rateBasisPoints: 3200, amountCents: 16_000, remainderCents: 34_000 } });
+  });
+});
+
+describe('the four rates (section 5, test class 14)', () => {
+  it('are exactly 30, 31, 32 and 33 %, in basis points and in percent', () => {
+    expect([...SHARE_RATE_CHOICES_BP]).toEqual([3000, 3100, 3200, 3300]);
+    expect([...SHARE_PERCENT_CHOICES]).toEqual([30, 31, 32, 33]);
+  });
+
+  it('the simulator refuses every rate between them by name, and the old continuous values with it', () => {
+    for (const bp of [3001, 3050, 3099, 3101, 3142, 3150, 3199, 3250, 3299]) {
+      expect(applyMonthlyShare(1000, bp)).toEqual({ ok: false, problem: 'rate_not_allowed' });
+      expect(applyMonthlyShare(1000, bp, SIMULATOR_RATE_RANGE)).toEqual({ ok: false, problem: 'rate_not_allowed' });
+      expect(isShareRateAllowed(bp)).toBe(false);
+    }
+    for (const bp of SHARE_RATE_CHOICES_BP) {
+      expect(applyMonthlyShare(1000, bp).ok).toBe(true);
+      expect(isShareRateAllowed(bp)).toBe(true);
+    }
+  });
+
+  it('refuses a rate outside the band before asking whether it is one of the four', () => {
+    expect(applyMonthlyShare(1000, 2900)).toEqual({ ok: false, problem: 'rate_out_of_range' });
+    expect(applyMonthlyShare(1000, 3400)).toEqual({ ok: false, problem: 'rate_out_of_range' });
+    // 32 read as a multiplier would be 320000 bp: refused, never computed.
+    expect(applyMonthlyShare(1000, 320_000)).toEqual({ ok: false, problem: 'rate_out_of_range' });
   });
 });
 
@@ -46,21 +84,96 @@ describe('selectMonthlyShareRate', () => {
     expect(rates.size).toBeGreaterThan(1);
   });
 
-  it('always draws a whole rate in [3000, 3300] and reaches both ends of it', () => {
-    let min = Infinity;
-    let max = -Infinity;
-    for (let seed = 1; seed <= 3000; seed++) {
+  it('draws only the four values, and every one of them', () => {
+    const seen = new Map<number, number>();
+    for (let seed = 1; seed <= 2000; seed++) {
       const { rateBasisPoints, ratePercent } = selectMonthlyShareRate(seed, 2026, 1 + (seed % 12));
-      expect(Number.isInteger(rateBasisPoints)).toBe(true);
-      expect(rateBasisPoints).toBeGreaterThanOrEqual(MONTHLY_SHARE_MIN_BP);
-      expect(rateBasisPoints).toBeLessThanOrEqual(MONTHLY_SHARE_MAX_BP);
+      expect(isShareRateAllowed(rateBasisPoints)).toBe(true);
       expect(ratePercent).toBe(rateBasisPoints / 100);
-      min = Math.min(min, rateBasisPoints);
-      max = Math.max(max, rateBasisPoints);
+      seen.set(rateBasisPoints, (seen.get(rateBasisPoints) ?? 0) + 1);
     }
-    // 301 possible values over 3000 draws: a stuck draw would not get this close.
-    expect(min).toBeLessThanOrEqual(3010);
-    expect(max).toBeGreaterThanOrEqual(3290);
+    expect([...seen.keys()].sort()).toEqual([3000, 3100, 3200, 3300]);
+    // A draw stuck on one value, or biased far from even, would not land here.
+    for (const count of seen.values()) expect(count).toBeGreaterThan(350);
+  });
+});
+
+describe('selectDailyShareRate', () => {
+  it('is reproducible for the same (seed, date) and draws only the four values', () => {
+    for (let d = 1; d <= 31; d++) {
+      const a = selectDailyShareRate(42, 2026, 10, d);
+      expect(selectDailyShareRate(42, 2026, 10, d)).toEqual(a);
+      expect(isShareRateAllowed(a.rateBasisPoints)).toBe(true);
+    }
+  });
+
+  it('lets the day enter the sub-seed: a month of days is not one rate, and no two dates of a year share a stream', () => {
+    const rates = new Set<number>();
+    for (let d = 1; d <= 30; d++) rates.add(selectDailyShareRate(42, 2026, 9, d).rateBasisPoints);
+    expect(rates.size).toBeGreaterThan(1);
+    const streams = new Set<number>();
+    for (let m = 1; m <= 12; m++) for (let d = 1; d <= 31; d++) streams.add(selectDailyShareRate(42, 2026, m, d).streamSeed);
+    expect(streams.size).toBe(12 * 31);
+  });
+});
+
+describe('resolveShareRate: the company setting', () => {
+  const dates = Array.from({ length: 30 }, (_, i) => ({ year: 2026, month: 9, day: i + 1 }));
+
+  it('a fixed percent is that percent on every date, with no seed', () => {
+    for (const percent of SHARE_PERCENT_CHOICES) {
+      for (const date of dates) {
+        expect(resolveShareRate({ mode: 'fixed', percent }, date)).toEqual({
+          rateBasisPoints: percent * 100, ratePercent: percent, mode: 'fixed', scope: null, seed: null, streamSeed: null,
+        });
+      }
+    }
+  });
+
+  it('random with scope month is the month draw on every day of that month', () => {
+    const month = selectMonthlyShareRate(9001, 2026, 9);
+    for (const date of dates) {
+      const r = resolveShareRate({ mode: 'random', scope: 'month', seed: 9001 }, date);
+      expect(r.rateBasisPoints).toBe(month.rateBasisPoints);
+      expect(r).toMatchObject({ mode: 'random', scope: 'month', seed: 9001, streamSeed: month.streamSeed });
+    }
+  });
+
+  it('random with scope day is each date\'s own draw', () => {
+    for (const date of dates) {
+      const r = resolveShareRate({ mode: 'random', scope: 'day', seed: 9001 }, date);
+      const own = selectDailyShareRate(9001, date.year, date.month, date.day);
+      expect(r).toMatchObject({ rateBasisPoints: own.rateBasisPoints, scope: 'day', streamSeed: own.streamSeed });
+    }
+  });
+
+  it('is stable under regeneration with the same setting, and moves with the seed', () => {
+    const setting: ShareSetting = { mode: 'random', scope: 'day', seed: 5 };
+    const first = dates.map(d => resolveShareRate(setting, d).rateBasisPoints);
+    const again = dates.map(d => resolveShareRate({ ...setting }, d).rateBasisPoints);
+    expect(again).toEqual(first);
+    const other = dates.map(d => resolveShareRate({ ...setting, seed: 6 }, d).rateBasisPoints);
+    expect(other).not.toEqual(first);
+  });
+});
+
+describe('shareSettingProblem: a setting a person typed', () => {
+  it('accepts the four fixed percents and both random scopes', () => {
+    for (const percent of SHARE_PERCENT_CHOICES) expect(shareSettingProblem({ mode: 'fixed', percent })).toBeNull();
+    expect(shareSettingProblem({ mode: 'random', scope: 'month', seed: 1 })).toBeNull();
+    expect(shareSettingProblem({ mode: 'random', scope: 'day', seed: 0 })).toBeNull();
+  });
+
+  it.each([29, 34, 30.5, 0.32, 3200, 3.2, NaN])('refuses the fixed percent %s', percent => {
+    expect(shareSettingProblem({ mode: 'fixed', percent } as unknown as ShareSetting)).toBe('percent_not_allowed');
+  });
+
+  it('refuses a random setting without a scope, or with a seed that is not a whole number', () => {
+    expect(shareSettingProblem({ mode: 'random', scope: 'week', seed: 1 } as unknown as ShareSetting)).toBe('scope_missing');
+    expect(shareSettingProblem({ mode: 'random', seed: 1 } as unknown as ShareSetting)).toBe('scope_missing');
+    expect(shareSettingProblem({ mode: 'random', scope: 'day', seed: 1.5 })).toBe('seed_not_integer');
+    expect(shareSettingProblem({ mode: 'random', scope: 'day', seed: Number.NaN })).toBe('seed_not_integer');
+    expect(shareSettingProblem({ mode: 'other' } as unknown as ShareSetting)).toBe('mode_unknown');
   });
 });
 
@@ -130,6 +243,7 @@ describe('applyMonthlyShare: refusals are return values', () => {
 
   it('refuses a non-integer or out-of-range rate', () => {
     expect(applyMonthlyShare(1000, 3142.5)).toEqual({ ok: false, problem: 'rate_not_whole_basis_points' });
+    expect(applyMonthlyShare(1000, 3200.5)).toEqual({ ok: false, problem: 'rate_not_whole_basis_points' });
     expect(applyMonthlyShare(1000, 2999)).toEqual({ ok: false, problem: 'rate_out_of_range' });
     expect(applyMonthlyShare(1000, 3301)).toEqual({ ok: false, problem: 'rate_out_of_range' });
   });

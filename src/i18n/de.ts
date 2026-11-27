@@ -7371,7 +7371,7 @@ export const de = {
   'simrides.cal.check.code.amountsReadable': 'Alle Beträge lesbar',
   'simrides.cal.check.code.declinedNotExported': 'Keine abgelehnten Aufträge im Fahrtenbuch-Bericht',
   'simrides.cal.check.code.eventsReviewed': 'Ereignisse vor der Erzeugung angewendet',
-  'simrides.cal.check.code.monthlyShare':  'Monatliche Beteiligung 30 bis 33 %',
+  'simrides.cal.check.code.monthlyShare':  'Monatliche Beteiligung 30, 31, 32 oder 33 %',
   'simrides.cal.check.code.reconciliation': 'Summen je Tag, Fahrer und Fahrzeug',
   'simrides.cal.check.code.repositioning': 'Leerfahrten mit Sicherheitsreserve',
   'simrides.cal.check.code.routePairs':    'Routenprüfung je Fahrtenpaar',

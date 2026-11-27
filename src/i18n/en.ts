@@ -7297,7 +7297,7 @@ export const en: PartialDictionary = {
   'simrides.cal.check.code.amountsReadable': 'Every amount readable',
   'simrides.cal.check.code.declinedNotExported': 'No declined orders in the Fahrtenbuch report',
   'simrides.cal.check.code.eventsReviewed': 'Events applied before generation',
-  'simrides.cal.check.code.monthlyShare':  'Monthly share 30 to 33 %',
+  'simrides.cal.check.code.monthlyShare':  'Monthly share 30, 31, 32 or 33 %',
   'simrides.cal.check.code.reconciliation': 'Totals per day, driver and vehicle',
   'simrides.cal.check.code.repositioning': 'Empty drives with their safety margin',
   'simrides.cal.check.code.routePairs':    'Route check per ride pair',
