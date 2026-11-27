@@ -1,9 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Field, Input, NativeSelect, cn,
+} from './ui';
+import { controlFrameClass } from './ui/Input';
 
 interface Plan {
   id: string;
@@ -69,83 +74,88 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '0.625rem 0.75rem',
-    borderRadius: '0.75rem',
-    fontSize: '0.875rem',
-    background: 'var(--bg-subtle)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border)',
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the dialog's logic and is unchanged, bar the
+  // `inputStyle` object, which was only look and is classes now. Everything
+  // below only draws.
+
+  const textareaClass = cn(
+    controlFrameClass,
+    'h-auto min-h-12 resize-y py-2 [@media(pointer:coarse)]:h-auto',
+  );
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="rounded-2xl w-full max-w-md" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)' }}>
-              <Plus size={20} style={{ color: 'var(--accent)' }} />
-            </div>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.assign.title')}</h2>
-          </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
-        </div>
+    <Dialog
+      open
+      onOpenChange={open => {
+        // The dialog stays open while the save runs, so a failure is shown in it.
+        if (!open && !saving) onClose();
+      }}
+    >
+      <DialogContent className="max-w-md" onInteractOutside={event => event.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-tile bg-brand-soft text-brand-text">
+              <Plus aria-hidden className="size-5" />
+            </span>
+            {t('bill.assign.title')}
+          </DialogTitle>
+          <DialogDescription className="sr-only">{t('bill.assign.title')}</DialogDescription>
+        </DialogHeader>
 
-        <div className="p-5 space-y-4">
+        <div className="grid gap-4">
           {loading ? (
-            <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>
+            <div className="flex justify-center py-8">
+              <Loader2 aria-hidden className="size-6 text-brand-text motion-safe:animate-spin" />
+            </div>
           ) : (
             <>
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.companyRequired')}</label>
-                <select value={companyId} onChange={e => setCompanyId(e.target.value)} style={inputStyle}>
+              <Field label={t('bill.field.companyRequired')}>
+                <NativeSelect value={companyId} onChange={e => setCompanyId(e.target.value)}>
                   <option value="">{t('bill.assign.pickCompany')}</option>
                   {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.planRequired')}</label>
-                <select value={planId} onChange={e => setPlanId(e.target.value)} style={inputStyle}>
+                </NativeSelect>
+              </Field>
+              <Field label={t('bill.field.planRequired')}>
+                <NativeSelect value={planId} onChange={e => setPlanId(e.target.value)}>
                   <option value="">{t('bill.assign.pickPlan')}</option>
                   {activePlans.map(p => (
                     <option key={p.id} value={p.id}>
                       {p.name} – {t('bill.pricePerMonth', { price: p.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 }) })}
                     </option>
                   ))}
-                </select>
-              </div>
+                </NativeSelect>
+              </Field>
               {selectedPlan && (
-                <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                  <p style={{ color: 'var(--text-primary)' }}><strong>{selectedPlan.name}</strong></p>
-                  <p style={{ color: 'var(--text-secondary)' }}>{t('bill.planSummary', { cars: selectedPlan.included_cars, drivers: selectedPlan.drivers_per_car_limit })}</p>
-                  <p style={{ color: 'var(--accent)' }} className="font-semibold">{t('bill.pricePerMonth', { price: selectedPlan.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 }) })}</p>
+                <div className="rounded-tile border border-line bg-sunken p-3 text-sm">
+                  <p className="text-fg"><strong>{selectedPlan.name}</strong></p>
+                  <p className="text-fg-muted">{t('bill.planSummary', { cars: selectedPlan.included_cars, drivers: selectedPlan.drivers_per_car_limit })}</p>
+                  <p className="whitespace-nowrap font-semibold tabular-nums text-brand-text">{t('bill.pricePerMonth', { price: selectedPlan.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 }) })}</p>
                 </div>
               )}
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.billingDay')}</label>
-                <input type="number" min="1" max="28" value={billingDay} onChange={e => setBillingDay(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.noteOptional')}</label>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, minHeight: '3rem', resize: 'vertical' }} placeholder={t('bill.notePlaceholder')} />
-              </div>
+              <Field label={t('bill.field.billingDay')}>
+                <Input type="number" min="1" max="28" value={billingDay} onChange={e => setBillingDay(e.target.value)} />
+              </Field>
+              <Field label={t('bill.field.noteOptional')} id="assign-subscription-note">
+                <textarea id="assign-subscription-note" value={notes} onChange={e => setNotes(e.target.value)} className={textareaClass} placeholder={t('bill.notePlaceholder')} />
+              </Field>
             </>
           )}
         </div>
 
-        <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>{t('common.cancel')}</button>
-          <button
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button
+            type="button"
             onClick={handleSubmit}
             disabled={saving || !companyId || !planId}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--accent)', opacity: saving || !companyId || !planId ? 0.6 : 1 }}
+            loading={saving}
           >
-            <Plus size={16} /> {saving ? t('common.saving') : t('bill.assign.submit')}
-          </button>
-        </div>
-      </div>
-    </div>
+            {saving ? null : <Plus aria-hidden />}
+            {saving ? t('common.saving') : t('bill.assign.submit')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

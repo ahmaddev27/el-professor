@@ -229,19 +229,14 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   ),
 ];
 
-/**
- * Batch 4's one-time-code block also renders inside Mein Konto, which is still
- * legacy: its hint, labels, quiet buttons and resend link sit on the legacy
- * card `--bg-surface`, and its six boxes draw a line-strong border there.
+/*
+ * `ON_LEGACY_SURFACE` (Phase-2 foregrounds on the legacy card `--bg-surface`)
+ * was removed with the remake's R3, 27.11.2026: it existed for batch 4's
+ * one-time-code block inside Mein Konto, the last screen in the company frame
+ * that painted its own legacy card. Mein Konto draws glass panes on tokens now,
+ * and every other screen that renders the block (signup, forgot password,
+ * verify email, the invitation) was already on the design system.
  */
-const ON_LEGACY_SURFACE: Array<{ fg: string; min: number }> = [
-  { fg: 'fg', min: TEXT },
-  { fg: 'fg-muted', min: TEXT },
-  { fg: 'brand-text', min: TEXT },
-  { fg: 'line-strong', min: NON_TEXT },
-  { fg: 'focus', min: NON_TEXT },
-  { fg: 'brand', min: NON_TEXT },
-];
 
 /*
  * `ON_LEGACY_PAGE` (Phase-2 foregrounds on the legacy page background
@@ -374,23 +369,6 @@ describe.each<Theme>(['light', 'dark'])('%s legacy theme tokens', theme => {
     // the pairing would still be wrong by intent, but this assertion is what
     // documents why the codebase never pairs them. See accentLabel.contrast.test.ts.
     expect(contrast(tokens['accent-text'] as Rgb, tokens['accent'] as Rgb)).toBeLessThan(TEXT);
-  });
-});
-
-describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy card background', theme => {
-  const tokens = parseTokens(theme);
-  const card = parseLegacyTokens(theme)['bg-surface'];
-
-  it('finds the legacy card background as an opaque colour', () => {
-    expect(card).toHaveLength(3);
-  });
-
-  it.each(ON_LEGACY_SURFACE)('$fg on --bg-surface reaches $min:1', ({ fg, min }) => {
-    const ratio = contrast(flatten(tokens[fg], card as Rgb), card as Rgb);
-    if (process.env.PRINT_CONTRAST) {
-      console.log(`${theme}\t${fg}\tbg-surface (legacy)\t${ratio.toFixed(2)}\t${min}`);
-    }
-    expect(ratio).toBeGreaterThanOrEqual(min);
   });
 });
 

@@ -5,21 +5,9 @@
       "style": 0,
       "color": 16
     },
-    "src/components/ActivationCodesManagement.tsx": {
-      "style": 101,
-      "color": 41
-    },
-    "src/components/AssignSubscriptionModal.tsx": {
-      "style": 22,
-      "color": 3
-    },
     "src/components/ConfirmationModal.tsx": {
       "style": 11,
       "color": 2
-    },
-    "src/components/DiscountCodesManagement.tsx": {
-      "style": 77,
-      "color": 14
     },
     "src/components/DriverSalarySummaryCard.tsx": {
       "style": 35,
@@ -41,10 +29,6 @@
       "style": 39,
       "color": 31
     },
-    "src/components/GenerateInvoicesModal.tsx": {
-      "style": 19,
-      "color": 5
-    },
     "src/components/HistoricalHourTargetsManager.tsx": {
       "style": 70,
       "color": 41
@@ -57,21 +41,9 @@
       "style": 985,
       "color": 682
     },
-    "src/components/InvoiceDetailModal.tsx": {
-      "style": 17,
-      "color": 5
-    },
     "src/components/LanguageSwitcher.tsx": {
       "style": 5,
       "color": 0
-    },
-    "src/components/ManualSubscriptionModal.tsx": {
-      "style": 22,
-      "color": 7
-    },
-    "src/components/MarkPaidModal.tsx": {
-      "style": 18,
-      "color": 3
     },
     "src/components/MietwagenauftragModal.tsx": {
       "style": 155,
@@ -88,10 +60,6 @@
     "src/components/MonatsplanungStundennachweisPreview.tsx": {
       "style": 207,
       "color": 139
-    },
-    "src/components/ReferralCodesManagement.tsx": {
-      "style": 42,
-      "color": 11
     },
     "src/components/RoleModal.tsx": {
       "style": 2,
@@ -121,41 +89,17 @@
       "style": 0,
       "color": 10
     },
-    "src/components/settings/AnnouncementsEditor.tsx": {
-      "style": 38,
-      "color": 1
-    },
-    "src/components/settings/FeatureFlagsEditor.tsx": {
-      "style": 9,
-      "color": 0
-    },
-    "src/components/settings/MailSettingsEditor.tsx": {
-      "style": 27,
-      "color": 1
-    },
     "src/components/settings/settingsEditorKit.tsx": {
-      "style": 12,
+      "style": 1,
       "color": 0
     },
     "src/contexts/ToastContext.tsx": {
       "style": 5,
       "color": 16
     },
-    "src/pages/AbnahmeDiagnosticPage.tsx": {
-      "style": 90,
-      "color": 111
-    },
     "src/pages/AbrechnungPage.tsx": {
       "style": 48,
       "color": 121
-    },
-    "src/pages/AccountPage.tsx": {
-      "style": 33,
-      "color": 0
-    },
-    "src/pages/CompaniesPage.tsx": {
-      "style": 264,
-      "color": 21
     },
     "src/pages/CompanyPlannerPage.tsx": {
       "style": 29,
@@ -169,22 +113,6 @@
       "style": 2,
       "color": 0
     },
-    "src/pages/PlatformAuditPage.tsx": {
-      "style": 49,
-      "color": 0
-    },
-    "src/pages/PlatformDirectoriesPage.tsx": {
-      "style": 53,
-      "color": 0
-    },
-    "src/pages/PlatformSettingsPage.tsx": {
-      "style": 49,
-      "color": 1
-    },
-    "src/pages/PlatformTeamPage.tsx": {
-      "style": 65,
-      "color": 1
-    },
     "src/pages/SettingsPage.tsx": {
       "style": 2,
       "color": 6
@@ -193,13 +121,9 @@
       "style": 154,
       "color": 71
     },
-    "src/pages/SubscriptionBillingPage.tsx": {
-      "style": 79,
-      "color": 5
-    },
     "src/pages/SuperAdminDashboard.tsx": {
-      "style": 174,
-      "color": 25
+      "style": 1,
+      "color": 0
     },
     "src/utils/overviewHelpers.ts": {
       "style": 0,

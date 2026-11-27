@@ -1,11 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { X, FileText, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileText, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { Alert } from './ui';
+import {
+  Alert, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Field, Input, NativeSelect,
+} from './ui';
 import { fetchAllActiveSubscriptions, fetchInvoiceQuotes, fetchInvoicedCompanyIds } from '../lib/platformBillingClient';
 import type { PlatformInvoiceQuote, PlatformSubscriptionRow } from '../lib/platformBilling';
 import { invoiceDueDate } from '../utils/invoiceDueDate';
@@ -157,60 +160,58 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '0.625rem 0.75rem',
-    borderRadius: '0.75rem',
-    fontSize: '0.875rem',
-    background: 'var(--bg-subtle)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border)',
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the dialog's logic and is unchanged, bar the
+  // `inputStyle` object, which was only look and is classes now. Everything
+  // below only draws.
+
+  const generateDisabled = generating || loading || quotesLoading || !quotes || !activeSubs || activeSubs.length === 0;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="rounded-2xl w-full max-w-md" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)' }}>
-              <FileText size={20} style={{ color: 'var(--accent)' }} />
-            </div>
-            <div>
-              <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.invoice.generateTitle')}</h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+    <Dialog
+      open
+      onOpenChange={open => {
+        // A run in progress is not interrupted: its result is shown in this dialog.
+        if (!open && !generating) onClose();
+      }}
+    >
+      <DialogContent className="max-w-md" onInteractOutside={event => event.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-tile bg-brand-soft text-brand-text">
+              <FileText aria-hidden className="size-5" />
+            </span>
+            <span className="grid min-w-0 gap-0.5">
+              <span>{t('bill.invoice.generateTitle')}</span>
+              <span className="text-xs font-normal text-fg-subtle">
                 {loading
                   ? t('common.loading')
                   : tPlural({ one: 'bill.invoice.activeSubs.one', other: 'bill.invoice.activeSubs.other' }, activeSubs?.length ?? 0)}
-              </p>
-            </div>
-          </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
-        </div>
+              </span>
+            </span>
+          </DialogTitle>
+          <DialogDescription className="sr-only">{t('bill.invoice.generateTitle')}</DialogDescription>
+        </DialogHeader>
 
-        <div className="p-5 space-y-4">
+        <div className="grid gap-4">
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</label>
-              <select value={month} onChange={e => setMonth(+e.target.value)} style={inputStyle}>
+            <Field label={t('common.month')}>
+              <NativeSelect value={month} onChange={e => setMonth(+e.target.value)}>
                 {MONTH_KEYS.map((key, i) => <option key={key} value={i + 1}>{t(key)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.year')}</label>
-              <input type="number" value={year} onChange={e => setYear(+e.target.value)} style={inputStyle} min={2024} max={2099} />
-            </div>
+              </NativeSelect>
+            </Field>
+            <Field label={t('bill.field.year')}>
+              <Input type="number" value={year} onChange={e => setYear(+e.target.value)} min={2024} max={2099} />
+            </Field>
           </div>
 
           {/* A list that could not be read whole is not generated from: an
               invoice run over part of the customers is the wrong month, and an
               empty count would read as "no active subscriptions". */}
           {!loading && activeSubs === null ? (
-            // Drawn with the design system, not with this dialog's inline styles:
-            // the style ratchet holds this file at its count. The soft critical
-            // fill on the legacy card is a pair tokens.contrast.test.ts measures.
             <Alert tone="critical" className="font-ui">{t('admin.read.failed')}</Alert>
           ) : (
-            <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+            <div className="rounded-tile bg-sunken p-3 text-sm text-fg-muted">
               {t('bill.invoice.hintPeriodLead', { count: activeSubs?.length ?? 0 })}{' '}
               <strong>{t(MONTH_KEYS[month - 1])} {year}</strong>
               {t('bill.invoice.hintPeriodTail')}
@@ -224,35 +225,29 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
           )}
 
           {results && (
-            <div className="p-3 rounded-xl text-sm space-y-1" style={{
-              background: results.errors.length > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
-              border: `1px solid ${results.errors.length > 0 ? 'var(--danger)' : 'var(--success)'}`,
-            }}>
-              <p style={{ color: 'var(--success)' }}>
-                {tPlural({ one: 'bill.invoice.createdCount.one', other: 'bill.invoice.createdCount.other' }, results.created)}
-              </p>
-              {results.skipped > 0 && <p style={{ color: 'var(--text-tertiary)' }}>{t('bill.invoice.skippedCount', { count: results.skipped })}</p>}
-              {results.errors.map((e, i) => <p key={i} style={{ color: 'var(--danger)' }}>{e}</p>)}
-            </div>
+            <Alert tone={results.errors.length > 0 ? 'critical' : 'positive'}>
+              <div className="grid gap-1">
+                <p className="text-positive">
+                  {tPlural({ one: 'bill.invoice.createdCount.one', other: 'bill.invoice.createdCount.other' }, results.created)}
+                </p>
+                {results.skipped > 0 && <p className="text-fg-subtle">{t('bill.invoice.skippedCount', { count: results.skipped })}</p>}
+                {results.errors.map((e, i) => <p key={i} className="text-critical">{e}</p>)}
+              </div>
+            </Alert>
           )}
         </div>
 
-        <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {t('common.close')}
-          </button>
-          <button
-            onClick={handleGenerate}
-            disabled={generating || loading || quotesLoading || !quotes || !activeSubs || activeSubs.length === 0}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--accent)', opacity: generating || loading || quotesLoading || !quotes || !activeSubs || activeSubs.length === 0 ? 0.6 : 1 }}
-          >
+          </Button>
+          <Button type="button" onClick={handleGenerate} disabled={generateDisabled}>
             {generating
-              ? <><Loader2 size={16} className="animate-spin" /> {t('bill.invoice.generating')}</>
-              : <><FileText size={16} /> {t('bill.invoice.generate')}</>}
-          </button>
-        </div>
-      </div>
-    </div>
+              ? <><Loader2 aria-hidden className="motion-safe:animate-spin" /> {t('bill.invoice.generating')}</>
+              : <><FileText aria-hidden /> {t('bill.invoice.generate')}</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

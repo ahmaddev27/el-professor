@@ -329,8 +329,8 @@ primitives alone**, and is checked in the shots.
 |---|---|
 | R1 | `OverviewPage`, `LockedFeaturePage` — **done 27.11.2026** (below) |
 | R2 | `NotesPage`, `WerkstattPage`, `NotificationsPage` — **done 27.11.2026** (below) |
-| R3 | `AccountPage`; then the OTP block's `ON_LEGACY_SURFACE` pairs retire |
-| R4 | the admin panel: `SuperAdminDashboard`, `CompaniesPage`, `PlatformDirectoriesPage`, `PlatformTeamPage`, `PlatformAuditPage`, `PlatformSettingsPage`, `PlatformPlansPage`, `SubscriptionBillingPage`, `AbnahmeDiagnosticPage` |
+| R3 | `AccountPage`; then the OTP block's `ON_LEGACY_SURFACE` pairs retire — **done 27.11.2026** (below, with R4) |
+| R4 | the admin panel: `SuperAdminDashboard`, `CompaniesPage`, `PlatformDirectoriesPage`, `PlatformTeamPage`, `PlatformAuditPage`, `PlatformSettingsPage`, `PlatformPlansPage`, `SubscriptionBillingPage`, `AbnahmeDiagnosticPage` — **done 27.11.2026** (below; `PlatformPlansPage` was already on tokens) |
 | R5 | the components phase 5 left legacy on purpose: the salary dialogs, the planning and document builders' screen parts (never the documents), the toast, `ConfirmationModal` callers, and `LandingPage` |
 | R6 | retire the legacy tokens once nothing reads them; the document components move their `var(--…)` reads to fixed values first, proved unchanged |
 
@@ -353,7 +353,48 @@ primitives alone**, and is checked in the shots.
 - **The proof.** `identity-proof.mjs` against `origin/staging`, after a negative control on each file. Every logic call is carried (74, 31, 25, and 20 of 22 on Notifications, where the two missing are the two `.map(…)` blocks whose markup was restyled; the `Toggle`s and `handleTypeToggle` inside them are carried). The logic regions differ only by presentation that moved below the marker: the two `inputStyle` objects, Werkstatt's `getStatusConfig` (words and colours in one map; the label is still read the same way) and Notifications' `iconColor`/`iconBg`. The handlers lost are hover painters (22, 14, 12 and 8). The status picker's three `setStatus('…')` buttons are one mapped `setStatus(option.key)`.
 - **Tests.** The four test files that open a dialog mock `ui`'s `Dialog` and `ConfirmDialog`, because `react-test-renderer` cannot draw a portal; the mocked `ConfirmDialog` keeps the real contract (`onConfirm()` then `onClose()`). A mutation control (confirm without `onConfirm`) fails the four delete tests. Two files outside the screens' own tests had to follow: `EditModals.writeRefusal.test.ts` (it opens `WerkstattCheckModal`; it mocks `Dialog` now too), and `scripts/style-ratchet.test.ts`, whose "a screen not yet converted" control was Werkstatt and is `AccountPage` now.
 - **Found in the shots.** A Werkstatt card read „Datum:17.9.2026“: the labels end in a colon with no space (also before R2); they carry `mr-1` now. „Heute“ was plain text beside two bordered arrows and is a secondary button in the page and the form. At 375 px the four status filters wrapped into three and one; they are two by two on a phone. In the form at 375 px, „→“ fell onto a line of its own; the calendar, both arrows and the month are one group now.
-- **Left as it was.** Both pages draw the edit button with a `CreditCard` icon (`CreditCard as Edit2`), as six other files do; the notes tests find the edit button by that icon. That is a question for the owner, not a look-only change.
+- **Left as it was.** Both pages draw the edit button with a `CreditCard` icon (`CreditCard as Edit2`), as six other files do; the notes tests find the edit button by that icon. That is a question for the owner, not a look-only change. **Answered 27.11.2026:** the owner chose the pencil, and `c2202e1` swapped it in all seven files (`Pencil as Edit2`, so no JSX line moved).
+
+**R3 and R4, as built (27.11.2026, branch `design/remake-r3`, one PR).**
+
+- **What moved.** Mein Konto (`AccountPage`, 33 inline styles / 0 colours → 0 / 0) and the platform panel:
+  - the dashboard (174 / 25 → 1 / 0; the one left is a plan bar's width, which is data);
+  - the company list with its four dialogs (264 / 21 → 0 / 0);
+  - billing (79 / 5) with its four dialogs and the manual subscription dialog;
+  - the activation, discount and referral codes (101 / 41, 77 / 14, 42 / 11);
+  - Team, Protokoll and the directories;
+  - the settings page with three editors and the kit they share (its one left is a field width passed in as data);
+  - the Abnahme diagnostics (90 / 111 → 0 / 0).
+
+  `PlatformPlansPage`, `ImpressumEditor` and `PrivacyTextEditor` were already on tokens. The style ratchet ends at 2992 / 2228 in 33 files.
+- **Retired.** `ON_LEGACY_SURFACE` in `tokens.contrast.test.ts` is gone, because every screen that renders the one-time-code block is now on tokens. The control in `scripts/style-ratchet.test.ts` ("a file the remake never converts") now uses the Gehaltsquittung sheet. That file stays on inline styles for good, so the control cannot move again.
+- **The proof.** `identity-proof.mjs` ran against `origin/staging`, per file, after a negative control.
+  - Every logic call is carried in all 21 files: 31 on Mein Konto, 87 on the dashboard, 62 on Abnahme, 61 on billing. The one exception is the directories' `switchTab(id)`, which moved from the trigger's `onClick` to `Tabs onValueChange`.
+  - The logic regions of Mein Konto, the referral codes and five dialogs are identical. The rest differ only by presentation: status maps that held colours, and the `inputStyle` / `labelStyle` / `cardStyle` objects.
+  - Every `onChange` and `onClick` expression of the old markup is present verbatim in the new. The handlers lost are hover painters and two tab setters that are now on `onValueChange`.
+  - The settings files had no marker on staging, so their logic regions include markup. Their handlers were compared by hand.
+- **Behaviour that changed on purpose** (each item is named in the PR):
+  - **Buttons gated with `hidden={!can…}` now hide.** These are: open a company, edit, restore, and the manual subscription. `inline-flex` outranks the `hidden` attribute, so on staging these row buttons were drawn for a `support`, `billing` or `read_only` account, and the database then refused the action. They now carry `[&[hidden]]:hidden`. The lifecycle menu was a plain `div` and already hid.
+  - **The hand-built overlays are now `Dialog`s.**
+    - A click beside a form still does not close it.
+    - Escape and the close button call the old close handler.
+    - A dialog that runs a request ignores close while it runs. These are reject company, the manual subscription, assign, generate invoices, mark paid, the discount code and the activation confirm.
+    - A generated activation code cannot be dismissed with Escape or a click beside it.
+  - **The tab strips are Radix `Tabs`**, so the arrow keys now switch tabs. In the directories, clicking the tab that is already open no longer resets its filters, because Radix fires no change for the same value.
+  - **The settings kit's `Note` is now an `Alert`.** This slightly changes the note in the Impressum and Datenschutz editors too.
+  - **`Button` has no caution variant.** The discount code's "hide" button lost its amber, and the lifecycle "medium" confirm is now the brand primary. The dialog's wording carries the weight.
+  - **The billing actions menu is named "Aktionen"** (`sa.subs.actionsMenu`, a new key). It was named "Anzeigen" before.
+  - **Mein Konto's four unlabelled fields now carry an `aria-label`.**
+- **Found by review.** An independent reviewer read the diff before the build and found four problems, all fixed before the gate:
+  - `CompaniesPage` had a duplicate import.
+  - `CompaniesPage` had lost the import of `berlinToday`, so the companies export would have thrown on click.
+  - The dashboard's quick-action links had lost `flex`.
+  - Four dialogs could be closed in the middle of a request.
+- **Tests.**
+  - `responsiveRules.test.ts` finds `overflow-x-auto` on each company-table frame and requires `relative`, with a mutation control.
+  - `ReferralCodesManagement.writeRefusal.test.ts` now mocks only `Alert`.
+  - The typecheck baseline fell from 165 to 163. Two unused icon imports in `InvoiceDetailModal` went with the old markup, and three `React` imports the conversion left unused were removed.
+- **Harness.** `design-harness/r4/` (fixtures and routes) and `design-harness/shots-r4.mjs` add a platform owner with every capability. The fakes switch to it for `?screen=r4-*`, and every other batch is unchanged.
 
 ## 9. Verification
 

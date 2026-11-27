@@ -26,7 +26,8 @@ vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: world
 vi.mock('../contexts/LanguageContext', () => ({
   useTranslation: () => ({ t: (key: string) => key, tPlural: (k: { one: string }) => k.one }),
 }));
-vi.mock('./ui', () => ({ Alert: () => null }));
+// The real primitives draw (no portal parts are used here); only Alert stays a stub.
+vi.mock('./ui', async importOriginal => ({ ...(await importOriginal<typeof import('./ui')>()), Alert: () => null }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.stubGlobal('window', { confirm: () => true, addEventListener: () => {}, removeEventListener: () => {} });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ShieldAlert, Info, Save } from 'lucide-react';
+import { RefreshCw, ShieldAlert, Save } from 'lucide-react';
 import { useAppConfig } from '../../contexts/AppConfigContext';
 import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -7,6 +7,8 @@ import type { TranslationKey, TranslationVars } from '../../i18n';
 import { isVersionConflict, settingRefusalKey, type SettingKey, type SettingRecord } from '../../lib/platformSettings';
 import { getSetting, putSetting } from '../../lib/platformSettingsClient';
 import { deDateTime } from '../../lib/platformFormat';
+import { Alert, Button, Card, Field as UiField, Input } from '../ui';
+import { controlFrameClass } from '../ui/Input';
 
 /**
  * The parts every editor on the settings screen shares (plan 3.6c, 3.10, 3.11):
@@ -16,19 +18,8 @@ import { deDateTime } from '../../lib/platformFormat';
  * announcement editors needed them too.
  */
 
-export const controlStyle: React.CSSProperties = {
-  padding: '0.5rem 0.75rem',
-  borderRadius: '0.75rem',
-  fontSize: '0.875rem',
-  background: 'var(--bg-subtle)',
-  color: 'var(--text-primary)',
-  border: '1px solid var(--border)',
-};
-
-export const cardStyle: React.CSSProperties = {
-  background: 'var(--bg-surface)',
-  border: '1px solid var(--border)',
-};
+/** A text field's frame, for a control that is not an `Input` (a textarea). */
+export const controlClass = `${controlFrameClass} h-auto py-2`;
 
 /** What one settings key looks like once it has been read. */
 export interface Loaded<T> {
@@ -57,28 +48,27 @@ export const EditorShell: React.FC<EditorShellProps> = ({ loading, problem, deta
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+        <RefreshCw size={24} className="animate-spin text-fg-subtle" />
       </div>
     );
   }
 
   if (problem) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 rounded-2xl text-center px-6" style={cardStyle}>
-        <ShieldAlert size={32} className="mb-3" style={{ color: 'var(--warning)' }} />
-        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(problem)}</p>
-        {detail && <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{detail}</p>}
-        <button onClick={onReload} className="mt-4 px-4 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
+      <Card className="flex flex-col items-center justify-center px-6 py-16 text-center font-ui">
+        <ShieldAlert size={32} className="mb-3 text-caution" />
+        <p className="font-medium text-fg">{t(problem)}</p>
+        {detail && <p className="mt-2 text-xs text-fg-subtle">{detail}</p>}
+        <Button onClick={onReload} className="mt-4">
           {t('admin.settings.reload')}
-        </button>
-      </div>
+        </Button>
+      </Card>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-2 font-ui text-xs text-fg-subtle">
         <span>{version === null ? '' : t('admin.settings.version', { version: String(version) })}</span>
         <span>{updatedAt ? t('admin.settings.updatedAt', { date: deDateTime(updatedAt) }) : ''}</span>
       </div>
@@ -198,16 +188,9 @@ export const SaveRow: React.FC<{ saving: boolean; onSave: () => void; disabled?:
   const off = saving || !!disabled;
   return (
     <div className="flex justify-end">
-      <button
-        onClick={onSave}
-        disabled={off}
-        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
-        // A label on a filled background is --text-inverse, never a fixed white:
-        // the dark theme's accent is light enough that white on it fails contrast.
-        style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: off ? 0.6 : 1 }}
-      >
+      <Button onClick={onSave} disabled={off}>
         <Save size={16} />{saving ? t('admin.common.saving') : t('admin.settings.save')}
-      </button>
+      </Button>
     </div>
   );
 };
@@ -222,28 +205,22 @@ export const Field: React.FC<{
 }> = ({ labelKey, value, disabled, width, onChange, type }) => {
   const { t } = useTranslation();
   return (
-    <label className="block">
-      <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-        {t(labelKey)}
-      </span>
-      <input
+    <UiField label={t(labelKey)}>
+      <Input
         type={type ?? 'text'}
         value={value}
         disabled={disabled}
         onChange={e => onChange(e.target.value)}
-        style={{ ...controlStyle, width: width ?? '100%', opacity: disabled ? 0.6 : 1 }}
+        // A caller-chosen width is data, not a look.
+        style={width ? { width } : undefined}
       />
-    </label>
+    </UiField>
   );
 };
 
 export const Note: React.FC<{ textKey: TranslationKey; vars?: TranslationVars }> = ({ textKey, vars }) => {
   const { t } = useTranslation();
-  return (
-    <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
-      style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-      <Info size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />
-      <span>{t(textKey, vars)}</span>
-    </div>
-  );
+  return <Alert tone="neutral">{t(textKey, vars)}</Alert>;
 };
+
+// ── Presentation (phase 5): the markup above only draws; its logic is unchanged ──

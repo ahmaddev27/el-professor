@@ -43,8 +43,11 @@ describe('responsive rules', () => {
     const tables = companies.split('<table className="w-full text-sm">');
     expect(tables).toHaveLength(3);
     for (const before of tables.slice(0, 2)) {
-      const frame = before.lastIndexOf('rounded-2xl overflow-');
-      expect(before.slice(frame, frame + 'rounded-2xl overflow-x-auto'.length)).toBe('rounded-2xl overflow-x-auto');
+      // The frame is the table's parent: its class list ends right before the tag.
+      const frame = before.lastIndexOf('overflow-');
+      expect(before.slice(frame, frame + 'overflow-x-auto'.length)).toBe('overflow-x-auto');
+      // Positioned, so a screen-reader label in a scrolled-off cell cannot escape it.
+      expect(before.slice(before.lastIndexOf('className="', frame)).split('"')[1]).toContain('relative');
     }
   });
 

@@ -27,9 +27,9 @@ import {
   type MailTemplatePurpose,
 } from '../../../supabase/functions/_shared/mail-template.ts';
 import { buildOtpMail } from '../../../supabase/functions/_shared/otp-mail.ts';
+import { Alert, Badge as UiBadge, Button, Card, CardContent, CardHeader, CardTitle, Field as UiField, Input, Tabs, TabsList, TabsTrigger, cn } from '../ui';
 import {
-  cardStyle,
-  controlStyle,
+  controlClass,
   EditorShell,
   Field,
   Note,
@@ -103,25 +103,16 @@ const MailSettingsEditor: React.FC = () => {
 
       <div className="space-y-4">
         <div>
-          <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.mail.templates.title')}</h2>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('admin.mail.templates.hint')}</p>
+          <h2 className="font-ui font-semibold text-fg">{t('admin.mail.templates.title')}</h2>
+          <p className="mt-1 font-ui text-xs text-fg-subtle">{t('admin.mail.templates.hint')}</p>
         </div>
-        <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
-          {MAIL_TEMPLATE_PURPOSES.map(id => (
-            <button
-              key={id}
-              onClick={() => setPurpose(id)}
-              className="grow basis-32 px-3 py-2 rounded-lg text-sm font-medium transition-all"
-              style={{
-                background: purpose === id ? 'var(--bg-surface)' : 'transparent',
-                color: purpose === id ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                boxShadow: purpose === id ? 'var(--shadow-sm)' : 'none',
-              }}
-            >
-              {t(PURPOSE_LABELS[id])}
-            </button>
-          ))}
-        </div>
+        <Tabs value={purpose} onValueChange={id => setPurpose(id as MailTemplatePurpose)}>
+          <TabsList variant="segmented" className="flex-wrap">
+            {MAIL_TEMPLATE_PURPOSES.map(id => (
+              <TabsTrigger key={id} value={id}>{t(PURPOSE_LABELS[id])}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         {/* Keyed by the mail, so switching discards the other mail's unsaved form. */}
         <TemplateSection key={purpose} purpose={purpose} />
       </div>
@@ -148,16 +139,20 @@ const SenderSection: React.FC = () => {
     >
       {form && (
         <>
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.mail.sender.title')}</h2>
-            <Field
-              labelKey="admin.mail.sender.name"
-              value={form.name}
-              disabled={!maySave}
-              onChange={name => setForm({ name })}
-            />
-            <Note textKey="admin.mail.sender.hint" />
-          </div>
+          <Card className="font-ui">
+            <CardHeader>
+              <CardTitle>{t('admin.mail.sender.title')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Field
+                labelKey="admin.mail.sender.name"
+                value={form.name}
+                disabled={!maySave}
+                onChange={name => setForm({ name })}
+              />
+              <Note textKey="admin.mail.sender.hint" />
+            </CardContent>
+          </Card>
           {!maySave && <Note textKey="admin.settings.readOnly" />}
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
         </>
@@ -171,22 +166,16 @@ const SenderSection: React.FC = () => {
 const Badge: React.FC<{ isDefault: boolean }> = ({ isDefault }) => {
   const { t } = useTranslation();
   return (
-    <span
-      className="text-[0.65rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
-      style={{
-        background: isDefault ? 'var(--bg-subtle)' : 'var(--accent-subtle)',
-        color: isDefault ? 'var(--text-tertiary)' : 'var(--accent)',
-      }}
-    >
+    <UiBadge tone={isDefault ? 'neutral' : 'brand'}>
       {t(isDefault ? 'admin.mail.field.default' : 'admin.mail.field.custom')}
-    </span>
+    </UiBadge>
   );
 };
 
 const FieldLabel: React.FC<{ labelKey: TranslationKey; isDefault: boolean }> = ({ labelKey, isDefault }) => {
   const { t } = useTranslation();
   return (
-    <span className="flex items-center gap-2 text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+    <span className="flex items-center gap-2 font-ui text-[13px] font-[550] text-fg-muted">
       {t(labelKey)} <Badge isDefault={isDefault} />
     </span>
   );
@@ -237,7 +226,6 @@ const TemplateForm: React.FC<{
 
   const kept = mailTemplateDefaultsKept(purpose, form);
   const allDefault = kept.subject && kept.heading && kept.paragraphs && kept.button;
-  const inputStyle = { ...controlStyle, width: '100%', opacity: maySave ? 1 : 0.6 };
   const setParagraph = (index: number, text: string) => {
     const paragraphs = [...form.paragraphs];
     paragraphs[index] = text;
@@ -248,32 +236,29 @@ const TemplateForm: React.FC<{
     <>
       {!maySave && <Note textKey="admin.settings.readOnly" />}
 
-      <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t(PURPOSE_LABELS[purpose])}</h3>
+      <Card className="font-ui">
+        <CardHeader>
+          <CardTitle as="h3">{t(PURPOSE_LABELS[purpose])}</CardTitle>
           {maySave && !allDefault && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setForm(mailTemplateToForm(purpose, {}))}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
               <RotateCcw size={13} />{t('admin.mail.resetAll')}
-            </button>
+            </Button>
           )}
-        </div>
-
-        <label className="block">
-          <FieldLabel labelKey="admin.mail.field.subject" isDefault={kept.subject} />
-          <input value={form.subject} disabled={!maySave} style={inputStyle}
+        </CardHeader>
+        <CardContent className="space-y-4">
+        <UiField label={<FieldLabel labelKey="admin.mail.field.subject" isDefault={kept.subject} />} hint={t('admin.mail.subjectRule')}>
+          <Input value={form.subject} disabled={!maySave}
             onChange={e => setForm({ ...form, subject: e.target.value })} />
-          <span className="block text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('admin.mail.subjectRule')}</span>
-        </label>
+        </UiField>
 
-        <label className="block">
-          <FieldLabel labelKey="admin.mail.field.heading" isDefault={kept.heading} />
-          <input value={form.heading} disabled={!maySave} style={inputStyle}
+        <UiField label={<FieldLabel labelKey="admin.mail.field.heading" isDefault={kept.heading} />}>
+          <Input value={form.heading} disabled={!maySave}
             onChange={e => setForm({ ...form, heading: e.target.value })} />
-        </label>
+        </UiField>
 
         <div className="space-y-2">
           <FieldLabel labelKey="admin.mail.field.paragraphs" isDefault={kept.paragraphs} />
@@ -286,36 +271,37 @@ const TemplateForm: React.FC<{
                 maxLength={MAIL_PARAGRAPH_MAX}
                 onChange={e => setParagraph(index, e.target.value)}
                 aria-label={t('admin.mail.paragraphN', { n: index + 1 })}
-                style={{ ...inputStyle, resize: 'vertical' }}
+                className={cn(controlClass, 'resize-y')}
               />
               {maySave && form.paragraphs.length > 1 && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => setForm({ ...form, paragraphs: form.paragraphs.filter((_, i) => i !== index) })}
-                  className="p-2 rounded-lg"
-                  style={{ color: 'var(--danger)' }}
+                  className="text-critical hover:text-critical"
                   title={t('admin.mail.removeParagraph')}
                   aria-label={t('admin.mail.removeParagraph')}
                 >
                   <Trash2 size={15} />
-                </button>
+                </Button>
               )}
             </div>
           ))}
           {maySave && form.paragraphs.length < MAIL_PARAGRAPHS_MAX && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setForm({ ...form, paragraphs: [...form.paragraphs, ''] })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-              style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}
             >
               <Plus size={13} />{t('admin.mail.addParagraph')}
-            </button>
+            </Button>
           )}
-          <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          <p className="text-xs text-fg-subtle">
             {t('admin.mail.variables')}{' '}
             {MAIL_TEMPLATE_VARIABLES[purpose].map((name, i) => (
               <span key={name}>
                 {i > 0 && ' · '}
-                <code className="px-1 rounded" style={{ background: 'var(--bg-subtle)' }}>{`{${name}}`}</code>{' '}
+                <code className="rounded bg-sunken px-1">{`{${name}}`}</code>{' '}
                 {t(VARIABLE_LABELS[name])}
               </span>
             ))}
@@ -323,29 +309,28 @@ const TemplateForm: React.FC<{
         </div>
 
         {hasButton && (
-          <label className="block">
-            <FieldLabel labelKey="admin.mail.field.button" isDefault={kept.button} />
-            <input value={form.button} disabled={!maySave} style={inputStyle}
+          <UiField label={<FieldLabel labelKey="admin.mail.field.button" isDefault={kept.button} />}>
+            <Input value={form.button} disabled={!maySave}
               onChange={e => setForm({ ...form, button: e.target.value })} />
-          </label>
+          </UiField>
         )}
 
         <Note textKey="admin.mail.fixedParts" />
-      </div>
+        </CardContent>
+      </Card>
 
       {refusal && (
-        <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
-          style={{ background: 'var(--warning-subtle)', color: 'var(--warning)', border: '1px solid var(--border)' }}>
-          <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
-          <span>{t('admin.mail.refused', { field: refusal })}</span>
-        </div>
+        <Alert tone="caution" icon={AlertTriangle}>{t('admin.mail.refused', { field: refusal })}</Alert>
       )}
 
-      <div className="rounded-2xl p-5 space-y-3" style={cardStyle}>
-        <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.mail.preview')}</h3>
+      <Card className="font-ui">
+        <CardHeader>
+          <CardTitle as="h3">{t('admin.mail.preview')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
         {preview ? (
           <>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <p className="text-sm text-fg-muted">
               <span className="font-semibold">{t('admin.mail.previewSubject')}</span> {preview.subject}
             </p>
             {/* Sandboxed: no script runs and no link navigates. allow-same-origin
@@ -357,19 +342,21 @@ const TemplateForm: React.FC<{
               title={t('admin.mail.preview')}
               sandbox="allow-same-origin"
               srcDoc={preview.html}
-              className="w-full rounded-xl"
-              style={{ height: '42rem', border: '1px solid var(--border)', background: '#F7F6F3' }}
+              className="h-[42rem] w-full rounded-tile border border-line"
             />
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.mail.previewValues')}</p>
+            <p className="text-xs text-fg-subtle">{t('admin.mail.previewValues')}</p>
           </>
         ) : (
-          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
+          <p className="text-sm text-fg-subtle">{t('admin.settings.exampleUnavailable')}</p>
         )}
-      </div>
+        </CardContent>
+      </Card>
 
       {maySave && <SaveRow saving={saving} onSave={onSave} disabled={refusal !== null} />}
     </>
   );
 };
+
+// ── Presentation (phase 5): the markup above only draws; its logic is unchanged ──
 
 export default MailSettingsEditor;

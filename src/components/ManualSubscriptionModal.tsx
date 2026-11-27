@@ -3,7 +3,11 @@ import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { X, RefreshCw, PencilLine } from 'lucide-react';
+import { PencilLine } from 'lucide-react';
+import {
+  Alert, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Field, Input, NativeSelect, cn,
+} from './ui';
 import { format } from 'date-fns';
 
 type SubStatus = 'inactive' | 'active' | 'expired' | 'suspended';
@@ -79,136 +83,92 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the modal's logic and is unchanged. Everything below
+  // only draws.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
-      <div className="w-full max-w-md rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)' }}>
-              <PencilLine size={15} style={{ color: 'var(--accent)' }} />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{t('bill.manual.title')}</h3>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{company.name}</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
-            <X size={16} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={open => { if (!open && !saving) onClose(); }}>
+      <DialogContent className="max-w-md" onInteractOutside={event => event.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5 text-base">
+            <span className="flex size-8 items-center justify-center rounded-tight bg-brand-soft text-brand-text">
+              <PencilLine aria-hidden className="size-[15px]" />
+            </span>
+            <span>
+              {t('bill.manual.title')}
+              <span className="block text-xs font-normal text-fg-subtle">{company.name}</span>
+            </span>
+          </DialogTitle>
+          <DialogDescription className="sr-only">{company.name}</DialogDescription>
+        </DialogHeader>
 
-        {/* Body */}
-        <div className="px-6 py-5 space-y-4">
-
+        <div className="grid gap-4">
           {/* Abo-Status */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
-              {t('bill.field.subStatus')}
-            </label>
-            <div className="flex gap-2 flex-wrap">
+          <fieldset className="grid gap-1.5">
+            <legend className="mb-1.5 text-[13px] font-[550] text-fg-muted">{t('bill.field.subStatus')}</legend>
+            <div className="flex flex-wrap gap-2">
               {STATUS_OPTIONS.map(opt => (
                 <button
                   key={opt.value}
                   type="button"
+                  aria-pressed={status === opt.value}
                   onClick={() => setStatus(opt.value)}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-                  style={status === opt.value
-                    ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                    : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
-                  }
+                  className={cn(
+                    'rounded-control border px-3 py-2 text-xs font-semibold transition-colors [@media(pointer:coarse)]:min-h-11',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                    status === opt.value
+                      ? 'border-transparent bg-brand text-brand-fg'
+                      : 'border-line bg-sunken text-fg-muted hover:text-fg',
+                  )}
                 >
                   {t(opt.label)}
                 </button>
               ))}
             </div>
-          </div>
+          </fieldset>
 
           {/* Aktiv seit */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              {t('bill.field.activeSince')}
-            </label>
-            <input
-              type="date"
-              value={startedAt}
-              onChange={e => setStartedAt(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-            />
-          </div>
+          <Field label={t('bill.field.activeSince')}>
+            <Input type="date" value={startedAt} onChange={e => setStartedAt(e.target.value)} />
+          </Field>
 
           {/* Aktiv bis */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              {t('bill.field.activeUntil')}
-            </label>
-            <input
-              type="date"
-              value={expiresAt}
-              onChange={e => setExpiresAt(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-            />
-          </div>
+          <Field label={t('bill.field.activeUntil')}>
+            <Input type="date" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} />
+          </Field>
 
           {/* Laufzeit */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              {t('bill.field.termOptional')}
-            </label>
-            <select
-              value={durationType}
-              onChange={e => setDurationType(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-            >
+          <Field label={t('bill.field.termOptional')}>
+            <NativeSelect value={durationType} onChange={e => setDurationType(e.target.value)}>
               {DURATION_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{t(opt.label)}</option>
               ))}
-            </select>
-          </div>
+            </NativeSelect>
+          </Field>
 
           {/* Änderungsgrund */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              {t('bill.field.changeReason')}
-            </label>
-            <input
+          <Field label={t('bill.field.changeReason')}>
+            <Input
               type="text"
               value={reason}
               onChange={e => setReason(e.target.value)}
               placeholder={t('bill.manual.reasonPlaceholder')}
-              className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             />
-          </div>
+          </Field>
 
-          <p className="text-[11px] p-3 rounded-xl" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: 'var(--text-secondary)' }}>
-            {t('bill.manual.warning')}
-          </p>
+          <Alert tone="caution" role="note">{t('bill.manual.warning')}</Alert>
         </div>
 
-        {/* Footer */}
-        <div className="flex gap-2 justify-end px-6 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          >
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {t('common.cancel')}
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
-          >
-            {saving ? <RefreshCw size={13} className="animate-spin" /> : <PencilLine size={13} />}
+          </Button>
+          <Button type="button" onClick={handleSave} loading={saving}>
+            {saving ? null : <PencilLine aria-hidden />}
             {saving ? t('common.saving') : t('common.save')}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

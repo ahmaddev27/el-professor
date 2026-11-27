@@ -8,7 +8,8 @@
 
 import React, { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { CheckCircle, AlertTriangle, XCircle, RefreshCw, ClipboardList } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, RefreshCw } from 'lucide-react';
+import { Alert, Badge, Button, Card, PageHeader, cn } from '../components/ui';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 
@@ -188,49 +189,6 @@ interface DiagResult {
   warnings: string[];
 }
 
-// ── Status badge ──────────────────────────────────────────────────────────
-function Badge({ ok, warn, label }: { ok?: boolean; warn?: boolean; label: string }) {
-  const bg = ok ? 'rgba(22,163,74,0.12)' : warn ? 'rgba(234,179,8,0.15)' : 'rgba(220,38,38,0.12)';
-  const border = ok ? '1px solid rgba(22,163,74,0.35)' : warn ? '1px solid rgba(234,179,8,0.35)' : '1px solid rgba(220,38,38,0.35)';
-  const color = ok ? '#4ade80' : warn ? '#facc15' : '#f87171';
-  const Icon = ok ? CheckCircle : warn ? AlertTriangle : XCircle;
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: bg, border, borderRadius: 6, padding: '2px 8px', fontSize: 12, fontWeight: 600, color }}>
-      <Icon style={{ width: 12, height: 12 }} />
-      {label}
-    </span>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12, marginTop: 0 }}>
-      {children}
-    </h3>
-  );
-}
-
-function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div style={{
-      background: '#0d1117', border: '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 12, padding: 20, marginBottom: 16,
-      ...style,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function Row({ label, value, ok, warn, error }: { label: string; value: string | number; ok?: boolean; warn?: boolean; error?: boolean }) {
-  const color = error ? '#f87171' : warn ? '#facc15' : ok ? '#4ade80' : '#e2e8f0';
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-      <span style={{ fontSize: 13, color: '#94a3b8' }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 700, color }}>{value}</span>
-    </div>
-  );
-}
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function AbnahmeDiagnosticPage() {
@@ -509,109 +467,92 @@ export default function AbnahmeDiagnosticPage() {
       : Math.max(0, 100 - result.criticalErrors.length * 20 - result.warnings.length * 3)
     : 0;
 
+  // ── Presentation (phase 5)
+  const sectionGrid = 'grid grid-cols-1 gap-4';
+  const tableTh = 'whitespace-nowrap px-2.5 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.05em] text-fg-subtle';
+  const tdMuted = 'px-2.5 py-[7px] tabular-nums whitespace-nowrap text-fg-muted';
+  const tdTotal = 'px-2.5 py-[7px] tabular-nums whitespace-nowrap text-brand-text';
+  const tile = 'rounded-tile border px-4 py-3.5';
+  const tileLabel = 'mb-1.5 text-[11px] text-fg-subtle';
+  const tileFigure = 'text-[22px] font-extrabold tabular-nums';
+
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px', color: '#e2e8f0' }}>
+    <div className="mx-auto grid max-w-[1100px] grid-cols-1 gap-4 px-4 py-6 font-ui text-fg">
 
       {/* Page header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ClipboardList style={{ width: 20, height: 20, color: '#06b6d4' }} />
-          </div>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>{t('diag.pageTitle')}</h1>
-            <p style={{ fontSize: 12, color: '#475569', margin: 0 }}>{t('diag.pageSubtitle')} · {STABLE_RUN_ID}</p>
-          </div>
-        </div>
-        <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-          {t('diag.readOnlyNote')}
-        </p>
-      </div>
-
-      {/* Run button */}
-      <button
-        onClick={runDiagnostic}
-        disabled={loading}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '10px 20px', borderRadius: 10, fontSize: 14, fontWeight: 700,
-          background: loading ? 'rgba(6,182,212,0.08)' : 'rgba(6,182,212,0.15)',
-          border: '1px solid rgba(6,182,212,0.3)',
-          color: loading ? '#475569' : '#06b6d4',
-          cursor: loading ? 'not-allowed' : 'pointer',
-          transition: 'all 0.18s',
-          marginBottom: 24,
-        }}
+      <PageHeader
+        className="pb-0"
+        title={t('diag.pageTitle')}
+        description={<>{t('diag.pageSubtitle')} · <span className="font-mono">{STABLE_RUN_ID}</span></>}
+        actions={(
+          <Button variant="secondary" onClick={runDiagnostic} disabled={loading}>
+            <RefreshCw aria-hidden className={loading ? 'motion-safe:animate-spin' : undefined} />
+            {loading ? t('diag.running') : t('diag.start')}
+          </Button>
+        )}
       >
-        <RefreshCw style={{ width: 16, height: 16, animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-        {loading ? t('diag.running') : t('diag.start')}
-      </button>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        <p className="text-[13px] text-fg-muted">{t('diag.readOnlyNote')}</p>
+      </PageHeader>
 
       {error && (
-        <Card style={{ border: '1px solid rgba(220,38,38,0.35)', background: 'rgba(220,38,38,0.06)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f87171' }}>
-            <XCircle style={{ width: 16, height: 16 }} />
-            <strong>{t('common.error')}:</strong> {error}
-          </div>
-        </Card>
+        <Alert tone="critical">
+          <strong>{t('common.error')}:</strong> {error}
+        </Alert>
       )}
 
       {result && (
-        <>
+        <div className={sectionGrid}>
           {/* ── Final Summary ─────────────────────────────────────────────── */}
-          <Card style={{ background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.15)' }}>
+          <Card className="p-5">
             <SectionTitle>{t('common.summary')}</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
               {([
                 { label: 'diag.fahrtenbuchClean', val: result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0 },
                 { label: 'diag.stundennachweisClean', val: result.stundennachweis.every(s => !s.maxShiftsViolation) },
               ] as const).map(({ label, val }) => (
-                <div key={label} style={{ background: val ? 'rgba(22,163,74,0.08)' : 'rgba(220,38,38,0.08)', border: `1px solid ${val ? 'rgba(22,163,74,0.25)' : 'rgba(220,38,38,0.25)'}`, borderRadius: 10, padding: '14px 16px' }}>
-                  <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t(label)}</p>
-                  <Badge ok={val} label={val ? t('diag.yes') : t('diag.no')} />
+                <div key={label} className={cn(tile, val ? 'border-positive/25 bg-positive-soft' : 'border-critical/25 bg-critical-soft')}>
+                  <p className={tileLabel}>{t(label)}</p>
+                  <StatusBadge ok={val} label={val ? t('diag.yes') : t('diag.no')} />
                 </div>
               ))}
-              <div style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 10, padding: '14px 16px' }}>
-                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t('diag.criticalErrors')}</p>
-                <span style={{ fontSize: 22, fontWeight: 900, color: result.criticalErrors.length > 0 ? '#f87171' : '#4ade80' }}>{result.criticalErrors.length}</span>
+              <div className={cn(tile, 'border-critical/25 bg-critical-soft')}>
+                <p className={tileLabel}>{t('diag.criticalErrors')}</p>
+                <span className={cn(tileFigure, result.criticalErrors.length > 0 ? 'text-critical' : 'text-positive')}>{result.criticalErrors.length}</span>
               </div>
-              <div style={{ background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: 10, padding: '14px 16px' }}>
-                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t('diag.warnings')}</p>
-                <span style={{ fontSize: 22, fontWeight: 900, color: result.warnings.length > 0 ? '#facc15' : '#4ade80' }}>{result.warnings.length}</span>
+              <div className={cn(tile, 'border-caution/20 bg-caution-soft')}>
+                <p className={tileLabel}>{t('diag.warnings')}</p>
+                <span className={cn(tileFigure, result.warnings.length > 0 ? 'text-caution' : 'text-positive')}>{result.warnings.length}</span>
               </div>
-              <div style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: 10, padding: '14px 16px' }}>
-                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t('diag.productionReadiness')}</p>
-                <span style={{ fontSize: 22, fontWeight: 900, color: productionReadiness >= 95 ? '#4ade80' : productionReadiness >= 70 ? '#facc15' : '#f87171' }}>{productionReadiness} %</span>
+              <div className={cn(tile, 'border-info/20 bg-info-soft')}>
+                <p className={tileLabel}>{t('diag.productionReadiness')}</p>
+                <span className={cn(tileFigure, productionReadiness >= 95 ? 'text-positive' : productionReadiness >= 70 ? 'text-caution' : 'text-critical')}>{productionReadiness} %</span>
               </div>
             </div>
 
             {result.criticalErrors.length > 0 && (
-              <div style={{ marginTop: 16, background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 8, padding: '12px 14px' }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: '#f87171', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('diag.criticalErrors')}</p>
+              <Alert tone="critical" title={t('diag.criticalErrors')} className="mt-4">
                 {result.criticalErrors.map((e, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#fca5a5', marginBottom: 4 }}>
-                    <XCircle style={{ width: 13, height: 13, flexShrink: 0 }} />
+                  <div key={i} className="mb-1 flex items-center gap-2 text-[13px]">
+                    <XCircle aria-hidden className="size-[13px] shrink-0 text-critical" />
                     {e}
                   </div>
                 ))}
-              </div>
+              </Alert>
             )}
             {result.warnings.length > 0 && (
-              <div style={{ marginTop: 12, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: 8, padding: '12px 14px' }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: '#facc15', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('diag.warnings')}</p>
+              <Alert tone="caution" title={t('diag.warnings')} className="mt-3">
                 {result.warnings.map((w, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#fde68a', marginBottom: 4 }}>
-                    <AlertTriangle style={{ width: 13, height: 13, flexShrink: 0 }} />
+                  <div key={i} className="mb-1 flex items-center gap-2 text-[13px]">
+                    <AlertTriangle aria-hidden className="size-[13px] shrink-0 text-caution" />
                     {w}
                   </div>
                 ))}
-              </div>
+              </Alert>
             )}
           </Card>
 
           {/* ── 1. Planning Run Integrity ──────────────────────────────────── */}
-          <Card>
+          <Card className="p-5">
             <SectionTitle>{t('diag.section1')}</SectionTitle>
             {result.run && (
               <>
@@ -623,7 +564,7 @@ export default function AbnahmeDiagnosticPage() {
                 {result.run.apply_summary_json && Object.entries(result.run.apply_summary_json).map(([k, v]) => (
                   <Row key={k} label={k} value={v} />
                 ))}
-                <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
+                <div className="mt-3 border-t border-line pt-3">
                   <Row label={t('diag.rowTotalTrips')} value={result.totalTrips}
                     ok={result.totalTrips === EXPECTED.totalFahrten}
                     error={result.totalTrips !== EXPECTED.totalFahrten} />
@@ -649,7 +590,7 @@ export default function AbnahmeDiagnosticPage() {
           </Card>
 
           {/* ── 2. Fahrtenbuch Integrity ───────────────────────────────────── */}
-          <Card>
+          <Card className="p-5">
             <SectionTitle>{t('diag.section2')}</SectionTitle>
             <Row label={t('diag.rowDuplicateTripIds')}
               value={result.duplicateTripIds.length}
@@ -673,16 +614,15 @@ export default function AbnahmeDiagnosticPage() {
               error={result.missingBlockId > 0} />
 
             {result.duplicateTripIds.length > 0 && (
-              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 8 }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: '#f87171', margin: '0 0 6px' }}>{t('diag.duplicateIdsSample')}</p>
+              <Alert tone="critical" title={t('diag.duplicateIdsSample')} className="mt-2.5">
                 {result.duplicateTripIds.slice(0, 5).map(id => (
-                  <p key={id} style={{ fontSize: 11, color: '#fca5a5', margin: '2px 0', fontFamily: 'monospace' }}>{id}</p>
+                  <p key={id} className="my-0.5 break-all font-mono text-[11px]">{id}</p>
                 ))}
-              </div>
+              </Alert>
             )}
 
-            <div style={{ marginTop: 12, padding: '10px 12px', background: result.criticalErrors.length === 0 && result.warnings.length === 0 ? 'rgba(22,163,74,0.06)' : 'rgba(234,179,8,0.06)', border: `1px solid ${result.criticalErrors.length === 0 && result.warnings.length === 0 ? 'rgba(22,163,74,0.2)' : 'rgba(234,179,8,0.2)'}`, borderRadius: 8 }}>
-              <Badge
+            <div className={cn('mt-3 rounded-tight border px-3 py-2.5', result.criticalErrors.length === 0 && result.warnings.length === 0 ? 'border-positive/20 bg-positive-soft' : 'border-caution/20 bg-caution-soft')}>
+              <StatusBadge
                 ok={result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0}
                 warn={result.warnings.length > 0 && result.criticalErrors.length === 0}
                 label={result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0
@@ -693,43 +633,41 @@ export default function AbnahmeDiagnosticPage() {
           </Card>
 
           {/* ── 3. Driver Distribution ─────────────────────────────────────── */}
-          <Card>
+          <Card className="p-5">
             <SectionTitle>{t('diag.section3')}</SectionTitle>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <div className="relative overflow-x-auto">
+              <table className="w-full border-collapse text-[13px]">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <tr className="border-b border-line">
                     {DRIVER_TABLE_KEYS.map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t(h)}</th>
+                      <th key={h} scope="col" className={tableTh}>{t(h)}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {result.driverStats.map(d => (
-                    <tr key={d.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={{ padding: '7px 10px', fontWeight: 700, color: '#e2e8f0' }}>{d.name}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.fahrten}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.blocks.size}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.workMinutes}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{minsToHHMM(d.workMinutes)}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{fmtDate(d.firstDate)}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{fmtDate(d.lastDate)}</td>
+                    <tr key={d.name} className="border-b border-line hover:bg-sunken">
+                      <td className="whitespace-nowrap px-2.5 py-[7px] font-bold text-fg">{d.name}</td>
+                      <td className={tdMuted}>{d.fahrten}</td>
+                      <td className={tdMuted}>{d.blocks.size}</td>
+                      <td className={tdMuted}>{d.workMinutes}</td>
+                      <td className={tdMuted}>{minsToHHMM(d.workMinutes)}</td>
+                      <td className={tdMuted}>{fmtDate(d.firstDate)}</td>
+                      <td className={tdMuted}>{fmtDate(d.lastDate)}</td>
                     </tr>
                   ))}
-                  <tr style={{ borderTop: '1px solid rgba(255,255,255,0.1)', background: 'rgba(6,182,212,0.04)' }}>
-                    <td style={{ padding: '7px 10px', fontWeight: 800, color: '#06b6d4' }}>{t('diag.total')}</td>
-                    <td style={{ padding: '7px 10px', fontWeight: 700, color: '#06b6d4' }}>
+                  <tr className="border-t border-line-strong bg-brand-soft">
+                    <td className="px-2.5 py-[7px] font-extrabold text-brand-text">{t('diag.total')}</td>
+                    <td className={cn(tdTotal, 'font-bold')}>
                       {result.driverStats.reduce((s, d) => s + d.fahrten, 0)}
                     </td>
-                    <td style={{ padding: '7px 10px', color: '#06b6d4' }}>
+                    <td className={tdTotal}>
                       {result.distinctBlocks}
                     </td>
-                    <td style={{ padding: '7px 10px', color: '#06b6d4' }}>
+                    <td className={tdTotal}>
                       {result.driverStats.reduce((s, d) => s + d.workMinutes, 0)}
                     </td>
-                    <td style={{ padding: '7px 10px', color: '#06b6d4' }}>
+                    <td className={tdTotal}>
                       {minsToHHMM(result.driverStats.reduce((s, d) => s + d.workMinutes, 0))}
                     </td>
                     <td colSpan={2} />
@@ -740,31 +678,29 @@ export default function AbnahmeDiagnosticPage() {
           </Card>
 
           {/* ── 4. Stundennachweis Integrity ───────────────────────────────── */}
-          <Card>
+          <Card className="p-5">
             <SectionTitle>{t('diag.section4')}</SectionTitle>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <div className="relative overflow-x-auto">
+              <table className="w-full border-collapse text-[13px]">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <tr className="border-b border-line">
                     {SHEET_TABLE_KEYS.map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t(h)}</th>
+                      <th key={h} scope="col" className={tableTh}>{t(h)}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {result.stundennachweis.map(d => (
-                    <tr key={d.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={{ padding: '7px 10px', fontWeight: 700, color: '#e2e8f0' }}>{d.name}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.fahrten}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.shiftsBeforeCompression}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.shiftsAfterCompression}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{minsToHHMM(d.totalMins)}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.nightMins > 0 ? minsToHHMM(d.nightMins) : '—'}</td>
-                      <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.sundayMins > 0 ? minsToHHMM(d.sundayMins) : '—'}</td>
-                      <td style={{ padding: '7px 10px' }}>
-                        <Badge ok={!d.maxShiftsViolation}
+                    <tr key={d.name} className="border-b border-line hover:bg-sunken">
+                      <td className="whitespace-nowrap px-2.5 py-[7px] font-bold text-fg">{d.name}</td>
+                      <td className={tdMuted}>{d.fahrten}</td>
+                      <td className={tdMuted}>{d.shiftsBeforeCompression}</td>
+                      <td className={tdMuted}>{d.shiftsAfterCompression}</td>
+                      <td className={tdMuted}>{minsToHHMM(d.totalMins)}</td>
+                      <td className={tdMuted}>{d.nightMins > 0 ? minsToHHMM(d.nightMins) : '—'}</td>
+                      <td className={tdMuted}>{d.sundayMins > 0 ? minsToHHMM(d.sundayMins) : '—'}</td>
+                      <td className="px-2.5 py-[7px]">
+                        <StatusBadge ok={!d.maxShiftsViolation}
                           label={d.maxShiftsViolation ? t('diag.violated', { count: d.daysWith4Plus.length }) : t('diag.ok')} />
                       </td>
                     </tr>
@@ -775,23 +711,23 @@ export default function AbnahmeDiagnosticPage() {
           </Card>
 
           {/* ── 5. Max-3-Schichten Check ───────────────────────────────────── */}
-          <Card>
+          <Card className="p-5">
             <SectionTitle>{t('diag.section5')}</SectionTitle>
             {result.stundennachweis.every(d => !d.maxShiftsViolation) ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'rgba(22,163,74,0.08)', border: '1px solid rgba(22,163,74,0.25)', borderRadius: 8 }}>
-                <CheckCircle style={{ width: 18, height: 18, color: '#4ade80' }} />
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#4ade80' }}>{t('diag.maxShiftsAllOk')}</span>
+              <div className="flex items-center gap-2.5 rounded-tight border border-positive/25 bg-positive-soft px-3.5 py-3">
+                <CheckCircle aria-hidden className="size-[18px] text-positive" />
+                <span className="text-sm font-bold text-positive">{t('diag.maxShiftsAllOk')}</span>
               </div>
             ) : (
               <div>
                 {result.stundennachweis.filter(d => d.maxShiftsViolation).map(d => (
-                  <div key={d.name} style={{ marginBottom: 12 }}>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: '#f87171', marginBottom: 6 }}>
-                      <XCircle style={{ width: 13, height: 13, display: 'inline', marginRight: 6 }} />
+                  <div key={d.name} className="mb-3">
+                    <p className="mb-1.5 text-[13px] font-bold text-critical">
+                      <XCircle aria-hidden className="mr-1.5 inline size-[13px]" />
                       {t('diag.driverViolationDays', { driver: d.name, count: d.daysWith4Plus.length })}
                     </p>
                     {d.daysWith4Plus.map(day => (
-                      <p key={day.date} style={{ fontSize: 12, color: '#fca5a5', margin: '2px 0 2px 20px' }}>
+                      <p key={day.date} className="my-0.5 ml-5 text-xs tabular-nums text-fg-muted">
                         {t('diag.dayShiftCount', { date: fmtDate(day.date), count: day.shifts })}
                       </p>
                     ))}
@@ -802,7 +738,7 @@ export default function AbnahmeDiagnosticPage() {
           </Card>
 
           {/* ── 6. Totals Consistency ─────────────────────────────────────── */}
-          <Card>
+          <Card className="p-5">
             <SectionTitle>{t('diag.section6')}</SectionTitle>
             <Row label={t('diag.rowTripsTotal')} value={result.totalTrips} />
             <Row label={t('diag.rowTripsNotCanceled')} value={result.nonCanceled} />
@@ -812,14 +748,51 @@ export default function AbnahmeDiagnosticPage() {
             <Row label={t('diag.rowShiftsBeforeCompression')} value={result.stundennachweis.reduce((s, d) => s + d.shiftsBeforeCompression, 0)} />
             <Row label={t('diag.rowShiftsAfterCompression')} value={result.stundennachweis.reduce((s, d) => s + d.shiftsAfterCompression, 0)} />
             <Row label={t('diag.rowCompressionChangesTripCount')} value={t('diag.compressionNeverChangesTrips')} ok={true} />
-            <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(6,182,212,0.05)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: 8 }}>
-              <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>
+            <div className="mt-3 rounded-tight border border-info/20 bg-info-soft px-3 py-2.5">
+              <p className="text-xs text-fg-muted">
                 {t('diag.compressionNote')}
               </p>
             </div>
           </Card>
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+// ── Presentation helpers ──────────────────────────────────────────────────
+function StatusBadge({ ok, warn, label }: { ok?: boolean; warn?: boolean; label: string }) {
+  const tone = ok ? 'positive' : warn ? 'caution' : 'critical';
+  const Icon = ok ? CheckCircle : warn ? AlertTriangle : XCircle;
+  return (
+    <Badge tone={tone}>
+      <Icon aria-hidden />
+      {label}
+    </Badge>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-3 mt-0 text-[13px] font-bold uppercase tracking-[0.08em] text-fg-muted">
+      {children}
+    </h3>
+  );
+}
+
+function Row({ label, value, ok, warn, error }: { label: string; value: string | number; ok?: boolean; warn?: boolean; error?: boolean }) {
+  const { t } = useTranslation();
+  const color = error ? 'text-critical' : warn ? 'text-caution' : ok ? 'text-positive' : 'text-fg';
+  const Icon = error ? XCircle : warn ? AlertTriangle : ok ? CheckCircle : null;
+  const word = error ? t('common.error') : warn ? t('diag.warnings') : ok ? t('diag.ok') : '';
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-line py-1.5">
+      <span className="min-w-0 text-[13px] text-fg-muted">{label}</span>
+      <span className={`flex min-w-0 items-center gap-1.5 break-all text-right text-[13px] font-bold tabular-nums ${color}`}>
+        {Icon ? <Icon aria-hidden className="size-3.5 shrink-0" /> : null}
+        {word ? <span className="sr-only">{word}</span> : null}
+        {value}
+      </span>
     </div>
   );
 }
