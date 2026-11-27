@@ -22,9 +22,9 @@ export const FIXTURE_POOL: PoolAddress[] = Array.from({ length: 64 }, (_, i) => 
 
 export const FIXTURE_DRIVERS = [
   // Weekdays only for the first two, so every weekend is a day with no ride.
-  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1', allowed_weekdays: [1, 2, 3, 4, 5] },
-  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2', allowed_weekdays: [1, 2, 3, 4, 5] },
-  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3', allowed_weekdays: [1, 2, 3, 4, 5] },
+  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1', allowed_weekdays: [1, 2, 3, 4, 5], planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2', allowed_weekdays: [1, 2, 3, 4, 5], planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3', allowed_weekdays: [1, 2, 3, 4, 5], planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
 ];
 
 /** A router slower than the generator's own estimate, so the routed model is the binding one. */

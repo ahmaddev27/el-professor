@@ -37,7 +37,11 @@ const fake = createFakeSupabase(call => {
       { id: 'car-1', kennzeichen: 'XX-AA 1', tuev_gueltig_bis: '2027-06-30' },
       { id: 'car-2', kennzeichen: 'XX-AA 2', tuev_gueltig_bis: '2027-06-30' },
     ],
-    drivers: [1, 2, 3].map(n => ({ id: `drv-${n}`, allowed_weekdays: null, planning_enabled: true })),
+    // Round 8: the month is planned from each driver's hours range.
+    drivers: [1, 2, 3].map(n => ({
+      id: `drv-${n}`, status: 'active', allowed_weekdays: null, planning_enabled: true,
+      planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13,
+    })),
     driver_notes: [],
     werkstatt_checks: [],
   };

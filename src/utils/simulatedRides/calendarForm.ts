@@ -38,7 +38,7 @@ export interface CalendarForm {
 export const DEFAULT_CALENDAR_FORM: CalendarForm = {
   timeZone: 'Europe/Berlin',
   operatingDayStartHour: '4',
-  shiftsPerVehicleDay: '1',
+  shiftsPerVehicleDay: '3',
   declinedRidesEnabled: true,
   declinedFee: '6,00',
   cancellationFeeEnabled: true,

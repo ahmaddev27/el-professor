@@ -26,10 +26,13 @@ const VEHICLES = [
 const ID_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ID_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ID_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+// Round 8: a driver is planned from his hours range (min/max salary over the
+// hourly rate), so every fixture driver carries one: 600-1200 EUR at 13 EUR/h.
+const RANGE = { planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 } as const;
 const DRIVERS: FullMonthDriver[] = [
-  { id: ID_A, name: 'Fahrer Alpha' },
-  { id: ID_B, name: 'Fahrer Beta' },
-  { id: ID_C, name: 'Fahrer Gamma' },
+  { id: ID_A, name: 'Fahrer Alpha', ...RANGE },
+  { id: ID_B, name: 'Fahrer Beta', ...RANGE },
+  { id: ID_C, name: 'Fahrer Gamma', ...RANGE },
 ];
 
 const note = (over: Partial<StructuredNote> & { driver_id: string }): StructuredNote => ({
@@ -55,7 +58,7 @@ const input = (over: Partial<FullMonthInput> = {}): FullMonthInput => ({
   drivers: DRIVERS,
   driverNotesMap: new Map(),
   seed: 4711,
-  shiftsPerVehicleDay: 1,
+  shiftsPerVehicleDay: 3,
   ...over,
 });
 
@@ -171,7 +174,10 @@ describe('no ride during a driver unavailability', () => {
       }
     }
     expect(r.violations).toEqual([]);
-    expect(r.refusals.some(x => x.reason === 'driver_blocked_by_note' && x.driverId === ID_A && x.noteType === 'Arzttermin')).toBe(true);
+    // Round 8: the note cuts the driver's window in his plan before any shift
+    // is drawn, so it shapes the day rather than refusing an attempt.
+    const alpha = r.driverPlans.find(p => p.driverId === ID_A)!;
+    expect(alpha.days.some(d => d.status === 'planned' && d.blockingNote?.type === 'Arzttermin')).toBe(true);
     expect(idsOf(r)).toContain(ID_A);
   });
 
@@ -206,7 +212,7 @@ describe('no operating capacity means no rides, with a reason', () => {
   });
 
   it('a weekend-only driver works weekends only', () => {
-    const r = run({ drivers: [{ id: ID_A, name: 'Fahrer Alpha', allowed_weekdays: [6, 7] }] });
+    const r = run({ drivers: [{ id: ID_A, name: 'Fahrer Alpha', allowed_weekdays: [6, 7], ...RANGE }] });
     expect(r.month.shifts.length).toBeGreaterThan(0);
     const weekdayOf = new Map(r.days.map(d => [d.day, d.isoWeekday]));
     for (const s of r.month.shifts) expect([6, 7]).toContain(weekdayOf.get(s.operatingDay));
@@ -258,11 +264,12 @@ describe('provenance', () => {
     const r = run({ seed: 7, driverNotesMap: notes, options: { tipShare: 0.3 }, settings: { declinedFeeCents: 700 } });
     const p = r.provenance;
     expect(p.generatorVersion).toBe(FULL_MONTH_GENERATOR_VERSION);
-    expect(p).toMatchObject({ seed: 7, year: 2026, month: 9, inputSource: 'period_driven', simulated: true, shiftsPerVehicleDay: 1 });
+    expect(p).toMatchObject({ seed: 7, year: 2026, month: 9, inputSource: 'period_driven', simulated: true, shiftsPerVehicleDay: 3 });
     expect(p.settings).toEqual({ ...DEFAULT_SIMULATION_TENANT_SETTINGS, declinedFeeCents: 700 });
     expect(p.options).toEqual({ ...DEFAULT_OPTIONS, tipShare: 0.3 });
     expect(p.inputs).toEqual({
       drivers: 3, vehicles: 2, addressPool: 40, driversWithNotes: 1, structuredNotes: 1, werkstattChecks: 0,
+      vehicleUnavailability: 0, driversPlanned: 3, uberDays: 0, uberPeriods: 0,
     });
   });
 });

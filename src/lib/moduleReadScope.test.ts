@@ -142,6 +142,9 @@ const READER_MODULE: Readonly<Record<string, string | null>> = {
   // columns of drivers and the month's werkstatt_checks, all read BEFORE a ride
   // is placed (decision 5 of 29.10.2026). It serves the same module-less screen.
   'src/lib/simulationInputsClient.ts':  null,
+  // Round 8: the imported Uber figures of the month the simulator plans
+  // against (income, drivers, partner links), for the same module-less screen.
+  'src/utils/simulatedRides/uberImportLoader.ts': null,
 
   // components, whose module is the screen that mounts them
   'src/components/AbrechnungScheduleCard.tsx':             'abrechnung',

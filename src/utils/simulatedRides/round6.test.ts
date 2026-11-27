@@ -5,7 +5,7 @@ import type { GeocodeClient } from '../../lib/geocodeClient';
 import { prepareRouting } from '../../lib/simulationRouting';
 import type { StructuredNote } from '../monatsplanungPhase3';
 import type { TravelRouter } from '../travelRouting/prefetch';
-import { generateFullMonth, validateFullMonth, type FullMonthInput, type FullMonthResult } from './fullMonth';
+import { checkDriverShifts, generateFullMonth, validateFullMonth, type FullMonthInput, type FullMonthResult } from './fullMonth';
 import { DEFAULT_OPTIONS, SHIFT_LIMITS } from './generator';
 import { haversineKm, PICKUP_HANDLING_SECONDS } from './geo';
 import { SHEET_RIDES, buildMonthReport } from './monthWorkbook';
@@ -29,9 +29,9 @@ const POOL: PoolAddress[] = Array.from({ length: 64 }, (_, i) => ({
   lon: 7.02 + (i % 8) * 0.009,
 }));
 const DRIVERS = [
-  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1' },
-  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2' },
-  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3' },
+  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
 ];
 const VEHICLES = [
   { id: '11111111-1111-4111-8111-111111111101', plate: 'XX-TEST-1', type: 'Limousine', tuev_gueltig_bis: '2027-04-30' },
@@ -285,18 +285,21 @@ describe('a rescheduled shift carries its final driver and vehicle onto every re
   });
 });
 
-// ── 5. A shift over or under its limit (the audit's "S38"), and overlaps ──
+// ── 5. A shift over its limit (the audit's "S38"), and overlaps ──
 
 /**
- * The defect: the ride loop ended a shift at the first step that found
- * nothing, so a long wait followed by a pickup no ride left in time ended the
- * shift with an hour of its window unused, below the 240-minute minimum, and
- * only the read-back noticed. Reproduced on invented data with a pool whose
- * outskirts hold a dead end: a pickup no ride leaves from. Before the fix this
- * produced shifts of 165-235 minutes; now the step is drawn again, and a shift
- * that still ends short is refused at scheduling time.
+ * The defect of Round 6: the ride loop ended a shift at the first step that
+ * found nothing, so a long wait followed by a pickup no ride left in time ended
+ * the shift with part of its window unused. Reproduced on invented data with a
+ * pool whose outskirts hold a dead end: a pickup no ride leaves from.
+ *
+ * Round 8 removed the universal 240-minute floor: a shift is as long as its
+ * driver's plan says (his hours range spread over his days), at most 360
+ * minutes. The driver is on duty from the shift's start to its planned end,
+ * and the last ride ends by then; a step that finds nothing is drawn again
+ * and never moves that end.
  */
-describe('every shift is 240 to 360 minutes, enforced before it is accepted', () => {
+describe('every shift keeps its driver plan, enforced before it is accepted', () => {
   const deadEnd: PoolAddress = { label: 'Sackgasse 1, 40210 Demostadt, Deutschland', lat: 51.17, lon: 7.14 };
   const trapped: TravelModel = {
     source: 'synthetic:dead-end',
@@ -305,24 +308,34 @@ describe('every shift is 240 to 360 minutes, enforced before it is accepted', ()
     ride: (from, to, hour) => (pointKey(from) === pointKey(deadEnd) ? null : ESTIMATE_TRAVEL_MODEL.ride(from, to, hour)),
   };
 
-  it.each([1, 2, 3, 4, 5, 6])('seed %i: no shift outside the limits, and the trap was hit', seed => {
+  it.each([1, 2, 3, 4, 5, 6])('seed %i: every shift is its planned length, at most 360 minutes, and the trap was hit', seed => {
     const built = month({ pool: [...POOL, deadEnd], travel: trapped, seed: 9000 + seed, shiftsPerVehicleDay: 3 });
-    expect(built.violations.filter(v => v.includes('shift of'))).toEqual([]);
+    expect(built.violations).toEqual([]);
+    const planned = new Map(built.driverPlans.flatMap(p => p.days.map(d => [`${p.driverId}|${d.date}`, d] as const)));
+    expect(built.month.shifts.length).toBeGreaterThan(0);
     for (const s of built.month.shifts) {
-      expect(minutes(s.endMs - s.startMs), s.id).toBeGreaterThanOrEqual(SHIFT_LIMITS.minMinutes);
-      expect(minutes(s.endMs - s.startMs), s.id).toBeLessThanOrEqual(SHIFT_LIMITS.maxMinutes);
+      const day = planned.get(`${s.driver.id}|${s.operatingDay}`);
+      expect(day?.status, s.id).toBe('planned');
+      expect(s.plannedEndMs, s.id).toBeDefined();
+      expect(minutes(s.plannedEndMs! - s.startMs), s.id).toBe(day!.plannedMinutes);
+      expect(minutes(s.plannedEndMs! - s.startMs), s.id).toBeLessThanOrEqual(SHIFT_LIMITS.maxMinutes);
+      expect(s.endMs, s.id).toBeLessThanOrEqual(s.plannedEndMs!);
     }
     const tried = built.scheduling.reduce((n, s) => n + (s.refusedSteps.no_dropoff ?? 0), 0);
     expect(tried).toBeGreaterThan(0);
   });
 
-  it('fills the window instead of refusing it: a step is drawn again before a shift ends short (measured: 1 refusal in six months, 35 without the retries)', () => {
-    let tooShort = 0;
-    for (const seed of [1, 2, 3, 4, 5, 6]) {
-      const built = month({ pool: [...POOL, deadEnd], travel: trapped, seed: 9000 + seed, shiftsPerVehicleDay: 3 });
-      tooShort += built.refusals.filter(r => r.reason === 'shift_too_short').length;
-    }
-    expect(tooShort).toBeLessThanOrEqual(3);
+  it('a shift shorter than 240 minutes is accepted when the driver plan asks for it, and one over 360 is caught', () => {
+    const built = month({ seed: 9001, shiftsPerVehicleDay: 3 });
+    expect(built.violations).toEqual([]);
+    const short = built.month.shifts.filter(s => minutes(s.plannedEndMs! - s.startMs) < 240);
+    // The fixture's range (600-1200 EUR at 13 EUR/h) spread over 30 days is about 140 minutes a day.
+    expect(short.length).toBeGreaterThan(0);
+    // Negative control: the read-back still refuses a shift stretched past 360 minutes.
+    const [first, ...rest] = built.month.shifts;
+    const stretched = { ...first, plannedEndMs: first.startMs + 361 * 60_000 };
+    const found = checkDriverShifts([stretched, ...rest], built.driverPlans, built.vehicleUnavailability, built.provenance.options.minDriverRestMinutes);
+    expect(found.some(v => v.includes('longer than 360'))).toBe(true);
   });
 
   it('reports overlapping rides of one vehicle or one driver when they are injected', async () => {

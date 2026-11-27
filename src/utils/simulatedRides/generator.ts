@@ -472,11 +472,17 @@ function checkWholeMilliseconds(rides: readonly SimRide[]): string[] {
   }));
 }
 
-function checkShiftLengths(shifts: readonly SimShift[]): string[] {
+/** The shortest and longest shift a month may hold, in minutes. */
+export interface ShiftLengthLimits {
+  minMinutes: number;
+  maxMinutes: number;
+}
+
+function checkShiftLengths(shifts: readonly SimShift[], limits: ShiftLengthLimits): string[] {
   return shifts.flatMap(s => {
     const minutes = (s.endMs - s.startMs) / 60_000;
-    return minutes < SHIFT_LIMITS.minMinutes || minutes > SHIFT_LIMITS.maxMinutes
-      ? [`${s.id}: shift of ${Math.round(minutes)} minutes is outside ${SHIFT_LIMITS.minMinutes}-${SHIFT_LIMITS.maxMinutes}`]
+    return minutes < limits.minMinutes || minutes > limits.maxMinutes
+      ? [`${s.id}: shift of ${Math.round(minutes)} minutes is outside ${limits.minMinutes}-${limits.maxMinutes}`]
       : [];
   });
 }
@@ -492,7 +498,8 @@ function checkVehicleDays(shifts: readonly SimShift[]): string[] {
     if (list.length > SHIFT_LIMITS.maxPerVehicleDay) out.push(`${key}: ${list.length} shifts in one operating day`);
   }
   for (const [key, list] of groupBy(shifts, s => s.vehicle.plate)) out.push(...overlaps(key, list));
-  for (const [key, list] of groupBy(shifts, s => s.driver.name)) out.push(...overlaps(key, list));
+  // By UUID where the shift carries one: two drivers who share a name are two drivers.
+  for (const [key, list] of groupBy(shifts, s => s.driver.id ?? `name:${s.driver.name}`)) out.push(...overlaps(key, list));
   return out;
 }
 
@@ -582,10 +589,12 @@ export function validateRides(
   base: GeoPoint,
   travel: TravelModel = ESTIMATE_TRAVEL_MODEL,
   margins: MarginOptions = DEFAULT_OPTIONS,
+  // The weeks generator keeps 240 to 360; the calendar month passes its own (no floor).
+  limits: ShiftLengthLimits = SHIFT_LIMITS,
 ): string[] {
   return [
     ...checkWholeMilliseconds(month.rides),
-    ...checkShiftLengths(month.shifts),
+    ...checkShiftLengths(month.shifts, limits),
     ...checkVehicleDays(month.shifts),
     ...checkOpeningLegs(month.shifts, month.rides, base, travel, margins),
     ...checkRideChain(month.rides, base, travel, margins),

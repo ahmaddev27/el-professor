@@ -1,6 +1,6 @@
 import { isShareRateAllowed } from './monthlyRate';
-import type { FullMonthResult } from './fullMonth';
-import { SHIFT_LIMITS } from './generator';
+import { checkDriverShifts, type FullMonthResult } from './fullMonth';
+import { MAX_DAY_MINUTES } from './driverMonthPlan';
 import { reconcile } from './monthTotals';
 import { inExportScope } from './revenue';
 
@@ -19,8 +19,9 @@ import { inExportScope } from './revenue';
  * - `VALIDATED_FOR_EXPORT` — every mandatory check passed.
  * - `NOT_VALIDATED` — at least one failed.
  * - `VERIFICATION_INCOMPLETE` — none failed, but at least one could not be
- *   checked: no routing service was asked, a pair had no route, or a shift ran
- *   on an unconfirmed note a person still has to review.
+ *   checked: no routing service was asked, a pair had no route, a shift ran
+ *   on an unconfirmed note a person still has to review, or a driver of the
+ *   pool could not be planned because his Drivers page lacks a setting.
  */
 
 export type ExportVerdict = 'VALIDATED_FOR_EXPORT' | 'VERIFICATION_INCOMPLETE' | 'NOT_VALIDATED';
@@ -37,7 +38,8 @@ export interface VerificationCheck {
     | 'reconciliation'
     | 'amounts_readable'
     | 'events_reviewed'
-    | 'monthly_share';
+    | 'monthly_share'
+    | 'drivers_planned';
   /** German, for the screen and the workbook. */
   label: string;
   outcome: CheckOutcome;
@@ -63,13 +65,13 @@ const check = (code: VerificationCheck['code'], label: string, outcome: CheckOut
   ({ code, label, outcome, detail });
 
 function shiftLimits(result: FullMonthResult): VerificationCheck {
-  const outside = result.month.shifts.filter(s => {
-    const minutes = (s.endMs - s.startMs) / 60_000;
-    return minutes < SHIFT_LIMITS.minMinutes || minutes > SHIFT_LIMITS.maxMinutes;
-  });
-  return check('shift_limits', `Schichtdauer ${SHIFT_LIMITS.minMinutes}-${SHIFT_LIMITS.maxMinutes} Minuten`,
-    outside.length === 0 ? 'passed' : 'failed',
-    outside.length === 0 ? `${result.month.shifts.length} Schichten, alle im Rahmen` : `${outside.length} Schichten ausserhalb: ${outside.slice(0, 5).map(s => s.id).join(', ')}`);
+  // Round 8: no universal floor. Each shift is checked against its own driver's
+  // plan — his day, his window, his range's maximum — and the 360-minute ceiling.
+  const problems = checkDriverShifts(result.month.shifts, result.driverPlans, result.vehicleUnavailability,
+    result.provenance.options.minDriverRestMinutes);
+  return check('shift_limits', `Schichten im Fenster und Stundenrahmen des Fahrers, hoechstens ${MAX_DAY_MINUTES} Minuten`,
+    problems.length === 0 ? 'passed' : 'failed',
+    problems.length === 0 ? `${result.month.shifts.length} Schichten, alle im Rahmen ihres Fahrers` : `${problems.length} Abweichungen: ${problems.slice(0, 3).join('; ')}`);
 }
 
 function routePairs(result: FullMonthResult): VerificationCheck {
@@ -109,6 +111,29 @@ function monthlyShare(result: FullMonthResult): VerificationCheck {
     `Satz ${rate.ratePercent} %, Betrag + Rest ${adds ? '=' : '≠'} Grundlage`);
 }
 
+/**
+ * Whether the month covers the drivers it was asked for (Round 8). A driver
+ * whose hours range or window is not configured is not planned, and a month
+ * that silently leaves him out would pass every other check: it is
+ * `not_verified` until the Drivers page says what he works. A month in which
+ * nobody could be planned is `failed`, because an empty report with every
+ * check passed is exactly the fabricated success §12 forbids.
+ */
+function driversPlanned(result: FullMonthResult): VerificationCheck {
+  const label = 'Fahrer nach ihren Einstellungen auf der Fahrerseite geplant';
+  const asked = result.driverPlans.filter(p => p.notPlannedReason !== 'inactive' && p.notPlannedReason !== 'planning_disabled');
+  const unconfigured = asked.filter(p => p.notPlannedReason === 'configuration_required');
+  const planned = asked.filter(p => p.planned);
+  if (asked.length > 0 && planned.length === 0) {
+    return check('drivers_planned', label, 'failed', `kein Fahrer planbar (${unconfigured.length} ohne Einstellungen - CONFIGURATION_REQUIRED)`);
+  }
+  if (unconfigured.length > 0) {
+    return check('drivers_planned', label, 'not_verified',
+      `${unconfigured.length} Fahrer ohne Stundenrahmen oder Zeitfenster (CONFIGURATION_REQUIRED): ${unconfigured.map(p => p.driverName).join(', ')}`);
+  }
+  return check('drivers_planned', label, 'passed', `${planned.length} Fahrer geplant`);
+}
+
 export function verifyMonth(result: FullMonthResult): MonthVerification {
   const exportedDeclined = result.month.rides.filter(inExportScope).filter(r => r.status === 'declined').length;
   const differences = reconcile(result).filter(r => r.partsSum !== r.total);
@@ -129,6 +154,7 @@ export function verifyMonth(result: FullMonthResult): MonthVerification {
       `${result.revenue.findings.length} unlesbare Betraege`),
     eventsReviewed(result),
     monthlyShare(result),
+    driversPlanned(result),
   ];
   const verdict: ExportVerdict = checks.some(c => c.outcome === 'failed')
     ? 'NOT_VALIDATED'

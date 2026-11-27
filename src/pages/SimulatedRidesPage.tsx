@@ -12,7 +12,7 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useFahrtenbuch } from '../hooks/useFahrtenbuch';
 import { createGeocodeClient } from '../lib/geocodeClient';
-import { loadDriverNotes, loadDriverPlanningFacts, loadWerkstattChecks } from '../lib/simulationInputsClient';
+import { loadDriverNotes, loadDriverPlanningFacts, loadVehicleUnavailability, loadWerkstattChecks } from '../lib/simulationInputsClient';
 import { prepareRouting, type RoutingFailureReason } from '../lib/simulationRouting';
 import { supabase } from '../lib/supabase';
 import { createTravelRouteClient } from '../lib/travelRouteClient';
@@ -28,6 +28,9 @@ import {
 } from '../utils/simulatedRides/figures';
 import { DEFAULT_CALENDAR_FORM, parseCalendarForm, type CalendarForm, type CalendarFormField } from '../utils/simulatedRides/calendarForm';
 import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type RoutingProvenance } from '../utils/simulatedRides/fullMonth';
+import type { UberMonthImport } from '../utils/simulatedRides/uberImport';
+import { loadUberMonth } from '../utils/simulatedRides/uberImportLoader';
+import { readUnavailability, type VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
 import { buildMonthReport } from '../utils/simulatedRides/monthWorkbook';
@@ -86,6 +89,9 @@ interface RunEvents {
   notes: Map<string, StructuredNote[]>;
   facts: Awaited<ReturnType<typeof loadDriverPlanningFacts>>;
   checks: WerkstattCheckRow[];
+  /** Calendar mode only: the cars' unavailability windows and the imported Uber figures (Round 8). */
+  unavailability: VehicleUnavailabilityRow[];
+  uber: UberMonthImport | null;
 }
 
 /** The pool a run draws from and the model that times it. `travel` absent is the labelled estimate. */
@@ -283,17 +289,24 @@ export default function SimulatedRidesPage() {
     return err instanceof Error ? err.message : t('simrides.error.generic');
   };
 
-  /** Notes, planning columns and (calendar mode) the month's workshop checks. A failed read throws. */
-  const readEvents = async (year: number, month: number, withChecks: boolean): Promise<RunEvents> => {
+  /**
+   * Notes, planning columns and, in calendar mode, the month's workshop checks,
+   * the cars' unavailability windows and the imported Uber figures. A failed
+   * read throws: a month planned without a window it did not hear about looks
+   * exactly like one that honoured it.
+   */
+  const readEvents = async (year: number, month: number, calendar: boolean): Promise<RunEvents> => {
     if (!companyId) throw new Error(t('simrides.error.generic'));
     const { first, last } = monthBounds(year, month);
     try {
-      const [notes, facts, checks] = await Promise.all([
+      const [notes, facts, checks, unavailability, uber] = await Promise.all([
         loadDriverNotes(companyId, addDays(first, -7)),
         loadDriverPlanningFacts(companyId),
-        withChecks ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
+        calendar ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
+        calendar ? loadVehicleUnavailability(companyId, addDays(first, -1), addDays(last, 2)) : Promise.resolve([] as VehicleUnavailabilityRow[]),
+        calendar ? loadUberMonth(companyId, year, month, supabase) : Promise.resolve(null),
       ]);
-      return { notes, facts, checks };
+      return { notes, facts, checks, unavailability, uber };
     } catch (err) {
       console.error('Fahrten simulieren: reading notes and vehicle facts failed', err);
       throw new Error(t('simrides.error.events'));
@@ -352,11 +365,23 @@ export default function SimulatedRidesPage() {
       const outcome = generateFullMonth({
         ...period, base: origin, pool: sourcing.points, seed,
         vehicles: cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev })),
-        drivers: drivers.map(d => ({
-          id: d.id, name: d.name,
-          allowed_weekdays: events.facts.get(d.id)?.allowed_weekdays ?? null, planning_enabled: events.facts.get(d.id)?.planning_enabled ?? true,
-        })),
+        // A driver whose row could not be read has no hours range, so he is
+        // reported as CONFIGURATION_REQUIRED rather than planned on a guess.
+        drivers: drivers.map(d => {
+          const f = events.facts.get(d.id);
+          return {
+            id: d.id, name: d.name, status: f?.status ?? null, employment_type: f?.employment_type ?? null,
+            allowed_weekdays: f?.allowed_weekdays ?? null, planning_enabled: f?.planning_enabled ?? true,
+            work_window_start: f?.work_window_start ?? null, work_window_end: f?.work_window_end ?? null,
+            is_full_day_available: f?.is_full_day_available ?? null,
+            planning_min_salary: f?.planning_min_salary ?? null, planning_max_salary: f?.planning_max_salary ?? null,
+            planning_hourly_rate: f?.planning_hourly_rate ?? null, salary_ratio: f?.salary_ratio ?? null,
+            planning_target_salary: f?.planning_target_salary ?? null,
+            target_monthly_hours: f?.target_monthly_hours ?? null, max_monthly_hours: f?.max_monthly_hours ?? null,
+          };
+        }),
         driverNotesMap: events.notes, werkstattChecks: events.checks,
+        vehicleUnavailability: readUnavailability(events.unavailability), uber: events.uber ?? undefined,
         settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
         travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
       });

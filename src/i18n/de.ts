@@ -7337,8 +7337,8 @@ export const de = {
   'simrides.cal.share.simulationOnly':     'Simulationswert, weder Steuer noch Provision.',
   'simrides.cal.share.tips':               'Trinkgeld in der Grundlage',
   'simrides.cal.share.title':              'Monatliche Beteiligung',
-  'simrides.cal.shifts':                   'Schichten je Fahrzeug und Tag',
-  'simrides.cal.shiftsHint':               '1 bis 3.',
+  'simrides.cal.shifts':                   'Höchstens Schichten je Fahrzeug und Tag',
+  'simrides.cal.shiftsHint':               '1 bis 3. Die Schichten kommen aus den Fahrern; ein Fahrzeug trägt höchstens so viele am Tag.',
   'simrides.cal.timeZone':                 'Zeitzone',
   'simrides.cal.timeZoneHint':             'IANA-Name, Standard Europe/Berlin.',
   'simrides.error.events':                 'Notizen, Fahrzeugdaten oder Werkstattprüfungen konnten nicht gelesen werden. Es wurde nichts erzeugt.',
@@ -7377,7 +7377,7 @@ export const de = {
   'simrides.cal.check.code.routePairs':    'Routenprüfung je Fahrtenpaar',
   'simrides.cal.check.code.routingMeasured': 'Fahrzeiten aus einem Routenservice',
   'simrides.cal.check.code.rules':         'Regeln aus der Rückprüfung',
-  'simrides.cal.check.code.shiftLimits':   'Schichtdauer 240 bis 360 Minuten',
+  'simrides.cal.check.code.shiftLimits':   'Schichten im Fenster und Stundenrahmen des Fahrers, höchstens 360 Minuten',
   'simrides.cal.check.failed':             'Nicht bestanden:',
   'simrides.cal.check.notVerified':        'Nicht geprüft:',
   'simrides.cal.check.passed':             'Bestanden:',
@@ -7503,4 +7503,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'account.tab.profile': 'Profil',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.driversPlanned': 'Fahrer nach ihren Einstellungen auf der Fahrerseite geplant',
 } as const;

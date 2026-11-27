@@ -17,7 +17,9 @@ zoneinfo):
     company setting in I; the basis, amount, remainder and rate of F;
   - the calendar: every day of the month a row of B, 24 h or 23/25;
   - overlaps: no vehicle and no driver (by id) holds two rides at once;
-  - shift lengths 240 to 360 minutes, from H2 and from O;
+  - shifts at most 360 minutes (no universal floor since Round 8: a shift is
+    as long as its driver's plan), the last ride by the planned end, one shift
+    per driver id and day, and the rest between them, from H2, O and I;
   - TÜV and confirmed full-day blocks, read from H and H2;
   - the route sheet G: one row per consecutive completed pair, its gap
     recomputed from A, and for a verified pair road + 45 s + margin <= gap;
@@ -213,15 +215,34 @@ def verify(report_path, ops_path):
     _, decisions = table(book, "H2 Schichtentscheidungen")
     accepted = [d for d in decisions if str(d["Ergebnis"]).startswith("eingeplant")]
     lengths = [(instant(d["Schichtende"] + ".000") - instant(d["Schichtbeginn"] + ".000")).total_seconds() / 60 for d in accepted]
-    outside = [round(m) for m in lengths if m < 240 or m > 360]
-    check(accepted and not outside, "H2: every accepted shift is 240 to 360 minutes",
+    outside = [round(m) for m in lengths if m <= 0 or m > 360]
+    check(accepted and not outside, "H2: every accepted shift is longer than 0 and at most 360 minutes",
           f"{len(accepted)} shifts, min {round(min(lengths))} max {round(max(lengths))}" if lengths else "no shift")
     _, planning = table(ops, "O Schichtplanung")
     planned = [r for r in planning if r["Art"] == "Schicht eingeplant"]
-    check(len(planned) == len(accepted) and all(240 <= r["Dauer (min)"] <= 360 for r in planned),
-          "O: the same shifts, all within their limits", f"{len(planned)} shifts")
-    short = sum(r["Anzahl"] for r in planning if r["Art"] == "Versuch verworfen" and "Mindestdauer" in str(r["Grund"]))
-    check.info(f"{short} shift attempts refused at scheduling time for ending short of 240 minutes")
+    spans = [(r, instant(r["Beginn"]), instant(r["Geplantes Ende"]), instant(r["Ende"])) for r in planned]
+    unreadable = [r["Schicht"] for r, b, p, e in spans if not (b and p and e)]
+    too_long = [r["Schicht"] for r, b, p, e in spans if b and p and (p - b).total_seconds() / 60 > 360]
+    late = [r["Schicht"] for r, b, p, e in spans if p and e and e > p]
+    check(len(planned) == len(accepted) and not unreadable and not too_long and not late,
+          "O: the same shifts, each planned for at most 360 minutes, the last ride by its planned end",
+          f"{len(planned)} shifts; {len(unreadable)} unreadable, {len(too_long)} over 360, {len(late)} ending late")
+    per_day = Counter((r["Fahrer-ID"], str(r["Tag"])) for r in planned)
+    twice = sorted(k for k, n in per_day.items() if n > 1)
+    check(all(r["Fahrer-ID"] for r in planned) and not twice, "O: every shift names its driver id, at most one per driver and day",
+          f"{len(per_day)} driver-days" + (f"; twice: {twice[:3]}" if twice else ""))
+    rest = settings_of(book).get("Option minDriverRestMinutes")
+    if isinstance(rest, (int, float)):
+        by_driver = defaultdict(list)
+        for r, b, p, e in spans:
+            if b and p:
+                by_driver[r["Fahrer-ID"]].append((b, p))
+        short_rest = sum(1 for v in by_driver.values() for a, b in zip(sorted(v), sorted(v)[1:])
+                         if (b[0] - a[1]).total_seconds() / 60 < rest)
+        check(short_rest == 0, f"O: at least {rest} minutes of rest between two shifts of one driver",
+              f"{short_rest} pairs short")
+    else:
+        check(False, "O: rest between two shifts of one driver", "cannot be checked: I names no Option minDriverRestMinutes")
 
     blocked_days = {(r["Kennzeichen"], str(r["Tag"])) for r in decisions if r.get("Code") == "vehicle_tuev_expired"}
     on_blocked = [r["Fahrt-ID"] for r in done if (r["Kennzeichen"], str(r["Datum der Fahrt"])) in blocked_days]

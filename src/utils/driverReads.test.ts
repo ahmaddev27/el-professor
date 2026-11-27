@@ -204,9 +204,16 @@ const DRIVER_READS: Record<string, readonly DeclaredRead[]> = {
   ],
   'lib/simulationInputsClient.ts': [
     {
-      statement: "select('id, allowed_weekdays, planning_enabled')",
+      statement: 'select(DRIVER_PLANNING_COLUMNS)',
       kind: 'record',
-      why: "Two planning columns the chooser's reader does not carry, consulted only as `facts.get(d.id)` for drivers `SimulatedRidesPage` has already filtered with `selectableDrivers`. The chooser is the boundary; a second filter here would be a second place the rule lives, and a driver absent from the chooser is never looked up.",
+      why: "The planning columns the chooser's reader does not carry (weekdays, window, hours range; Round 8), consulted only as `facts.get(d.id)` for drivers `SimulatedRidesPage` has already filtered with `selectableDrivers`. The chooser is the boundary; a second filter here would be a second place the rule lives, and a driver absent from the chooser is never looked up. `status` is read too, and a driver it says is not active is still not planned.",
+    },
+  ],
+  'utils/simulatedRides/uberImportLoader.ts': [
+    {
+      statement: "select('id, name')",
+      kind: 'record',
+      why: "Resolves the imported Uber figures of one calendar month to the driver they belong to (Round 8, S2). A record of money already earned: a driver deactivated since still earned that month's figures, and dropping him would leave his rows unattributed. It offers nobody for future work; who is planned is decided by the chooser and the drivers' own planning columns.",
     },
   ],
   'lib/tripAnalysisClient.ts': [

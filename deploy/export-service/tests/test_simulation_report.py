@@ -248,7 +248,14 @@ def test_declined_orders_live_only_in_the_operational_report_with_their_fee(ops,
 
 
 def test_scheduling_lists_every_shift_within_its_limits(ops):
+    # Round 8: no universal 240-minute floor. A shift is as long as its
+    # driver's plan says, at most 360 minutes, its last ride ends by the
+    # planned end, and a driver works at most one shift a day. The fixture is
+    # a February (no clock change), so the wall-clock strings compare in order.
     _, rows = table(ops, "O Schichtplanung")
     shifts = [r for r in rows if r["Art"] == "Schicht eingeplant"]
     assert shifts
-    assert all(240 <= r["Dauer (min)"] <= 360 for r in shifts)
+    assert all(0 < r["Dauer (min)"] <= 360 for r in shifts)
+    assert all(r["Ende"] <= r["Geplantes Ende"] for r in shifts)
+    days = [(r["Fahrer-ID"], r["Tag"]) for r in shifts]
+    assert all(driver for driver, _ in days) and len(days) == len(set(days))

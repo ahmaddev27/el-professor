@@ -7263,8 +7263,8 @@ export const en: PartialDictionary = {
   'simrides.cal.share.simulationOnly':     'A simulation figure, neither tax nor commission.',
   'simrides.cal.share.tips':               'Include tips in the basis',
   'simrides.cal.share.title':              'Monthly share',
-  'simrides.cal.shifts':                   'Shifts per vehicle and day',
-  'simrides.cal.shiftsHint':               '1 to 3.',
+  'simrides.cal.shifts':                   'At most shifts per vehicle and day',
+  'simrides.cal.shiftsHint':               '1 to 3. The shifts come from the drivers; a vehicle carries at most this many a day.',
   'simrides.cal.timeZone':                 'Time zone',
   'simrides.cal.timeZoneHint':             'IANA name, default Europe/Berlin.',
   'simrides.error.events':                 'Notes, vehicle data or workshop checks could not be read. Nothing was generated.',
@@ -7303,7 +7303,7 @@ export const en: PartialDictionary = {
   'simrides.cal.check.code.routePairs':    'Route check per ride pair',
   'simrides.cal.check.code.routingMeasured': 'Drive times from a routing service',
   'simrides.cal.check.code.rules':         'Rules read back from the result',
-  'simrides.cal.check.code.shiftLimits':   'Shift length 240 to 360 minutes',
+  'simrides.cal.check.code.shiftLimits':   'Shifts inside the driver\'s window and hours range, at most 360 minutes',
   'simrides.cal.check.failed':             'Failed:',
   'simrides.cal.check.notVerified':        'Not verified:',
   'simrides.cal.check.passed':             'Passed:',
@@ -7429,4 +7429,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'account.tab.profile': 'Profile',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.driversPlanned': 'Drivers planned from their settings on the Drivers page',
 };

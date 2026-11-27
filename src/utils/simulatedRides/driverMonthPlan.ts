@@ -11,6 +11,7 @@ import {
 } from '../monthlyPlan/hoursRange';
 import { calendarDaysOfMonth, isoWeekdayOf, operatingDayIn, operatingDayStartIn } from './period';
 import type { SimulationTenantSettings } from './tenantSettings';
+import type { UberMonthImport } from './uberImport';
 
 /**
  * One driver's month, planned from the Drivers page and nothing else (Round 8,
@@ -34,7 +35,9 @@ import type { SimulationTenantSettings } from './tenantSettings';
  * - **The window** is `work_window_start/end`, or the whole operating day when
  *   `is_full_day_available` is set or no window is configured (the real
  *   planner applies no window then either, `monatsplanungPhase3.checkWindow`).
- *   A window across midnight runs to the next calendar day.
+ *   A window across midnight runs to the next calendar day, and every window
+ *   ends where its operating day does (04:00), so a shift never spills into
+ *   the next operating day or the next month.
  *
  * ## The two numbers that are not configuration
  *
@@ -170,6 +173,34 @@ export interface DriverMonthPlan {
   printed: Pick<DriverPlanConfig, 'salaryRatio' | 'targetSalary' | 'targetMonthlyHours' | 'maxMonthlyHours' | 'hourlyRate' | 'minSalary' | 'maxSalary'>;
 }
 
+/**
+ * The moments a note keeps the driver off the road. A note that covers a whole
+ * calendar day also covers the whole operating day of that date: a driver sick
+ * on the 11th does not drive the 11th's night tail at 01:00 on the 12th, and
+ * the calendar day alone would have left that stretch open (Round 8). Wider
+ * only: the calendar day stays covered too, so nothing the monthly plan's own
+ * check (`findBlockingNote`) would refuse is ever planned.
+ */
+export function noteExclusions(
+  note: StructuredNote,
+  settings: Pick<SimulationTenantSettings, 'timeZone' | 'operatingDayStartHour'>,
+): { start: number; end: number }[] {
+  const calendar = noteExclusionIntervals(note);
+  const out = [...calendar];
+  for (const iv of calendar) {
+    const from = new Date(iv.start);
+    const wholeDay = from.getHours() === 0 && from.getMinutes() === 0 && from.getSeconds() === 0
+      && iv.end === new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1).getTime();
+    if (!wholeDay) continue;
+    const date = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
+    const start = operatingDayStartIn(date, settings.timeZone, settings.operatingDayStartHour);
+    const end = operatingDayStartIn(shiftDate(date, 1), settings.timeZone, settings.operatingDayStartHour);
+    // A start the clocks skip has no instant; the calendar day stays the cut then.
+    if (start.kind === 'ok' && end.kind === 'ok') out.push({ start: start.ms, end: end.ms });
+  }
+  return out;
+}
+
 function shiftDate(day: string, days: number): string {
   const d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10)));
   d.setUTCDate(d.getUTCDate() + days);
@@ -240,7 +271,11 @@ function windowsOfMonth(window: NonNullable<DriverMonthPlan['window']>, inputs: 
     const startsBeforeCutoff = window.startMinute < operatingDayStartHour * 60;
     const day = startMs != null ? operatingDayIn(startMs, timeZone, operatingDayStartHour) : startsBeforeCutoff ? shiftDate(anchor, -1) : anchor;
     if (!inMonth.has(day)) continue;
-    byDay.set(day, { date: day, startMs: startMs != null && endMs != null ? startMs : null, endMs: startMs != null && endMs != null ? endMs : null });
+    // A shift stays inside its operating day, so every ride of it counts on the
+    // day it is planned for and the month's last shift cannot spill into the next.
+    const dayEnd = operatingDayStartIn(shiftDate(day, 1), timeZone, operatingDayStartHour);
+    const readable = startMs != null && endMs != null && dayEnd.kind === 'ok';
+    byDay.set(day, { date: day, startMs: readable ? startMs : null, endMs: readable ? Math.min(endMs, dayEnd.ms) : null });
   }
   return days.map(day => byDay.get(day)!);
 }
@@ -311,6 +346,7 @@ export function planDriverMonth(config: DriverPlanConfig, inputs: DriverMonthInp
   const confirmed = notes.filter(n => n.note_planning_behavior === 'exclude_from_plan' && effectOfNote(n).certainty === 'confirmed');
   const unconfirmed = notes.filter(n => n.note_planning_behavior === 'exclude_from_plan' && effectOfNote(n).certainty !== 'confirmed');
   const ref = (n: StructuredNote): PlanNoteRef => ({ id: n.id, type: n.note_type });
+  const exclusionsOf = (n: StructuredNote) => noteExclusions(n, inputs.settings);
 
   const calendar = calendarDaysOfMonth(inputs.year, inputs.month);
   const windows = window ? windowsOfMonth(window, inputs) : calendar.map(date => ({ date, startMs: null, endMs: null }));
@@ -328,13 +364,13 @@ export function planDriverMonth(config: DriverPlanConfig, inputs: DriverMonthInp
     if (realDays?.has(w.date)) return { ...day, status: 'real_trips' };
     if (w.startMs == null || w.endMs == null) return { ...day, status: 'clock_unreadable' };
 
-    const blockingHere = confirmed.filter(n => noteExclusionIntervals(n).some(iv => iv.start < w.endMs! && iv.end > w.startMs!));
-    day.reviewNotes = unconfirmed.filter(n => noteExclusionIntervals(n).some(iv => iv.start < w.endMs! && iv.end > w.startMs!)).map(ref);
+    const blockingHere = confirmed.filter(n => exclusionsOf(n).some(iv => iv.start < w.endMs! && iv.end > w.startMs!));
+    day.reviewNotes = unconfirmed.filter(n => exclusionsOf(n).some(iv => iv.start < w.endMs! && iv.end > w.startMs!)).map(ref);
     let start = w.startMs;
     let end = w.endMs;
     if (blockingHere.length > 0) {
       day.blockingNote = ref(blockingHere[0]);
-      const free = freeStretch(start, end, blockingHere.flatMap(n => noteExclusionIntervals(n)));
+      const free = freeStretch(start, end, blockingHere.flatMap(n => exclusionsOf(n)));
       if (!free) return { ...day, status: 'absent', windowStartMs: null, windowEndMs: null };
       start = free.start;
       end = free.end;
@@ -405,4 +441,35 @@ export function planDriverMonth(config: DriverPlanConfig, inputs: DriverMonthInp
     ...base, days: plannedDays, targetMinutes, planned: true, notPlannedReason: null, plannedMinutes,
     assessment: assessAgainstRange(plannedMinutes, range, isOwner),
   };
+}
+
+/**
+ * The two Uber inputs of the plan, read off `readUberMonth`.
+ *
+ * A day counts as active when Uber reported a fare (`umsatz`) or a trip on it.
+ * A driver Uber reported per day is held to those days, except inside a period
+ * Uber reported only as a total: the total says he drove some days of that
+ * period and not which, so none of them is taken away. A driver Uber reported
+ * only as period totals is `weekly_only`, and his days are not restricted.
+ */
+export function uberActivity(uber: Pick<UberMonthImport, 'days' | 'periods'>): {
+  activeDays: Map<string, Set<string>>;
+  weeklyOnly: Set<string>;
+} {
+  const activeDays = new Map<string, Set<string>>();
+  for (const day of uber.days) {
+    const set = activeDays.get(day.driverId) ?? new Set<string>();
+    if (day.figures.umsatzCents > 0 || (day.figures.tripCount ?? 0) > 0) set.add(day.date);
+    activeDays.set(day.driverId, set);
+  }
+  const weeklyOnly = new Set<string>();
+  for (const period of uber.periods) {
+    const set = activeDays.get(period.driverId);
+    if (!set) {
+      weeklyOnly.add(period.driverId);
+      continue;
+    }
+    for (let day = period.periodStart; day <= period.periodEnd; day = shiftDate(day, 1)) set.add(day);
+  }
+  return { activeDays, weeklyOnly };
 }
