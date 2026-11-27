@@ -23,9 +23,9 @@ const openNewNote = page => page.getByRole('button', { name: /^(Neue Notiz|New n
 
 const openEditNote = page => clickFirstOf(page, [
   p => p.getByRole('button', { name: /bearbeiten|^edit/i }),
-  // lucide 0.344 kebab-cases the icon's name, so Trash2 is `lucide-trash2`; the old
-  // notes page draws its edit button with a CreditCard icon.
-  p => p.locator('button:has(svg.lucide-credit-card), button:has(svg.lucide-pen), button:has(svg.lucide-square-pen)'),
+  // lucide 0.344 kebab-cases the icon's name, so Trash2 is `lucide-trash2`. Until R3
+  // the edit button drew a CreditCard icon; a before set from an older base needs it.
+  p => p.locator('button:has(svg.lucide-pencil), button:has(svg.lucide-credit-card), button:has(svg.lucide-square-pen)'),
 ]);
 
 const openDeleteNote = async page => {

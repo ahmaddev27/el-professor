@@ -119,7 +119,7 @@ async function mount(): Promise<ReactTestRenderer> {
 async function openForEdit(note: Record<string, unknown>): Promise<ReactTestRenderer> {
   world.notes = [note];
   const tree = await mount();
-  await press(buttonsWithIcon(tree, 'credit-card')[0]);
+  await press(buttonsWithIcon(tree, 'pencil')[0]);
   return tree;
 }
 
@@ -306,7 +306,7 @@ describe('the review', () => {
     world.notes = [baseNote({ verification_status: 'verified', reviewed_by: 'u1', reviewed_at: '2026-10-14T10:00:00+00:00' })];
     const tree = await mount();
     expect(textOf(tree)).toContain('notes.prov.status.verified');
-    expect(buttonsWithIcon(tree, 'credit-card')).toHaveLength(0);
+    expect(buttonsWithIcon(tree, 'pencil')).toHaveLength(0);
   });
 
   it('names the reviewer from the company\'s people, and an unknown one as unknown', async () => {

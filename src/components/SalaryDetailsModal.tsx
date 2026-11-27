@@ -1,5 +1,5 @@
 import React, { useState, useEffect, type FormEvent } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban, CalendarRange } from 'lucide-react';
+import { X, Plus, Pencil as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban, CalendarRange } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation, Income } from '../types/receipt';
 import { supabase } from '../lib/supabase';

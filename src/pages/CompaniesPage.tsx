@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Building2, Plus, Search, Eye, CreditCard as Edit2, MoreVertical,
+  Building2, Plus, Search, Eye, Pencil as Edit2, MoreVertical,
   CheckCircle, XCircle, PauseCircle, Users, ChevronRight,
   Globe, Mail, Phone, MapPin, Calendar, RefreshCw, ArrowLeft, User,
   Shield, X, Save, ExternalLink, Archive, Trash2, AlertTriangle,

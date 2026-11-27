@@ -4,7 +4,7 @@ import { useToast } from '../contexts/ToastContext';
 import { deleteChecked } from '../lib/writeOutcome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { Plus, CreditCard as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Pencil as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
 import { referralUsageCounts } from '../lib/panelFigures';
 import { Alert } from './ui';
 import { format } from 'date-fns';

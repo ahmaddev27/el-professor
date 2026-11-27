@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, CreditCard as Edit2, Trash2, ToggleLeft, ToggleRight, Tag, ChevronDown, ChevronUp, Users, Building2, Calendar, Hash, Percent, Euro, Check, X, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil as Edit2, Trash2, ToggleLeft, ToggleRight, Tag, ChevronDown, ChevronUp, Users, Building2, Calendar, Hash, Percent, Euro, Check, X, AlertTriangle } from 'lucide-react';
 import ConfirmationModal from './ConfirmationModal';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
