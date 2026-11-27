@@ -107,8 +107,8 @@ export default {
         'elev-lg': 'var(--elev-lg)',
         brand: 'var(--brand-glow)',
         mark: 'var(--mark-glow)',
-        segment: 'var(--glass-hi), 0 2px 8px -3px rgb(4 60 44 / 0.25)',
-        field: 'inset 0 1px 2px rgb(4 60 44 / 0.05)',
+        segment: 'var(--glass-hi), 0 2px 8px -3px rgb(32 50 82 / 0.25)',
+        field: 'inset 0 1px 2px rgb(32 50 82 / 0.05)',
       },
       backgroundImage: {
         'brand-gradient': 'var(--brand-gradient)',

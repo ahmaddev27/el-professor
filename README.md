@@ -25,7 +25,9 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **The brand is the logo's blue (27.11.2026, branch `design/brand-blue`, one PR against `staging`, no migration, look only).** The primary colour moved from the spec's emerald to the logo's `#0060FF` and an eleven-step scale built from it, in both themes; semantic green (paid, active, success) stays green, and the rest of the Glass look is unchanged. See `Docs/design/remake-v2/PLAN.md` §1a.
+> **The greys follow the logo (27.11.2026, branch `design/canvas-blue`, one PR against `staging`, no migration, look only).** At the owner's word the canvas, text, lines, shadows and glows were turned from the spec's green-grey onto the logo's hue, at their own lightness and chroma (canvas `#EAEDF3` / `#06090D`). The semantic tones are untouched. `tokens.contrast.test.ts` fails a green grey. PLAN.md §1b.
+>
+> **The brand is the logo's blue (27.11.2026, merged into `staging` as #391, no migration, look only).** The primary colour moved from the spec's emerald to the logo's `#0060FF` and an eleven-step scale built from it, in both themes; semantic green (paid, active, success) stays green, and the rest of the Glass look is unchanged. See `Docs/design/remake-v2/PLAN.md` §1a.
 >
 > **The collapsible sidebar rail and the 10 px gutter (27.11.2026, merged into `staging` as #389, no migration).** Both shells' sidebars collapse to Reidey's 68 px rail on wide screens, every item stays named in it, and the sidebar no longer touches the sheet. See `Docs/design/remake-v2/PLAN.md` §7.
 
