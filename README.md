@@ -25,7 +25,9 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **A Beleg printed before 04:00 counts on the previous day (09.11.2026, branch `fix/receipt-business-day`, PR against `staging`, one migration).** `receipts.business_date` is derived by `public.receipt_business_date(date, time)` (`receiptBusinessDate()` in TypeScript); the weekly Abrechnung, the mail's figures, the Tankenquote, the till and the Overview group by it. The Belege list still shows the printed date and says `Zählt zum …` when they differ.
+> **A new Uber driver no longer stops the daily pull (26.11.2026, branch `fix/new-drivers-from-uber`, PR #375 against `staging`, two migrations).** The pull links or creates up to five new drivers (`uber_pull_place_unlinked`, active, name only) and then imports the day; a departed namesake is refused, not linked. A new driver's e-mail language defaults to German and the staff number to the company's last + 1 (`drivers_assign_personalnummer`, owner drivers excluded). The Fahrer and Fahrzeuge pages refresh their own data from Reidey without importing earnings.
+>
+> **A Beleg printed before 04:00 counts on the previous day (09.11.2026, #373 and #374, one migration, on production since 26.11.2026).** `receipts.business_date` is derived by `public.receipt_business_date(date, time)` (`receiptBusinessDate()` in TypeScript); the weekly Abrechnung, the mail's figures, the Tankenquote, the till and the Overview group by it. The Belege list still shows the printed date and says `Zählt zum …` when they differ.
 >
 > **No engine code, column name or id on a screen (03.11.2026, #368 and #369, on production since 03.11.2026, no migration).** The standard plan's notes, the Fahrer table and fourteen dictionary messages printed them.
 >

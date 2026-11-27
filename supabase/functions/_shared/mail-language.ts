@@ -4,10 +4,10 @@
  * Pure: no Deno, `npm:` or `jsr:` import, so vitest runs it in Node.
  *
  * Five languages, one default, and the default is the owner's decision of
- * 19.10.2026: **English**, even though the product's UI falls back to German. A
+ * 26.11.2026: **German**, which reverses his English decision of 19.10.2026. A
  * driver whose language is missing, empty, mistyped or one we do not write gets
- * English, never German by accident and never a crash. The database says the same
- * (`drivers.preferred_language` is NOT NULL DEFAULT 'en' with a CHECK), so this
+ * German, never a crash. The database says the same for new rows
+ * (`drivers.preferred_language` defaults to 'de', with a CHECK), so this
  * fallback is the second wall: it covers a row read before the migration, a
  * response that omitted the column, and a future language added to the table
  * before it is added here.
@@ -21,7 +21,7 @@ export const MAIL_LANGUAGES = ['ar', 'en', 'de', 'tr', 'ru'] as const;
 
 export type MailLanguage = (typeof MAIL_LANGUAGES)[number];
 
-export const DEFAULT_MAIL_LANGUAGE: MailLanguage = 'en';
+export const DEFAULT_MAIL_LANGUAGE: MailLanguage = 'de';
 
 export function isMailLanguage(value: unknown): value is MailLanguage {
   return MAIL_LANGUAGES.some((code) => code === value);

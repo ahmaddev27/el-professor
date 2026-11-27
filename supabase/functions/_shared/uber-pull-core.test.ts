@@ -7,6 +7,8 @@ import {
   businessWeekNumber,
   completedOperatingDay,
   dueOccurrence,
+  earnersToPlace,
+  placementBlockReason,
   isFailure,
   isGap,
   planDay,
@@ -281,5 +283,52 @@ describe('a day with an earner Reidey could not place', () => {
   it('records each earner once and at most 200', () => {
     const many = Array.from({ length: 250 }, (_, i) => ({ name: 'E' + i, uberDriverUuid: 'u' + i, trips: null }));
     expect(unmatchedNotes(many)).toHaveLength(200);
+  });
+});
+
+describe('earnersToPlace', () => {
+  const day = '2026-10-14';
+  const earner = (id: string, name: string, fareCents: number, trips: number | null = 3): UberDriverEarnings => ({
+    externalDriverId: id, uberDriverUuid: null, name, fareCents, promotionCents: 0, tipsCents: 0,
+    cashCents: 0, netOutstandingCents: 0, trips, differenceCents: 0,
+  });
+
+  it('names the unlinked earners with money, and nobody else', () => {
+    const drivers = [earner('1', 'Anna Beispiel', 1000), earner('2', 'Ben Muster', 2000), earner('3', 'Cara Probe', 0, null)];
+    expect(earnersToPlace(drivers, day, new Set(['1']))).toEqual([{ external_driver_id: '2', name: 'Ben Muster' }]);
+  });
+
+  it('lists an id once even if the partner repeats it', () => {
+    const drivers = [earner('2', 'Ben Muster', 2000), earner('2', 'Ben Muster', 500)];
+    expect(earnersToPlace(drivers, day, new Set())).toHaveLength(1);
+  });
+
+  it('is empty when every earner is linked', () => {
+    expect(earnersToPlace([earner('1', 'Anna Beispiel', 1000)], day, new Set(['1']))).toEqual([]);
+  });
+});
+
+describe('placementBlockReason', () => {
+  it("takes the database's own refusal", () => {
+    expect(placementBlockReason({ ok: false, reason: 'too_many' })).toBe('too_many');
+    expect(placementBlockReason({ ok: false, reason: 'company_blocked' })).toBe('company_blocked');
+  });
+
+  it("takes the first refused earner's reason, never the name", () => {
+    expect(placementBlockReason({
+      ok: true, created: [], linked: [],
+      refused: [{ name: 'Anna Beispiel', reason: 'name_inactive' }, { name: 'Ben Muster', reason: 'name_taken' }],
+    })).toBe('name_inactive');
+  });
+
+  it('is null when everyone was placed', () => {
+    expect(placementBlockReason({ ok: true, created: [{ name: 'Anna Beispiel' }], linked: [], refused: [] })).toBeNull();
+  });
+
+  it('keeps nothing it does not know, so no free text reaches the run', () => {
+    expect(placementBlockReason({ ok: false, reason: 'Anna Beispiel' })).toBeNull();
+    expect(placementBlockReason({ ok: true, refused: [{ name: 'x', reason: 'something_new' }] })).toBeNull();
+    expect(placementBlockReason(null)).toBeNull();
+    expect(placementBlockReason('too_many')).toBeNull();
   });
 });

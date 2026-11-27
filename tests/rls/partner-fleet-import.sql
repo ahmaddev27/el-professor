@@ -264,10 +264,17 @@ BEGIN
     'null | null');
   PERFORM _fi_rec(17, 'a driver the partner reports as departed is created inactive, not dropped',
     (SELECT status FROM drivers WHERE company_id = co_a AND name = 'Dora Weg'), 'inactive');
+  -- Since 20261126100000 an ACTIVE created driver is numbered by the drivers
+  -- trigger (nothing in the import names the column); an inactive one is not.
+  -- tests/rls/driver-defaults.sql pins the number itself, so only pay and
+  -- employment are read here, and the departed driver's absence of a number.
   PERFORM _fi_rec(18, 'nothing about pay or employment arrives: the created drivers carry the columns'' own defaults',
-    (SELECT string_agg(DISTINCT employment_type || ' ' || salary_ratio::text || ' ' || coalesce(personalnummer, 'null'), ',')
+    (SELECT string_agg(DISTINCT employment_type || ' ' || salary_ratio::text, ',')
        FROM drivers WHERE company_id = co_a AND name IN ('Bernd Neu', 'Carla Neu', 'Dora Weg', 'Unbekannter Fahrer')),
-    'employee 0.5000 null');
+    'employee 0.5000');
+  PERFORM _fi_rec(181, 'the departed driver created inactive takes no staff number',
+    (SELECT coalesce(personalnummer, 'null') FROM drivers WHERE company_id = co_a AND name = 'Dora Weg'),
+    'null');
 
   PERFORM _fi_rec(19, 'a link a person rejected creates nothing',
     (SELECT count(*)::text FROM drivers WHERE name = 'Rita Rejected'), '0');
