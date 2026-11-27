@@ -5,6 +5,8 @@ import { CalendarResult } from '../components/simulatedRides/CalendarResult';
 import { CalendarSettings } from '../components/simulatedRides/CalendarSettings';
 import { RoutingSummary } from '../components/simulatedRides/RoutingSummary';
 import { SimulatedBadge } from '../components/simulatedRides/SimulatedBadge';
+import { SimulationSettingsPanel } from '../components/simulatedRides/SimulationSettingsPanel';
+import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -15,6 +17,7 @@ import { createGeocodeClient } from '../lib/geocodeClient';
 import { loadDriverNotes, loadDriverPlanningFacts, loadVehicleUnavailability, loadWerkstattChecks } from '../lib/simulationInputsClient';
 import { prepareRouting, type RoutingFailureReason } from '../lib/simulationRouting';
 import { supabase } from '../lib/supabase';
+import { loadSimulationSettings, saveSimulationSettings, type CompanySimulationSettings } from '../lib/simulationSettingsClient';
 import { createTravelRouteClient } from '../lib/travelRouteClient';
 import { loadCompanyDrivers, loadSettings } from '../lib/tripAnalysisClient';
 import type { CompanyDriver } from '../lib/tripAnalysisView';
@@ -39,7 +42,7 @@ import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
 import { buildMonthReport } from '../utils/simulatedRides/monthWorkbook';
 import { buildOperationalReport } from '../utils/simulatedRides/operationalReport';
-import { selectMonthlyShareRate } from '../utils/simulatedRides/monthlyRate';
+import { selectMonthlyShareRate, type ShareSetting } from '../utils/simulatedRides/monthlyRate';
 import { routeChecks, summariseRouteChecks, type RouteCheckSummary } from '../utils/simulatedRides/routeCheck';
 import { rideDate, ridesToRows } from '../utils/simulatedRides/sheet';
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from '../utils/simulatedRides/travelModel';
@@ -216,8 +219,13 @@ export default function SimulatedRidesPage() {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { settings } = useCompanySettings();
   const scope = useCompanyScope();
+  const { isAdmin } = useAuth();
   const { createImport } = useFahrtenbuch();
   const canWrite = scope.can('documents', 'edit') && !scope.readOnly;
+  // The company's simulation settings are `is_company_admin()`'s to write: a
+  // company administrator, or a platform account in a support session. The
+  // database refuses everyone else; this only decides whether to offer Save.
+  const canEditSimulationSettings = !scope.readOnly && (isAdmin || scope.kind === 'support');
 
   const [mode, setMode] = useState<Mode>('calendar');
   const [monthKey, setMonthKey] = useState(defaultMonthKey);
@@ -237,6 +245,9 @@ export default function SimulatedRidesPage() {
   const [formError, setFormError] = useState<CalendarFormField | null>(null);
   const [routingFailed, setRoutingFailed] = useState(false);
   const [allowEstimate, setAllowEstimate] = useState(false);
+  const [simulationSettings, setSimulationSettings] = useState<CompanySimulationSettings | null>(null);
+  const [simulationSettingsFailed, setSimulationSettingsFailed] = useState(false);
+  const [savingSimulationSettings, setSavingSimulationSettings] = useState(false);
 
   useEffect(() => {
     if (settings?.city) setCity(current => current || settings.city || '');
@@ -273,6 +284,36 @@ export default function SimulatedRidesPage() {
     })();
     return () => { live = false; };
   }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    let live = true;
+    setSimulationSettings(null);
+    setSimulationSettingsFailed(false);
+    loadSimulationSettings(companyId, supabase)
+      .then(row => { if (live) setSimulationSettings(row); })
+      .catch(err => {
+        console.error('Fahrten simulieren: loading the simulation settings failed', err);
+        if (live) setSimulationSettingsFailed(true);
+      });
+    return () => { live = false; };
+  }, [companyId]);
+
+  const saveSettings = async (values: { shareSetting: ShareSetting | null; returnToBase: boolean }) => {
+    if (!companyId) return;
+    setSavingSimulationSettings(true);
+    try {
+      const saved = await saveSimulationSettings(companyId, values, supabase);
+      setSimulationSettings(saved);
+      setSimulationSettingsFailed(false);
+      showToast('success', t('simrides.settings.saved'));
+    } catch (err) {
+      console.error('Fahrten simulieren: saving the simulation settings failed', err);
+      showToast('error', t('simrides.settings.saveFailed', { message: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setSavingSimulationSettings(false);
+    }
+  };
 
   const period = useMemo(() => {
     const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
@@ -312,17 +353,20 @@ export default function SimulatedRidesPage() {
     if (!companyId) throw new Error(t('simrides.error.generic'));
     const { first, last } = monthBounds(year, month);
     try {
-      const [notes, facts, checks, unavailability, uber, realTrips] = await Promise.all([
+      const [notes, facts, checks, unavailability, uber, realTrips, simulation] = await Promise.all([
         loadDriverNotes(companyId, addDays(first, -7)),
         loadDriverPlanningFacts(companyId),
         calendar ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
         calendar ? loadVehicleUnavailability(companyId, addDays(first, -1), addDays(last, 2)) : Promise.resolve([] as VehicleUnavailabilityRow[]),
         calendar ? loadUberMonth(companyId, year, month, supabase) : Promise.resolve(null),
         calendar ? loadRealTripRows(companyId, year, month, supabase) : Promise.resolve(null),
+        // Read again for the run rather than taken from the panel: a month runs
+        // on what is stored now, never on an unsaved draft or a stale copy.
+        calendar ? loadSimulationSettings(companyId, supabase) : Promise.resolve(null),
       ]);
-      return { notes, facts, checks, unavailability, uber, realTrips };
+      return { notes, facts, checks, unavailability, uber, realTrips, simulation };
     } catch (err) {
-      console.error('Fahrten simulieren: reading notes, vehicle facts, Uber figures or real trips failed', err);
+      console.error('Fahrten simulieren: reading notes, vehicle facts, Uber figures, real trips or the simulation settings failed', err);
       throw new Error(t('simrides.error.events'));
     }
   };
@@ -378,6 +422,7 @@ export default function SimulatedRidesPage() {
         return;
       }
       const events = await readEvents(period.year, period.month, true);
+      if (events.simulation) setSimulationSettings(events.simulation);
       setPhase('pool');
       const { pool } = await ensurePool();
       const origin = located.base;
@@ -411,10 +456,12 @@ export default function SimulatedRidesPage() {
         }),
         driverNotesMap: events.notes, werkstattChecks: events.checks,
         vehicleUnavailability: readUnavailability(events.unavailability), uber: events.uber ?? undefined, realTrips,
-        // Section 5's share on the imported umsatz, computed and never booked.
-        // Until the company setting exists (S8) it is the seed's month draw,
-        // the rate the share preview above already names.
-        shareSetting: { mode: 'random', scope: 'month', seed },
+        // Section 5's share on the imported umsatz, computed and never booked,
+        // at the company's stored rate. None stored is `share_not_configured`
+        // in the report, never a rate made up here. The return to the base is
+        // off unless the company turned it on (D8).
+        shareSetting: events.simulation?.shareSetting ?? null,
+        returnToBase: events.simulation?.returnToBase ?? false,
         settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
         travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
       });
@@ -581,6 +628,12 @@ export default function SimulatedRidesPage() {
           {error ? <Alert tone="critical">{error}</Alert> : null}
         </CardContent>
       </Card>
+
+      {mode === 'calendar' ? (
+        <SimulationSettingsPanel settings={simulationSettings} loadFailed={simulationSettingsFailed}
+          canEdit={canEditSimulationSettings} saving={savingSimulationSettings} period={period}
+          suggestedSeed={seed} onSave={values => { void saveSettings(values); }} />
+      ) : null}
 
       {mode === 'calendar' && calendarResult ? (
         <CalendarResult result={calendarResult} onDownload={() => downloadReport(buildMonthReport)}

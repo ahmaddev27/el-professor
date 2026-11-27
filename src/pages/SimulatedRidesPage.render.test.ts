@@ -33,6 +33,12 @@ const world = vi.hoisted(() => ({
   addressQueries: [] as string[],
   delivered: [] as unknown[],
   built: [] as unknown[],
+  /** Round 8 S8: the company's stored simulation settings row, none, or a failed read. */
+  simulationRow: null as Record<string, unknown> | null,
+  simulationError: false,
+  isAdmin: true,
+  /** What the screen handed the generator as the share setting and the return to base. */
+  generatorSettings: [] as { shareSetting: unknown; returnToBase: unknown }[],
 }));
 
 const POOL = Array.from({ length: 70 }, (_, i) => ({
@@ -49,6 +55,7 @@ const FULL_ADDRESS = { street: 'Musterweg', house_number: '7', postal_code: '402
 const fake = createFakeSupabase(call => {
   if (call.table === 'driver_notes' && world.noteError) return { data: null, error: { message: 'boom' } };
   if (call.table === 'fahrtenbuch_trips' && world.tripsError) return { data: null, error: { message: 'boom' } };
+  if (call.table === 'company_simulation_settings' && world.simulationError) return { data: null, error: { message: 'boom' } };
   const rows: Record<string, unknown[]> = {
     cars: [
       { id: 'car-1', kennzeichen: 'XX-AA 1', tuev_gueltig_bis: '2027-06-30' },
@@ -62,6 +69,7 @@ const fake = createFakeSupabase(call => {
     driver_notes: [],
     werkstatt_checks: [],
     fahrtenbuch_trips: world.realTrips,
+    company_simulation_settings: world.simulationRow ? [world.simulationRow] : [],
   };
   return { data: rows[call.table] ?? [], error: null };
 });
@@ -70,7 +78,8 @@ vi.mock('../lib/supabase', () => ({ supabase: fake.client }));
 vi.mock('../contexts/SuperAdminContext', () => ({ useSuperAdmin: () => ({ effectiveCompanyId: 'company-1' }) }));
 vi.mock('../contexts/CompanySettingsContext', () => ({ useCompanySettings: () => ({ settings: world.address }) }));
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: () => {} }) }));
-vi.mock('../hooks/useCompanyScope', () => ({ useCompanyScope: () => ({ can: () => true, readOnly: false }) }));
+vi.mock('../hooks/useCompanyScope', () => ({ useCompanyScope: () => ({ can: () => true, readOnly: false, kind: 'own' }) }));
+vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ isAdmin: world.isAdmin }) }));
 vi.mock('../hooks/useFahrtenbuch', () => ({ useFahrtenbuch: () => ({ createImport: async () => {} }) }));
 vi.mock('../lib/tripAnalysisClient', () => ({
   loadCompanyDrivers: async () => [1, 2, 3].map(n => ({
@@ -141,6 +150,7 @@ vi.mock('../utils/simulatedRides/fullMonth', async importActual => {
     generateFullMonth: (input: Parameters<typeof actual.generateFullMonth>[0]) => {
       world.generateCalls += 1;
       world.bases.push({ base: input.base, source: input.baseSource, label: input.baseLabel });
+      world.generatorSettings.push({ shareSetting: input.shareSetting, returnToBase: input.returnToBase });
       const out = actual.generateFullMonth(input);
       if (out.ok && world.injectViolation) out.result.violations = ['Teststreit: eine Regel gebrochen'];
       return out;
@@ -206,6 +216,10 @@ describe('SimulatedRidesPage, calendar mode', () => {
     world.addressQueries.length = 0;
     world.delivered.length = 0;
     world.built.length = 0;
+    world.simulationRow = null;
+    world.simulationError = false;
+    world.isAdmin = true;
+    world.generatorSettings.length = 0;
   });
 
   it('shows the share rate before generating, then 28 days for February 2026 and a downloadable report', async () => {
@@ -233,6 +247,10 @@ describe('SimulatedRidesPage, calendar mode', () => {
     expect(text).toContain('Finanzabgleich mit Uber - INCOMPLETE');
     expect(text).toContain('Uber meldet für den Monat keine Zahlen');
     expect(text).toContain('Anteil (berechnet, nicht gebucht)');
+    // No stored setting (S8): no rate is made up, the report says so, and the
+    // return to the base stays off.
+    expect(text).toContain('Kein Anteilssatz festgelegt');
+    expect(world.generatorSettings).toEqual([{ shareSetting: null, returnToBase: false }]);
 
     const download = button(renderer.root, 'Fahrtenbuch-Bericht herunterladen (SIMULIERT)');
     expect(download.props.disabled).toBeFalsy();
@@ -371,8 +389,53 @@ describe('SimulatedRidesPage, calendar mode', () => {
     await chooseFebruary(renderer);
     await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
     await settle(() => collect(renderer.root).includes('konnten nicht gelesen werden'));
-    expect(collect(renderer.root)).toContain('die echten Fahrten des Monats konnten nicht gelesen werden');
+    expect(collect(renderer.root)).toContain('die echten Fahrten des Monats oder die Simulationseinstellungen des Unternehmens konnten nicht gelesen werden');
     expect(world.generateCalls).toBe(0);
+  });
+
+  it('the company\'s stored settings reach the generator: its rate, and the return to the base', async () => {
+    world.simulationRow = {
+      id: 'set-1', company_id: 'company-1', share_mode: 'random', share_percent: null, share_scope: 'day', seed: 4242,
+      return_to_base: true, updated_at: '2026-11-27T10:00:00Z',
+    };
+    const renderer = await mount();
+    await settle(() => collect(renderer.root).includes('Jeder Betriebstag zieht seinen eigenen Satz'));
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('Erzeugter Kalendermonat'));
+    expect(world.generatorSettings).toEqual([{ shareSetting: { mode: 'random', scope: 'day', seed: 4242 }, returnToBase: true }]);
+    const text = collect(renderer.root);
+    expect(text).not.toContain('Kein Anteilssatz festgelegt');
+    // The settings are read for the run, scoped to the company, and never written by it.
+    const reads = fake.calls.filter(c => c.table === 'company_simulation_settings');
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+    expect(reads.every(c => c.op === 'select' && c.filters.includes('eq:company_id'))).toBe(true);
+  });
+
+  it('settings that cannot be read stop the run: an unread setting is not "not configured"', async () => {
+    world.simulationError = true;
+    const renderer = await mount();
+    await settle(() => collect(renderer.root).includes('Die Simulationseinstellungen konnten nicht geladen werden'));
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('konnten nicht gelesen werden'));
+    expect(collect(renderer.root)).toContain('Simulationseinstellungen des Unternehmens konnten nicht gelesen werden');
+    expect(world.generateCalls).toBe(0);
+  });
+
+  it('a non-administrator sees the settings and is offered no Save', async () => {
+    world.isAdmin = false;
+    world.simulationRow = {
+      id: 'set-1', company_id: 'company-1', share_mode: 'fixed', share_percent: 31, share_scope: null, seed: null,
+      return_to_base: false, updated_at: null,
+    };
+    const renderer = await mount();
+    await settle(() => collect(renderer.root).includes('Jeder Tag: 31 %'));
+    const text = collect(renderer.root);
+    expect(text).toContain('Nur ein Administrator kann diese Einstellungen ändern.');
+    expect(renderer.root.findAll(node => node.type === 'button' && collect(node).includes('Einstellungen speichern'))).toEqual([]);
+    const mode = renderer.root.findAll(node => node.type === 'select' && node.props.id === 'simsettings-mode')[0];
+    expect(mode.props.disabled).toBe(true);
   });
 
   it('a fee that is not whole cents is refused before anything is read', async () => {

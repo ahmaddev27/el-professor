@@ -1447,7 +1447,16 @@ INSERT INTO _mx_spec VALUES
 (82, 'company_modules', $q$company_id = {co} AND module_key = 'werkstatt'$q$,
   $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'werkstatt', true)$q$, NULL,
   $q$INSERT INTO company_modules (company_id, module_key, enabled) VALUES ({co}, 'notes', true)$q$,
-  $q$enabled = enabled$q$);
+  $q$enabled = enabled$q$),
+-- The simulator's company settings (20261127200000, FleetBook round 8): the
+-- business shape with an administrator gate on every write, trip_analysis_
+-- settings' shape. One row per company, so the INSERT probe clears the side's
+-- own first.
+(85, 'company_simulation_settings', $q$id = {id}$q$,
+  $q$INSERT INTO company_simulation_settings (id, company_id, share_mode, share_percent) VALUES ({id}, {co}, 'fixed', 32)$q$,
+  $q$DELETE FROM company_simulation_settings WHERE company_id = {co}$q$,
+  $q$INSERT INTO company_simulation_settings (company_id, share_mode, share_scope, seed) VALUES ({co}, 'random', 'month', 7)$q$,
+  $q$return_to_base = return_to_base$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1627,7 +1636,9 @@ INSERT INTO _mx_move VALUES
 -- owner the move is an ordinary UPDATE that succeeds.
 ('company_modules',                      $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM company_modules WHERE company_id = {other_co} AND module_key = 'werkstatt'$q$,
-                                         'Y', 'one decision per company and module');
+                                         'Y', 'one decision per company and module'),
+('company_simulation_settings',          $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM company_simulation_settings WHERE company_id = {other_co}$q$, 'Y', 'one settings row per company');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -2233,6 +2244,13 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('trip_analysis_settings',             'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('trip_analysis_settings',             'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('trip_analysis_settings',             'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+-- 20261127200000, trip_analysis_settings' shape: every write asks an
+-- administrator, and the WITH CHECK refuses a move.
+('company_simulation_settings',        'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_simulation_settings',        'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('company_simulation_settings',        'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('company_simulation_settings',        'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('company_simulation_settings',        'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('user_profiles',                      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- anon and super: since 20260916110010 the profile guard refuses a JWT putting a
 -- profile into a company before RLS is asked; both were RR
@@ -2464,7 +2482,9 @@ UPDATE _mx_expected x
      -- PP (no privilege), which the WHERE above skips, so what this adds is the
      -- SELECT inside a context and the confirm INSERT: refused in a view
      -- context, the supported company's own in a support session.
-     'receipt_edits');
+     'receipt_edits',
+     -- 20261127200000: the same shape and the same two triggers
+     'company_simulation_settings');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
