@@ -106,9 +106,11 @@ describe('the committed baseline', () => {
   };
 
   it('still sees debt in a screen phase 5 has not reached, so a broken counter cannot pass by finding nothing', () => {
-    const source = readFileSync(new URL('../src/pages/WerkstattPage.tsx', import.meta.url), 'utf8');
+    // Werkstatt was this control until the Glass remake's R2 moved it; Mein Konto
+    // is the last screen inside the company frame still on the legacy look (R3).
+    const source = readFileSync(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8');
     expect(countStyleDebt(source).style).toBeGreaterThan(0);
-    expect(baseline.files['src/pages/WerkstattPage.tsx']?.style).toBeGreaterThan(0);
+    expect(baseline.files['src/pages/AccountPage.tsx']?.style).toBeGreaterThan(0);
   });
 
   it('holds the phase 5 batch-1 screens at zero: they are on the design system', () => {

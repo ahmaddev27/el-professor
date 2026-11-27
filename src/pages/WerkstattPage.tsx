@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Wrench, Calendar, AlertCircle, CheckCircle, CreditCard as Edit2, Trash2, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { getWeeksOfMonth, getWeekNumberForDate, type WeekOfMonth } from '../utils/weekCalculations';
 import WerkstattCheckModal from '../components/WerkstattCheckModal';
-import ConfirmationModal from '../components/ConfirmationModal';
 import { format } from 'date-fns';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { Alert, Badge, Button, ConfirmDialog, EmptyState, NativeSelect, PageHeader, cn } from '../components/ui';
 import { deleteChecked } from '../lib/writeOutcome';
 
 interface WerkstattCheck {
@@ -188,23 +188,6 @@ export default function WerkstattPage() {
     }
   };
 
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case 'positive': return {
-        icon: <CheckCircle className="w-5 h-5" style={{ color: 'var(--success)' }} />,
-        bg: 'var(--success-subtle)', border: 'rgba(5,150,105,0.3)', label: t('werkstatt.positive'),
-      };
-      case 'negative': return {
-        icon: <AlertCircle className="w-5 h-5" style={{ color: 'var(--danger)' }} />,
-        bg: 'var(--danger-subtle)', border: 'rgba(220,38,38,0.3)', label: t('werkstatt.negative'),
-      };
-      case 'repaired': return {
-        icon: <Wrench className="w-5 h-5" style={{ color: 'var(--accent-text)' }} />,
-        bg: 'var(--accent-subtle)', border: 'rgba(37,99,235,0.3)', label: t('werkstatt.repaired'),
-      };
-      default: return { icon: null, bg: 'var(--bg-subtle)', border: 'var(--border)', label: status };
-    }
-  };
 
   function handleExport() {
     // Second wall for the rule above: the button is disabled while the load
@@ -260,121 +243,115 @@ export default function WerkstattPage() {
     });
   }
 
-  const selectStyle: React.CSSProperties = {
-    background: 'var(--bg-subtle)', border: '1px solid var(--border)',
-    borderRadius: '0.5rem', color: 'var(--text-primary)',
-    fontSize: '0.875rem', padding: '0.375rem 0.75rem', outline: 'none',
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged, except that
+  // `getStatusConfig` moved below: it held the words and the colours in one
+  // object, and the colours are the look. Everything below only draws.
+
+  const getStatusConfig = (status: string) => {
+    switch (status) {
+      case 'positive': return {
+        icon: <CheckCircle aria-hidden className="size-5 text-positive" />,
+        card: 'border-positive/30 bg-positive-soft', tone: 'positive' as const, label: t('werkstatt.positive'),
+      };
+      case 'negative': return {
+        icon: <AlertCircle aria-hidden className="size-5 text-critical" />,
+        card: 'border-critical/30 bg-critical-soft', tone: 'critical' as const, label: t('werkstatt.negative'),
+      };
+      case 'repaired': return {
+        icon: <Wrench aria-hidden className="size-5 text-info" />,
+        card: 'border-info/30 bg-info-soft', tone: 'info' as const, label: t('werkstatt.repaired'),
+      };
+      default: return { icon: null, card: 'border-line bg-sunken', tone: 'neutral' as const, label: status };
+    }
   };
 
-  /**
-   * The failed-read panel and the empty-state panel are one card with two sets
-   * of values, not two cards. Written as two the screen would carry five more
-   * inline styles and one more literal colour, which the per-file style ratchet
-   * fails on; the icon, the heading, the body and the button are chosen here and
-   * in the ternaries below instead.
-   */
-  const EmptyStateIcon = loadFailed !== null ? AlertCircle : Wrench;
-
   const statusButtons = [
-    { key: 'all' as const, label: t('common.all'), activeColor: 'var(--text-primary)', activeBg: 'var(--bg-elevated)' },
-    { key: 'negative' as const, label: t('werkstatt.negative'), activeColor: 'var(--danger)', activeBg: 'var(--danger-subtle)' },
-    { key: 'repaired' as const, label: t('werkstatt.repaired'), activeColor: 'var(--accent-text)', activeBg: 'var(--accent-subtle)' },
-    { key: 'positive' as const, label: t('werkstatt.positive'), activeColor: 'var(--success)', activeBg: 'var(--success-subtle)' },
+    { key: 'all' as const, label: t('common.all'), active: 'bg-sunken text-fg' },
+    { key: 'negative' as const, label: t('werkstatt.negative'), active: 'bg-critical-soft text-critical' },
+    { key: 'repaired' as const, label: t('werkstatt.repaired'), active: 'bg-info-soft text-info' },
+    { key: 'positive' as const, label: t('werkstatt.positive'), active: 'bg-positive-soft text-positive' },
   ];
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-xl" style={{ background: 'var(--warning-subtle)' }}>
-            <Wrench className="w-7 h-7" style={{ color: 'var(--warning)' }} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.werkstatt')}</h1>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.subtitle')}</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={handleExport}
-            disabled={loadFailed !== null}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{
-              background: 'var(--success-solid)', color: 'white',
-              opacity: loadFailed !== null ? 0.5 : 1,
-              cursor: loadFailed !== null ? 'not-allowed' : 'pointer',
-            }}
-            title={loadFailed !== null ? t('werkstatt.loadFailed') : t('common.exportExcel')}
-          >
-            <Download className="w-4 h-4" />
-            Excel
-          </button>
-          <button
-            onClick={() => { setSelectedCheck(null); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg"
-            style={{ background: 'var(--warning-solid)', color: 'white' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.85'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-          >
-            <Plus className="w-5 h-5" />
-            {t('werkstatt.newCheck')}
-          </button>
-        </div>
-      </div>
+  // `mr-1`: the dictionary's labels end in a colon with no space, and the value
+  // follows inline, so without it a card read „Datum:17.9.2026“.
+  const labelClass = 'mr-1 font-medium text-fg-muted';
 
-      <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+  return (
+    <div className="space-y-6 font-ui">
+      <PageHeader
+        className="pb-0"
+        title={t('nav.werkstatt')}
+        description={t('werkstatt.subtitle')}
+        actions={(
+          <>
+            <Button
+              variant="secondary"
+              onClick={handleExport}
+              disabled={loadFailed !== null}
+              title={loadFailed !== null ? t('werkstatt.loadFailed') : t('common.exportExcel')}
+            >
+              <Download aria-hidden />
+              Excel
+            </Button>
+            <Button onClick={() => { setSelectedCheck(null); setShowModal(true); }}>
+              <Plus aria-hidden />
+              {t('werkstatt.newCheck')}
+            </Button>
+          </>
+        )}
+      />
+
+      <div className="glass-card rounded-surface p-5">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Calendar className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+            <Calendar aria-hidden className="size-5 text-fg-muted" />
             <button
+              type="button"
               onClick={() => handleMonthChange('prev')}
-              className="px-3 py-1 rounded-lg text-sm [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              className={cn(
+                'inline-flex h-[30px] items-center justify-center rounded-tight border border-edge bg-raised px-3 text-sm text-fg shadow-raised transition-colors hover:bg-raised/[1.4] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
+              )}
             >←</button>
-            <div className="text-center min-w-[140px] text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <div className="min-w-[140px] whitespace-nowrap text-center text-sm font-semibold text-fg">
               {selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
             </div>
             <button
+              type="button"
               onClick={() => handleMonthChange('next')}
-              className="px-3 py-1 rounded-lg text-sm [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              className={cn(
+                'inline-flex h-[30px] items-center justify-center rounded-tight border border-edge bg-raised px-3 text-sm text-fg shadow-raised transition-colors hover:bg-raised/[1.4] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
+              )}
             >→</button>
-            <button
-              onClick={() => setSelectedMonth(new Date())}
-              className="px-3 py-1 rounded-lg text-xs [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-              style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
-            >{t('common.today')}</button>
+            <Button variant="secondary" size="sm" className="[@media(pointer:coarse)]:min-w-10" onClick={() => setSelectedMonth(new Date())}>{t('common.today')}</Button>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.period')}</span>
-            <select value={selectedWeek} onChange={(e) => setSelectedWeek(Number(e.target.value))} style={selectStyle}>
+            <span className="text-sm font-medium text-fg-muted">{t('werkstatt.period')}</span>
+            <NativeSelect containerClassName="w-auto" className="h-9" value={selectedWeek} onChange={(e) => setSelectedWeek(Number(e.target.value))}>
               {weeks.map((week) => (
                 <option key={week.weekNumber} value={week.weekNumber}>{week.label}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           <div className="flex-1" />
 
-          <div className="flex flex-wrap gap-2">
+          {/* Two by two on a phone: four in a wrapping row left „Positiv“ alone on a line. */}
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             {statusButtons.map(btn => (
               <button
                 key={btn.key}
+                type="button"
+                aria-pressed={statusFilter === btn.key}
                 onClick={() => setStatusFilter(btn.key)}
-                className="px-4 py-2 rounded-lg text-sm transition-colors"
-                style={{
-                  background: statusFilter === btn.key ? btn.activeBg : 'var(--bg-subtle)',
-                  color: statusFilter === btn.key ? btn.activeColor : 'var(--text-secondary)',
-                  border: '1px solid var(--border)',
-                  fontWeight: statusFilter === btn.key ? 600 : 400,
-                }}
+                className={cn(
+                  'rounded-control border border-line px-4 py-2 text-sm transition-colors [@media(pointer:coarse)]:min-h-11',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                  statusFilter === btn.key ? cn('font-semibold', btn.active) : 'bg-field font-normal text-fg-muted hover:bg-sunken',
+                )}
               >{btn.label}</button>
             ))}
           </div>
@@ -382,100 +359,92 @@ export default function WerkstattPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--warning)' }}></div>
-          <p className="mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.loading')}</p>
+        <div className="py-12 text-center">
+          <div className="mx-auto h-12 w-12 rounded-full border-b-2 border-brand motion-safe:animate-spin" />
+          <p className="mt-4 text-sm text-fg-muted">{t('werkstatt.loading')}</p>
         </div>
-      ) : loadFailed !== null || filteredChecks.length === 0 ? (
-        <div className="rounded-xl p-12 text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
-          <EmptyStateIcon className="w-16 h-16 mx-auto mb-4" style={{ color: loadFailed !== null ? 'var(--danger)' : 'var(--text-tertiary)' }} />
-          <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
-            {loadFailed !== null ? t('werkstatt.loadFailed') : t('werkstatt.none')}
-          </h3>
-          <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            {loadFailed !== null
-              ? (loadFailed || t('common.error'))
-              : statusFilter === 'all'
-                ? t('werkstatt.noneWeek')
-                : t('werkstatt.noneWithStatus', { status: getStatusConfig(statusFilter).label })}
-          </p>
-          {/* Not offered while the read failed: "create the first check" says the
-              week holds none, which is the one thing this panel cannot claim. */}
-          {loadFailed === null && (
-            <button
-              onClick={() => { setSelectedCheck(null); setShowModal(true); }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg"
-              style={{ background: 'var(--warning-solid)', color: 'white' }}
-            >
-              <Plus className="w-5 h-5" />
-              {t('werkstatt.firstCheck')}
-            </button>
-          )}
+      ) : loadFailed !== null ? (
+        <Alert tone="critical" title={t('werkstatt.loadFailed')}>
+          {loadFailed || t('common.error')}
+        </Alert>
+      ) : filteredChecks.length === 0 ? (
+        <div className="glass-card rounded-surface p-6">
+          <EmptyState
+            icon={Wrench}
+            title={t('werkstatt.none')}
+            description={statusFilter === 'all'
+              ? t('werkstatt.noneWeek')
+              : t('werkstatt.noneWithStatus', { status: getStatusConfig(statusFilter).label })}
+            action={(
+              <Button onClick={() => { setSelectedCheck(null); setShowModal(true); }}>
+                <Plus aria-hidden />
+                {t('werkstatt.firstCheck')}
+              </Button>
+            )}
+          />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredChecks.map((check) => {
             const config = getStatusConfig(check.status);
             return (
               <div
                 key={check.id}
-                className="rounded-xl p-4"
-                style={{ background: config.bg, border: `2px solid ${config.border}`, boxShadow: 'var(--shadow-sm)' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)'; }}
+                className={cn('rounded-surface border-2 p-4 shadow-raised transition-shadow hover:shadow-elev-md', config.card)}
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
+                <div className="mb-3 flex items-start justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
                     {config.icon}
-                    <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    <h3 className="font-semibold text-fg">
                       {check.car?.kennzeichen || t('common.unknown')}
                     </h3>
+                    <Badge tone={config.tone}>{config.label}</Badge>
                   </div>
                   {mayEdit && <div className="flex gap-1">
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('common.edit')}
+                      className="hover:text-caution"
                       onClick={() => { setSelectedCheck(check); setShowModal(true); }}
-                      className="p-1 rounded"
-                      style={{ color: 'var(--text-secondary)' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--warning)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
                     >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
+                      <Edit2 aria-hidden />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('common.delete')}
+                      className="hover:text-critical"
                       onClick={() => setCheckToDelete(check)}
-                      className="p-1 rounded"
-                      style={{ color: 'var(--text-secondary)' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--danger)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <Trash2 aria-hidden />
+                    </Button>
                   </div>}
                 </div>
 
                 <div className="space-y-1.5 text-sm">
                   <div>
-                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.dateLabel')}</span>
-                    <span style={{ color: 'var(--text-primary)' }}>{new Date(check.check_date).toLocaleDateString('de-DE')}</span>
+                    <span className={labelClass}>{t('werkstatt.dateLabel')}</span>
+                    <span className="whitespace-nowrap tabular-nums text-fg">{new Date(check.check_date).toLocaleDateString('de-DE')}</span>
                   </div>
                   {check.oil_status && (
                     <div>
-                      <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.oilLabel')}</span>
-                      <span style={{ color: 'var(--text-primary)' }}>{check.oil_status}</span>
+                      <span className={labelClass}>{t('werkstatt.oilLabel')}</span>
+                      <span className="text-fg">{check.oil_status}</span>
                     </div>
                   )}
                   <div>
-                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.odometerLabel')}</span>
-                    <span style={{ color: 'var(--text-primary)' }}>{check.km_stand.toLocaleString('de-DE')} km</span>
+                    <span className={labelClass}>{t('werkstatt.odometerLabel')}</span>
+                    <span className="whitespace-nowrap tabular-nums text-fg">{check.km_stand.toLocaleString('de-DE')} km</span>
                   </div>
                   <div>
-                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.notesLabel')}</span>
-                    <p style={{ color: 'var(--text-primary)' }}>{check.notes}</p>
+                    <span className={labelClass}>{t('werkstatt.notesLabel')}</span>
+                    <p className="text-fg">{check.notes}</p>
                   </div>
                   {check.status === 'repaired' && check.repair_notes && (
-                    <div className="mt-2 pt-2 border-t" style={{ borderColor: 'rgba(37,99,235,0.2)' }}>
-                      <span className="font-medium" style={{ color: 'var(--accent-text)' }}>{t('werkstatt.repairLabel')}</span>
-                      <p style={{ color: 'var(--text-primary)' }}>{check.repair_notes}</p>
+                    <div className="mt-2 border-t border-info/20 pt-2">
+                      <span className="font-medium text-info">{t('werkstatt.repairLabel')}</span>
+                      <p className="text-fg">{check.repair_notes}</p>
                     </div>
                   )}
                 </div>
@@ -494,12 +463,11 @@ export default function WerkstattPage() {
       )}
 
       {checkToDelete && (
-        <ConfirmationModal
-          isOpen={!!checkToDelete}
-          type="confirm"
+        <ConfirmDialog
+          open={!!checkToDelete}
           title={t('werkstatt.deleteTitle')}
-          message={t('werkstatt.deleteMessage', { plate: checkToDelete.car?.kennzeichen ?? '' })}
-          confirmText={t('common.delete')}
+          description={t('werkstatt.deleteMessage', { plate: checkToDelete.car?.kennzeichen ?? '' })}
+          confirmLabel={t('common.delete')}
           onConfirm={handleDelete}
           onClose={() => setCheckToDelete(null)}
         />

@@ -43,13 +43,17 @@ vi.mock('../contexts/LanguageContext', () => ({ useTranslation: () => world.tran
 
 vi.mock('./ui', async importOriginal => {
   const original = await importOriginal<typeof import('./ui')>();
-  // CarModal draws a Radix Sheet, which portals; react-test-renderer cannot
-  // render a portal, so the sheet's parts draw their children inline.
+  // CarModal draws a Radix Sheet and WerkstattCheckModal a Radix Dialog; both
+  // portal, and react-test-renderer cannot render a portal, so their parts draw
+  // their children inline (an open dialog; a closed one draws nothing).
   const pass = ({ children }: { children?: ReactNode }) => createElement('div', null, children);
   return {
     ...original,
     Sheet: pass, SheetBody: pass, SheetContent: pass, SheetDescription: pass,
     SheetFooter: pass, SheetHeader: pass, SheetTitle: pass,
+    Dialog: ({ open, children }: { open: boolean; children?: ReactNode }) =>
+      open ? createElement('div', null, children) : null,
+    DialogContent: pass, DialogHeader: pass, DialogFooter: pass, DialogTitle: pass, DialogDescription: pass,
   };
 });
 

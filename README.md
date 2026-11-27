@@ -25,7 +25,9 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **The Glass remake, batch R1 (27.11.2026, branch `design/remake-r1`, PR against `staging`, no migration, look only).** The Overview and the locked-feature page are on the Glass tokens and primitives, and the charts draw from the new series tokens `chart-1` … `chart-5`. Four screens inside the company frame are still legacy (R2, R3). See `Docs/design/remake-v2/PLAN.md` §8.
+> **The Glass remake, batch R2 (27.11.2026, branch `design/remake-r2`, stacked on R1, PR against `staging`, no migration, look only).** Notizen, Werkstatt (with its check form) and Benachrichtigungen are on the Glass tokens and primitives. One screen inside the company frame is still legacy, Mein Konto (R3). See `Docs/design/remake-v2/PLAN.md` §8.
+>
+> **The Glass remake, batch R1 (27.11.2026, branch `design/remake-r1`, PR against `staging`, no migration, look only).** The Overview and the locked-feature page are on the Glass tokens and primitives, and the charts draw from the new series tokens `chart-1` … `chart-5`. See `Docs/design/remake-v2/PLAN.md` §8.
 >
 > **The Glass remake, stage 1 (27.11.2026, branch `design/remake-v2`, PR against `staging`, no migration, look only; approved by the owner and merged into `staging` on 27.11.2026, **not yet deployed**: no GitHub Actions run while the repository is private).** Emerald replaces the blue, the panes are glass over an ambient glow, and the font is Geist. The tokens, every primitive, both shells and `/design-preview` are moved, and the screens follow in batches. See `Docs/design/remake-v2/PLAN.md`.
 >

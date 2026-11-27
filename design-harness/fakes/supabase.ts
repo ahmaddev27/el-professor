@@ -20,6 +20,7 @@ import { batch1bFailsEveryTable, batch1bPrimaryTable, batch1bTables } from '../f
 import { analysisFailure, analysisTables } from '../analysis/fixtures';
 import { applayoutTables } from '../applayout/fixtures';
 import { r1Tables } from '../r1/fixtures';
+import { r2Tables } from '../r2/fixtures';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
@@ -64,6 +65,8 @@ function seed(): Map<string, Row[]> {
     ...applayoutTables(),
     // Design remake R1's tables, on its own screens only (r1/fixtures.ts).
     ...r1Tables(),
+    // Design remake R2's tables, on its own screens only (r2/fixtures.ts).
+    ...r2Tables(),
   ]);
 }
 

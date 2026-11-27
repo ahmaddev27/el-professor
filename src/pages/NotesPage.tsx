@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2, Paperclip } from 'lucide-react';
-import { Alert, Badge, Button } from '../components/ui';
+import { Plus, Search, Trash2, CreditCard as Edit2, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2, Paperclip } from 'lucide-react';
+import {
+  Alert, Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle, EmptyState, Field, Input,
+  NativeSelect, PageHeader, cn,
+} from '../components/ui';
+import { controlFrameClass } from '../components/ui/Input';
 import { usePartnerCatchUp } from '../hooks/usePartnerCatchUp';
-import ConfirmationModal from '../components/ConfirmationModal';
 import type { ExportOptions } from '../utils/excelExport';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { supabase } from '../lib/supabase';
@@ -156,16 +159,6 @@ const EVIDENCE_PROBLEM_KEYS: Record<'empty' | 'size' | 'type' | 'upload', Transl
   size: 'notes.prov.err.evidenceSize',
   type: 'notes.prov.err.evidenceType',
   upload: 'notes.prov.err.evidenceUpload',
-};
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
 };
 
 interface FormData extends ProvenanceFormValues {
@@ -857,59 +850,60 @@ export function NotesPage() {
     return matchesSearch && matchesDriver && matchesDate;
   });
 
+
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  const textareaClass = cn(
+    controlFrameClass,
+    'h-auto resize-none py-2 [@media(pointer:coarse)]:h-auto',
+  );
+  const checkboxClass =
+    'size-4 shrink-0 accent-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas';
+  const checkboxLabelClass = 'flex cursor-pointer items-center gap-2 text-sm text-fg-muted';
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('notes.title')}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            {t('notes.subtitle')}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canCatchUp && (
-            <Button
-              variant="secondary"
-              onClick={() => { void (async () => { if (await catchUp()) await loadData(); })(); }}
-              disabled={fetching}
-              loading={fetching}
-              title={t('partner.catchup.hint')}
-            >
-              <DownloadCloud aria-hidden />
-              {t('partner.catchup.action')}
+    <div className="space-y-6 font-ui">
+      <PageHeader
+        className="pb-0"
+        title={t('notes.title')}
+        description={t('notes.subtitle')}
+        actions={
+          <>
+            {canCatchUp && (
+              <Button
+                variant="secondary"
+                onClick={() => { void (async () => { if (await catchUp()) await loadData(); })(); }}
+                disabled={fetching}
+                loading={fetching}
+                title={t('partner.catchup.hint')}
+              >
+                <DownloadCloud aria-hidden />
+                {t('partner.catchup.action')}
+              </Button>
+            )}
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                variant="secondary"
+                onClick={() => void handleExportXlsx()}
+                disabled={exporting || filteredNotes.length === 0}
+              >
+                {exporting ? <Loader2 aria-hidden className="motion-safe:animate-spin" /> : <Download aria-hidden />}
+                {exporting ? t('notes.exporting') : t('notes.export')}
+              </Button>
+              {exportError && (
+                <span className="text-xs text-critical">{exportError}</span>
+              )}
+              {!exportError && filteredNotes.length > 0 && (
+                <span className="text-xs text-fg-subtle">
+                  {t('notes.exportHint')}
+                </span>
+              )}
+            </div>
+            <Button onClick={() => setShowModal(true)}>
+              <Plus aria-hidden />{t('notes.new')}
             </Button>
-          )}
-          <div className="flex flex-col items-end gap-1">
-            <button
-              onClick={() => void handleExportXlsx()}
-              disabled={exporting || filteredNotes.length === 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-              style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-              onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
-            >
-              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              {exporting ? t('notes.exporting') : t('notes.export')}
-            </button>
-            {exportError && (
-              <span className="text-xs" style={{ color: 'var(--danger)' }}>{exportError}</span>
-            )}
-            {!exportError && filteredNotes.length > 0 && (
-              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                {t('notes.exportHint')}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-          >
-            <Plus className="w-5 h-5" />{t('notes.new')}</button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {waitingForLink !== null && waitingForLink > 0 && (
         <Alert tone="caution" title={t('notes.waitingForLink.title', { count: String(waitingForLink) })}>
@@ -918,84 +912,77 @@ export function NotesPage() {
       )}
 
       {/* Filters */}
-      <div className="rounded-lg p-4 space-y-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
-            <input
+      <div className="glass-card space-y-4 rounded-surface p-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="relative min-w-0">
+            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-fg-subtle" />
+            <Input
               type="text"
               placeholder={t('notes.searchPlaceholder')}
+              aria-label={t('notes.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full"
-              style={{ ...inputStyle, padding: '0.5rem 0.75rem 0.5rem 2.5rem' }}
+              className="pl-10"
             />
           </div>
-          <select value={selectedDriver} onChange={(e) => setSelectedDriver(e.target.value)} style={inputStyle}>
+          <NativeSelect
+            value={selectedDriver}
+            onChange={(e) => setSelectedDriver(e.target.value)}
+            aria-label={t('common.allDrivers')}
+            containerClassName="sm:w-56"
+          >
             <option value="">{t('common.allDrivers')}</option>
             {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          </NativeSelect>
         </div>
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Calendar className="w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
-            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('notes.timeFilter')}</span>
+            <Calendar aria-hidden className="size-5 text-fg-subtle" />
+            <span className="text-sm font-medium text-fg-muted">{t('notes.timeFilter')}</span>
             <div className="flex flex-wrap gap-2">
               {(['all','date','week','month'] as FilterMode[]).map(mode => (
-                <button key={mode}
+                <Button key={mode}
+                  size="sm"
+                  variant={filterMode === mode ? 'primary' : 'secondary'}
+                  aria-pressed={filterMode === mode}
                   onClick={() => setFilterMode(mode)}
-                  className="px-3 py-1 text-sm rounded-lg transition-colors"
-                  style={filterMode === mode
-                    ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                    : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
                 >
                   {mode === 'all' ? t('common.all') : mode === 'date' ? t('common.date') : mode === 'week' ? t('common.week') : t('common.month')}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
 
           {filterMode === 'date' && (
-            <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
-              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={inputStyle} />
-              <button onClick={() => setSelectedDate(format(new Date(), 'yyyy-MM-dd'))}
-                className="px-3 py-2 rounded-lg text-sm"
-                style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              >{t('common.today')}</button>
+            <div className="flex flex-wrap items-center gap-3 rounded-tile bg-sunken p-3">
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-auto" />
+              <Button variant="secondary" onClick={() => setSelectedDate(format(new Date(), 'yyyy-MM-dd'))}
+              >{t('common.today')}</Button>
             </div>
           )}
 
           {(filterMode === 'week' || filterMode === 'month') && (
-            <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
-              <button onClick={() => handleMonthChange('prev')} className="p-2 rounded-lg"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = '')}
-              ><ChevronLeft className="w-4 h-4" /></button>
-              <div className="text-center min-w-[140px]">
-                <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <div className="flex flex-wrap items-center gap-3 rounded-tile bg-sunken p-3">
+              <Button variant="secondary" size="icon" onClick={() => handleMonthChange('prev')}
+                aria-label={t('notes.prevMonth')}
+              ><ChevronLeft aria-hidden /></Button>
+              <div className="min-w-[140px] text-center">
+                <div className="text-sm font-semibold text-fg">
                   {selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
                 </div>
               </div>
-              <button onClick={() => handleMonthChange('next')} className="p-2 rounded-lg"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = '')}
-              ><ChevronRight className="w-4 h-4" /></button>
-              <button
+              <Button variant="secondary" size="icon" onClick={() => handleMonthChange('next')}
+                aria-label={t('notes.nextMonth')}
+              ><ChevronRight aria-hidden /></Button>
+              <Button variant="secondary"
                 onClick={() => { setSelectedMonth(new Date()); setSelectedWeek(getWeekNumberForDate(new Date())); }}
-                className="px-3 py-2 rounded-lg text-sm"
-                style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              >{t('common.today')}</button>
+              >{t('common.today')}</Button>
               {filterMode === 'week' && (
-                <select value={selectedWeek} onChange={e => setSelectedWeek(Number(e.target.value))} style={inputStyle}>
+                <NativeSelect value={selectedWeek} onChange={e => setSelectedWeek(Number(e.target.value))}
+                  aria-label={t('common.week')} containerClassName="w-auto min-w-40">
                   {weeks.map(w => <option key={w.weekNumber} value={w.weekNumber}>{w.label}</option>)}
-                </select>
+                </NativeSelect>
               )}
             </div>
           )}
@@ -1004,50 +991,40 @@ export function NotesPage() {
 
       {/* Notes list */}
       {loading ? (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('werkstatt.loading')}</p>
+        <div className="py-12 text-center">
+          <div className="inline-block size-8 rounded-full border-b-2 border-brand motion-safe:animate-spin"></div>
+          <p className="mt-2 text-fg-subtle">{t('werkstatt.loading')}</p>
         </div>
       ) : filteredNotes.length === 0 ? (
-        <div className="text-center py-12 rounded-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <StickyNote className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-          <p style={{ color: 'var(--text-tertiary)' }}>
-            {searchQuery || selectedDriver ? t('notes.noneFound') : t('notes.noneYet')}
-          </p>
+        <div className="glass-card rounded-surface">
+          <EmptyState
+            icon={StickyNote}
+            title={searchQuery || selectedDriver ? t('notes.noneFound') : t('notes.noneYet')}
+          />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredNotes.map(note => (
-            <div key={note.id} className="rounded-lg p-4 hover:shadow-md transition-shadow"
-              style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                    <h3 className="font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+            <div key={note.id} className="glass-card min-w-0 rounded-surface p-4 motion-safe:transition-shadow hover:shadow-elev-md">
+              <div className="mb-3 flex items-start justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="mb-0.5 flex flex-wrap items-center gap-2">
+                    <h3 className="truncate font-semibold text-fg">
                       {note.drivers?.name}
                     </h3>
                     {note.note_type && note.note_type !== 'general' && (
-                      <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'var(--bg-muted)', color: 'var(--text-tertiary)' }}>
+                      <Badge>
                         {(k => k ? t(k) : note.note_type)(NOTE_TYPES.find(nt => nt.value === note.note_type)?.label)}
-                      </span>
+                      </Badge>
                     )}
-                    {/*
-                      The plate, when the note names a car. The classes carry the
-                      legacy variables instead of an inline style object because
-                      this screen is not converted yet and the style ratchet is at
-                      its baseline (PlatformTeamPage does the same).
-                      Shown from the note's own joined row, so a plate is never
-                      guessed: no car, or a plate that did not load, shows nothing.
-                    */}
                     {note.submitted_by_name && (
-                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--bg-muted)] text-[var(--text-secondary)]">
-                        {t('notes.fromApp')}
-                      </span>
+                      <Badge>{t('notes.fromApp')}</Badge>
                     )}
+                    {/* The plate, when the note names a car. Shown from the note's own
+                        joined row, so a plate is never guessed: no car, or a plate that
+                        did not load, shows nothing. */}
                     {note.cars?.kennzeichen && (
-                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--bg-muted)] text-[var(--text-secondary)]">
-                        {note.cars.kennzeichen}
-                      </span>
+                      <Badge className="tabular-nums">{note.cars.kennzeichen}</Badge>
                     )}
                     {/* A reviewed or rejected note says so. An unreviewed incident says so too:
                         "a Blitzer somebody typed" must not read as one a document backs. */}
@@ -1065,40 +1042,36 @@ export function NotesPage() {
                       <Badge tone="brand"><Paperclip aria-hidden />{t('notes.prov.chip.evidence')}</Badge>
                     )}
                   </div>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note, t)}</p>
+                  <p className="text-xs tabular-nums text-fg-subtle">{noteDateLabel(note, t)}</p>
                   {note.occurred_at && (
-                    <p className="text-xs text-[var(--text-tertiary)]">
+                    <p className="text-xs tabular-nums text-fg-subtle">
                       {t('notes.prov.occurredLine', { date: momentLabel(note.occurred_at) })}
                     </p>
                   )}
                   {note.note_planning_behavior && note.note_planning_behavior !== 'neutral' && (
-                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                      style={note.note_planning_behavior === 'exclude_from_plan'
-                        ? { background: 'var(--danger-subtle)', color: 'var(--danger)' }
-                        : { background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
+                    <Badge className="mt-1"
+                      tone={note.note_planning_behavior === 'exclude_from_plan' ? 'critical' : 'caution'}>
                       {t(PLANNING_BEHAVIOR_LABELS[note.note_planning_behavior])}
-                    </span>
+                    </Badge>
                   )}
                 </div>
-                {mayEdit && <div className="flex gap-2 ml-2 flex-shrink-0">
-                  <button onClick={() => handleEdit(note)} className="p-1 rounded inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--accent-text)' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => handleDelete(note.id)} className="p-1 rounded inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" style={{ color: 'var(--danger)' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {mayEdit && <div className="ml-2 flex shrink-0 gap-2">
+                  <Button variant="ghost" size="icon-sm" onClick={() => handleEdit(note)}
+                    aria-label={t('common.edit')} className="text-brand-text hover:bg-brand-soft hover:text-brand-text">
+                    <Edit2 aria-hidden />
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" onClick={() => handleDelete(note.id)}
+                    aria-label={t('common.delete')} className="text-critical hover:bg-critical-soft hover:text-critical">
+                    <Trash2 aria-hidden />
+                  </Button>
                 </div>}
               </div>
               {note.note_text ? (
-                <p className="text-sm whitespace-pre-wrap break-words" style={{ color: 'var(--text-secondary)' }}>
+                <p className="whitespace-pre-wrap break-words text-sm text-fg-muted">
                   {note.note_text}
                 </p>
               ) : (
-                <p className="text-sm italic" style={{ color: 'var(--text-tertiary)' }}>
+                <p className="text-sm italic text-fg-subtle">
                   {(k => k ? t(k) : t('notes.one'))(NOTE_TYPES.find(nt => nt.value === note.note_type)?.label)}
                 </p>
               )}
@@ -1108,242 +1081,200 @@ export function NotesPage() {
       )}
 
       {/* Modal */}
+      <Dialog open={showModal} onOpenChange={open => { if (!open) handleCloseModal(); }}>
+        <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>{editingNote ? t('notes.edit') : t('notes.new')}</DialogTitle>
+          </DialogHeader>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-            style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-lg)' }}>
-            <div className="flex items-center justify-between p-6" style={{ borderBottom: '1px solid var(--border)' }}>
-              <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-                {editingNote ? t('notes.edit') : t('notes.new')}
-              </h2>
-              <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={handleCloseModal} style={{ color: 'var(--text-tertiary)' }}
-                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}>
-                <X className="w-6 h-6" />
-              </button>
+          <form onSubmit={handleSubmit} className="grid gap-4">
+            {/* Driver */}
+            <Field label={t('notes.driverRequired')}>
+              <NativeSelect value={formData.driver_id}
+                onChange={e => setFormData(p => ({ ...p, driver_id: e.target.value }))}
+                required>
+                <option value="">{t('notes.pickDriver')}</option>
+                {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </NativeSelect>
+            </Field>
+
+            {/* Note type + planning behavior */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label={t('notes.noteTypeLabel')}>
+                <NativeSelect value={formData.note_type} onChange={e => handleNoteTypeChange(e.target.value)}>
+                  {NOTE_TYPES.map(nt => <option key={nt.value} value={nt.value}>{t(nt.label)}</option>)}
+                </NativeSelect>
+              </Field>
+              <Field label={t('notes.planningBehaviour')}>
+                <NativeSelect value={formData.note_planning_behavior}
+                  onChange={e => setFormData(p => ({ ...p, note_planning_behavior: e.target.value as NotePlanningBehavior }))}
+                  disabled={behaviorLocked}
+                  aria-describedby={behaviorLocked ? 'note-behavior-hint' : undefined}>
+                  <option value="neutral">{t('notes.effect.none')}</option>
+                  <option value="exclude_from_plan">{t('notes.effect.exclude')}</option>
+                  <option value="must_include_in_plan">{t('notes.effect.require')}</option>
+                </NativeSelect>
+              </Field>
+              {/* Its own full-width row: inside the second column the sentence
+                  would wrap into a tall strip on a phone. */}
+              {behaviorLocked && (
+                <p id="note-behavior-hint" className="text-xs text-fg-subtle sm:col-span-2">
+                  {t('notes.behaviorFixed')}
+                </p>
+              )}
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {/* Driver */}
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  {t('notes.driverRequired')}
-                </label>
-                <select value={formData.driver_id}
-                  onChange={e => setFormData(p => ({ ...p, driver_id: e.target.value }))}
-                  className="w-full" style={inputStyle} required>
-                  <option value="">{t('notes.pickDriver')}</option>
-                  {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </div>
+            {/*
+              Car: optional. It records which vehicle an incident happened on,
+              so a ticket addressed to a plate can be tied back to the
+              Fahrtenbuch. A picker over the company's own cars, never free
+              text, so the stored value is a key and not two spellings of one
+              plate. A NativeSelect, never the Radix `Select`, whose
+              `onValueChange` would rewrite this handler.
+            */}
+            <Field id="note-car" label={<>
+              {t('ta.col.vehicle')}{' '}
+              {vehicleRequired
+                ? <span aria-hidden className="text-critical">*</span>
+                : <span className="font-normal text-fg-subtle">{t('notes.descriptionOptional')}</span>}
+            </>}>
+              <NativeSelect
+                id="note-car"
+                required={vehicleRequired}
+                value={formData.car_id}
+                onChange={e => setFormData(p => ({ ...p, car_id: e.target.value }))}
+              >
+                <option value="">{t('imp.optionNoCar')}</option>
+                {carOptions.map(option => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </NativeSelect>
+            </Field>
 
-              {/* Note type + planning behavior */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    {t('notes.noteTypeLabel')}
-                  </label>
-                  <select value={formData.note_type} onChange={e => handleNoteTypeChange(e.target.value)}
-                    className="w-full" style={inputStyle}>
-                    {NOTE_TYPES.map(nt => <option key={nt.value} value={nt.value}>{t(nt.label)}</option>)}
-                  </select>
+            {/* Date range toggle */}
+            <div className="grid gap-3">
+              <label className={checkboxLabelClass}>
+                <input type="checkbox" checked={formData.use_date_range}
+                  onChange={e => setFormData(p => ({ ...p, use_date_range: e.target.checked }))}
+                  className={checkboxClass} />
+                {t('notes.dateRange')}
+              </label>
+
+              {formData.use_date_range ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label={t('notes.startDateReq')}>
+                    <Input type="date" value={formData.start_date}
+                      onChange={e => setFormData(p => ({ ...p, start_date: e.target.value }))}
+                      required />
+                  </Field>
+                  <Field label={t('notes.endDateReq')}>
+                    <Input type="date" value={formData.end_date}
+                      onChange={e => setFormData(p => ({ ...p, end_date: e.target.value }))}
+                      min={formData.start_date}
+                      required />
+                  </Field>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('notes.planningBehaviour')}</label>
-                  <select value={formData.note_planning_behavior}
-                    onChange={e => setFormData(p => ({ ...p, note_planning_behavior: e.target.value as NotePlanningBehavior }))}
-                    disabled={behaviorLocked}
-                    aria-describedby={behaviorLocked ? 'note-behavior-hint' : undefined}
-                    className="w-full disabled:cursor-not-allowed disabled:opacity-60" style={inputStyle}>
-                    <option value="neutral">{t('notes.effect.none')}</option>
-                    <option value="exclude_from_plan">{t('notes.effect.exclude')}</option>
-                    <option value="must_include_in_plan">{t('notes.effect.require')}</option>
-                  </select>
-                </div>
-                {/* Its own full-width row: inside the second column the sentence
-                    would wrap into a tall strip on a phone. */}
-                {behaviorLocked && (
-                  <p id="note-behavior-hint" className="col-span-2 text-xs text-[var(--text-tertiary)]">
-                    {t('notes.behaviorFixed')}
-                  </p>
-                )}
-              </div>
-
-              {/*
-                Car — optional. It records which vehicle an incident happened on,
-                so a ticket addressed to a plate can be tied back to the
-                Fahrtenbuch. A picker over the company's own cars, never free
-                text, so the stored value is a key and not two spellings of one
-                plate. The plain `<select>` matches the four already on this
-                screen — it is not converted to the design system, and its inline
-                styles sit exactly at the ratchet's baseline, so the legacy look is
-                carried in classes here. Never the Radix `Select`, whose
-                `onValueChange` would rewrite this handler.
-              */}
-              <div>
-                <label htmlFor="note-car" className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
-                  {t('ta.col.vehicle')}{' '}
-                  {vehicleRequired
-                    ? <span aria-hidden className="text-[var(--danger)]">*</span>
-                    : <span className="font-normal text-[var(--text-tertiary)]">{t('notes.descriptionOptional')}</span>}
-                </label>
-                <select
-                  id="note-car"
-                  required={vehicleRequired}
-                  value={formData.car_id}
-                  onChange={e => setFormData(p => ({ ...p, car_id: e.target.value }))}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-                >
-                  <option value="">{t('imp.optionNoCar')}</option>
-                  {carOptions.map(option => (
-                    <option key={option.id} value={option.id}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Date range toggle */}
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                  <input type="checkbox" checked={formData.use_date_range}
-                    onChange={e => setFormData(p => ({ ...p, use_date_range: e.target.checked }))}
-                    className="w-4 h-4" />
-                  {t('notes.dateRange')}
-                </label>
-
-                {formData.use_date_range ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.startDateReq')}</label>
-                      <input type="date" value={formData.start_date}
-                        onChange={e => setFormData(p => ({ ...p, start_date: e.target.value }))}
-                        className="w-full" style={inputStyle} required />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.endDateReq')}</label>
-                      <input type="date" value={formData.end_date}
-                        onChange={e => setFormData(p => ({ ...p, end_date: e.target.value }))}
-                        min={formData.start_date}
-                        className="w-full" style={inputStyle} required />
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.dateReq')}</label>
-                    <input type="date" value={formData.start_date}
-                      onChange={e => setFormData(p => ({ ...p, start_date: e.target.value, end_date: e.target.value, note_date: e.target.value + 'T' + (formData.note_date.split('T')[1] || '00:00') }))}
-                      className="w-full" style={inputStyle} required />
-                  </div>
-                )}
-              </div>
-
-              {/* Full day + time (only for single-day or must_include) */}
-              {!formData.use_date_range && (
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <input type="checkbox" checked={formData.is_full_day}
-                      onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked, start_time: '', end_time: '' }))}
-                      className="w-4 h-4" />
-                    {t('notes.fullDay')}
-                  </label>
-                  {!formData.is_full_day && (
-                    <div className="flex items-center gap-2 flex-1">
-                      <div className="flex-1">
-                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.from')}</label>
-                        <input type="time" value={formData.start_time}
-                          onChange={e => setFormData(p => ({ ...p, start_time: e.target.value }))}
-                          style={inputStyle} className="w-full" />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.to')}</label>
-                        <input type="time" value={formData.end_time}
-                          onChange={e => setFormData(p => ({ ...p, end_time: e.target.value }))}
-                          style={inputStyle} className="w-full" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* For date-range exclude notes: full day applies to each day in range */}
-              {formData.use_date_range && formData.note_planning_behavior === 'exclude_from_plan' && (
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 cursor-pointer text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <input type="checkbox" checked={formData.is_full_day}
-                      onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked }))}
-                      className="w-4 h-4" />
-                    {t('notes.fullDayEachDay')}
-                  </label>
-                </div>
-              )}
-
-              {/* Description — optional */}
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  {t('common.description')} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('notes.descriptionOptional')}</span>
-                </label>
-                <textarea
-                  value={formData.note_text}
-                  onChange={e => setFormData(p => ({ ...p, note_text: e.target.value }))}
-                  rows={4}
-                  className="w-full resize-none"
-                  style={inputStyle}
-                  placeholder={t('notes.descPlaceholder')}
-                />
-              </div>
-
-              {eventDetailsApply(formData.note_type) && (
-                <NoteProvenanceFields
-                  values={formData}
-                  onChange={patch => setFormData(p => ({ ...p, ...patch }))}
-                />
-              )}
-
-              {editingNote ? (
-                <NoteReviewPanel
-                  provenance={editingNote}
-                  authorName={editingNote.submitted_by_name ?? nameOf(editingNote.created_by)}
-                  nameOf={nameOf}
-                  mayEdit={mayEdit}
-                  evidenceOffered={eventDetailsApply(formData.note_type)}
-                  busy={provBusy}
-                  edited={initialReviewed !== null && reviewedFieldsChanged(initialReviewed, reviewedOf(formData))}
-                  onDecide={handleDecide}
-                  onAttach={file => void handleAttach(file)}
-                  onOpenEvidence={() => void handleOpenEvidence()}
-                  onRemoveEvidence={handleRemoveEvidence}
-                />
               ) : (
-                <p className="text-xs text-[var(--text-tertiary)]">{t('notes.prov.saveFirst')}</p>
+                <Field label={t('notes.dateReq')}>
+                  <Input type="date" value={formData.start_date}
+                    onChange={e => setFormData(p => ({ ...p, start_date: e.target.value, end_date: e.target.value, note_date: e.target.value + 'T' + (formData.note_date.split('T')[1] || '00:00') }))}
+                    required />
+                </Field>
               )}
+            </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={handleCloseModal}
-                  className="flex-1 px-4 py-2 rounded-lg transition-colors"
-                  style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
-                <button type="submit"
-                  className="flex-1 px-4 py-2 rounded-lg transition-colors"
-                  style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}>
-                  {editingNote ? t('common.update') : t('common.add')}
-                </button>
+            {/* Full day + time (only for single-day or must_include) */}
+            {!formData.use_date_range && (
+              <div className="flex flex-wrap items-end gap-4">
+                <label className={cn(checkboxLabelClass, 'min-h-10')}>
+                  <input type="checkbox" checked={formData.is_full_day}
+                    onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked, start_time: '', end_time: '' }))}
+                    className={checkboxClass} />
+                  {t('notes.fullDay')}
+                </label>
+                {!formData.is_full_day && (
+                  <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Field label={t('notes.from')}>
+                      <Input type="time" value={formData.start_time}
+                        onChange={e => setFormData(p => ({ ...p, start_time: e.target.value }))} />
+                    </Field>
+                    <Field label={t('notes.to')}>
+                      <Input type="time" value={formData.end_time}
+                        onChange={e => setFormData(p => ({ ...p, end_time: e.target.value }))} />
+                    </Field>
+                  </div>
+                )}
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-      <ConfirmationModal
-        isOpen={deleteConfirm.open}
+            )}
+
+            {/* For date-range exclude notes: full day applies to each day in range */}
+            {formData.use_date_range && formData.note_planning_behavior === 'exclude_from_plan' && (
+              <div className="flex items-center gap-2">
+                <label className={checkboxLabelClass}>
+                  <input type="checkbox" checked={formData.is_full_day}
+                    onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked }))}
+                    className={checkboxClass} />
+                  {t('notes.fullDayEachDay')}
+                </label>
+              </div>
+            )}
+
+            {/* Description: optional */}
+            <Field id="note-description" label={<>
+              {t('common.description')} <span className="font-normal text-fg-subtle">{t('notes.descriptionOptional')}</span>
+            </>}>
+              <textarea
+                id="note-description"
+                value={formData.note_text}
+                onChange={e => setFormData(p => ({ ...p, note_text: e.target.value }))}
+                rows={4}
+                className={textareaClass}
+                placeholder={t('notes.descPlaceholder')}
+              />
+            </Field>
+
+            {eventDetailsApply(formData.note_type) && (
+              <NoteProvenanceFields
+                values={formData}
+                onChange={patch => setFormData(p => ({ ...p, ...patch }))}
+              />
+            )}
+
+            {editingNote ? (
+              <NoteReviewPanel
+                provenance={editingNote}
+                authorName={editingNote.submitted_by_name ?? nameOf(editingNote.created_by)}
+                nameOf={nameOf}
+                mayEdit={mayEdit}
+                evidenceOffered={eventDetailsApply(formData.note_type)}
+                busy={provBusy}
+                edited={initialReviewed !== null && reviewedFieldsChanged(initialReviewed, reviewedOf(formData))}
+                onDecide={handleDecide}
+                onAttach={file => void handleAttach(file)}
+                onOpenEvidence={() => void handleOpenEvidence()}
+                onRemoveEvidence={handleRemoveEvidence}
+              />
+            ) : (
+              <p className="text-xs text-fg-subtle">{t('notes.prov.saveFirst')}</p>
+            )}
+
+            <div className="flex flex-col-reverse gap-2 border-t border-line pt-3.5 sm:flex-row sm:justify-end">
+              <Button type="button" variant="secondary" onClick={handleCloseModal}>{t('common.cancel')}</Button>
+              <Button type="submit">
+                {editingNote ? t('common.update') : t('common.add')}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={deleteConfirm.open}
         onClose={() => setDeleteConfirm({ open: false, noteId: '' })}
         onConfirm={confirmDeleteNote}
         title={t('notes.deleteTitle')}
-        message={t('notes.deleteConfirm')}
-        type="confirm"
-        confirmText={t('common.delete')}
-        cancelText={t('common.cancel')}
+        description={t('notes.deleteConfirm')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
       />
     </div>
   );

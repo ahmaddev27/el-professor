@@ -7418,4 +7418,8 @@ export const en: PartialDictionary = {
   'settings.uberPull.runs.unlinkedReason.rejected': 'This Uber driver\'s link was rejected earlier, so they are not added automatically. Assign them on the Drivers page, then catch up the day on the Earnings page.',
   'settings.uberPull.runs.unlinkedReason.run_not_open': 'The day was already closed when the new driver was to be added. Catch up the day on the Earnings page.',
   'settings.uberPull.runs.unlinkedReason.too_many': 'More than five new Uber drivers in one day are not added automatically at night. Add them on the Drivers page with “Update drivers from Reidey”, then catch up the day on the Earnings page.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'notes.nextMonth': 'Next month',
+  'notes.prevMonth': 'Previous month',
 };
