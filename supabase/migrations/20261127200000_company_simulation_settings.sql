@@ -81,8 +81,8 @@ CREATE TABLE IF NOT EXISTS public.company_simulation_settings (
     CHECK (seed IS NULL OR seed >= 0),
   CONSTRAINT company_simulation_settings_share_shape CHECK (
        (share_mode IS NULL     AND share_percent IS NULL     AND share_scope IS NULL     AND seed IS NULL)
-    OR (share_mode = 'fixed'   AND share_percent IS NOT NULL AND share_scope IS NULL     AND seed IS NULL)
-    OR (share_mode = 'random'  AND share_percent IS NULL     AND share_scope IS NOT NULL AND seed IS NOT NULL)
+    OR (share_mode IS NOT DISTINCT FROM 'fixed'  AND share_percent IS NOT NULL AND share_scope IS NULL     AND seed IS NULL)
+    OR (share_mode IS NOT DISTINCT FROM 'random' AND share_percent IS NULL     AND share_scope IS NOT NULL AND seed IS NOT NULL)
   )
 );
 
@@ -284,6 +284,22 @@ BEGIN
                     AND k.conname = 'company_simulation_settings_one_per_company') THEN
     RAISE EXCEPTION 'simulation settings self-check 6: the one-row-per-company constraint is gone';
   END IF;
+  -- 6b. The shape refuses a percent, a scope or a seed with no mode. A CHECK passes on NULL, and
+  --     `share_mode = 'fixed'` is NULL when the mode is, so the first version of this constraint let
+  --     such a row in (the RLS kit caught it). Asked of the real constraint, not of its text: the
+  --     company id names no company, and a CHECK is evaluated before the foreign key, so 23514 means
+  --     refused by the shape and 23503 means the shape let the row through.
+  FOREACH v_name IN ARRAY ARRAY['share_percent = 31', 'share_scope = ''month''', 'seed = 7'] LOOP
+    BEGIN
+      EXECUTE format('INSERT INTO public.%I (company_id, %s) VALUES (gen_random_uuid(), %s)',
+                     c_tbl, split_part(v_name, ' = ', 1), split_part(v_name, ' = ', 2));
+      RAISE EXCEPTION 'simulation settings self-check 6b: a row with % and no mode was stored', v_name;
+    EXCEPTION
+      WHEN check_violation THEN NULL;
+      WHEN foreign_key_violation THEN
+        RAISE EXCEPTION 'simulation settings self-check 6b: the shape lets % through with no mode', v_name;
+    END;
+  END LOOP;
   IF (SELECT a.attnotnull IS NOT TRUE OR pg_get_expr(d.adbin, d.adrelid) IS DISTINCT FROM 'false'
         FROM pg_attribute a
         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum

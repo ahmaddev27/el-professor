@@ -353,8 +353,11 @@ BEGIN
     _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_mode, share_percent) VALUES (%L, ''booked'', 31)', co_a)) LIKE 'ERR 23514%'
     AND _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_mode, share_scope, seed) VALUES (%L, ''random'', ''week'', 7)', co_a)) LIKE 'ERR 23514%'
     AND _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_mode, share_scope, seed) VALUES (%L, ''random'', ''month'', -1)', co_a)) LIKE 'ERR 23514%');
-  PERFORM _ss_ok('values: a percent with no mode is refused',
-    _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_percent) VALUES (%L, 31)', co_a)) LIKE 'ERR 23514%');
+  PERFORM _ss_ok('values: a percent, a scope or a seed with no mode is refused',
+    _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_percent) VALUES (%L, 31)', co_a)) LIKE 'ERR 23514%'
+    AND _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_scope) VALUES (%L, ''month'')', co_a)) LIKE 'ERR 23514%'
+    AND _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, seed) VALUES (%L, 7)', co_a)) LIKE 'ERR 23514%'
+    AND _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, share_scope, seed) VALUES (%L, ''day'', 7)', co_a)) LIKE 'ERR 23514%');
   PERFORM _ss_ok('values: return_to_base is never NULL',
     _ss_try(u, v_clear || format('INSERT INTO company_simulation_settings (company_id, return_to_base) VALUES (%L, NULL)', co_a)) LIKE 'ERR 23502%');
   PERFORM _ss_ok('values: a second row for the same company is refused',
