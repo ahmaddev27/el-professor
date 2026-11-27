@@ -155,7 +155,7 @@ Round 8 writes nothing to any of these.
 - **Mode:** either fixed in the company setting, or random. Random means seeded, with a scope of month or day, on its own stream as today.
 - **Base:** imported Uber `umsatz` per driver per operating day. `aktionen` and tips are shown beside it, not in it, until D1.
 - **Rounding:** half away from zero per day; the month total is the sum of the days.
-- **Meaning:** `CONFIGURATION_REQUIRED`. Nothing is booked, and no "total according to the configured formula" is produced while the meaning is unconfigured.
+- **Meaning:** `CONFIGURATION_REQUIRED`. Nothing is booked, and no "total according to the configured formula" is produced while the meaning is unconfigured. **Superseded by D1's answer (27.11.2026, §4):** the company share.
 - **A negative day** is computed with its sign and flagged.
 - The product table and `PRODUCT_RATE_RANGE` are not touched.
 
@@ -319,7 +319,7 @@ Sending our coordinates removes the geocoder difference from his comparison.
 
 | # | Question | Default until answered |
 |---|---|---|
-| D1 | **The share:** what it means, who receives it, its base (`umsatz` only, or with `aktionen`), negative days, cancellation fees, and whether Uber's fare is gross or net. | `CONFIGURATION_REQUIRED`. Computed on `umsatz` and shown, never booked. |
+| D1 | **The share:** what it means, who receives it, its base (`umsatz` only, or with `aktionen`), negative days, cancellation fees, and whether Uber's fare is gross or net. | `CONFIGURATION_REQUIRED`. Computed on `umsatz` and shown, never booked. **Answered 27.11.2026** (below the table). |
 | D2 | **Breaks.** Proposal: `drivers.break_after_minutes` and `drivers.break_minutes`, with NULL meaning the statute. | No field. Shifts stay at 6 h or less, so §4 ArbZG needs no break; reported as "no break rule per driver". |
 | D3 | **Leave and sickness.** The days already come from driver notes. What is missing is an annual entitlement, and whether an absence day counts against the hours range. Proposal: `drivers.annual_leave_days` plus a company rule. | Absence days reduce the available days. The range is not reduced. A shortfall is reported. |
 | D4 | **Pay model.** Only employee and company_owner exist. Proposal: `drivers.pay_model` (commission, hourly, fixed, minijob). | Commission and hours × rate side by side. The difference is not resolved. |
@@ -329,6 +329,15 @@ Sending our coordinates removes the geocoder difference from his comparison.
 | D8 | **Return to base.** | Off. |
 | D9 | **Top up DEMO** with invented daily Uber rows and a base (a write to staging, test company only). | Wait for his yes. |
 | D10 | **The verdict.** | Keep the export verdict separate from a new financial status, so an unconfigured share does not block a valid Fahrtenbuch. The other option: the whole month reads `VERIFICATION_INCOMPLETE` until D1. |
+
+### D1, answered (27.11.2026)
+
+The owner asked for four things. He left the choices to the developer and accepted these.
+
+1. **A day's rides should equal the company's daily Uber earnings.** No fare is fitted to that figure, because §4 and §5 forbid forcing a reconciliation. Sheet 4 shows the gap instead, `Differenz Umsatz - Fahrpreise`: the imported `umsatz` minus the simulated and real fares of the driver-day.
+2. **Premiums in the hours.** None, until he sends each driver's contract premium rates.
+3. **The share** is the company share (`Unternehmensanteil`). It is computed on the imported `umsatz`, shown, never in a fare and never booked. `share_meaning_unconfigured` is gone, so a month reads `RECONCILED` when every row of sheet 4 does.
+4. **The wait between two rides** is at most 30 minutes in a calendar month. The weeks mode is untouched.
 
 ## 5. Unavailable data (§13 item 13)
 
