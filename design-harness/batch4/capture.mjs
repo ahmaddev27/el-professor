@@ -142,6 +142,7 @@ const SHOTS = [
   { name: 'login-hinweis-google', query: { screen: 'login', notice: 'platform-google' }, variants: STATE_VARIANTS },
   { name: 'login-google', query: { screen: 'login', google: 'on' }, variants: STATE_VARIANTS },
   { name: 'login-en', query: { screen: 'login', lang: 'en' }, variants: ONE },
+  { name: 'login-ar', query: { screen: 'login', lang: 'ar' }, variants: ONE },
   // Password reset: the address, the code, a wrong code, then the new password.
   { name: 'passwort-vergessen', query: { screen: 'forgot' } },
   { name: 'passwort-vergessen-code', query: { screen: 'forgot' }, act: requestCode },

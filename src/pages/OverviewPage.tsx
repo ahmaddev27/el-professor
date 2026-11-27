@@ -770,12 +770,12 @@ const OverviewPage: React.FC = () => {
             ))}
             <div
               className={`mt-1 flex items-center justify-between gap-3 rounded-tile p-4 ${
-                currentMetrics.profit >= 0 ? 'bg-brand text-brand-fg' : 'bg-critical-solid text-critical-fg'
+                currentMetrics.profit >= 0 ? 'bg-positive-solid text-positive-fg' : 'bg-critical-solid text-critical-fg'
               }`}
             >
               <div className="flex min-w-0 items-center gap-2">
                 <div className={`flex size-7 shrink-0 items-center justify-center rounded-tight ${
-                  currentMetrics.profit >= 0 ? 'bg-brand-fg/20' : 'bg-critical-fg/20'
+                  currentMetrics.profit >= 0 ? 'bg-positive-fg/20' : 'bg-critical-fg/20'
                 }`}>
                   <DollarSign size={14} aria-hidden />
                 </div>

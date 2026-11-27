@@ -288,7 +288,7 @@ export default function NotificationsPage() {
           <div className="flex items-center gap-3">
             <div className={cn(
               'flex size-10 flex-shrink-0 items-center justify-center rounded-tile',
-              globalEnabled ? 'bg-brand-soft text-brand-text' : 'bg-sunken text-fg-subtle',
+              globalEnabled ? 'bg-positive-soft text-positive' : 'bg-sunken text-fg-subtle',
             )}>
               {globalEnabled
                 ? <Bell aria-hidden className="size-5" />
