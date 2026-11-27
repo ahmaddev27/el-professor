@@ -51,9 +51,9 @@ const SupportReasonModal: React.FC<Props> = ({ companyName, busy, onCancel, onCo
   // no `caution` fill for a white label to read on; the tone is carried by the
   // icon, the title and the words, as it is everywhere else.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgb(5_8_16/0.55)] p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center glass-scrim motion-safe:animate-ui-fade-in p-4">
       <div
-        className="w-full max-w-lg space-y-4 rounded-surface border border-line bg-overlay p-6 font-ui shadow-overlay"
+        className="w-full max-w-lg space-y-4 glass-strong motion-safe:animate-ui-pop-in rounded-pane p-6 font-ui"
         role="dialog"
         aria-modal="true"
       >

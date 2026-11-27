@@ -36,16 +36,19 @@ const ownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const renderRoot = resolve(arg('root') ?? ownRoot);
 const e2eRequire = createRequire(join(ownRoot, 'e2e', 'package.json'));
 const set = arg('set');
-const only = arg('only');
+// Comma-separated name parts, as in design-harness/capture.mjs.
+const only = arg('only')?.split(',').filter(Boolean);
 if (set !== 'before' && set !== 'after') {
   console.error('usage: node design-harness/batch4/capture.mjs --set before|after [--only <name part>] [--root <dir>]');
   process.exit(2);
 }
 
 const FIXED_NOW = new Date('2026-09-14T10:00:00+02:00');
-const WIDTHS = [375, 768, 1280];
+/** `--widths 1440,375` replaces the default three and every shot's own list. */
+const WIDTHS = arg('widths')?.split(',').map(Number).filter(Boolean) ?? [375, 768, 1280];
 const THEMES = ['light', 'dark'];
-const outDir = join(ownRoot, 'Docs', 'design', 'phase5', 'batch4', set);
+/** `--out <dir>` (relative to this checkout) replaces Docs/design/phase5. */
+const outDir = join(ownRoot, arg('out') ?? join('Docs', 'design', 'phase5'), 'batch4', set);
 
 const STATE_VARIANTS = [
   { width: 1280, theme: 'light' },
@@ -227,8 +230,12 @@ const server = await createServer({
 await server.listen();
 const origin = new URL(server.resolvedUrls.local[0]).origin;
 
-const { chromium } = e2eRequire('@playwright/test');
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--lang=de-DE'] });
+// HARNESS_PLAYWRIGHT and an empty HARNESS_CHANNEL: see design-harness/capture.mjs.
+const { chromium } = process.env.HARNESS_PLAYWRIGHT
+  ? createRequire(import.meta.url)(process.env.HARNESS_PLAYWRIGHT)
+  : e2eRequire('@playwright/test');
+const channel = process.env.HARNESS_CHANNEL ?? 'chrome';
+const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: true, args: ['--lang=de-DE'] });
 const encoder = await browser.newPage();
 
 mkdirSync(outDir, { recursive: true });
@@ -238,9 +245,9 @@ const skipped = [];
 
 try {
   for (const shot of SHOTS) {
-    for (const { width, theme } of shot.variants ?? allVariants) {
+    for (const { width, theme } of (arg('widths') ? allVariants : shot.variants ?? allVariants)) {
       const file = `${width}-${theme}-${shot.name}.webp`;
-      if (only && !file.includes(only)) continue;
+      if (only && !only.some(part => file.includes(part))) continue;
 
       const phone = width < 768;
       const context = await browser.newContext({

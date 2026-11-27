@@ -23,7 +23,7 @@ export function Tooltip({ content, children, side = 'top', delayDuration = 300 }
             side={side}
             sideOffset={6}
             collisionPadding={8}
-            className="z-[60] max-w-xs rounded-control bg-fg px-2.5 py-1.5 font-ui text-xs font-medium text-canvas shadow-overlay motion-safe:animate-ui-fade-in"
+            className="z-[60] max-w-xs glass-toast rounded-tight px-2 py-1 font-ui text-xs font-medium motion-safe:animate-ui-fade-in"
           >
             {content}
           </TooltipPrimitive.Content>

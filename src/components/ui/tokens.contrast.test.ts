@@ -8,6 +8,14 @@ import { describe, expect, it } from 'vitest';
  * 1.4.11): input borders, the focus outline, chart marks. The pairs are the
  * ones the components actually render, not every combination.
  *
+ * Since the design remake (27.11.2026) most surfaces are TRANSLUCENT glass, so
+ * a token's own value is not what a reader sees. `rendered()` builds what is
+ * actually under a pair — the canvas, the canvas under each ambient glow at its
+ * peak, the content sheet over those, a card over all of them, a dialog over
+ * the scrim over all of those — and a pair must pass on EVERY one of them: the
+ * ratio is the worst case, not an average. A translucent foreground (a line, a
+ * border) is composited onto each before it is measured.
+ *
  * Run with PRINT_CONTRAST=1 to print the full table.
  */
 
@@ -25,12 +33,68 @@ function blockAfter(marker: string): string {
   return css.slice(open + 1, css.indexOf('}', open));
 }
 
-function parseTokens(theme: Theme): Record<string, Rgb> {
-  const tokens: Record<string, Rgb> = {};
-  for (const match of blockAfter(`/* @tokens ${theme} */`).matchAll(/--([a-z-]+):\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*;/g)) {
+/**
+ * A token is RGB channels, and a translucent one has its alpha in a sibling
+ * `--<name>-a` (tailwind.config.js multiplies the two). An opaque token comes
+ * back as three channels, a translucent one as four.
+ */
+function parseTokens(theme: Theme): Record<string, Rgb | Rgba> {
+  const body = blockAfter(`/* @tokens ${theme} */`);
+  const tokens: Record<string, Rgb | Rgba> = {};
+  for (const match of body.matchAll(/--([a-z0-9-]+):\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*;/g)) {
     tokens[match[1]] = [Number(match[2]), Number(match[3]), Number(match[4])];
   }
+  for (const match of body.matchAll(/--([a-z0-9-]+)-a:\s*([\d.]+)\s*;/g)) {
+    const colour = tokens[match[1]];
+    if (!colour) throw new Error(`--${match[1]}-a has no --${match[1]} beside it`);
+    tokens[match[1]] = [colour[0], colour[1], colour[2], Number(match[2])] as Rgba;
+  }
   return tokens;
+}
+
+/** The two stops of a gradient token, written as hex in the same block. */
+function gradientStops(theme: Theme, name: string): Rgb[] {
+  const line = new RegExp(`--${name}:\\s*linear-gradient\\(([^;]+)\\);`).exec(blockAfter(`/* @tokens ${theme} */`));
+  if (!line) throw new Error(`the ${theme} block has no --${name}`);
+  return [...line[1].matchAll(/#([0-9a-fA-F]{6})/g)].map(m => [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)) as Rgb);
+}
+
+/**
+ * Every colour a surface token can render as, worst cases included. Opaque
+ * tokens render as themselves. The layering is the shells' (PLAN.md §2): the
+ * page is the canvas with the glow over it; the sidebar and the content sheet
+ * sit on the page; cards sit on the page (the signed-out screens) or on the
+ * sheet; a dialog sits on the scrim over any of those; an inset fill (sunken)
+ * and a field sit inside a pane; the table header's wash sits on a card.
+ */
+function rendered(tokens: Record<string, Rgb | Rgba>): (name: string) => Rgb[] {
+  const canvas = tokens.canvas as Rgb;
+  const over = (layer: string, under: Rgb[]) => under.map(surface => flatten(tokens[layer], surface));
+  const pages = [canvas, ...['amb-1', 'amb-2', 'amb-3', 'amb-4'].map(glow => flatten(tokens[glow], canvas))];
+  const sheets = over('sheet', pages);
+  const raised = over('raised', [...pages, ...sheets]);
+  const dialogs = over('overlay', over('scrim', [...pages, ...sheets, ...raised]));
+  const stacks: Record<string, Rgb[]> = {
+    canvas: pages,
+    sheet: sheets,
+    raised,
+    overlay: dialogs,
+    sunken: over('sunken', [...sheets, ...raised, ...dialogs]),
+    field: over('field', [...pages, ...sheets, ...raised, ...dialogs]),
+    wash: over('wash', raised),
+    toast: over('toast', [...pages, ...sheets, ...raised]),
+  };
+  return name => {
+    if (stacks[name]) return stacks[name];
+    const colour = tokens[name];
+    if (colour.length === 4) throw new Error(`--${name} is translucent and has no layering in rendered()`);
+    return [colour];
+  };
+}
+
+/** The worst ratio of `fg` over every colour `bg` renders as. */
+function worst(tokens: Record<string, Rgb | Rgba>, fg: string, bg: string): number {
+  return Math.min(...rendered(tokens)(bg).map(surface => contrast(flatten(tokens[fg], surface), surface)));
 }
 
 /**
@@ -77,21 +141,23 @@ function contrast(a: Rgb, b: Rgb): number {
 
 const TEXT = 4.5;
 const NON_TEXT = 3;
-const SURFACES = ['canvas', 'raised', 'overlay', 'sunken', 'field'];
+const SURFACES = ['canvas', 'sheet', 'raised', 'overlay', 'sunken', 'field', 'wash', 'solid'];
 
 const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   ...['fg', 'fg-muted', 'fg-subtle'].flatMap(fg => SURFACES.map(bg => ({ fg, bg, min: TEXT }))),
-  ...['canvas', 'raised', 'overlay', 'brand-soft'].map(bg => ({ fg: 'brand-text', bg, min: TEXT })),
+  ...['canvas', 'sheet', 'raised', 'overlay', 'solid', 'brand-soft'].map(bg => ({ fg: 'brand-text', bg, min: TEXT })),
   { fg: 'brand-fg', bg: 'brand', min: TEXT },
   { fg: 'brand-fg', bg: 'brand-hover', min: TEXT },
-  { fg: 'brand-fg', bg: 'critical-solid', min: TEXT },
+  // Since the remake the dark brand label is dark green, so the destructive
+  // fill carries its own white label token rather than borrowing brand-fg.
+  { fg: 'critical-fg', bg: 'critical-solid', min: TEXT },
   ...['positive', 'caution', 'critical'].flatMap(fg => [
     { fg, bg: 'canvas', min: TEXT },
     { fg, bg: 'raised', min: TEXT },
     { fg, bg: 'overlay', min: TEXT },
     { fg, bg: `${fg}-soft`, min: TEXT },
   ]),
-  ...['canvas', 'raised', 'overlay'].flatMap(bg => [
+  ...['canvas', 'sheet', 'raised', 'overlay', 'field'].flatMap(bg => [
     { fg: 'line-strong', bg, min: NON_TEXT },
     { fg: 'focus', bg, min: NON_TEXT },
     { fg: 'brand', bg, min: NON_TEXT },
@@ -101,7 +167,8 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // and its body in fg-muted, with the odd emphasis in fg; the car form marks a
   // chosen driver's row brand-soft under fg text. So both text tokens sit on
   // every soft fill.
-  ...['brand-soft', 'positive-soft', 'caution-soft', 'critical-soft'].flatMap(bg => [
+  // The remake (27.11.2026) gives the neutral Alert the neutral tone's own soft fill.
+  ...['brand-soft', 'positive-soft', 'caution-soft', 'critical-soft', 'neutral-soft'].flatMap(bg => [
     { fg: 'fg', bg, min: TEXT },
     { fg: 'fg-muted', bg, min: TEXT },
   ]),
@@ -117,6 +184,9 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // Its other two words on sunken — "Alle löschen" / "Plan endgültig löschen"
   // in critical, a reassigned driver in brand-text — are batch 2's pairs above.
   { fg: 'caution', bg: 'sunken', min: TEXT },
+  // The remake (27.11.2026): a table's header row and totals row are the wash,
+  // so a signed amount in the totals row, and the header's fg-subtle, sit on it.
+  ...['positive', 'critical', 'caution', 'brand-text', 'fg-subtle'].map(fg => ({ fg, bg: 'wash', min: TEXT })),
   // Phase 5, batch 1b renders batch 2's three sunken pairs too: the Beleg
   // form's OCR candidates (the chosen value positive, a rejected one critical)
   // and its idle drop zone (brand-text). New here: a field the OCR read with low
@@ -136,6 +206,21 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // the discounts in positive and the countdown in positive, caution or
   // critical as it runs out: batches 2 and 3's three sunken pairs above.
   { fg: 'brand', bg: 'brand-soft', min: NON_TEXT },
+  // The design remake (27.11.2026). The status colours read on the content
+  // sheet as well as on a card; the four tones the remake adds (a badge or a
+  // callout: the tone's text on the tone's soft fill, or on any pane) read like
+  // the first three; the toast is its own dark pane in both themes. The tones'
+  // `-dot` colours are not here on purpose: a dot always sits beside the word it
+  // marks, so it carries no information of its own (SC 1.4.11 exempts it).
+  ...['positive', 'caution', 'critical'].map(fg => ({ fg, bg: 'sheet', min: TEXT })),
+  ...['info', 'violet', 'teal', 'neutral'].flatMap(fg => [
+    { fg, bg: 'canvas', min: TEXT },
+    { fg, bg: 'sheet', min: TEXT },
+    { fg, bg: 'raised', min: TEXT },
+    { fg, bg: 'overlay', min: TEXT },
+    { fg, bg: `${fg}-soft`, min: TEXT },
+  ]),
+  { fg: 'toast-fg', bg: 'toast', min: TEXT },
 ];
 
 /**
@@ -152,33 +237,13 @@ const ON_LEGACY_SURFACE: Array<{ fg: string; min: number }> = [
   { fg: 'brand', min: NON_TEXT },
 ];
 
-/**
- * A Phase-2 foreground on the legacy page background `--bg-base`.
- *
- * This block was written for the company app, whose AppLayout painted
- * `--bg-base` while the screens inside it moved one batch at a time. AppLayout
- * moved with phase 5's last batch and paints `--canvas` now, so these pairs are
- * no longer about the company app — but they are not obsolete, because
- * **AdminLayout still paints `--bg-base`** and the platform screens inside it
- * are built from the design system: the Team roster, the Protokoll, the
- * settings editors and their previews. The same six pairs are still rendered,
- * in the panel rather than in the tenant shell, so the block stays and only its
- * reason changes. It retires when AdminLayout moves.
- *
- * In light the two backgrounds are the same colour (#f4f6fa / #F4F6FA), so this
- * block can only ever diverge from the `canvas` pairs in dark, where
- * `--bg-base` is #0b0f17 against `--canvas` #0A0F1C.
+/*
+ * `ON_LEGACY_PAGE` (Phase-2 foregrounds on the legacy page background
+ * `--bg-base`) was removed with the design remake, 27.11.2026: AdminLayout was
+ * the last frame that painted `--bg-base`, it paints nothing now, and nothing in
+ * `src/` reads that variable. The platform screens' design-system controls sit
+ * on the canvas and the sheet, which the PAIRS below measure over the glow.
  */
-const ON_LEGACY_PAGE: Array<{ fg: string; min: number }> = [
-  { fg: 'fg', min: TEXT },
-  { fg: 'fg-muted', min: TEXT },
-  { fg: 'fg-subtle', min: TEXT },
-  // A destructive action's word: "Deaktivieren" on the Team roster.
-  { fg: 'critical', min: TEXT },
-  // An active control's mark and every control's focus ring.
-  { fg: 'brand', min: NON_TEXT },
-  { fg: 'focus', min: NON_TEXT },
-];
 
 /**
  * Legacy on-a-filled-background pairs.
@@ -306,23 +371,6 @@ describe.each<Theme>(['light', 'dark'])('%s legacy theme tokens', theme => {
   });
 });
 
-describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy page background', theme => {
-  const tokens = parseTokens(theme);
-  const page = parseLegacyTokens(theme)['bg-base'];
-
-  it('finds the legacy page background as an opaque colour', () => {
-    expect(page).toHaveLength(3);
-  });
-
-  it.each(ON_LEGACY_PAGE)('$fg on --bg-base reaches $min:1', ({ fg, min }) => {
-    const ratio = contrast(tokens[fg], page as Rgb);
-    if (process.env.PRINT_CONTRAST) {
-      console.log(`${theme}\t${fg}\tbg-base (legacy)\t${ratio.toFixed(2)}\t${min}`);
-    }
-    expect(ratio).toBeGreaterThanOrEqual(min);
-  });
-});
-
 describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy card background', theme => {
   const tokens = parseTokens(theme);
   const card = parseLegacyTokens(theme)['bg-surface'];
@@ -332,7 +380,7 @@ describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy card ba
   });
 
   it.each(ON_LEGACY_SURFACE)('$fg on --bg-surface reaches $min:1', ({ fg, min }) => {
-    const ratio = contrast(tokens[fg], card as Rgb);
+    const ratio = contrast(flatten(tokens[fg], card as Rgb), card as Rgb);
     if (process.env.PRINT_CONTRAST) {
       console.log(`${theme}\t${fg}\tbg-surface (legacy)\t${ratio.toFixed(2)}\t${min}`);
     }
@@ -373,8 +421,9 @@ describe('fixed colours on the signed-out screens', () => {
     expect(google).toContain(`${prefix}border-[#${border}]`);
     expect(google).toContain(`${prefix}text-[#${label}]`);
     expect(contrast(hex(label), hex(fill))).toBeGreaterThanOrEqual(TEXT);
-    expect(contrast(hex(border), parseTokens(theme).canvas)).toBeGreaterThanOrEqual(NON_TEXT);
-    expect(contrast(hex(border), parseTokens(theme).raised)).toBeGreaterThanOrEqual(NON_TEXT);
+    for (const surface of [...rendered(parseTokens(theme))('canvas'), ...rendered(parseTokens(theme))('raised')]) {
+      expect(contrast(hex(border), surface)).toBeGreaterThanOrEqual(NON_TEXT);
+    }
   });
 });
 
@@ -387,10 +436,24 @@ describe.each<Theme>(['light', 'dark'])('%s theme tokens', theme => {
   });
 
   it.each(PAIRS)('$fg on $bg reaches $min:1', ({ fg, bg, min }) => {
-    const ratio = contrast(tokens[fg], tokens[bg]);
+    const ratio = worst(tokens, fg, bg);
     if (process.env.PRINT_CONTRAST) {
       console.log(`${theme}\t${fg}\t${bg}\t${ratio.toFixed(2)}\t${min}`);
     }
     expect(ratio).toBeGreaterThanOrEqual(min);
+  });
+});
+
+/**
+ * The primary button is a gradient since the remake, so its label has to read
+ * on both stops, at rest and on hover. The stops are hex in the token blocks;
+ * the spec's light top stop (#0B9068) was 4.04:1 under white and is darkened.
+ */
+describe.each<Theme>(['light', 'dark'])('%s primary button gradient', theme => {
+  const label = parseTokens(theme)['brand-fg'] as Rgb;
+  it.each(['brand-gradient', 'brand-gradient-hover'])('brand-fg reads on both stops of --%s', name => {
+    const stops = gradientStops(theme, name);
+    expect(stops).toHaveLength(2);
+    for (const stop of stops) expect(contrast(label, stop)).toBeGreaterThanOrEqual(TEXT);
   });
 });

@@ -166,7 +166,7 @@ export function DataTable<Row>({
           {columns.map((column, columnIndex) => (
             <td
               key={column.id}
-              className={cn('border-b border-line px-4', cellHeight, column.hideBelow && HIDE_BELOW[column.hideBelow])}
+              className={cn('border-b border-line px-3.5 first:pl-[18px] last:pr-[18px]', cellHeight, column.hideBelow && HIDE_BELOW[column.hideBelow])}
             >
               <Skeleton
                 className={cn('h-4', SKELETON_WIDTHS[(rowIndex + columnIndex) % SKELETON_WIDTHS.length], isNumeric(column.kind) && 'ml-auto')}
@@ -210,7 +210,7 @@ export function DataTable<Row>({
       <tr
         key={getRowId(row)}
         className={cn(
-          'transition-colors hover:bg-sunken/50',
+          'motion-safe:transition-colors motion-safe:duration-150 hover:bg-raised',
           onRowClick &&
             'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
         )}
@@ -233,7 +233,7 @@ export function DataTable<Row>({
           <td
             key={column.id}
             className={cn(
-              'border-b border-line px-4 align-middle text-fg',
+              'border-b border-line px-3.5 align-middle text-[13.5px] text-fg first:pl-[18px] last:pr-[18px]',
               cellHeight,
               isNumeric(column.kind) && 'whitespace-nowrap text-right tabular-nums',
               column.kind === 'date' && 'whitespace-nowrap tabular-nums',
@@ -256,7 +256,7 @@ export function DataTable<Row>({
   const showTotals = Boolean(totals) && !loading && !error && sortedRows.length > 0;
 
   return (
-    <div className={cn('overflow-hidden rounded-surface border border-line bg-raised font-ui shadow-raised', className)}>
+    <div className={cn('glass-card overflow-hidden rounded-surface font-ui', className)}>
       {/* Focusable so a keyboard user can scroll a table wider than the screen. */}
       <div
         role="region"
@@ -284,7 +284,7 @@ export function DataTable<Row>({
           scrollClassName,
         )}
       >
-        <table className="w-full border-separate border-spacing-0 text-sm">
+        <table className="w-full border-separate border-spacing-0 text-[13.5px] tabular-nums">
           <caption className="sr-only">{caption}</caption>
           <thead>
             <tr>
@@ -300,7 +300,7 @@ export function DataTable<Row>({
                     className={cn(
                       // Separate borders, not collapsed ones: a collapsed border
                       // does not travel with a sticky header cell.
-                      'sticky top-0 z-10 h-10 whitespace-nowrap border-b border-line bg-sunken px-4 text-left text-[13px] font-semibold text-fg-muted',
+                      'sticky top-0 z-10 h-10 whitespace-nowrap border-b border-line bg-wash px-3.5 text-left text-[12.5px] font-[550] text-fg-subtle first:pl-[18px] last:pr-[18px]',
                       isNumeric(column.kind) && 'text-right',
                       column.hideBelow && HIDE_BELOW[column.hideBelow],
                       column.className,
@@ -328,7 +328,7 @@ export function DataTable<Row>({
                 );
               })}
               {rowActions ? (
-                <th scope="col" className="sticky top-0 z-10 h-10 w-px border-b border-line bg-sunken px-2">
+                <th scope="col" className="sticky top-0 z-10 h-10 w-px border-b border-line bg-wash px-2">
                   <span className="sr-only">{rowActionsLabel}</span>
                 </th>
               ) : null}
@@ -342,7 +342,7 @@ export function DataTable<Row>({
                   <td
                     key={column.id}
                     className={cn(
-                      'h-11 bg-sunken/60 px-4 font-semibold text-fg',
+                      'h-11 bg-wash px-3.5 font-semibold text-fg first:pl-[18px] last:pr-[18px]',
                       isNumeric(column.kind) && 'whitespace-nowrap text-right tabular-nums',
                       column.hideBelow && HIDE_BELOW[column.hideBelow],
                     )}
@@ -351,7 +351,7 @@ export function DataTable<Row>({
                   </td>
                 ))}
                 {rowActions ? (
-                  <td className="bg-sunken/60 px-2 text-right">{totalsActions}</td>
+                  <td className="bg-wash px-2 text-right">{totalsActions}</td>
                 ) : null}
               </tr>
             </tfoot>

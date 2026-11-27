@@ -7,7 +7,6 @@ import {
   Database, ListChecks, Download, BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import BrandLogo from './BrandLogo';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { usePlan, FeatureKey } from '../contexts/PlanContext';
 import { monthlyPlanInNav } from './navVisibility';
@@ -93,9 +92,9 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
   // the active row is the design system's navigation fill (`bg-brand-soft`,
   // `text-brand-text`) rather than the old filled accent pill.
 
-  const navItemClass = 'flex w-full items-center gap-3 rounded-control px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:py-3';
+  const navItemClass = 'group flex h-9 w-full items-center gap-3 rounded-control border border-transparent px-2.5 text-[13.5px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11';
 
-  const sectionLabelClass = 'px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle';
+  const sectionLabelClass = 'px-2.5 pb-1 pt-3 text-xs font-medium text-fg-subtle';
 
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
@@ -132,26 +131,27 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
         to={item.path}
         onClick={() => setIsMobileMenuOpen(false)}
         className={({ isActive }) =>
-          cn(navItemClass, isActive ? 'bg-brand-soft text-brand-text' : 'text-fg-muted hover:bg-sunken hover:text-fg')
+          cn(navItemClass, isActive ? 'border-edge bg-raised text-fg shadow-raised' : 'text-fg-muted hover:bg-raised hover:text-fg')
         }
       >
-        <Icon size={16} className="shrink-0" />
+        <Icon size={18} className="shrink-0 group-aria-[current=page]:text-brand" />
         <span>{t(item.labelKey)}</span>
       </NavLink>
     );
   };
 
   const SidebarContent = () => (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col px-[10px] pb-[10px] pt-[14px]">
       {/* Logo. Below `lg` the menu button is fixed over this row's left edge —
           it covered the mark whenever the drawer was open — so the lockup
           starts clear of it there and keeps its old inset on a desktop. */}
-      <div className="flex items-center gap-3 border-b border-line py-4 pl-14 pr-4 lg:pl-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-          <BrandLogo className="h-8 w-8 object-contain" />
+      <div className="flex items-center gap-3 pb-3 pl-[46px] pr-2 lg:pl-1.5">
+        {/* The dark-background glyph in both themes: the tile is dark either way. */}
+        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mark shadow-mark">
+          <img src="/brand/mark-on-dark.png" alt="" className="h-6 w-6 object-contain" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-fg">
+          <p className="truncate text-base font-[650] tracking-[-0.02em] text-fg">
             {isViewingAsCompany ? activeCompany?.name : (settings?.company_name || 'El-Professor')}
           </p>
           <p className={cn('text-[10px]', isViewingAsCompany ? 'text-caution' : 'text-fg-subtle')}>
@@ -161,7 +161,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto py-2">
         {NAV_ITEMS.map(renderNavItem)}
 
         {/* `isSupportAdmin` is the profile's `admin` role. A platform account
@@ -188,7 +188,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
               onClick={() => { exitCompany(); setIsMobileMenuOpen(false); navigate(ADMIN_BASE); }}
               className={cn(navItemClass, 'text-caution hover:bg-caution-soft')}
             >
-              <ArrowLeft size={16} className="shrink-0" />
+              <ArrowLeft size={18} className="shrink-0" />
               <span>{t('nav.backToAdmin')}</span>
             </button>
           </>
@@ -196,12 +196,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       </nav>
 
       {/* Logout */}
-      <div className="border-t border-line p-2">
+      <div className="border-t border-line pt-2">
         <button
           onClick={handleLogout}
           className={cn(navItemClass, 'text-critical hover:bg-critical-soft')}
         >
-          <LogOut size={16} className="shrink-0" />
+          <LogOut size={18} className="shrink-0" />
           <span>{t('common.logout')}</span>
         </button>
         {/* Impressum and Datenschutz, owed from every page; a new tab, so
@@ -224,7 +224,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       {/* Mobile overlay — the design system's scrim, as Dialog paints it. */}
       {isMobileMenuOpen && (
         <div
-          className="fixed inset-0 z-30 bg-[rgb(5_8_16/0.55)] lg:hidden"
+          className="fixed inset-0 z-30 glass-scrim motion-safe:animate-ui-fade-in lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
@@ -232,7 +232,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 z-40 h-full w-64 transform border-r border-line bg-raised shadow-overlay transition-transform duration-300 ease-in-out lg:translate-x-0',
+          'glass-drawer fixed left-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-l-0 motion-safe:transition-transform motion-safe:duration-[320ms] motion-safe:ease-glass lg:sticky lg:top-[10px] lg:ml-[10px] lg:mt-[10px] lg:h-[calc(100dvh-20px)] lg:w-[254px] lg:shrink-0 lg:translate-x-0 lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised',
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >

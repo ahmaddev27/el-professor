@@ -6,7 +6,6 @@ import {
   Library, ScrollText, SlidersHorizontal, Users, Layers,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import BrandLogo from './BrandLogo';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -51,35 +50,6 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { path: '/admin/team',             icon: Users,            labelKey: 'admin.nav.team',        requires: 'staff.manage' },
 ];
 
-/**
- * One look for every sidebar destination. The account link sits in the footer
- * rather than in the nav, so sharing these keeps the two from drifting apart.
- */
-const NAV_ITEM_CLASS =
-  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full';
-
-const navItemStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties =>
-  isActive
-    ? { background: 'var(--warning-solid)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
-    : { color: 'var(--text-secondary)', background: 'transparent' };
-
-// NavLink marks the active entry with aria-current; its colours must survive hover.
-const handleNavItemMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
-  const el = e.currentTarget;
-  if (!el.getAttribute('aria-current')) {
-    el.style.background = 'var(--warning-subtle)';
-    el.style.color = 'var(--warning)';
-  }
-};
-
-const handleNavItemMouseLeave = (e: React.MouseEvent<HTMLAnchorElement>) => {
-  const el = e.currentTarget;
-  if (!el.getAttribute('aria-current')) {
-    el.style.background = 'transparent';
-    el.style.color = 'var(--text-secondary)';
-  }
-};
-
 const ROLE_LABEL_KEYS: Record<PlatformRole, TranslationKey> = {
   owner:     'admin.role.owner',
   support:   'admin.role.support',
@@ -98,33 +68,37 @@ const AdminSidebar: React.FC = () => {
     setIsMobileMenuOpen(false);
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // One look for every sidebar destination, as Sidebar draws the company one:
+  // the active entry is a glass chip (NavLink's aria-current drives it), hover
+  // is a class. The two imperative hover painters this file had are gone.
+  const navItemClass = 'group flex h-9 w-full items-center gap-3 rounded-control border border-transparent px-2.5 text-[13.5px] font-medium text-fg-muted transition-colors hover:bg-raised hover:text-fg aria-[current=page]:border-edge aria-[current=page]:bg-raised aria-[current=page]:text-fg aria-[current=page]:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11';
+  const iconClass = 'shrink-0 group-aria-[current=page]:text-brand';
+
   const SidebarContent = () => (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col px-[10px] pb-[10px] pt-[14px]">
       {/* Identity — deliberately distinct from the company shell so it is always
           obvious which context is being operated in. */}
-      <div className="px-4 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
-        <div
-          className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg overflow-hidden"
-          style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}
-        >
+      <div className="flex items-center gap-3 pb-3 pl-[46px] pr-2 lg:pl-1.5">
+        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mark shadow-mark">
           {/* The El-Professor mark, as the owner asked on 28.09.2026. The warning
               tint, the border and the warning-coloured subtitle below all stay:
               the comment above this block says the panel's identity is
               deliberately distinct from the company shell, and asking for the
               logo was not asking to give that up. */}
-          <BrandLogo className="h-6 w-6 object-contain" />
+          <img src="/brand/mark-on-dark.png" alt="" className="h-6 w-6 object-contain" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+          <p className="truncate text-base font-[650] tracking-[-0.02em] text-fg">
             {t('admin.title')}
           </p>
-          <p className="text-[10px]" style={{ color: 'var(--warning)' }}>
+          <p className="text-[10px] text-caution">
             {t('admin.subtitle')}
           </p>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto py-2">
         {ADMIN_NAV_ITEMS.filter(item => platformCan(item.requires)).map(item => {
           const Icon = item.icon;
           return (
@@ -133,26 +107,23 @@ const AdminSidebar: React.FC = () => {
               to={item.path}
               end={item.end}
               onClick={() => setIsMobileMenuOpen(false)}
-              className={NAV_ITEM_CLASS}
-              style={navItemStyle}
-              onMouseEnter={handleNavItemMouseEnter}
-              onMouseLeave={handleNavItemMouseLeave}
+              className={navItemClass}
             >
-              <Icon size={16} className="flex-shrink-0" />
+              <Icon size={18} className={iconClass} />
               <span>{t(item.labelKey)}</span>
             </NavLink>
           );
         })}
       </nav>
 
-      <div className="p-2 border-t space-y-1" style={{ borderColor: 'var(--border)' }}>
+      <div className="space-y-1 border-t border-line pt-2">
         {profile?.email && (
-          <p className="px-3 pb-1 text-[10px] truncate" style={{ color: 'var(--text-tertiary)' }}>
+          <p className="truncate px-2.5 pb-1 text-[10px] text-fg-subtle">
             {profile.email}
           </p>
         )}
         {platformAccess.role && (
-          <p className="px-3 pb-1 text-[10px] font-semibold" style={{ color: 'var(--warning)' }}>
+          <p className="px-2.5 pb-1 text-[10px] font-semibold text-caution">
             {t(ROLE_LABEL_KEYS[platformAccess.role])}
           </p>
         )}
@@ -165,22 +136,16 @@ const AdminSidebar: React.FC = () => {
         <NavLink
           to="/admin/konto"
           onClick={() => setIsMobileMenuOpen(false)}
-          className={NAV_ITEM_CLASS}
-          style={navItemStyle}
-          onMouseEnter={handleNavItemMouseEnter}
-          onMouseLeave={handleNavItemMouseLeave}
+          className={navItemClass}
         >
-          <UserCog size={16} className="flex-shrink-0" />
+          <UserCog size={18} className={iconClass} />
           <span>{t('admin.nav.account')}</span>
         </NavLink>
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium w-full transition-all duration-150"
-          style={{ color: 'var(--danger)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--danger-subtle)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+          className="flex h-9 w-full items-center gap-3 rounded-control px-2.5 text-[13.5px] font-medium text-critical transition-colors hover:bg-critical-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11"
         >
-          <LogOut size={16} className="flex-shrink-0" />
+          <LogOut size={18} className="shrink-0" />
           <span>{t('common.logout')}</span>
         </button>
       </div>
@@ -191,34 +156,22 @@ const AdminSidebar: React.FC = () => {
     <>
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        className="lg:hidden fixed top-3 left-4 z-50 p-2 rounded-lg transition-colors"
-        style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-secondary)',
-          boxShadow: 'var(--shadow-sm)',
-        }}
+        className="fixed left-4 top-3 z-50 rounded-control border border-line bg-raised p-2 text-fg-muted shadow-raised transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
       >
         {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
 
       {isMobileMenuOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-30"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
+          className="glass-scrim fixed inset-0 z-30 motion-safe:animate-ui-fade-in lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
       <aside
-        className={`fixed top-0 left-0 z-40 h-full w-64 transform transition-transform duration-300 ease-in-out border-r ${
+        className={`glass-drawer fixed left-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-l-0 motion-safe:transition-transform motion-safe:duration-[320ms] motion-safe:ease-glass lg:sticky lg:top-[10px] lg:ml-[10px] lg:mt-[10px] lg:h-[calc(100dvh-20px)] lg:w-[254px] lg:shrink-0 lg:translate-x-0 lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised ${
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0`}
-        style={{
-          background: 'var(--bg-surface)',
-          borderColor: 'var(--border)',
-          boxShadow: 'var(--shadow-lg)',
-        }}
+        }`}
       >
         <SidebarContent />
       </aside>

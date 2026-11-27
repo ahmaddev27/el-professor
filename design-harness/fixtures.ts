@@ -65,6 +65,8 @@ export function fixedCostRows(): Row[] {
     description,
     amount,
     created_by: HARNESS_USER_ID,
+    // A standing cost (no month): the screen reads `period_month` since monthly copies came in.
+    period_month: null,
     created_at: CREATED_AT,
     updated_at: CREATED_AT,
   }));

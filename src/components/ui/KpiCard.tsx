@@ -38,10 +38,14 @@ export function KpiCard({ label, value, icon: Icon, trend, caption, loading = fa
   const TrendIcon = trend ? TREND_ICON[trend.direction] : null;
 
   return (
-    <Card className={cn('flex flex-col gap-3 p-5 font-ui', className)} aria-busy={loading || undefined}>
+    <Card className={cn('flex flex-col gap-2.5 px-4 pb-3.5 pt-4 font-ui', className)} aria-busy={loading || undefined}>
       <div className="flex items-center justify-between gap-3">
         <p className="text-[13px] font-medium text-fg-muted">{label}</p>
-        {Icon ? <Icon aria-hidden className="size-4 text-fg-subtle" /> : null}
+        {Icon ? (
+          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-tight bg-raised text-fg-muted shadow-hi">
+            <Icon aria-hidden className="size-4" />
+          </span>
+        ) : null}
       </div>
 
       {loading ? (
@@ -56,10 +60,10 @@ export function KpiCard({ label, value, icon: Icon, trend, caption, loading = fa
               because a container takes no width from its content and a card in a flex
               row has to keep sizing from its label. */}
           <div className="[container-type:inline-size]">
-            <p className="text-[clamp(1.0625rem,14cqi,1.75rem)] font-semibold leading-none tracking-tight text-fg tabular-nums">{value}</p>
+            <p className="text-[clamp(1.0625rem,14cqi,1.625rem)] font-semibold leading-none tracking-[-0.03em] text-fg tabular-nums">{value}</p>
           </div>
           {trend || caption ? (
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
               {trend && TrendIcon ? (
                 <span className={cn('inline-flex items-center gap-1 font-semibold tabular-nums', SENTIMENT_CLASS[trend.sentiment ?? 'neutral'])}>
                   <TrendIcon aria-hidden className="size-3.5" />

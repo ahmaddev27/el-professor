@@ -34,19 +34,20 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
 
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   return (
-    <div className="min-h-dvh bg-canvas font-ui text-fg">
+    <div className="min-h-dvh font-ui text-fg lg:flex">
       <Sidebar isSupportAdmin={isSupportAdmin} />
 
-      <div className="lg:pl-64">
+      <div className="min-w-0 flex-1 lg:py-[10px] lg:pr-[10px]">
+       <div className="glass-sheet min-h-dvh rounded-none border-0 lg:min-h-[calc(100dvh-20px)] lg:overflow-clip lg:rounded-pane lg:border">
         {/* Whose data this is comes before anything else. It renders nothing
             for a company user. */}
         <SupportSessionBar />
         {/* The platform's announcements for this company (plan 3.11). */}
         <AnnouncementBanner />
-        <header className="sticky top-0 z-20 border-b border-line bg-raised shadow-raised">
+        <header className="glass-topbar sticky top-0 z-20 h-[60px] lg:rounded-t-pane">
           {/* Below `lg` the sidebar's menu button is fixed over this row's
               left edge, so the first control starts clear of it. */}
-          <div className="flex items-center justify-between py-3 pl-16 pr-4 sm:pr-6 lg:pl-6">
+          <div className="flex h-full items-center justify-between pl-16 pr-4 sm:pr-6 lg:pl-6 lg:pr-5">
             <div className="flex items-center gap-3">
               <Button
                 variant="ghost"
@@ -69,9 +70,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
           </div>
         </header>
 
-        <main className="p-5 lg:p-6">
+        <main className="page-settle mx-auto w-full max-w-[1440px] px-4 pb-12 pt-5 min-[960px]:px-8 min-[960px]:pb-14 min-[960px]:pt-7">
           <Outlet />
         </main>
+       </div>
       </div>
     </div>
   );

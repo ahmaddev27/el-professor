@@ -1504,6 +1504,7 @@ export function AbrechnungPage() {
             background: isDark ? '#0d1117' : '#ffffff',
             width: 600,
             pointerEvents: 'none',
+            fontFamily: "Barlow, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
           }}
         >
           <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>

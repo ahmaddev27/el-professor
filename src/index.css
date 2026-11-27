@@ -1,33 +1,54 @@
-/* Barlow, self-hosted through @fontsource so no request leaves for a font CDN.
-   The @font-face rules cost nothing until an element uses `font-ui`: a browser
-   only downloads a face it has to render. */
+/* Barlow stays for one picture only: the Abrechnung share card, which html2canvas turns into the
+   PNG a driver receives, pins it so the remake does not change that document (PLAN.md §4). */
 @import '@fontsource/barlow/400.css';
 @import '@fontsource/barlow/500.css';
 @import '@fontsource/barlow/600.css';
 @import '@fontsource/barlow/700.css';
 
+/* Geist and Geist Mono, self-hosted (src/assets/fonts, SIL OFL 1.1): the design remake's faces
+   (Docs/design/remake-v2/PLAN.md §4). Nothing loads from a font CDN, and a browser downloads a face
+   only when it has to render one. */
+@font-face {
+  font-family: 'Geist';
+  src: url('./assets/fonts/geist-latin-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('./assets/fonts/geist-mono-latin-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design system tokens (Phase 2) ───────────────────────────────────────────
- * The palette of src/components/ui and the AppShell, derived from the brand
- * board: night #0A0F1C, surface #0C1730, blue #146BFF, cyan #00E7FF.
- *
- * Deliberately separate from the legacy variables further down. Those still
- * drive every existing screen, and Phase 5 moves screens across in batches, so
- * nothing in this block may change how a current page looks. No name here is
- * shared with the legacy set.
+/* ── Design system tokens (Phase 2, remade 27.11.2026) ───────────────────────
+ * The palette of src/components/ui and both shells: the "Glass" design remake
+ * (Docs/design/remake-v2/PLAN.md). Emerald brand, a green-grey canvas with an
+ * ambient glow and film grain behind translucent glass panes. Mapped onto our
+ * token names by ROLE, never by the spec's names: our `--overlay` is the dialog
+ * surface (the spec's glass-strong), our `--scrim` is the spec's overlay.
  *
  * Colours are space-separated RGB channels so Tailwind's opacity modifier works
- * (`bg-brand/10`); the hex in each comment is the same colour. Every text and
- * surface pairing is held to WCAG AA by src/components/ui/tokens.contrast.test.ts,
- * which parses the two blocks below by their marker comments, so a changed value
- * fails the build if it no longer passes.
+ * (`bg-brand/10`); the hex in each comment is the same colour. A TRANSLUCENT
+ * token carries its alpha in a sibling `--<name>-a`, and tailwind.config.js
+ * multiplies the two, so `bg-raised` paints white at .62 and `bg-raised/50` half
+ * of that. Every text and surface pairing is held to WCAG AA by
+ * src/components/ui/tokens.contrast.test.ts, which parses both blocks by their
+ * marker comments and composites every translucent token over the canvas, each
+ * ambient glow at its peak and the glass sheet before it measures.
  *
- * Shape rule: controls (buttons, inputs, selects) use --radius-control, surfaces
- * (cards, tables, dialogs, sheets) use --radius-surface, badges and avatars are
- * fully round.
+ * Where a value differs from the spec, the spec value failed that test; the
+ * comment says so (PLAN.md §3).
+ *
+ * Shape rule: controls use --radius-control (10px), surfaces --radius-surface
+ * (18px), dialogs and the shell's panes --radius-pane (22px), badges and
+ * avatars are fully round.
  */
 /* A screen-reader label in a scrolled-off table cell is absolutely positioned. With nothing
    positioned inside its scrolling frame it escapes the frame's clipping, and the whole page
@@ -53,87 +74,201 @@ td select, th select { max-width: none; }
 
 /* @tokens light */
 :root {
-  --canvas:         244 246 250;  /* #F4F6FA page background */
-  --raised:         255 255 255;  /* #FFFFFF cards, tables, sidebar */
-  --overlay:        255 255 255;  /* #FFFFFF dialogs, sheets, popovers */
-  --sunken:         237 241 247;  /* #EDF1F7 table header, hover, skeleton */
-  --field:          255 255 255;  /* #FFFFFF input fill */
-  --fg:             10 15 28;     /* #0A0F1C primary text */
-  --fg-muted:       70 83 107;    /* #46536B secondary text */
-  --fg-subtle:      95 107 130;   /* #5F6B82 captions, placeholders */
-  --line:           220 226 236;  /* #DCE2EC dividers */
-  --line-strong:    124 136 158;  /* #7C889E input borders (3:1 non-text) */
-  --brand:          20 107 255;   /* #146BFF primary actions, chart marks */
-  --brand-hover:    15 90 224;    /* #0F5AE0 */
+  --canvas:         232 239 236;  /* #E8EFEC page background, under the glow */
+  --raised:         255 255 255;  /* white at .62: cards, tables, panels */
+  --raised-a:       0.62;
+  --overlay:        249 252 251;  /* #F9FCFB at .80: dialogs, sheets, menus */
+  --overlay-a:      0.8;
+  --sunken:         17 25 22;     /* ink at .06: skeleton, inset fills, counts */
+  --sunken-a:       0.06;
+  --wash:           255 255 255;  /* white at .30: a table's header row */
+  --wash-a:         0.3;
+  --field:          255 255 255;  /* white at .62: input fill */
+  --field-a:        0.62;
+  --solid:          247 250 249;  /* #F7FAF9 an opaque surface */
+  --sheet:          255 255 255;  /* white at .34: the sidebar and the content sheet */
+  --sheet-a:        0.34;
+  --edge:           255 255 255;  /* white at .78: the 1px edge of every glass pane */
+  --edge-a:         0.78;
+  --scrim:          9 15 13;      /* #090F0D at .20: behind a dialog or the drawer */
+  --scrim-a:        0.2;
+  --toast:          14 22 19;     /* #0E1613 at .84: the toast, dark in both themes */
+  --toast-a:        0.84;
+  --toast-fg:       233 242 238;  /* #E9F2EE */
+  --fg:             17 25 22;     /* #111916 primary text */
+  --fg-muted:       79 91 86;     /* #4F5B56 secondary text */
+  --fg-subtle:      82 94 89;     /* #525E59 captions, placeholders (spec #5D6964: 3.83:1 over the glow) */
+  --line:           17 25 22;     /* ink at .08: dividers */
+  --line-a:         0.08;
+  --line-strong:    17 25 22;     /* ink at .50: control borders (spec .15 is under 3:1) */
+  --line-strong-a:  0.5;
+  --brand:          4 120 87;     /* #047857 emerald: primary actions, active marks */
+  --brand-hover:    6 95 70;      /* #065F46 */
   --brand-fg:       255 255 255;  /* #FFFFFF text on brand */
-  --brand-soft:     231 240 255;  /* #E7F0FF selected and info fills */
-  --brand-text:     15 90 224;    /* #0F5AE0 links, active navigation */
-  --signal:         0 124 145;    /* #007C91 brand cyan, darkened to read on light */
-  --focus:          20 107 255;   /* #146BFF focus outline */
-  --positive:       10 122 69;    /* #0A7A45 */
-  --positive-soft:  227 246 236;  /* #E3F6EC */
-  --caution:        143 82 0;     /* #8F5200 */
-  --caution-soft:   253 241 220;  /* #FDF1DC */
-  --critical:       192 38 45;    /* #C0262D */
-  --critical-soft:  253 232 232;  /* #FDE8E8 */
-  --critical-solid: 192 38 45;    /* #C0262D destructive button fill */
+  --brand-soft:     226 243 235;  /* #E2F3EB selected and info fills */
+  --brand-text:     5 96 63;      /* #05603F links, active navigation */
+  --signal:         11 98 89;     /* #0B6259 teal, the second brand colour */
+  --focus:          4 120 87;     /* #047857 focus outline (spec #10B981 is 2.2:1) */
+  --positive:       5 96 63;      /* #05603F */
+  --positive-soft:  230 245 238;  /* #E6F5EE */
+  --positive-dot:   18 162 114;   /* #12A272 */
+  --caution:        138 75 6;     /* #8A4B06 */
+  --caution-soft:   252 242 223;  /* #FCF2DF */
+  --caution-dot:    217 154 38;   /* #D99A26 */
+  --critical:       168 35 27;    /* #A8231B */
+  --critical-soft:  253 236 236;  /* #FDECEC */
+  --critical-dot:   229 72 77;    /* #E5484D */
+  --critical-solid: 192 38 45;    /* #C0262D destructive fill (spec #E5484D is 4.2:1 under white) */
+  --critical-fg:    255 255 255;  /* #FFFFFF the label on that fill, in both themes */
+  --info:           28 85 179;    /* #1C55B3 */
+  --info-soft:      232 240 252;  /* #E8F0FC */
+  --info-dot:       59 130 246;   /* #3B82F6 */
+  --violet:         84 64 173;    /* #5440AD */
+  --violet-soft:    239 237 250;  /* #EFEDFA */
+  --violet-dot:     139 124 240;  /* #8B7CF0 */
+  --teal:           11 98 89;     /* #0B6259 */
+  --teal-soft:      224 243 241;  /* #E0F3F1 */
+  --teal-dot:       20 168 154;   /* #14A89A */
+  --neutral:        79 91 86;     /* #4F5B56 */
+  --neutral-soft:   238 241 240;  /* #EEF1F0 */
+  --neutral-dot:    152 163 158;  /* #98A39E */
+  --amb-1:          16 185 129;   /* the four ambient glows, each at its own alpha */
+  --amb-1-a:        0.3;
+  --amb-2:          45 212 191;
+  --amb-2-a:        0.22;
+  --amb-3:          56 189 248;
+  --amb-3-a:        0.16;
+  --amb-4:          132 204 22;
+  --amb-4-a:        0.1;
 
-  --radius-control: 0.5rem;
-  --radius-surface: 0.75rem;
-  --shadow-raised:  0 1px 2px rgb(10 15 28 / 0.05), 0 1px 3px rgb(10 15 28 / 0.04);
-  --shadow-overlay: 0 16px 40px rgb(10 15 28 / 0.16), 0 2px 6px rgb(10 15 28 / 0.08);
+  --radius-xs:      6px;
+  --radius-sm:      8px;
+  --radius-control: 10px;
+  --radius-lg:      14px;
+  --radius-surface: 18px;
+  --radius-pane:    22px;
+  --ease:           cubic-bezier(0.22, 1, 0.36, 1);
+  --grain:          0.035;
+  --glass-hi:       inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --glass-shadow:   0 1px 1px rgb(4 60 44 / 0.04), 0 12px 32px -20px rgb(4 60 44 / 0.3);
+  --elev-xs:        0 1px 2px rgb(17 25 22 / 0.05);
+  --elev-md:        0 10px 30px -14px rgb(17 25 22 / 0.22), 0 2px 6px -2px rgb(17 25 22 / 0.06);
+  --elev-lg:        0 30px 70px -24px rgb(17 25 22 / 0.38), 0 6px 16px -6px rgb(17 25 22 / 0.1);
+  --brand-gradient:       linear-gradient(180deg, #098663 0%, #047857 100%); /* spec top #0B9068: 4.04:1 under white */
+  --brand-gradient-hover: linear-gradient(180deg, #0a7f5c 0%, #065f46 100%);
+  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.24), 0 1px 2px rgb(4 120 87 / 0.3), 0 8px 20px -10px rgb(4 120 87 / 0.6);
+  --mark-gradient:  linear-gradient(150deg, #13402f, #08120e);
+  --mark-glow:      inset 0 1px 0 rgb(255 255 255 / 0.18), 0 6px 16px -8px rgb(4 60 44 / 0.6);
+  --shadow-raised:  var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--glass-shadow);
+  --shadow-overlay: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-lg);
 }
 
 /* @tokens dark */
 .dark {
-  --canvas:         10 15 28;     /* #0A0F1C brand night */
-  --raised:         12 23 48;     /* #0C1730 brand surface */
-  --overlay:        17 30 59;     /* #111E3B */
-  --sunken:         20 34 65;     /* #142241 */
-  --field:          10 15 28;     /* #0A0F1C */
-  --fg:             238 242 250;  /* #EEF2FA */
-  --fg-muted:       169 181 204;  /* #A9B5CC */
-  --fg-subtle:      130 144 171;  /* #8290AB */
-  --line:           30 44 75;     /* #1E2C4B */
-  --line-strong:    94 110 143;   /* #5E6E8F */
-  --brand:          20 107 255;   /* #146BFF */
-  --brand-hover:    15 90 224;    /* #0F5AE0 */
-  --brand-fg:       255 255 255;  /* #FFFFFF */
-  --brand-soft:     18 41 90;     /* #12295A */
-  --brand-text:     111 164 255;  /* #6FA4FF */
-  --signal:         0 231 255;    /* #00E7FF brand cyan */
-  --focus:          0 231 255;    /* #00E7FF */
-  --positive:       74 222 152;   /* #4ADE98 */
-  --positive-soft:  15 46 42;     /* #0F2E2A */
-  --caution:        255 194 102;  /* #FFC266 */
-  --caution-soft:   51 38 15;     /* #33260F */
-  --critical:       255 138 138;  /* #FF8A8A */
-  --critical-soft:  58 21 32;     /* #3A1520 */
+  --canvas:         5 10 8;       /* #050A08 */
+  --raised:         255 255 255;  /* white at .045 */
+  --raised-a:       0.045;
+  --overlay:        14 20 18;     /* #0E1412 at .80 */
+  --overlay-a:      0.8;
+  --sunken:         255 255 255;  /* white at .07 */
+  --sunken-a:       0.07;
+  --wash:           255 255 255;  /* white at .025 */
+  --wash-a:         0.025;
+  --field:          255 255 255;  /* white at .04 */
+  --field-a:        0.04;
+  --solid:          17 23 21;     /* #111715 */
+  --sheet:          255 255 255;  /* white at .025 */
+  --sheet-a:        0.025;
+  --edge:           255 255 255;  /* white at .09 */
+  --edge-a:         0.09;
+  --scrim:          0 0 0;        /* black at .45 */
+  --scrim-a:        0.45;
+  --toast:          14 22 19;     /* #0E1613 at .84 */
+  --toast-a:        0.84;
+  --toast-fg:       233 242 238;  /* #E9F2EE */
+  --fg:             229 235 232;  /* #E5EBE8 */
+  --fg-muted:       181 191 186;  /* #B5BFBA (spec #A3AFAA: 4.20:1 on a table header over the glow) */
+  --fg-subtle:      172 183 178;  /* #ACB7B2 (spec #93A09A: 3.51:1 there) */
+  --line:           255 255 255;  /* white at .08 */
+  --line-a:         0.08;
+  --line-strong:    255 255 255;  /* white at .42 (spec .15 is under 3:1) */
+  --line-strong-a:  0.42;
+  --brand:          52 211 153;   /* #34D399 */
+  --brand-hover:    110 231 183;  /* #6EE7B7 */
+  --brand-fg:       4 38 26;      /* #04261A */
+  --brand-soft:     15 42 32;     /* #0F2A20 */
+  --brand-text:     116 227 184;  /* #74E3B8 */
+  --signal:         132 217 207;  /* #84D9CF */
+  --focus:          52 211 153;   /* #34D399 */
+  --positive:       116 227 184;  /* #74E3B8 */
+  --positive-soft:  14 42 31;     /* #0E2A1F */
+  --positive-dot:   47 191 138;   /* #2FBF8A */
+  --caution:        245 196 107;  /* #F5C46B */
+  --caution-soft:   46 34 12;     /* #2E220C */
+  --caution-dot:    226 163 54;   /* #E2A336 */
+  --critical:       255 163 158;  /* #FFA39E */
+  --critical-soft:  51 20 22;     /* #331416 */
+  --critical-dot:   240 97 106;   /* #F0616A */
   --critical-solid: 214 58 64;    /* #D63A40 */
+  --critical-fg:    255 255 255;  /* #FFFFFF */
+  --info:           156 194 251;  /* #9CC2FB */
+  --info-soft:      16 32 58;     /* #10203A */
+  --info-dot:       91 156 246;   /* #5B9CF6 */
+  --violet:         195 184 251;  /* #C3B8FB */
+  --violet-soft:    31 26 56;     /* #1F1A38 */
+  --violet-dot:     155 141 243;  /* #9B8DF3 */
+  --teal:           132 217 207;  /* #84D9CF */
+  --teal-soft:      15 41 39;     /* #0F2927 */
+  --teal-dot:       45 212 191;   /* #2DD4BF */
+  --neutral:        181 191 186;  /* #B5BFBA */
+  --neutral-soft:   29 37 34;     /* #1D2522 */
+  --neutral-dot:    111 123 118;  /* #6F7B76 */
+  --amb-1:          16 185 129;
+  --amb-1-a:        0.22;
+  --amb-2:          20 184 166;
+  --amb-2-a:        0.14;
+  --amb-3:          56 189 248;
+  --amb-3-a:        0.09;
+  --amb-4:          16 185 129;
+  --amb-4-a:        0.06;
 
-  --shadow-raised:  0 0 #0000;
-  --shadow-overlay: 0 20px 48px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --grain:          0.05;
+  --glass-hi:       inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --glass-shadow:   0 1px 1px rgb(0 0 0 / 0.3), 0 16px 36px -20px rgb(0 0 0 / 0.75);
+  --elev-xs:        0 1px 2px rgb(0 0 0 / 0.4);
+  --elev-md:        0 12px 30px -12px rgb(0 0 0 / 0.6);
+  --elev-lg:        0 30px 70px -20px rgb(0 0 0 / 0.75);
+  --brand-gradient:       linear-gradient(180deg, #6ee7b7 0%, #34d399 100%);
+  --brand-gradient-hover: linear-gradient(180deg, #8ff0c9 0%, #4ade9f 100%);
+  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.4), 0 8px 24px -10px rgb(52 211 153 / 0.55);
 }
 
 /* ── Legacy theme tokens (every screen built before Phase 2) ─────────────── */
+/* Remapped 27.11.2026 onto the remake's palette (owner: "the colours and everything"), so no
+   screen still on these tokens shows the retired blue or cyan, or a blue-grey neutral: the
+   accent family is the emerald brand and the neutrals are the remake's green-greys. Same
+   names, same roles, so no screen's markup changed; the status colours below were already
+   the remake's red and kept their values. No generated document reads a variable (the
+   Quittungen, the Mietwagenauftrag and both images paint fixed colours), so nothing printed
+   moves. These blocks retire with the last legacy screen (Docs/design/remake-v2/PLAN.md, R6). */
 /* @legacy-tokens light */
 :root {
   /* Light */
-  --bg-base:        #f4f6fa;
+  --bg-base:        #e8efec;
   --bg-surface:     #ffffff;
   --bg-elevated:    #ffffff;
-  --bg-subtle:      #f8f9fc;
-  --bg-muted:       #eef1f7;
-  --border:         #e4e8f0;
-  --border-subtle:  #edf0f7;
-  --text-primary:   #111827;
-  --text-secondary: #6b7280;
-  --text-tertiary:  #9ca3af;
+  --bg-subtle:      #f4f8f6;
+  --bg-muted:       #eef1f0;
+  --border:         #dfe6e3;
+  --border-subtle:  #ebf0ee;
+  --text-primary:   #111916;
+  --text-secondary: #4f5b56;
+  --text-tertiary:  #6f7b76;
   --text-inverse:   #ffffff;
-  --accent:         #2563eb;
-  --accent-hover:   #1d4ed8;
-  --accent-subtle:  #eff6ff;
-  --accent-text:    #2563eb;
+  --accent:         #047857;
+  --accent-hover:   #065f46;
+  --accent-subtle:  #e2f3eb;
+  --accent-text:    #05603f;
   /* Darkened 17.09.2026 (owner's decision) from #059669 / #d97706, which were
      too light to carry a white label: 3.77:1 and 3.19:1. See the note above the
      dark block for why the fill needs its own token.
@@ -160,21 +295,21 @@ td select, th select { max-width: none; }
 
 /* @legacy-tokens dark */
 .dark {
-  --bg-base:        #0b0f17;
-  --bg-surface:     #111827;
-  --bg-elevated:    #1a2235;
-  --bg-subtle:      #141d2e;
-  --bg-muted:       #1e2a3d;
+  --bg-base:        #050a08;
+  --bg-surface:     #111715;
+  --bg-elevated:    #18201d;
+  --bg-subtle:      #141b18;
+  --bg-muted:       #1d2522;
   --border:         rgba(255,255,255,0.08);
   --border-subtle:  rgba(255,255,255,0.05);
-  --text-primary:   #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-tertiary:  #64748b;
-  --text-inverse:   #111827;
-  --accent:         #06b6d4;
-  --accent-hover:   #0891b2;
-  --accent-subtle:  rgba(6,182,212,0.1);
-  --accent-text:    #22d3ee;
+  --text-primary:   #e5ebe8;
+  --text-secondary: #a3afaa;
+  --text-tertiary:  #7d8984;
+  --text-inverse:   #04261a;
+  --accent:         #34d399;
+  --accent-hover:   #6ee7b7;
+  --accent-subtle:  rgba(52,211,153,0.1);
+  --accent-text:    #74e3b8;
   /* --success / --warning are TEXT here and keep their values: on a dark
      surface a status colour has to be light, and they already reach 5.35:1 to
      8.93:1 that way.
@@ -212,18 +347,178 @@ td select, th select { max-width: none; }
   --shadow-lg:      0 8px 32px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.3);
 }
 
-/* ── Base resets ──────────────────────────────────────────────────────────── */
+/* ── Base: the canvas, the ambient field and the grain ────────────────────── */
+/* The canvas is painted on html and the page body is transparent, so the two fixed
+   pseudo-elements below sit behind every screen and scrolling never repaints them. A
+   legacy screen that paints its own --bg-base or --bg-surface simply covers them. */
+html {
+  background-color: rgb(var(--canvas));
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+html.dark { color-scheme: dark; }
 body {
-  background-color: var(--bg-base);
-  color: var(--text-primary);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  background: transparent;
+  isolation: isolate;
+  color: rgb(var(--fg));
+}
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+/* The glow and the grain sit below every pane's blur layer (z-index -1, the
+   `::before` of .glass-sheet and .glass-topbar below), so a pane blurs them. */
+body::before {
+  z-index: -3;
+  background:
+    radial-gradient(42% 38% at 6% 4%, rgb(var(--amb-1) / var(--amb-1-a)), transparent 72%),
+    radial-gradient(36% 36% at 94% 18%, rgb(var(--amb-2) / var(--amb-2-a)), transparent 72%),
+    radial-gradient(44% 40% at 72% 98%, rgb(var(--amb-3) / var(--amb-3-a)), transparent 72%),
+    radial-gradient(30% 30% at 20% 80%, rgb(var(--amb-4) / var(--amb-4-a)), transparent 72%);
+}
+body::after {
+  z-index: -2;
+  opacity: var(--grain);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
-/* ── Scrollbar styling ────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+/* Figures line up in every table, and in anything that asks for them. */
+table { font-variant-numeric: tabular-nums; }
+
+/* ── Fallbacks: a person who asks for less transparency or more contrast, and a browser
+   without backdrop-filter, get opaque panes and no grain. The glass utilities read these
+   same variables, so one block covers every pane. ───────────────────────────────────── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root {
+    --raised: 255 255 255; --raised-a: 1;
+    --sheet: 248 251 250;  --sheet-a: 1;
+    --overlay: 255 255 255; --overlay-a: 1;
+    --field: 255 255 255;  --field-a: 1;
+  }
+  .dark {
+    --raised: 18 24 22;    --raised-a: 1;
+    --sheet: 14 20 18;     --sheet-a: 1;
+    --overlay: 21 28 25;   --overlay-a: 1;
+    --field: 21 28 25;     --field-a: 1;
+  }
+  body::after { display: none; }
+  *, *::before, *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+}
+@media (prefers-contrast: more) {
+  :root { --line-a: 0.25; --line-strong-a: 0.6; }
+  .dark { --line-a: 0.28; --line-strong-a: 0.6; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --sheet: 248 251 250;  --sheet-a: 1;
+    --overlay: 255 255 255; --overlay-a: 1;
+  }
+  .dark {
+    --sheet: 14 20 18;     --sheet-a: 1;
+    --overlay: 21 28 25;   --overlay-a: 1;
+  }
+}
+
+/* ── Glass panes ──────────────────────────────────────────────────────────────
+   One recipe per layer (PLAN.md §2). A card is a translucent pane with an edge and a
+   highlight and NO blur; only the layers that sit over moving content blur what is
+   behind them: the sidebar and the content sheet, the topbar, dialogs and menus, the
+   drawer, the toast and the scrim. In @layer components so a utility passed through
+   className still wins. Every colour is a token, so the fallbacks above cover them. */
+@layer components {
+  .glass-card {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--raised) / var(--raised-a));
+    box-shadow: var(--shadow-raised);
+  }
+  /* The sheet and the topbar blur through a `::before` layer, never on the element itself.
+     An element with a backdrop-filter becomes the containing block of every `position:
+     fixed` descendant, and the content sheet holds every page: the legacy screens' inline
+     `fixed inset-0` dialogs would open inside the sheet instead of over the viewport, and
+     UserMenu's click-outside layer would shrink to the 60px topbar. The layer adds no
+     stacking context either, so a legacy dialog's z-50 still covers the sidebar. The
+     topbar is sticky with a z-index, so its layer stays inside it; the sheet's layer
+     joins the body's stacking context, above the glow (-3) and the grain (-2). */
+  .glass-sheet {
+    position: relative;
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    box-shadow: var(--shadow-raised);
+  }
+  .glass-sheet::before,
+  .glass-topbar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .glass-sheet::before {
+    background-color: rgb(var(--sheet) / var(--sheet-a));
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    backdrop-filter: blur(22px) saturate(160%);
+  }
+  .glass-strong {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--overlay) / var(--overlay-a));
+    box-shadow: var(--shadow-overlay);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    backdrop-filter: blur(26px) saturate(180%);
+  }
+  .glass-drawer {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--overlay) / var(--overlay-a));
+    box-shadow: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-lg);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+  }
+  .glass-topbar {
+    position: relative;
+    isolation: isolate;
+    border-bottom: 1px solid rgb(var(--line) / var(--line-a));
+  }
+  .glass-topbar::before {
+    background-color: rgb(var(--solid) / 0.52);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+  }
+  .glass-scrim {
+    background-color: rgb(var(--scrim) / var(--scrim-a));
+    -webkit-backdrop-filter: blur(6px) saturate(120%);
+    backdrop-filter: blur(6px) saturate(120%);
+  }
+  .glass-toast {
+    background-color: rgb(var(--toast) / var(--toast-a));
+    color: rgb(var(--toast-fg));
+    border: 1px solid rgb(var(--toast-fg) / 0.1);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    backdrop-filter: blur(16px) saturate(160%);
+  }
+}
+
+/* A page's direct children settle into place once, staggered. `backwards`, not the spec's
+   `both`: a transform left in effect after the animation would make each child a containing
+   block for position: fixed, and a legacy dialog rendered inside a page would open inside
+   that child instead of over the viewport. Nothing moves for a person who asks for less
+   motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .page-settle > * { animation: page-settle 0.45s var(--ease) backwards; }
+  .page-settle > *:nth-child(2) { animation-delay: 0.03s; }
+  .page-settle > *:nth-child(3) { animation-delay: 0.06s; }
+  .page-settle > *:nth-child(4) { animation-delay: 0.09s; }
+  .page-settle > *:nth-child(5) { animation-delay: 0.12s; }
+  @keyframes page-settle { from { transform: translateY(6px); } }
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+::-webkit-scrollbar-thumb { background: rgb(var(--line-strong) / calc(var(--line-strong-a) * 0.6)); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--line-strong) / var(--line-strong-a)); }
 
 /* ── Native select dropdown readability ───────────────────────────────────── */
 select {
@@ -231,20 +526,20 @@ select {
   background-color: var(--bg-surface);
 }
 select option {
-  color: #111827;
+  color: #111916;
   background-color: #ffffff;
 }
 select option:disabled {
-  color: #94a3b8;
+  color: #6f7b76;
   background-color: #ffffff;
 }
 .dark select option {
-  color: #f1f5f9;
-  background-color: #1e2a3d;
+  color: #e5ebe8;
+  background-color: #1d2522;
 }
 .dark select option:disabled {
-  color: #64748b;
-  background-color: #1e2a3d;
+  color: #7d8984;
+  background-color: #1d2522;
 }
 
 /* ── Utility animations ───────────────────────────────────────────────────── */

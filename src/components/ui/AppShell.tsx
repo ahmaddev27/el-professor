@@ -73,8 +73,9 @@ function writeCollapsed(collapsed: boolean) {
 function BrandLockup({ collapsed }: { collapsed: boolean }) {
   return (
     <>
-      <img src="/brand/mark-on-light.png" alt="" className="h-8 w-auto dark:hidden" />
-      <img src="/brand/mark-on-dark.png" alt="" className="hidden h-8 w-auto dark:block" />
+      <span className="inline-flex size-[34px] shrink-0 items-center justify-center rounded-control bg-mark shadow-mark">
+        <img src="/brand/mark-on-dark.png" alt="" className="h-6 w-6 object-contain" />
+      </span>
       {collapsed ? (
         <span className="sr-only">El-Professor</span>
       ) : (
@@ -97,10 +98,10 @@ function NavItemLink({ item, collapsed, onNavigate }: { item: AppShellNavItem; c
       aria-label={collapsed ? item.label : undefined}
       className={({ isActive }) =>
         cn(
-          'flex h-9 items-center gap-3 rounded-control text-sm font-medium transition-colors [@media(pointer:coarse)]:h-11',
-          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+          'flex h-10 items-center gap-3 rounded-control border border-transparent text-[13.5px] font-[550] transition-colors [@media(pointer:coarse)]:h-11',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
           collapsed ? 'justify-center' : 'px-3',
-          isActive ? 'bg-brand-soft text-brand-text' : 'text-fg-muted hover:bg-sunken hover:text-fg',
+          isActive ? 'border-edge bg-solid/70 text-fg shadow-raised' : 'text-fg-muted hover:bg-raised hover:text-fg',
         )
       }
     >
@@ -136,19 +137,19 @@ function SidebarContents({ navGroups, homeTo, collapsed, footer, collapseToggle,
         to={homeTo}
         onClick={onNavigate}
         className={cn(
-          'flex h-14 shrink-0 items-center gap-2.5 border-b border-line',
-          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+          'flex h-16 shrink-0 items-center gap-2.5 rounded-t-pane',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus',
           collapsed ? 'justify-center' : 'px-4',
         )}
       >
         <BrandLockup collapsed={collapsed} />
       </NavLink>
 
-      <nav aria-label={t('ui.shell.mainNavigation')} className="flex-1 overflow-y-auto px-2 py-3">
+      <nav aria-label={t('ui.shell.mainNavigation')} className="flex-1 overflow-y-auto px-3 py-2">
         {navGroups.map((group, index) => (
           <div key={group.id} className={cn(index > 0 && 'mt-5')}>
             {group.label && !collapsed ? (
-              <p id={`nav-group-${group.id}`} className="px-3 pb-1.5 text-xs font-semibold text-fg-subtle">
+              <p id={`nav-group-${group.id}`} className="px-3 pb-1.5 text-xs font-[550] text-fg-subtle">
                 {group.label}
               </p>
             ) : null}
@@ -229,9 +230,9 @@ export function AppShell({ navGroups, homeTo, topBarStart, topBarEnd, sidebarFoo
       {/* Below the staging banner when there is one; see EnvironmentBanner. */}
       <aside
         className={cn(
-          'fixed bottom-0 left-0 top-[var(--env-banner-height,0px)] z-40 hidden border-r border-line bg-raised lg:block',
+          'fixed bottom-3 left-3 top-[calc(var(--env-banner-height,0px)+0.75rem)] z-40 hidden glass-sheet rounded-pane lg:block',
           'motion-safe:transition-[width] motion-safe:duration-200',
-          collapsed ? 'w-[4.5rem]' : 'w-64',
+          collapsed ? 'w-[4.5rem]' : 'w-[17rem]',
         )}
       >
         <SidebarContents
@@ -258,11 +259,12 @@ export function AppShell({ navGroups, homeTo, topBarStart, topBarEnd, sidebarFoo
 
       <div
         className={cn(
-          'flex min-h-dvh flex-col motion-safe:transition-[padding] motion-safe:duration-200',
-          collapsed ? 'lg:pl-[4.5rem]' : 'lg:pl-64',
+          'flex min-h-dvh flex-col motion-safe:transition-[padding] motion-safe:duration-200 lg:py-3 lg:pr-3',
+          collapsed ? 'lg:pl-[6rem]' : 'lg:pl-[18.5rem]',
         )}
       >
-        <header className="sticky top-[var(--env-banner-height,0px)] z-30 flex h-14 items-center gap-2 border-b border-line bg-canvas px-3 sm:px-6">
+        <div className="glass-sheet flex flex-1 flex-col lg:rounded-pane">
+        <header className="glass-topbar sticky top-[var(--env-banner-height,0px)] z-30 flex h-14 items-center gap-2 px-3 sm:px-6 lg:rounded-t-pane">
           <Button
             variant="ghost"
             size="icon"
@@ -280,8 +282,9 @@ export function AppShell({ navGroups, homeTo, topBarStart, topBarEnd, sidebarFoo
         {notice}
 
         <main id="app-shell-main" tabIndex={-1} className="flex-1 px-4 py-6 focus:outline-none sm:px-6 lg:px-8 lg:py-8">
-          <div className="mx-auto w-full max-w-[1400px]">{children}</div>
+          <div className="page-settle mx-auto w-full max-w-[1400px]">{children}</div>
         </main>
+        </div>
       </div>
     </div>
   );

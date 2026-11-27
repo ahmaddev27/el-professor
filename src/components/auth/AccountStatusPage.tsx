@@ -32,7 +32,7 @@ const TONE_CIRCLE: Record<AccountStatusTone, string> = {
  * stays in the page.
  */
 const AccountStatusPage: React.FC<AccountStatusPageProps> = ({ tone, icon: Icon, title, children, contactLead, action }) => (
-  <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center bg-canvas px-4 py-12 font-ui text-fg">
+  <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center px-4 py-12 font-ui text-fg">
     <div className="w-full max-w-md">
       <BrandMark size="sm" className="mb-8" />
       <Card className="p-6 text-center sm:p-8">

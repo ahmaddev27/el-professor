@@ -9,11 +9,11 @@ import { cn } from './cn';
 // they set the font themselves. The design tokens live on :root and .dark and
 // reach the portal unchanged.
 
-const scrimClass = 'bg-[rgb(5_8_16/0.55)] motion-safe:data-[state=open]:animate-ui-fade-in';
+const scrimClass = 'glass-scrim motion-safe:data-[state=open]:animate-ui-fade-in';
 
 const closeButtonClass = [
-  'absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-control text-fg-subtle transition-colors [@media(pointer:coarse)]:right-2 [@media(pointer:coarse)]:top-2 [@media(pointer:coarse)]:size-10',
-  'hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus',
+  'absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-tight text-fg-subtle transition-colors [@media(pointer:coarse)]:right-2 [@media(pointer:coarse)]:top-2 [@media(pointer:coarse)]:size-10',
+  'hover:bg-sunken hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
 ].join(' ');
 
 function CloseButton() {
@@ -37,11 +37,11 @@ export const DialogContent = forwardRef<
     {/* The overlay doubles as the scroll container, so a tall dialog scrolls
         instead of being cut off, and centring needs no transform that the
         entry animation would fight with. */}
-    <DialogPrimitive.Overlay className={cn('fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4', scrimClass)}>
+    <DialogPrimitive.Overlay className={cn('fixed inset-0 z-50 grid place-items-center overflow-y-auto p-5', scrimClass)}>
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          'relative grid w-full max-w-lg gap-5 rounded-surface border border-line bg-overlay p-6 font-ui text-fg shadow-overlay',
+          'relative grid w-full max-w-[560px] gap-4 glass-strong rounded-pane p-[22px] font-ui text-fg',
           'focus:outline-none motion-safe:data-[state=open]:animate-ui-pop-in',
           className,
         )}
@@ -60,14 +60,14 @@ export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElem
 }
 
 export function DialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end', className)} {...props} />;
+  return <div className={cn('flex flex-col-reverse gap-2 border-t border-line pt-3.5 sm:flex-row sm:justify-end', className)} {...props} />;
 }
 
 export const DialogTitle = forwardRef<
   ElementRef<typeof DialogPrimitive.Title>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title ref={ref} className={cn('text-lg font-semibold leading-snug text-fg', className)} {...props} />
+  <DialogPrimitive.Title ref={ref} className={cn('text-[17px] font-semibold leading-snug tracking-[-0.01em] text-fg', className)} {...props} />
 ));
 DialogTitle.displayName = 'DialogTitle';
 
@@ -75,14 +75,14 @@ export const DialogDescription = forwardRef<
   ElementRef<typeof DialogPrimitive.Description>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description ref={ref} className={cn('text-sm text-fg-muted', className)} {...props} />
+  <DialogPrimitive.Description ref={ref} className={cn('text-[13px] text-fg-subtle', className)} {...props} />
 ));
 DialogDescription.displayName = 'DialogDescription';
 
 // ── Sheet: the same dialog, anchored to an edge ─────────────────────────────
 
 const sheetVariants = cva(
-  'fixed z-50 flex flex-col border-line bg-overlay font-ui text-fg shadow-overlay focus:outline-none',
+  'fixed z-50 flex flex-col glass-drawer border-line font-ui text-fg focus:outline-none',
   {
     variants: {
       side: {
@@ -91,7 +91,7 @@ const sheetVariants = cva(
           'bottom-0 right-0 top-[var(--env-banner-height,0px)] w-full border-l sm:max-w-md motion-safe:data-[state=open]:animate-ui-slide-in-right',
         left: 'bottom-0 left-0 top-[var(--env-banner-height,0px)] w-[min(18rem,calc(100vw-3rem))] border-r motion-safe:data-[state=open]:animate-ui-slide-in-left',
         bottom:
-          'inset-x-0 bottom-0 max-h-[90dvh] rounded-t-surface border-t motion-safe:data-[state=open]:animate-ui-slide-in-bottom',
+          'inset-x-0 bottom-0 max-h-[90dvh] rounded-t-pane border-t motion-safe:data-[state=open]:animate-ui-slide-in-bottom',
       },
     },
     defaultVariants: { side: 'right' },

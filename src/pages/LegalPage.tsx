@@ -66,7 +66,7 @@ export function LegalPageView({ page, state, onRetry }: {
   const { t, language } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col bg-canvas font-ui text-fg">
+    <div className="flex min-h-screen flex-col font-ui text-fg">
       <header className="border-b border-line bg-raised">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <a

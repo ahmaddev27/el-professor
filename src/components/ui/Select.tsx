@@ -55,13 +55,13 @@ export const SelectContent = forwardRef<
       sideOffset={position === 'popper' ? sideOffset : undefined}
       className={cn(
         'relative z-[60] max-h-[min(var(--radix-select-content-available-height),20rem)] min-w-[var(--radix-select-trigger-width)]',
-        'overflow-hidden rounded-control border border-line bg-overlay font-ui text-fg shadow-overlay',
-        'motion-safe:data-[state=open]:animate-ui-pop-in',
+        'overflow-hidden glass-strong rounded-tile font-ui text-fg',
+        'motion-safe:data-[state=open]:animate-ui-menu-in',
         className,
       )}
       {...props}
     >
-      <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
+      <SelectPrimitive.Viewport className="p-1.5">{children}</SelectPrimitive.Viewport>
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
 ));
@@ -74,7 +74,7 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex h-9 cursor-default select-none items-center rounded-[calc(var(--radius-control)-2px)] pl-8 pr-3 text-sm outline-none [@media(pointer:coarse)]:h-11',
+      'relative flex h-[34px] cursor-default select-none items-center rounded-tight pl-8 pr-3 text-[13px] outline-none [@media(pointer:coarse)]:h-11',
       'data-[highlighted]:bg-sunken data-[state=checked]:font-semibold data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
