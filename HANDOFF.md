@@ -2,7 +2,7 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — the Glass remake, batch R6, and two Arabic fixes** (branch `design/remake-r6`, one PR into `staging`; no migration, look only).
+- **27.11.2026 (latest) — the Glass remake, batch R6, and two Arabic fixes** (branch `design/remake-r6`, PR #388 into `staging`; no migration, look only).
   - **Sidebar missing in Arabic on wide screens, both shells:** the drawer's closed `rtl:translate-x-full` outranked `lg:translate-x-0` (Tailwind 3.4 emits `rtl:` after the screens at equal specificity), so the sticky sidebar slid out past the right edge. Now `max-lg:-translate-x-full max-lg:rtl:translate-x-full` in `Sidebar` and `AdminSidebar`.
   - **Arabic face is Tajawal** (`@fontsource/tajawal`, Arabic subset 400/500/700, replacing `@fontsource/ibm-plex-sans-arabic`); Latin text and figures stay Geist.
   - **R6:** the legacy tokens are gone from `src/index.css` with the unused legacy classes and animations; the last readers (note components, `DriverSalarySummaryCard`'s export buttons, seven `HistoricalWorkingHoursWizard` figures that passed a `var()` as a class) are on tokens; the Timesheet's absence badge has a fixed colour. `legacyTokensRetired.test.ts` replaces `accentLabel.contrast.test.ts`. The landing hero mirrors in RTL through `--hero-x`.
