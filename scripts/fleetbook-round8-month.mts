@@ -8,7 +8,8 @@
  *   npx vite-node scripts/fleetbook-round8-month.mts --from-inputs <dir>/round8-2026-09-inputs.json --out <dir>
  *       [--seed N] [--render]
  *
- * --fetch signs in to STAGING as the DEMO login (e2e/.env.local; no other host
+ * --fetch signs in to STAGING as the DEMO login (e2e/.env.local, or the file
+ * named by R8_E2E_ENV, since a worktree has none of its own; no other host
  * is accepted, and no company but DEMO Monatsplanung GmbH), reads what the
  * screen reads, builds the address pool and the routed matrix through the same
  * edge functions, and writes:
@@ -64,7 +65,7 @@ mkdirSync(OUT, { recursive: true });
 // ── Staging, and only staging ──────────────────────────────────────────────────
 
 function e2eEnv(): Record<string, string> {
-  const text = readFileSync(path.join(REPO, 'e2e/.env.local'), 'utf8');
+  const text = readFileSync(process.env.R8_E2E_ENV || path.join(REPO, 'e2e/.env.local'), 'utf8');
   const out: Record<string, string> = {};
   for (const line of text.split(/\r?\n/u)) {
     const m = /^([A-Z0-9_]+)=(.*)$/u.exec(line.trim());
