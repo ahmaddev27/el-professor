@@ -31,6 +31,12 @@ BEGIN
   -- A privilege error is raised at parse time and the plan the owner just
   -- warmed would hide it, so the owner's cached plans go first.
   DISCARD PLANS;
+  -- set_config(..., true) lasts the whole transaction, so a user set by an
+  -- earlier probe would still be auth.uid() here: anon and the service key
+  -- carry no subject in production, and must not here either.
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
   IF p_who = 'anon' THEN
     PERFORM set_config('request.jwt.claim.role', 'anon', true);
     EXECUTE 'SET LOCAL ROLE anon';

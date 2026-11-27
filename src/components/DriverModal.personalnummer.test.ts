@@ -2,7 +2,6 @@ import { createElement, type ReactNode } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { settle } from '../test-utils/tree';
-import type { FakeCall } from '../test-utils/fakeSupabase';
 import type { Driver } from '../types/receipt';
 
 /**
@@ -22,7 +21,7 @@ const world = vi.hoisted(() => ({
 
 vi.mock('../lib/supabase', async () => {
   const { createFakeSupabase } = await import('../test-utils/fakeSupabase');
-  world.fake = createFakeSupabase((call: FakeCall) => (
+  world.fake = createFakeSupabase(() => (
     world.hold
       ? (world.hold.then(() => world.answer) as unknown as typeof world.answer)
       : world.answer
