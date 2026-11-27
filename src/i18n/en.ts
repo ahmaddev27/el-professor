@@ -7425,4 +7425,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'sa.subs.actionsMenu': 'Actions',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'account.tab.profile': 'Profile',
 };

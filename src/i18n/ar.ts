@@ -7142,4 +7142,5 @@ export const ar: PartialDictionary = {
   'notes.nextMonth': 'الشهر التالي',
   'notes.prevMonth': 'الشهر السابق',
   'sa.subs.actionsMenu': 'الإجراءات',
+  'account.tab.profile': 'الملف الشخصي',
 };
