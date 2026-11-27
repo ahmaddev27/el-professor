@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { User, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Building2, ShieldCheck, KeyRound } from 'lucide-react';
-import { Alert, Button, Card, Input, PageHeader } from '../components/ui';
+import { Alert, Button, Card, Input, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -24,6 +24,8 @@ const MIN_LEN = 8;
 
 /** A code went to the new address; the change happens once it is entered. */
 type EmailChallenge = { newEmail: string; accessToken: string; cooldownSeconds: number };
+
+type AccountTab = 'profile' | 'email' | 'password' | 'passkeys';
 
 /**
  * The signed-in user's own account: display name, email address, password.
@@ -57,6 +59,7 @@ const AccountPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const { user, profile, isSuperAdmin } = useAuth();
   const passkeysOn = usePasskeysEnabled();
+  const [tab, setTab] = useState<AccountTab>('profile');
 
   const [companyName, setCompanyName] = useState<string | null>(null);
 
@@ -281,13 +284,45 @@ const AccountPage: React.FC = () => {
     </h3>
   );
 
-  return (
-    <div className="max-w-3xl space-y-6 font-ui">
-      <PageHeader title={t('account.title')} description={t('account.subtitle')} />
+  // Panels stay mounted and are only hidden, so a pending email code and
+  // half-typed fields survive a tab switch.
+  const panel = 'space-y-6 data-[state=inactive]:hidden';
+  const formCard = 'glass-card rounded-surface p-5 text-fg lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-10';
+  const activeTab: AccountTab = tab === 'passkeys' && !passkeysOn ? 'profile' : tab;
+  const shownName = profile?.full_name?.trim() ?? '';
+  const shownEmail = profile?.email ?? user?.email ?? '';
+  const initials = (shownName || shownEmail).slice(0, 2).toUpperCase();
 
+  return (
+    <div className="mx-auto w-full max-w-4xl space-y-6 font-ui">
+      <PageHeader title={t('account.title')} description={t('account.subtitle')} className="pb-0" />
+
+      <Tabs value={activeTab} onValueChange={id => setTab(id as AccountTab)}>
+        <TabsList>
+          <TabsTrigger value="profile"><User size={15} aria-hidden />{t('account.tab.profile')}</TabsTrigger>
+          <TabsTrigger value="email"><Mail size={15} aria-hidden />{t('account.email.heading')}</TabsTrigger>
+          <TabsTrigger value="password"><Lock size={15} aria-hidden />{t('account.password.heading')}</TabsTrigger>
+          {passkeysOn && (
+            <TabsTrigger value="passkeys"><KeyRound size={15} aria-hidden />{t('passkey.heading')}</TabsTrigger>
+          )}
+        </TabsList>
+
+      <TabsContent value="profile" forceMount className={`mt-6 ${panel}`}>
       {/* Who you are — read-only facts about the account */}
       <Card className="p-5">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="flex items-center gap-4 pb-5">
+          <span
+            aria-hidden
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand-soft text-base font-semibold text-brand-text"
+          >
+            {initials}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-fg">{shownName || shownEmail}</p>
+            {shownName && <p className="truncate text-sm text-fg-muted" dir="ltr">{shownEmail}</p>}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 border-t border-edge pt-5 sm:grid-cols-3">
           <div>
             <p className="text-xs uppercase tracking-wide text-fg-subtle">
               {t('account.field.role')}
@@ -311,16 +346,18 @@ const AccountPage: React.FC = () => {
       </Card>
 
       {/* Display name */}
-      <form onSubmit={saveName} className="glass-card rounded-surface p-5 text-fg">
+      <form onSubmit={saveName} className={formCard}>
+          <div>
           <h3 className={sectionTitle}>
             <User size={16} className="text-brand-text" aria-hidden />
             {t('account.name.heading')}
           </h3>
+          </div>
+          <div className="mt-3 lg:mt-0">
           <Input
             type="text"
             value={fullName}
             onChange={e => setFullName(e.target.value)}
-            className="mt-3"
             placeholder={t('account.name.placeholder')}
             aria-label={t('account.name.heading')}
           />
@@ -328,7 +365,11 @@ const AccountPage: React.FC = () => {
           <Button type="submit" disabled={nameBusy} className="mt-4">
             {nameBusy ? t('common.saving') : t('common.save')}
           </Button>
+          </div>
       </form>
+      </TabsContent>
+
+      <TabsContent value="email" forceMount className={`mt-6 ${panel}`}>
 
       {/* Email. A company user gets a code at the new address and the challenge
           below completes the change; a platform account changes it in one step. */}
@@ -366,13 +407,16 @@ const AccountPage: React.FC = () => {
             e.preventDefault();
             void (isSuperAdmin ? changeEmailDirectly : requestEmailChange)(withPassword);
           }}
-          className="glass-card rounded-surface p-5 text-fg"
+          className={formCard}
         >
+            <div>
             {emailHeading}
             <p className="mt-1 text-xs text-fg-muted">
               {isSuperAdmin ? t('account.email.platformHint') : t('account.email.hint')}
             </p>
-            <div className="mt-3 space-y-3">
+            </div>
+            <div className="mt-3 lg:mt-0">
+            <div className="space-y-3">
               <Input
                 type="email"
                 value={email}
@@ -418,11 +462,15 @@ const AccountPage: React.FC = () => {
                 <p className="mt-1.5 text-xs text-fg-subtle">{t('passkey.reauth.hint')}</p>
               </div>
             )}
+            </div>
         </form>
       )}
+      </TabsContent>
 
+      <TabsContent value="password" forceMount className={`mt-6 ${panel}`}>
       {/* Password */}
-      <form onSubmit={savePassword} className="glass-card rounded-surface p-5 text-fg">
+      <form onSubmit={savePassword} className={formCard}>
+          <div>
           <h3 className={sectionTitle}>
             <Lock size={16} className="text-brand-text" aria-hidden />
             {t('account.password.heading')}
@@ -430,8 +478,10 @@ const AccountPage: React.FC = () => {
           <p className="mt-1 text-xs text-fg-muted">
             {t('account.password.hint', { n: String(MIN_LEN) })}
           </p>
+          </div>
 
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 lg:mt-0">
+          <div className="space-y-3">
             <Input
               type={showPw ? 'text' : 'password'}
               value={currentPw}
@@ -473,11 +523,16 @@ const AccountPage: React.FC = () => {
           <Button type="submit" disabled={pwBusy} className="mt-4">
             {pwBusy ? t('common.saving') : t('account.password.submit')}
           </Button>
+          </div>
       </form>
+      </TabsContent>
 
       {/* Renders nothing until GoTrue reports passkeys, so this page is
           unchanged on today's server. */}
-      <PasskeyCard />
+      <TabsContent value="passkeys" forceMount className={`mt-6 ${panel}`}>
+        <PasskeyCard />
+      </TabsContent>
+      </Tabs>
     </div>
   );
 };

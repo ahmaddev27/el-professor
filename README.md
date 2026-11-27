@@ -25,7 +25,9 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **Both topbars follow Reidey's shell (27.11.2026, branch `design/shell-topbar`, one PR against `staging`, no migration).** The section's name at the start, language and theme (and the user menu in the company shell) at the end; the panel's duplicate amber "Administration" pill is gone and its sidebar lines are quiet grey.
+> **Mein Konto in tabs (27.11.2026, branch `design/account-tabs`, one PR against `staging`, no migration, look only).** Profil, E-Mail, Passwort and, while GoTrue reports them, Passkeys, on `/admin/konto` and `/mein-konto` alike. Every panel stays mounted, so a pending email code survives a switch.
+
+> **Both topbars follow Reidey's shell (27.11.2026, merged into `staging` as #385, no migration).** The section's name at the start, language and theme (and the user menu in the company shell) at the end; the panel's duplicate amber "Administration" pill is gone and its sidebar lines are quiet grey.
 
 > **Arabic, the third UI language (27.11.2026, merged into `staging` as #384, no migration).** All 7117 keys are translated into Modern Standard Arabic against a closed glossary (a German domain term in brackets at its first mention), the whole UI mirrors right-to-left, and the generated documents, the legal pages, money, dates and digits stay German. `src/rtlClasses.test.ts` keeps physical direction classes out of `src/` and `rtl:` classes out of the documents. The owner reviews the wording. See CLAUDE.md, *Language*.
 

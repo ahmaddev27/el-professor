@@ -7499,4 +7499,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'sa.subs.actionsMenu': 'Aktionen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'account.tab.profile': 'Profil',
 } as const;
