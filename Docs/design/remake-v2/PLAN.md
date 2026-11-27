@@ -298,6 +298,9 @@ dark `line-strong`) fails exactly the four pairs it should.
   - `NAV_ITEMS`, `ADMIN_ITEMS`, the `can()` and module gates, every handler and the menu state stay byte
     for byte; only class strings and wrapper markup change, proved by script (§9).
   - The brand row is the El-Professor glyph in the spec's `.brand-mark` tile, then the company name.
+  - **The topbar follows the spec's order** (27.11.2026, after the owner's screenshot of the panel):
+    the section's name at the start (`.crumbs`, from `navCrumbKey()` over the sidebars' own nav
+    lists), the actions at the end (language, theme, user menu). Both shells.
 - **`AdminLayout` and `AdminSidebar` (legacy):** the same frame, moved off inline styles onto tokens in
   the phase 5 way. The platform pages inside stay legacy until their batch.
 - **`AppShell` (`/design-preview`'s frame):** the same frame. Its existing collapse (a 68px rail) gets

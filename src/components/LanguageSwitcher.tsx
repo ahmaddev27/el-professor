@@ -9,9 +9,9 @@ import { cn } from './ui';
  *
  * `variant="ui"` is the design-system look, for the signed-out screens since
  * phase 5 batch 4 and for AppLayout's header since the frame moved: token
- * classes that follow the theme, a 40 px target on a touch screen. `default`
- * is the legacy header look, and the two shells still on the legacy variables
- * draw it — AdminLayout and the legal pages. It moves when AdminLayout does.
+ * classes that follow the theme, a 40 px target on a touch screen, and
+ * AdminLayout's header since 27.11.2026. `default` is the legacy header look,
+ * and only the legal pages still draw it.
  * (A third variant, `dark`, painted the old always-dark sign-in screens;
  * nothing uses it any more.)
  */

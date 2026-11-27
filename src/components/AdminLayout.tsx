@@ -1,7 +1,7 @@
 import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Sun, Moon, ShieldAlert, RefreshCw } from 'lucide-react';
-import AdminSidebar from './AdminSidebar';
+import AdminSidebar, { ADMIN_NAV_ITEMS } from './AdminSidebar';
 import SupportSessionBar from './SupportSessionBar';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -9,6 +9,14 @@ import LanguageSwitcher from './LanguageSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { TENANT_HOME, decideAdminGate } from '../lib/adminGate';
+import { navCrumbKey, type CrumbSource } from '../lib/navCrumb';
+import { Button } from './ui';
+
+/** Every panel destination the topbar can name; the account page sits in the sidebar's foot. */
+const CRUMB_SOURCES: CrumbSource[] = [
+  ...ADMIN_NAV_ITEMS,
+  { path: '/admin/konto', labelKey: 'admin.nav.account' },
+];
 
 /**
  * Shell for the platform administration area.
@@ -26,6 +34,7 @@ const AdminLayout: React.FC = () => {
   const { t } = useTranslation();
   const { isSuperAdmin, signOut } = useAuth();
   const { platformAccessStatus, isPlatformStaff, reloadPlatformAccess } = useSuperAdmin();
+  const crumbKey = navCrumbKey(useLocation().pathname, CRUMB_SOURCES);
 
   // One decision, taken in a pure function the tests cover: the panel opens
   // only for an account platform_whoami() reports an active role for, and an
@@ -95,22 +104,26 @@ const AdminLayout: React.FC = () => {
             "Beenden" has to be reachable from where it was started. */}
         <SupportSessionBar />
         <header className="glass-topbar sticky top-0 z-20 h-[60px] lg:rounded-t-pane">
-          <div className="flex h-full items-center justify-between ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
-            <div className="flex items-center gap-3">
-              <button
+          {/* Reidey's topbar, as in AppLayout: the section's name at the start,
+              the actions at the end. The panel's name is the sidebar's; the
+              amber "Administration" pill that repeated it here is gone. */}
+          <div className="flex h-full items-center justify-between gap-3 ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
+            <p className="min-w-0 truncate text-sm font-semibold text-fg">
+              {crumbKey ? t(crumbKey) : null}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <LanguageSwitcher variant="ui" />
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={toggleTheme}
-                className="rounded-control border border-line bg-sunken p-2 text-fg-muted transition-colors hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 title={isDark ? t('shell.themeToLight') : t('shell.themeToDark')}
+                aria-label={isDark ? t('shell.themeToLight') : t('shell.themeToDark')}
+                className="border border-line bg-sunken"
               >
                 {isDark ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-              <span
-                className="rounded-control border border-caution/30 bg-caution-soft px-2.5 py-1 text-[11px] font-semibold text-caution shadow-hi"
-              >
-                {t('admin.badge')}
-              </span>
+              </Button>
             </div>
-            <LanguageSwitcher />
           </div>
         </header>
 

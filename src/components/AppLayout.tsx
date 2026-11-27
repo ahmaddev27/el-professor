@@ -1,6 +1,6 @@
 import React from 'react';
-import { Outlet } from 'react-router-dom';
-import Sidebar from './Sidebar';
+import { Outlet, useLocation } from 'react-router-dom';
+import Sidebar, { ADMIN_ITEMS, NAV_ITEMS } from './Sidebar';
 import UserMenu from './UserMenu';
 import AnnouncementBanner from './AnnouncementBanner';
 import SupportSessionBar from './SupportSessionBar';
@@ -9,6 +9,14 @@ import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 import { Sun, Moon } from 'lucide-react';
 import { Button } from './ui';
+import { navCrumbKey, type CrumbSource } from '../lib/navCrumb';
+
+/** Every company destination the topbar can name; Mein Konto is reached from the user menu. */
+const CRUMB_SOURCES: CrumbSource[] = [
+  ...NAV_ITEMS,
+  ...ADMIN_ITEMS,
+  { path: '/mein-konto', labelKey: 'account.title' },
+];
 
 /**
  * The company application frame — phase 5's last conversion.
@@ -31,6 +39,7 @@ interface AppLayoutProps {
 const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
   const { toggleTheme, isDark } = useTheme();
   const { t } = useTranslation();
+  const crumbKey = navCrumbKey(useLocation().pathname, CRUMB_SOURCES);
 
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   return (
@@ -47,8 +56,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
         <header className="glass-topbar sticky top-0 z-20 h-[60px] lg:rounded-t-pane">
           {/* Below `lg` the sidebar's menu button is fixed over this row's
               left edge, so the first control starts clear of it. */}
-          <div className="flex h-full items-center justify-between ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
-            <div className="flex items-center gap-3">
+          {/* Reidey's topbar: the section's name at the start, the actions at
+              the end (language, theme, account). */}
+          <div className="flex h-full items-center justify-between gap-3 ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
+            <p className="min-w-0 truncate text-sm font-semibold text-fg">
+              {crumbKey ? t(crumbKey) : null}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <LanguageSwitcher variant="ui" />
               <Button
                 variant="ghost"
                 size="icon"
@@ -59,12 +74,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
               >
                 {isDark ? <Sun size={16} /> : <Moon size={16} />}
               </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* The design-system variant, which already existed for the
-                  signed-out screens. The `default` one stays exactly as it is,
-                  because AdminLayout and the legal pages still draw it. */}
-              <LanguageSwitcher variant="ui" />
               <UserMenu />
             </div>
           </div>
