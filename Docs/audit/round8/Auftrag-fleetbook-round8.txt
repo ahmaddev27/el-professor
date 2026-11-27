@@ -1,0 +1,538 @@
+# CLAUDE — FLEETBOOK ROUND 8
+## DRIVER SALARIES, REAL WORKING HOURS, UBER DAILY EARNINGS & CALENDAR MONTH PLANNING
+
+**Priority: CRITICAL**
+
+**Target application:** El-Professor / FleetBook  
+**Affected modules:** Drivers, Uber Import, Fahrten simulieren, Kalendermonat, Schichtplanung, Routing, Financial Reports, Fahrtenbuch Export
+
+---
+
+## 1. MAIN OBJECTIVE
+
+FleetBook must generate monthly driver and vehicle plans based on the company's actual imported data, not arbitrary simulated amounts.
+
+The most important inputs are:
+
+1. Driver working hours from the **Drivers page**.
+2. Driver salary and payment configuration from the **Drivers page**.
+3. Daily Uber earnings imported into FleetBook.
+4. Uber tips (`Trinkgeld`) for each driver.
+5. Actual trip details, when available.
+6. Company city and starting location.
+7. Vehicle and driver availability.
+8. Actual calendar month boundaries.
+
+**The system must calculate a feasible plan from these inputs. It must not invent unrealistic fares, modify historical financial values, or create impossible shifts just to make the totals look correct.**
+
+---
+
+## 2. DRIVER SHIFTS MUST MATCH THE DRIVERS PAGE
+
+Currently, the system creates shifts based on generation logic that may not match the individual driver's working hours or salary settings.
+
+This must change.
+
+For every driver, fetch the authoritative configuration from the Drivers page, using the driver's immutable UUID:
+
+- Driver name and UUID.
+- Employment or contract type.
+- Monthly salary, if configured.
+- Hourly wage, if configured.
+- Revenue commission, if configured.
+- Target or contracted working hours.
+- Maximum permitted working hours.
+- Availability and working days.
+- Scheduled breaks.
+- Leave, sickness and confirmed unavailability.
+- Driver-specific working restrictions.
+- Relevant company and tenant ID.
+
+Do not assume every driver works the same number of hours.
+
+Do not apply a universal 240–360-minute shift requirement when the driver's actual configured working arrangements require something else. Validate whether this range is a simulation preference, a business constraint, or a driver-specific requirement.
+
+### Required calculations
+
+For each driver and month, calculate:
+
+- Contracted monthly hours.
+- Scheduled hours.
+- Actual recorded hours, if available.
+- Remaining or excess hours.
+- Number of shifts.
+- Paid and unpaid breaks, where configured.
+- Salary or wage amount.
+- Commission amount, if applicable.
+- Difference between expected and calculated compensation.
+
+**Salary and hours must reconcile with the Drivers page.**
+
+Do not automatically change a salary to fit generated shifts, or invent worked hours to justify an existing salary.
+
+If the existing salary and hours settings cannot be reconciled, show an explicit discrepancy and prevent an unsupported payroll claim.
+
+For simulation planning, optimize the proposed shifts within the real configuration. Keep planning results separate from actual payroll records.
+
+---
+
+## 3. EVERY SHIFT MUST START FROM THE COMPANY CITY
+
+Every generated operational block must begin at a defined starting point inside the city where the company is based.
+
+Read the company location from its actual tenant settings:
+
+- Company city.
+- Company address or authorized operating base.
+- Latitude and longitude, if available.
+- Company-specific operating area.
+- Applicable start and return rules.
+
+Do not hardcode Solingen or any other city.
+
+### Required shift sequence
+
+Example:
+
+**Company base → First pickup → Passenger trip → Empty repositioning → Next passenger trip → ... → Shift end**
+
+The first passenger pickup does not need to be inside the company city, but the operational shift must begin from the configured company starting location.
+
+The drive from the base to the first pickup must:
+
+- Be calculated using routing.
+- Consume real scheduling time.
+- Have its empty kilometers recorded.
+- Not be counted as a paid passenger trip.
+- Not be hidden or deleted from internal operations.
+
+If the company requires return-to-base at shift end, apply this from company settings and include the necessary time. Do not invent a universal return requirement.
+
+**A shift may not simply begin at a random pickup location in another city without accounting for the vehicle's travel from its actual starting point.**
+
+---
+
+## 4. USE REAL TRIPS AND REALISTIC PRICES
+
+This is a critical correction.
+
+Trip prices must be based on authentic imported trip data whenever such data exists.
+
+For real trips, preserve the imported:
+
+- Original trip ID.
+- Original trip date.
+- Pickup and drop-off time.
+- Pickup and destination.
+- Driver identity.
+- Fare amount.
+- Uber fees or adjustments when provided.
+- Tip amount.
+- Cancellation status and charge.
+- Original source information.
+
+Never inflate individual trip prices to force the system to reach a daily revenue target.
+
+### Example
+
+If an actual Uber trip was 8.70 €, it must remain 8.70 €.
+
+Do not change it to 19.80 € simply because the generated day needs more revenue.
+
+Do not create an invented trip and label it as an actual Uber trip.
+
+### If Uber provides only daily earnings
+
+If the import contains a daily financial total but not individual trips, the system cannot reconstruct real trips from that number alone.
+
+In that situation:
+
+- Preserve the Uber daily total as an authentic imported financial value.
+- Mark all generated trip details as `SIMULIERT`.
+- Do not classify the generated rides as real or historical.
+- Do not claim the simulated trips independently prove the Uber earnings.
+- Display the distinction between imported actuals and simulated planning estimates.
+
+Use realistic fares only for clearly labeled simulations, with documented pricing assumptions and a transparent reconciliation gap.
+
+**Never manipulate real-world records or invent evidence of actual rides.**
+
+---
+
+## 5. DAILY UBER EARNINGS × 30%, 31%, 32% OR 33%
+
+The daily financial calculation must be based on the **daily amount imported from Uber**.
+
+The allowed percentage options are:
+
+- 30%
+- 31%
+- 32%
+- 33%
+
+These are percentages, not multipliers of 30–33 times.
+
+For a selected percentage `p`:
+
+`Calculated daily share = Imported Uber daily amount × p / 100`
+
+For example:
+
+- Imported Uber amount: 500.00 €
+- Selected share: 32%
+- Calculated amount: 160.00 €
+
+**Important:** The percentage must have a clearly defined business meaning in the application: company share, driver share, commission or other configured financial category.
+
+Do not silently assume it is the driver's salary or that it represents the total price of trips.
+
+Before implementation, inspect the existing financial configuration and Uber import schema and determine:
+
+- Is the imported daily amount gross or net?
+- Does it include Uber's service fees?
+- Are tips included or excluded?
+- Does the percentage apply to fares only or another eligible base?
+- Who receives the calculated percentage?
+- How are refunds, adjustments and cancellations treated?
+
+Use the company's actual configured rule; document it explicitly.
+
+If the required business meaning or eligible calculation base is not configured, mark the calculation as `CONFIGURATION_REQUIRED` rather than inventing an answer.
+
+### Percentage selection
+
+Make the allowed percentage selectable through company settings.
+
+If the simulation uses a randomly selected percentage, it must:
+
+- Be one of exactly 30%, 31%, 32%, or 33%.
+- Have a documented scope: per month or per day.
+- Be reproducible with a Seed.
+- Remain stable during regeneration with the same settings.
+- Never modify the imported Uber source amounts.
+
+### Reconciliation
+
+Show, for each driver and day:
+
+1. Uber imported amount.
+2. Applied percentage.
+3. Calculated share.
+4. Imported tips.
+5. Relevant adjustments.
+6. Total according to the configured accounting formula.
+7. Difference from the source or target, if applicable.
+
+**Do not force the sum of fabricated trip fares to match the calculated share.** The financial share is a derived accounting amount, not automatically the gross fare total.
+
+---
+
+## 6. TRINKGELD MUST MATCH UBER EXACTLY
+
+Tips are a strict requirement.
+
+For each driver, the total `Trinkgeld` must match the imported Uber tips for the same reporting period, **to the exact cent**.
+
+Where daily driver-level tips are available:
+
+`SUM(Driver trip tips for day) = Uber imported driver tips for day`
+
+Where only monthly driver-level tips are available:
+
+`SUM(Driver trip tips for month) = Uber imported driver tips for month`
+
+Do not pretend daily tip distribution is known if Uber supplies only the monthly amount.
+
+### Rules
+
+- No invented tips.
+- No random tip increases.
+- No rounding differences beyond the specified cent-level currency representation.
+- No transfer of tips between different drivers.
+- No duplication of tips across days.
+- No tips on empty repositioning journeys.
+- No automatic tips on canceled trips unless explicitly supported by source records.
+
+Preserve the original Uber values.
+
+If imported tips are not linked to individual trips, store the driver/day tip total independently. Do not fabricate per-trip allocations and describe them as actual tip records.
+
+If a simulation requires allocating tips to synthetic trip rows, label the allocation clearly as simulated and keep the original authoritative total separately.
+
+Any unexplained difference must fail financial validation.
+
+---
+
+## 7. EXACT CALENDAR MONTH — NOT UBER WEEKLY PERIODS
+
+The monthly planner must use actual calendar boundaries.
+
+Examples:
+
+- September 2026: 01.09.2026–30.09.2026.
+- October 2026: 01.10.2026–31.10.2026.
+- February 2027: 01.02.2027–28.02.2027.
+- February 2028: 01.02.2028–29.02.2028.
+
+Uber may organize imported statements into four or five weekly periods.
+
+**These weekly periods must never determine the boundaries of FleetBook's monthly report.**
+
+Instead, import the source periods and allocate their dated transactions into the selected calendar month according to the actual transaction dates and the configured accounting date rules.
+
+A calendar month must:
+
+- Begin on day 1.
+- End on its actual last day.
+- Include zero-activity days.
+- Correctly handle midnight crossings.
+- Correctly handle `Europe/Berlin` or the company's configured time zone.
+- Avoid duplicate transactions at weekly and monthly boundaries.
+- Avoid omitting transactions because they belong to an overlapping Uber statement week.
+
+Do not simply divide a weekly aggregate across days without trustworthy date-level information.
+
+If the source contains only a weekly total and daily amounts cannot be established, mark the daily breakdown as unavailable instead of inventing it.
+
+---
+
+## 8. AUTOMATIC EMPTY-DRIVE REPOSITIONING
+
+Keep the Round 6 `REPOSITIONING` architecture.
+
+Between two passenger trips:
+
+`A → B` = passenger trip
+
+`B → C` = empty repositioning
+
+`C → D` = passenger trip
+
+The internal repositioning drive must:
+
+- Remain in the operational system.
+- Use valid coordinates.
+- Use a road routing engine.
+- Have a realistic duration and distance.
+- Be assigned to the correct driver and vehicle.
+- Be included in working-time planning as appropriate.
+- Never be counted as a passenger fare.
+- Never be deleted from the internal movement history solely to hide routing problems.
+
+Prefer short transitions of 2–5 minutes where feasible, but never force longer journeys into that limit.
+
+The next ride must not start until the vehicle can physically reach its pickup location.
+
+Also include the necessary trip preparation and configured safety margin.
+
+---
+
+## 9. REALISTIC SHIFT AND SALARY RECONCILIATION
+
+The monthly planning engine must jointly optimize:
+
+- Individual driver hours.
+- Available driver days.
+- Contract and salary configuration.
+- Available vehicles.
+- Actual Uber ride assignments.
+- Realistic routing.
+- Working-time and break constraints.
+- Company base location.
+- Imported financial totals.
+
+The system must not optimize one dimension by silently violating another.
+
+Examples of forbidden behavior:
+
+- Adding fake shifts to justify a fixed salary.
+- Changing real fares to satisfy a percentage target.
+- Moving recorded trips to other dates to fill missing working hours.
+- Changing real trip driver assignments without authoritative evidence.
+- Ignoring travel between pickups.
+- Using hours from the wrong month.
+- Ignoring leave or maintenance.
+
+If the input data cannot produce a fully consistent plan, provide an explicit reconciliation report instead of fabricating missing facts.
+
+---
+
+## 10. REQUIRED MONTHLY OUTPUTS
+
+Produce a real, readable XLSX workbook containing:
+
+### Sheet 1 — Fahrtenbuch
+
+- Actual passenger trip records when available.
+- Eligible canceled trips and configured cancellation fees.
+- No `abgelehnt` rows.
+- No internal repositioning rows.
+- Original IDs, dates, driver references and fares.
+- Source and authenticity classification.
+
+### Sheet 2 — Driver Shifts
+
+For every driver:
+
+- Driver UUID and name.
+- Shift ID.
+- Shift date.
+- Shift start/end.
+- Starting company base.
+- Vehicle.
+- Passenger trips.
+- Repositioning time.
+- Working hours and breaks.
+- Any hours discrepancy.
+- Verification status.
+
+### Sheet 3 — Driver Salary & Working Hours
+
+- Configured salary or wage basis.
+- Contracted hours.
+- Scheduled hours.
+- Actual hours, when available.
+- Gross wage calculation when supported.
+- Commission, if applicable.
+- Imported tips.
+- Unresolved differences.
+
+Do not label a revenue total as the driver's salary.
+
+### Sheet 4 — Uber Daily Reconciliation
+
+- Calendar date.
+- Driver UUID.
+- Uber imported earnings.
+- Eligible financial calculation base.
+- Selected percentage.
+- Calculated share.
+- Imported tips.
+- Actual fare totals, if individually available.
+- Differences and verification results.
+
+### Sheet 5 — Vehicles & Repositioning
+
+- Vehicle identity.
+- Driver assignment.
+- Operating shift.
+- Passenger kilometers.
+- Empty kilometers.
+- Base departure.
+- Empty-route start/end.
+- Route duration.
+- Route provider.
+- Verification status.
+
+### Sheet 6 — Calendar Month Summary
+
+Show every calendar day, including days with no activity.
+
+Include totals for:
+
+- Passenger fares.
+- Tips.
+- Cancellations.
+- Driver salary calculations.
+- Company financial share.
+- Passenger kilometers.
+- Empty kilometers.
+- Work hours.
+- Number of shifts.
+
+### Sheet 7 — Validation & Provenance
+
+Document:
+
+- Import source identifiers.
+- Reporting month.
+- Tenant.
+- Time zone.
+- Generator version.
+- Whether the records are actual, imported, simulated or derived.
+- Calculation rules.
+- Applied percentage.
+- Test status.
+- Unresolved differences.
+
+---
+
+## 11. DOCKER ROUTING & INDEPENDENT VERIFICATION
+
+Previous independent Docker testing found:
+
+- 19 unique routing time warnings.
+- 109 unverified transitions.
+- 0 forbidden declined rows in export.
+
+The new generator must address the root causes.
+
+Do not report `0 routing errors` if routing was skipped.
+
+Create a route-validation report that allows direct comparison with independent Nominatim and Valhalla results.
+
+If the routing engine is unavailable, the result is `VERIFICATION_INCOMPLETE`, not `VALIDATED_FOR_EXPORT`.
+
+---
+
+## 12. AUTOMATED TESTING
+
+Add regression tests for:
+
+1. Individual driver salary settings.
+2. Individual driver monthly working-hour targets.
+3. Drivers with different employment and payment models.
+4. Driver leave and sickness.
+5. Vehicle maintenance.
+6. Start of each shift at the company base.
+7. Base-to-first-pickup empty travel.
+8. Repositioning between passenger trips.
+9. Trips crossing midnight.
+10. All calendar month lengths.
+11. Uber weeks overlapping month boundaries.
+12. Uber daily totals and missing daily detail.
+13. Exact driver tip reconciliation.
+14. Percentage selection from 30/31/32/33 only.
+15. Correct percentage calculation base.
+16. No inflated real fares.
+17. No fabricated actual rides.
+18. No double-counted Uber transactions.
+19. Correct cancellation charges.
+20. Exclusion of `abgelehnt` from Fahrtenbuch.
+21. Driver and vehicle overlap prevention.
+22. Invalid or unavailable geocoding.
+23. Unavailable routing.
+24. Correct handling of unresolvable salary/hour mismatches.
+25. Multi-tenant isolation.
+26. Export, re-import and independent validation.
+
+Tests must include realistic negative scenarios where the correct result is failure or `INCOMPLETE`, not a fabricated successful report.
+
+---
+
+## 13. REQUIRED DELIVERABLES
+
+Deliver:
+
+1. Root-cause analysis of the existing generator.
+2. Actual source-code changes.
+3. Updated database schema or migrations, if needed.
+4. Automated regression tests.
+5. Test execution evidence.
+6. Example September 2026 calendar-month workbook.
+7. Example October 2026 calendar-month workbook.
+8. Driver salary and hour reconciliation.
+9. Uber earnings and tips reconciliation.
+10. Shift start-location evidence.
+11. Repositioning and routing report.
+12. Source provenance report.
+13. A list of unsupported, missing or unverifiable source data.
+14. Comparison before and after changes.
+
+Do not modify real Uber imports or historical records.
+
+Do not solve reconciliation errors by adjusting fares, hours, dates, salaries or tips without a legitimate documented source event.
+
+**The final goal is a FleetBook monthly planner that reflects authentic Uber financial data, respects each driver's actual working configuration, starts shifts at the company's operating base, produces realistic route-feasible schedules and always reports from the first to the last day of the selected calendar month.**
+
+**Success means verifiable consistency with source data — not merely a green badge or a generated spreadsheet.**
