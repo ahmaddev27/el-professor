@@ -17,6 +17,9 @@ import {
   NOT_READ_SALARIES,
   NO_ACTUAL_HOURS,
   NO_GROSS_WAGE,
+  FARE_GAP_HEADER,
+  FARE_GAP_TOTAL_LABEL,
+  FARE_UNREADABLE,
   NO_UBER_ROW,
   SHARE_HEADER,
   UBER_NOT_READ,
@@ -494,6 +497,71 @@ describe('sheet 4: the month never reads better than its own rows (D1, owner 27.
     const rows = rowStatuses(r);
     if (rows.some(x => x !== 'RECONCILED')) expect(r.financial.status).not.toBe('RECONCILED');
     if (r.financial.status === 'RECONCILED') expect(rows.every(x => x === 'RECONCILED')).toBe(true);
+  });
+});
+
+describe('sheet 4: the gap between Uber\'s turnover and the fares is shown, never closed (D1, owner 27.11.2026)', () => {
+  const dayRows = (r: FullMonthResult): Rows => {
+    const uber = sheetOf(r, CLOSING_SHEET_UBER);
+    return uber.slice(1).filter(x => x[column(uber, 'Zeilenart')] === 'Tag');
+  };
+  const header = sheetOf(month, CLOSING_SHEET_UBER);
+  const at = (h: string) => column(header, h);
+
+  it('is Umsatz minus simulated and real fares on every day with figures, to the cent', () => {
+    let checked = 0;
+    for (const r of dayRows(month)) {
+      const gap = r[at(FARE_GAP_HEADER)];
+      if (typeof gap !== 'number') continue;
+      const real = r[at('Echte Fahrpreise (EUR, importiert)')];
+      expect(cents(gap)).toBe(cents(r[at('Umsatz (EUR, importiert)')]) - cents(r[at('Simulierte Fahrpreise (EUR, nicht tatsaechlich)')])
+        - (real === '' ? 0 : cents(real)));
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(40);
+  });
+
+  it('counts the real fares of a day the driver drove for real', () => {
+    const row = dayRows(month).find(r => r[at('Fahrer-ID')] === ALPHA && r[at('Datum')] === '2026-09-08')!;
+    expect(row[at('Echte Fahrpreise (EUR, importiert)')]).toBe(28.5);
+    expect(cents(row[at(FARE_GAP_HEADER)])).toBe(cents(row[at('Umsatz (EUR, importiert)')]) - cents(row[at('Simulierte Fahrpreise (EUR, nicht tatsaechlich)')]) - 2_850);
+  });
+
+  it('says why there is no gap instead of printing 0, and leaves weeks and open tips empty', () => {
+    const blind = dayRows(run({ uber: null }));
+    expect(new Set(blind.map(r => r[at(FARE_GAP_HEADER)]))).toEqual(new Set([UBER_NOT_READ]));
+    const uber = sheetOf(month, CLOSING_SHEET_UBER);
+    // A driver Uber reports nothing daily for is planned on every allowed day, with no figure to compare.
+    const alphaOnly = dayRows(run({ uber: { days: UBER.days.filter(d => d.driverId === ALPHA), periods: [] } }));
+    const betaDays = alphaOnly.filter(r => r[at('Fahrer-ID')] === BETA);
+    expect(betaDays.length).toBeGreaterThan(5);
+    for (const r of betaDays) expect(r[at(FARE_GAP_HEADER)]).toBe(NO_UBER_ROW);
+    for (const r of uber.slice(1).filter(x => x[column(uber, 'Zeilenart')] !== 'Tag')) expect(r[column(uber, FARE_GAP_HEADER)]).toBe('');
+  });
+
+  it('marks a day whose real fare cannot be read, and the total leaves it out and says so', () => {
+    const rows = [...REAL_ROWS.slice(0, 1), realRow({ id: 'r-2', start_at: '2026-09-08T09:10:00Z', end_at: '2026-09-08T09:40:00Z', price_amount: 'abc', source_row_key: 'uber:r2' })];
+    const unreadable = run({ realTrips: readRealTrips({ year: 2026, month: 9, rows, drivers: DRIVER_REFS, timeZone: ZONE, operatingDayStartHour: 4 }) });
+    const row = dayRows(unreadable).find(r => r[at('Fahrer-ID')] === ALPHA && r[at('Datum')] === '2026-09-08')!;
+    expect(row[at(FARE_GAP_HEADER)]).toBe(FARE_UNREADABLE);
+    expect(String(checkValue(sheetOf(unreadable, CLOSING_SHEET_CHECKS), FARE_GAP_TOTAL_LABEL))).toMatch(/nicht enthalten: .*1 mit unlesbarem Fahrpreis/);
+  });
+
+  it('totals on sheet 7 as the sum of the day gaps, and says "nicht gelesen" without Uber', () => {
+    const gaps = dayRows(month).map(r => r[at(FARE_GAP_HEADER)]).filter((g): g is number => typeof g === 'number');
+    const total = String(checkValue(sheetOf(month, CLOSING_SHEET_CHECKS), FARE_GAP_TOTAL_LABEL));
+    expect(total.startsWith(`${gaps.reduce((n, g) => n + cents(g), 0) / 100} EUR ueber ${gaps.length} Fahrertage`)).toBe(true);
+    expect(checkValue(sheetOf(run({ uber: null }), CLOSING_SHEET_CHECKS), FARE_GAP_TOTAL_LABEL)).toBe(UBER_NOT_READ);
+  });
+
+  it('fits no fare to Uber: doubling every day\'s Umsatz moves the gap and leaves every simulated ride as it was', () => {
+    const doubled: ReconcileUber = { ...UBER, days: UBER.days.map(d => ({ ...d, figures: { ...d.figures, umsatzCents: d.figures.umsatzCents * 2 } })) };
+    const other = run({ uber: doubled });
+    const strip = (r: FullMonthResult) => r.month.rides.map(ride => ({ ...ride, tripId: undefined }));
+    expect(strip(other)).toEqual(strip(month));
+    const gapOf = (r: FullMonthResult) => dayRows(r).find(x => x[at('Fahrer-ID')] === ALPHA && x[at('Datum')] === '2026-09-10')![at(FARE_GAP_HEADER)];
+    const umsatz = UBER.days.find(d => d.driverId === ALPHA && d.date === '2026-09-10')!.figures.umsatzCents;
+    expect(cents(gapOf(other)) - cents(gapOf(month))).toBe(umsatz);
   });
 });
 

@@ -328,11 +328,19 @@ export function paySheetRows(result: FullMonthResult): Row[] {
 /** The share's column on sheets 4 and 6: it names what the share is (D1). */
 export const SHARE_HEADER = 'Unternehmensanteil (EUR, berechnet, nicht gebucht)';
 
+/**
+ * The gap between what Uber paid out as turnover and what the book's fares add
+ * up to, per driver and operating day (D1, owner 27.11.2026). It is shown and
+ * never closed: no fare is fitted to Uber's daily figure (spec §4, §5).
+ */
+export const FARE_GAP_HEADER = 'Differenz Umsatz - Fahrpreise (EUR, angezeigt, nicht ausgeglichen)';
+
 export const UBER_HEADERS: readonly string[] = [
   LABEL_HEADER, 'Zeilenart', 'Datum', 'Bis', 'Fahrer-ID', 'Fahrer', 'Umsatz (EUR, importiert)', 'Aktionen (EUR, importiert)',
   'Bargeld (EUR, importiert)', 'Basis (EUR)', 'Satz (%)', SHARE_HEADER,
   'Trinkgeld importiert (EUR)', 'Trinkgeld verteilt (EUR, simuliert)', 'Differenz Trinkgeld (EUR, Verteilung)', 'Simulierte Fahrten',
-  'Simulierte Fahrpreise (EUR, nicht tatsaechlich)', 'Echte Fahrpreise (EUR, importiert)', 'Formelergebnis (EUR, Unternehmensanteil = Umsatz x Satz)', 'Hinweise', 'Status',
+  'Simulierte Fahrpreise (EUR, nicht tatsaechlich)', 'Echte Fahrpreise (EUR, importiert)', FARE_GAP_HEADER,
+  'Formelergebnis (EUR, Unternehmensanteil = Umsatz x Satz)', 'Hinweise', 'Status',
 ];
 
 const NOTE_TEXT: Record<DriverDayNote, string> = {
@@ -367,6 +375,26 @@ function realFaresByDriverDay(result: FullMonthResult): Map<string, number | nul
   return out;
 }
 
+export const FARE_UNREADABLE = 'unlesbar';
+
+/**
+ * Umsatz minus simulated and real fares for one driver-day, in cents, or the
+ * word for why there is none: Uber not read, no Uber row, or a real fare that
+ * could not be read. A day with no real trip counts its real fares as 0.
+ */
+function dayFareGap(result: FullMonthResult, d: DriverDayReconciliation, real: number | null | undefined): number | string {
+  if (!result.financial.uberRead) return UBER_NOT_READ;
+  if (d.notes.includes('no_uber_row')) return NO_UBER_ROW;
+  if (real === null) return FARE_UNREADABLE;
+  return d.umsatzCents - d.simulatedFareCents - (real ?? 0);
+}
+
+/** Every day's gap, in the order of `financial.days`. */
+function fareGaps(result: FullMonthResult): (number | string)[] {
+  const realFares = realFaresByDriverDay(result);
+  return result.financial.days.map(d => dayFareGap(result, d, realFares.get(`${d.driverId}|${d.day}`)));
+}
+
 /** The outcome of each day-scoped Uber tip, by driver and day. */
 function dayTipOutcomes(result: FullMonthResult): Map<string, TipOutcome> {
   return new Map(result.financial.tips.filter(t => t.scope === 'day').map(t => [`${t.driverId}|${t.from}`, t.outcome]));
@@ -398,8 +426,10 @@ function periodStatus(p: PeriodReconciliation, tip: TipOutcome | undefined): str
 export function uberSheetRows(result: FullMonthResult): Row[] {
   const realFares = realFaresByDriverDay(result);
   const tips = dayTipOutcomes(result);
-  const days = result.financial.days.map((d): Row => {
+  const gaps = fareGaps(result);
+  const days = result.financial.days.map((d, i): Row => {
     const real = realFares.get(`${d.driverId}|${d.day}`);
+    const gap = gaps[i];
     const tip = tips.get(`${d.driverId}|${d.day}`);
     const notes = [...d.notes.map(n => NOTE_TEXT[n] ?? n), ...(tip && tip !== 'allocated' ? [`Trinkgeld: ${TIP_OUTCOME_TEXT[tip] ?? tip}`] : [])];
     // A figure Uber never gave is not a zero: not read at all, or no row for this driver-day.
@@ -409,8 +439,8 @@ export function uberSheetRows(result: FullMonthResult): Row[] {
       LABEL.derived, 'Tag', d.day, d.day, d.driverId, d.driverName, imported(d.umsatzCents), imported(d.aktionenCents),
       imported(d.bargeldCents), imported(d.basisCents), rateCell(d.rateBasisPoints), euroOrEmpty(d.shareCents),
       imported(d.tipsImportedCents), euro(d.tipsAllocatedCents), imported(d.tipDifferenceCents), d.simulatedCompleted,
-      euro(d.simulatedFareCents), real === undefined ? '' : (real === null ? 'unlesbar' : euro(real)),
-      euroOrEmpty(d.formulaTotalCents), notes.join('; '), dayStatus(d, tip),
+      euro(d.simulatedFareCents), real === undefined ? '' : (real === null ? FARE_UNREADABLE : euro(real)),
+      typeof gap === 'number' ? euro(gap) : gap, euroOrEmpty(d.formulaTotalCents), notes.join('; '), dayStatus(d, tip),
     ];
   });
   const periodTips = new Map(result.financial.tips.filter(t => t.scope === 'period').map(t => [`${t.driverId}|${t.from}|${t.to}`, t.outcome]));
@@ -422,13 +452,13 @@ export function uberSheetRows(result: FullMonthResult): Row[] {
       LABEL.derived, p.placement === 'inside_month' ? 'Woche im Monat' : 'Woche ueber die Monatsgrenze (nicht im Monat gezaehlt)',
       p.periodStart, p.periodEnd, p.driverId, p.driverName, euro(p.umsatzCents), euro(p.aktionenCents), '', euro(p.umsatzCents),
       rateCell(p.rateBasisPoints), euroOrEmpty(p.shareCents), euro(p.tipsImportedCents), euro(p.tipsAllocatedCents),
-      euro(p.tipsImportedCents - p.tipsAllocatedCents), '', '', '', euroOrEmpty(p.shareCents),
+      euro(p.tipsImportedCents - p.tipsAllocatedCents), '', '', '', '', euroOrEmpty(p.shareCents),
       notes.join('; '), periodStatus(p, tip),
     ];
   });
   const unallocated = result.financial.tips.filter(t => t.outcome !== 'allocated').map((t): Row => [
     LABEL.derived, 'Trinkgeld nicht verteilt', t.from, t.to, t.driverId, t.driverName, '', '', '', '', '', '',
-    euro(t.importedCents), euro(t.allocatedCents), euro(t.importedCents - t.allocatedCents), t.completedRides, '', '', '',
+    euro(t.importedCents), euro(t.allocatedCents), euro(t.importedCents - t.allocatedCents), t.completedRides, '', '', '', '',
     TIP_OUTCOME_TEXT[t.outcome] ?? t.outcome, 'INCOMPLETE',
   ]);
   return [[...UBER_HEADERS], ...days, ...periods, ...unallocated];
@@ -621,6 +651,20 @@ function distinct(values: readonly string[]): string {
   return set.length === 0 ? 'keine' : set.join(', ');
 }
 
+export const FARE_GAP_TOTAL_LABEL = 'Differenz Umsatz - Fahrpreise (EUR, Summe der Tage mit Uber-Wert)';
+
+/** The month's gap: the sum of the days that have one, and how many days have none. */
+function fareGapTotalText(result: FullMonthResult): string {
+  if (!result.financial.uberRead) return UBER_NOT_READ;
+  const gaps = fareGaps(result);
+  const counted = gaps.filter((g): g is number => typeof g === 'number');
+  const total = `${euro(counted.reduce((n, g) => n + g, 0))} EUR ueber ${counted.length} Fahrertage`;
+  const unreadable = gaps.filter(g => g === FARE_UNREADABLE).length;
+  const noRow = gaps.filter(g => g === NO_UBER_ROW).length;
+  const left = [...(noRow > 0 ? [`${noRow} ohne Uber-Wert`] : []), ...(unreadable > 0 ? [`${unreadable} mit unlesbarem Fahrpreis`] : [])];
+  return left.length === 0 ? total : `${total}; nicht enthalten: ${left.join(', ')}`;
+}
+
 export function checksSheetRows(result: FullMonthResult, verification: MonthVerification): Row[] {
   const p = result.provenance;
   const f = result.financial;
@@ -669,6 +713,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Betriebstag', `${p.settings.operatingDayStartHour}:00 bis ${p.settings.operatingDayStartHour}:00 (${p.settings.timeZone})`],
       ['Anteil', 'Umsatz (importiert) x Satz, je Fahrer und Betriebstag; berechnet und angezeigt, nicht gebucht'],
       ['Anteil: Bedeutung', `${SHARE_MEANING_TEXT[f.share.meaning]} (D1, Entscheidung des Inhabers vom 27.11.2026); ein Prozentsatz des Umsatzes, kein Faktor auf die Fahrpreise`],
+      ['Differenz Umsatz - Fahrpreise', 'Umsatz (importiert) minus simulierte und echte Fahrpreise, je Fahrer und Betriebstag; angezeigt, nicht ausgeglichen: kein Fahrpreis wird an den Uber-Wert angepasst (D1, 27.11.2026)'],
       ['Lohnberechnung nach Regel', '(Umsatz + Aktionen) x Provisionssatz + Trinkgeld, je Uber-Zeile auf Cent gerundet; keine Gehaltsbuchung'],
       ['Trinkgeld', 'nur aus Uber-Zahlen, centgenau auf simulierte Fahrten verteilt; nie erzeugt'],
       ['Stornogebuehr', 'nur wenn die Firma sie eingestellt hat'],
@@ -690,6 +735,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Regelverletzungen beim Zuruecklesen', result.violations.length === 0 ? 'keine' : result.violations.join('; ')],
       ['Finanzabgleich: Befunde', f.violations.length === 0 ? 'keine' : f.violations.join('; ')],
       ['Trinkgeldwerte nicht verteilt', `${tipsOpen.length} (${euro(tipsOpen.reduce((n, t) => n + t.importedCents, 0))} EUR)`],
+      [FARE_GAP_TOTAL_LABEL, fareGapTotalText(result)],
       ['Fahrer ausserhalb ihres Stundenrahmens', outsideRange.length === 0 ? 'keine' : outsideRange.map(o => o.driverName).join(', ')],
       ['Abgelehnte Fahrertage', result.refusals.length === 0 ? 'keine'
         : distinct(result.refusals.map(r => REASON_TEXT[r.reason] ?? r.reason))],

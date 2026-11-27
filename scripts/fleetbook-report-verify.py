@@ -481,6 +481,14 @@ def verify_closing(path):
     else:
         check(all(r["Umsatz (EUR, importiert)"] == "nicht gelesen" for r in counted_rows),
               "4: Uber not read, and no row pretends a figure")
+    # The gap (D1, 27.11.2026) is shown, never closed: Umsatz minus simulated and real fares, on every day with figures.
+    gap_header = "Differenz Umsatz - Fahrpreise (EUR, angezeigt, nicht ausgeglichen)"
+    gap_rows = [r for r in uber if r["Zeilenart"] == "Tag" and isinstance(r.get(gap_header), (int, float))]
+    wrong_gap = [r for r in gap_rows if cents(r[gap_header]) != cents(r["Umsatz (EUR, importiert)"])
+                 - cents(r["Simulierte Fahrpreise (EUR, nicht tatsaechlich)"])
+                 - (0 if r["Echte Fahrpreise (EUR, importiert)"] in ("", None) else cents(r["Echte Fahrpreise (EUR, importiert)"]))]
+    check(gap_header in (uber[0] if uber else {}) and not wrong_gap, "4: the gap is Umsatz minus simulated and real fares",
+          f"{len(gap_rows)} days, {len(wrong_gap)} wrong")
     across = [r for r in uber if str(r["Zeilenart"]).startswith("Woche ueber die Monatsgrenze")]
     check(all(r["Status"] == "INCOMPLETE" for r in across), "4: a week across the month boundary stays INCOMPLETE", f"{len(across)} weeks")
     failed = [r for r in uber if r["Status"] == "FAILED"]
