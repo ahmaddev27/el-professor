@@ -38,8 +38,9 @@
 /* ── Design system tokens (Phase 2, remade 27.11.2026) ───────────────────────
  * The palette of src/components/ui and both shells: the "Glass" design remake
  * (Docs/design/remake-v2/PLAN.md). The logo's blue as the brand (owner,
- * 27.11.2026: it replaced the spec's emerald), a green-grey canvas with an
- * ambient glow and film grain behind translucent glass panes. Mapped onto our
+ * 27.11.2026: it replaced the spec's emerald), a blue-grey canvas on the
+ * logo's hue (the same day: it was green-grey), an ambient glow and film grain
+ * behind translucent glass panes. Mapped onto our
  * token names by ROLE, never by the spec's names: our `--overlay` is the dialog
  * surface (the spec's glass-strong), our `--scrim` is the spec's overlay.
  *
@@ -106,33 +107,33 @@ td select, th select { max-width: none; }
 
 /* @tokens light */
 :root {
-  --canvas:         232 239 236;  /* #E8EFEC page background, under the glow */
+  --canvas:         234 237 243;  /* #EAEDF3 page background, under the glow */
   --raised:         255 255 255;  /* white at .62: cards, tables, panels */
   --raised-a:       0.62;
-  --overlay:        249 252 251;  /* #F9FCFB at .80: dialogs, sheets, menus */
+  --overlay:        250 251 254;  /* #FAFBFE at .80: dialogs, sheets, menus */
   --overlay-a:      0.8;
-  --sunken:         17 25 22;     /* ink at .06: skeleton, inset fills, counts */
+  --sunken:         20 23 29;     /* ink at .06: skeleton, inset fills, counts */
   --sunken-a:       0.06;
   --wash:           255 255 255;  /* white at .30: a table's header row */
   --wash-a:         0.3;
   --field:          255 255 255;  /* white at .62: input fill */
   --field-a:        0.62;
-  --solid:          247 250 249;  /* #F7FAF9 an opaque surface */
+  --solid:          248 249 252;  /* #F8F9FC an opaque surface */
   --sheet:          255 255 255;  /* white at .34: the sidebar and the content sheet */
   --sheet-a:        0.34;
   --edge:           255 255 255;  /* white at .78: the 1px edge of every glass pane */
   --edge-a:         0.78;
-  --scrim:          9 15 13;      /* #090F0D at .20: behind a dialog or the drawer */
+  --scrim:          11 14 18;     /* #0B0E12 at .20: behind a dialog or the drawer */
   --scrim-a:        0.2;
-  --toast:          14 22 19;     /* #0E1613 at .84: the toast, dark in both themes */
+  --toast:          17 20 26;     /* #11141A at .84: the toast, dark in both themes */
   --toast-a:        0.84;
-  --toast-fg:       233 242 238;  /* #E9F2EE */
-  --fg:             17 25 22;     /* #111916 primary text */
-  --fg-muted:       79 91 86;     /* #4F5B56 secondary text */
-  --fg-subtle:      82 94 89;     /* #525E59 captions, placeholders (spec #5D6964: 3.83:1 over the glow) */
-  --line:           17 25 22;     /* ink at .08: dividers */
+  --toast-fg:       235 240 247;  /* #EBF0F7 */
+  --fg:             20 23 29;     /* #14171D primary text */
+  --fg-muted:       83 88 98;     /* #535862 secondary text */
+  --fg-subtle:      86 91 101;    /* #565B65 captions, placeholders (spec #5D6964: 3.83:1 over the glow) */
+  --line:           20 23 29;     /* ink at .08: dividers */
   --line-a:         0.08;
-  --line-strong:    17 25 22;     /* ink at .50: control borders (spec .15 is under 3:1) */
+  --line-strong:    20 23 29;     /* ink at .50: control borders (spec .15 is under 3:1) */
   --line-strong-a:  0.5;
   --brand:          0 96 255;     /* #0060FF blue-500, the logo's blue: primary actions, active marks (5.1:1 under white) */
   --brand-hover:    0 81 218;     /* #0051DA blue-600 */
@@ -163,25 +164,25 @@ td select, th select { max-width: none; }
   --teal:           11 98 89;     /* #0B6259 */
   --teal-soft:      224 243 241;  /* #E0F3F1 */
   --teal-dot:       20 168 154;   /* #14A89A */
-  --neutral:        79 91 86;     /* #4F5B56 */
-  --neutral-soft:   238 241 240;  /* #EEF1F0 */
-  --neutral-dot:    152 163 158;  /* #98A39E */
+  --neutral:        83 88 98;     /* #535862 */
+  --neutral-soft:   239 240 243;  /* #EFF0F3 */
+  --neutral-dot:    155 160 169;  /* #9BA0A9 */
   /* Chart series (R1). A series is a mark with no word beside it, so each one
      reaches 3:1 on every pane a chart sits on; tokens.contrast.test.ts measures it. */
   --chart-1:        0 96 255;     /* #0060FF blue-500, the logo's blue */
   --chart-2:        10 132 91;    /* #0A845B emerald, series 1 before the blue */
   --chart-3:        166 100 29;   /* #A6641D orange (spec #E0892B is 1.8:1) */
   --chart-4:        115 102 200;  /* #7366C8 violet (spec #8B7CF0 is 2.3:1) */
-  --chart-5:        109 118 114;  /* #6D7672 grey (spec #98A39E is 1.7:1) */
+  --chart-5:        112 116 123;  /* #70747B grey (spec #98A39E is 1.7:1) */
   --chart-1-soft:   0 96 255;     /* series 1 at .14, an area's fill */
   --chart-1-soft-a: 0.14;
-  --amb-1:          112 163 255;  /* the four ambient glows, each at its own alpha; the first is blue-400 */
+  --amb-1:          112 163 255;  /* the four ambient glows, each at its own alpha: blue-400, blue-300, sky, blue-200 */
   --amb-1-a:        0.24;
-  --amb-2:          45 212 191;
+  --amb-2:          164 197 255;
   --amb-2-a:        0.22;
   --amb-3:          56 189 248;
   --amb-3-a:        0.16;
-  --amb-4:          132 204 22;
+  --amb-4:          202 221 255;
   --amb-4-a:        0.1;
 
   --radius-xs:      6px;
@@ -193,10 +194,10 @@ td select, th select { max-width: none; }
   --ease:           cubic-bezier(0.22, 1, 0.36, 1);
   --grain:          0.035;
   --glass-hi:       inset 0 1px 0 rgb(255 255 255 / 0.9);
-  --glass-shadow:   0 1px 1px rgb(4 60 44 / 0.04), 0 12px 32px -20px rgb(4 60 44 / 0.3);
-  --elev-xs:        0 1px 2px rgb(17 25 22 / 0.05);
-  --elev-md:        0 10px 30px -14px rgb(17 25 22 / 0.22), 0 2px 6px -2px rgb(17 25 22 / 0.06);
-  --elev-lg:        0 30px 70px -24px rgb(17 25 22 / 0.38), 0 6px 16px -6px rgb(17 25 22 / 0.1);
+  --glass-shadow:   0 1px 1px rgb(32 50 82 / 0.04), 0 12px 32px -20px rgb(32 50 82 / 0.3);
+  --elev-xs:        0 1px 2px rgb(20 23 29 / 0.05);
+  --elev-md:        0 10px 30px -14px rgb(20 23 29 / 0.22), 0 2px 6px -2px rgb(20 23 29 / 0.06);
+  --elev-lg:        0 30px 70px -24px rgb(20 23 29 / 0.38), 0 6px 16px -6px rgb(20 23 29 / 0.1);
   --brand-gradient:       linear-gradient(180deg, #196aff 0%, #0060ff 100%); /* top 4.62:1 under white, bottom the logo's 5.1:1 */
   --brand-gradient-hover: linear-gradient(180deg, #0058ec 0%, #0051da 100%);
   --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.24), 0 1px 2px rgb(0 96 255 / 0.3), 0 8px 20px -10px rgb(0 96 255 / 0.55);
@@ -208,10 +209,10 @@ td select, th select { max-width: none; }
 
 /* @tokens dark */
 .dark {
-  --canvas:         5 10 8;       /* #050A08 */
+  --canvas:         6 9 13;       /* #06090D */
   --raised:         255 255 255;  /* white at .045 */
   --raised-a:       0.045;
-  --overlay:        14 20 18;     /* #0E1412 at .80 */
+  --overlay:        16 19 23;     /* #101317 at .80 */
   --overlay-a:      0.8;
   --sunken:         255 255 255;  /* white at .07 */
   --sunken-a:       0.07;
@@ -219,19 +220,19 @@ td select, th select { max-width: none; }
   --wash-a:         0.025;
   --field:          255 255 255;  /* white at .04 */
   --field-a:        0.04;
-  --solid:          17 23 21;     /* #111715 */
+  --solid:          19 22 26;     /* #13161A */
   --sheet:          255 255 255;  /* white at .025 */
   --sheet-a:        0.025;
   --edge:           255 255 255;  /* white at .09 */
   --edge-a:         0.09;
   --scrim:          0 0 0;        /* black at .45 */
   --scrim-a:        0.45;
-  --toast:          14 22 19;     /* #0E1613 at .84 */
+  --toast:          17 20 26;     /* #11141A at .84 */
   --toast-a:        0.84;
-  --toast-fg:       233 242 238;  /* #E9F2EE */
-  --fg:             229 235 232;  /* #E5EBE8 */
-  --fg-muted:       181 191 186;  /* #B5BFBA (spec #A3AFAA: 4.20:1 on a table header over the glow) */
-  --fg-subtle:      172 183 178;  /* #ACB7B2 (spec #93A09A: 3.51:1 there) */
+  --toast-fg:       235 240 247;  /* #EBF0F7 */
+  --fg:             231 233 239;  /* #E7E9EF */
+  --fg-muted:       184 188 197;  /* #B8BCC5 (spec #A3AFAA: 4.20:1 on a table header over the glow) */
+  --fg-subtle:      178 183 192;  /* #B2B7C0 (spec #93A09A: 3.51:1 there; one step above the turn onto the logo's hue, which left it at 4.49:1 on sunken) */
   --line:           255 255 255;  /* white at .08 */
   --line-a:         0.08;
   --line-strong:    255 255 255;  /* white at .42 (spec .15 is under 3:1) */
@@ -265,19 +266,19 @@ td select, th select { max-width: none; }
   --teal:           132 217 207;  /* #84D9CF */
   --teal-soft:      15 41 39;     /* #0F2927 */
   --teal-dot:       45 212 191;   /* #2DD4BF */
-  --neutral:        181 191 186;  /* #B5BFBA */
-  --neutral-soft:   29 37 34;     /* #1D2522 */
-  --neutral-dot:    111 123 118;  /* #6F7B76 */
+  --neutral:        184 188 197;  /* #B8BCC5 */
+  --neutral-soft:   32 35 41;     /* #202329 */
+  --neutral-dot:    115 120 130;  /* #737882 */
   --chart-1:        112 163 255;  /* #70A3FF blue-400 */
   --chart-2:        47 191 138;   /* #2FBF8A emerald, series 1 before the blue */
   --chart-3:        240 162 74;   /* #F0A24A */
   --chart-4:        155 141 243;  /* #9B8DF3 */
-  --chart-5:        136 151 145;  /* #889791 (spec #6F7B76 is 2.2:1 on a card) */
+  --chart-5:        140 147 159;  /* #8C939F (spec #6F7B76 is 2.2:1 on a card) */
   --chart-1-soft:   112 163 255;
   --chart-1-soft-a: 0.16;
   --amb-1:          112 163 255;
   --amb-1-a:        0.22;
-  --amb-2:          20 184 166;
+  --amb-2:          0 81 218;
   --amb-2-a:        0.14;
   --amb-3:          56 189 248;
   --amb-3-a:        0.09;

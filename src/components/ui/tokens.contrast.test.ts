@@ -399,3 +399,52 @@ describe('the brand is the logo\'s blue', () => {
     expect(hueDistance(hue(tokens['chart-1'] as Rgb), hue(tokens['chart-2'] as Rgb))).toBeGreaterThanOrEqual(45);
   });
 });
+
+// The owner's second decision of 27.11.2026: the page's greys follow the logo
+// too. Every neutral was green-grey (hue about 155) and was turned onto the
+// logo's hue at its own lightness and chroma (OKLCH), so each keeps its
+// contrast; the glows and the shadow tints went with them. A neutral is a
+// grey, so its hue is only read when it has one (r, g and b not all equal).
+const NEUTRALS: Record<Theme, string[]> = {
+  light: ['canvas', 'overlay', 'solid', 'sunken', 'scrim', 'toast', 'toast-fg', 'fg', 'fg-muted', 'fg-subtle',
+    'line', 'line-strong', 'neutral', 'neutral-soft', 'neutral-dot', 'chart-5'],
+  dark: ['canvas', 'overlay', 'solid', 'toast', 'toast-fg', 'fg', 'fg-muted', 'fg-subtle',
+    'neutral', 'neutral-soft', 'neutral-dot', 'chart-5'],
+};
+
+/** Every `rgb(r g b / a)` written inside a composite token, such as a shadow. */
+function compositeColours(theme: Theme, name: string): Rgb[] {
+  const body = blockAfter(`/* @tokens ${theme} */`);
+  const line = body.match(new RegExp(`--${name}:([^;]*);`));
+  if (!line) throw new Error(`--${name} is missing from the ${theme} block`);
+  return [...line[1].matchAll(/rgb\((\d{1,3}) (\d{1,3}) (\d{1,3}) \//g)].map(m => [Number(m[1]), Number(m[2]), Number(m[3])] as Rgb);
+}
+
+const tinted = ([r, g, b]: Rgb) => !(r === g && g === b);
+
+describe('the greys are the logo\'s greys', () => {
+  it.each<Theme>(['light', 'dark'])('keeps every %s neutral on the logo\'s hue', theme => {
+    const tokens = parseTokens(theme);
+    for (const name of NEUTRALS[theme]) {
+      const colour = tokens[name]?.slice(0, 3) as Rgb | undefined;
+      expect(colour, name).toBeDefined();
+      if (!tinted(colour!)) continue;
+      expect(hueDistance(hue(colour!), hue(LOGO_BLUE)), name).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it.each<Theme>(['light', 'dark'])('keeps the %s glows in the blue family', theme => {
+    const tokens = parseTokens(theme);
+    for (const name of ['amb-1', 'amb-2', 'amb-3', 'amb-4']) {
+      expect(hueDistance(hue(tokens[name].slice(0, 3) as Rgb), hue(LOGO_BLUE)), name).toBeLessThanOrEqual(20);
+    }
+  });
+
+  it.each<Theme>(['light', 'dark'])('tints the %s shadows with the logo\'s hue, never green', theme => {
+    for (const name of ['glass-shadow', 'elev-xs', 'elev-md', 'elev-lg']) {
+      for (const colour of compositeColours(theme, name).filter(tinted)) {
+        expect(hueDistance(hue(colour), hue(LOGO_BLUE)), name).toBeLessThanOrEqual(10);
+      }
+    }
+  });
+});

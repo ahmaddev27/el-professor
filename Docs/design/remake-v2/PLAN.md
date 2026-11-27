@@ -12,6 +12,8 @@ in the file, colours included**.
 - **The brand is the logo's blue (owner, 27.11.2026, after the sidebar rail):** *"replace our primary
   green with the blue of the logo and its shades, across the whole design."* It overrides the spec for
   the **primary colour only**; everything else above stays. See §1a.
+- **The greys follow the logo too (owner, the same evening):** asked whether the faint green-grey of
+  the canvas should stay, he answered *"لا حولو زي اللوغو"* (no, turn it like the logo). See §1b.
 - **Stays El-Professor's:** the product name, and the logo glyph (`public/brand/mark-on-dark.png`),
   which is drawn inside the spec's dark `.brand-mark` tile.
 - **Retired:** blue `#146BFF` and cyan `#00E7FF`.
@@ -30,7 +32,7 @@ below are El-Professor's, and only the values move.
 
 | our token (role) | spec source | light | dark |
 |---|---|---|---|
-| `canvas`: page background | `--canvas` | `#e8efec` | `#050a08` |
+| `canvas`: page background | `--canvas` | `#eaedf3` (§1b; was `#e8efec`) | `#06090d` (§1b; was `#050a08`) |
 | `raised`: cards, tables, panels | `--surface` (translucent) | `255 255 255` @ .62 | `255 255 255` @ .045 |
 | `overlay`: dialogs, sheets, menus, popovers | `--glass-strong` | `249 252 251` @ .80 | `14 20 18` @ .80 |
 | `sunken`: table header, hover, skeleton, inset fills | `--surface-3` | `17 25 22` @ .06 | `255 255 255` @ .07 |
@@ -92,7 +94,7 @@ half, as the emerald did:
 
 **What did not move, on purpose.** Semantic green stays green: `positive` (paid, active, success badges,
 success toasts) carries meaning, not brand. `caution`, `critical`, `info`, `teal`, `violet`, `signal` and
-the neutral canvas, surfaces and shadows are unchanged — the owner kept the rest of the Glass look. Four
+the neutral canvas, surfaces and shadows are unchanged — the owner kept the rest of the Glass look (until §1b, the same evening). Four
 places used the brand to mean "good" and were moved to `positive` so they stay green: the overview's
 Firmengewinn card when there is a profit (red on a loss; it needed a solid fill, so `positive-solid` and
 its label `positive-fg` are new, with the old emerald and its label as their values and a pair in the
@@ -108,6 +110,29 @@ logo files are unchanged, and so is `DriverSalarySummaryCard`, an image whose co
 logo's blue as 500; every brand token is a step of it; the tints and gradient stops stay within 8° of
 the logo's hue; the light label reads on every blue the logo is drawn in; and chart series 1 and 2 stay
 apart in hue. Putting the emerald back on `--brand` fails it (negative control, 27.11.2026).
+
+### 1b. The greys are the logo's greys (27.11.2026)
+
+The same evening the owner turned the neutrals too: *"لا حولو زي اللوغو"*. Every grey of the remake
+carried the spec's green tint (OKLCH hue about 170°). Each one was turned onto the logo's OKLCH hue
+(261.6°) **at its own lightness and chroma**, so the tint is exactly as faint as before and every
+contrast moves by a hair. The tokens: light `canvas` `#eaedf3`, `overlay`, `solid`, the ink of `fg`,
+`sunken`, `line` and `line-strong` `#14171d`, `fg-muted`, `fg-subtle`, `scrim`, `toast` and `toast-fg`,
+the three `neutral` tones and `chart-5`; dark `canvas` `#06090d`, `overlay`, `solid`, `toast`,
+`toast-fg`, `fg`, `fg-muted`, `fg-subtle`, the three `neutral` tones and `chart-5`. Dark `fg-subtle`
+went one step lighter than the plain turn (`#b2b7c0`), which left it at 4.49:1 on `sunken`.
+
+The glows went with them: light `amb-2` teal → blue-300, `amb-4` lime → blue-200, dark `amb-2` teal →
+blue-600; the sky glow `amb-3` was already blue. The shadows' ink (`--glass-shadow`, `--elev-*`, and the
+two shadows in `tailwind.config.js`) is the turned navy `rgb(32 50 82)` / `rgb(20 23 29)`.
+
+Not turned: the semantic tones and their tints (`positive`, `caution`, `critical`, `info`, `teal`,
+`violet`) and `signal`, which carry meaning, and pure white and black.
+
+`tokens.contrast.test.ts`' block *the greys are the logo's greys* holds each listed neutral within 10° of
+the logo's hue (a pure grey has none and is skipped), the four glows within 20°, and every tinted shadow
+within 10°. Putting the green canvas, the green shadow and the lime glow back fails exactly those three
+tests (negative control, 27.11.2026).
 
 **How alpha fits the RGB-channel convention.** A token stays a channel triple, and a translucent one gains
 a sibling, `--<name>-a`. Tailwind's colour becomes `rgb(var(--raised) / calc(var(--raised-a, 1) *
@@ -127,8 +152,8 @@ remap keeps every name and role, so no markup changes:
 
 - the accent family becomes the emerald brand (`#047857` / `#34d399`, `accent-text` `#05603f` /
   `#74e3b8`);
-- the neutrals (`bg-*`, `border*`, `text-*`) become the remake's green-greys (`bg-base` is the canvas,
-  `#e8efec` / `#050a08`);
+- the neutrals (`bg-*`, `border*`, `text-*`) become the remake's greys, green until §1b and on the logo's hue
+  since (`bg-base` is the canvas, `#eaedf3` / `#06090d`);
 - the status colours were already the remake's red, green and amber, and keep their values.
 
 **Why that is safe for the documents, measured rather than assumed.** The 39 and 44 `var(--…)` reads in
