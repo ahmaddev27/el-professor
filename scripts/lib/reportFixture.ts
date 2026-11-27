@@ -84,7 +84,7 @@ export async function buildFixtureMonth(o: FixtureOptions): Promise<FullMonthRes
     tuev_gueltig_bis: i === 1 ? `${o.year}-${String(o.month).padStart(2, '0')}-20` : `${o.year + 1}-04-30`,
   }));
   const out = generateFullMonth({
-    year: o.year, month: o.month, base: FIXTURE_BASE, pool, vehicles: plates, drivers: FIXTURE_DRIVERS,
+    year: o.year, month: o.month, base: FIXTURE_BASE, baseSource: 'saved_point', pool, vehicles: plates, drivers: FIXTURE_DRIVERS,
     driverNotesMap: fixtureNotes(o.year, o.month), seed: o.seed,
     settings: {
       declinedRidesEnabled: true, declinedFeeCents: 600, cancellationFeeEnabled: true, cancellationFeeCents: 600,

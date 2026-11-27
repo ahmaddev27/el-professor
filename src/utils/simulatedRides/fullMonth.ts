@@ -38,6 +38,7 @@ import {
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from './travelModel';
 import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, SimShift, SimVehicle } from './types';
 import type { UberMonthImport } from './uberImport';
+import type { BaseSource } from './baseSelection';
 import { unavailableDuring, type UnavailabilityWindow } from './vehicleAvailability';
 
 /**
@@ -168,6 +169,18 @@ export interface FullMonthInput {
   tenantId?: string;
   /** How the Betriebssitz is named on a repositioning record. */
   baseLabel?: string;
+  /**
+   * Where `base` came from (`resolveBase`): the saved point, or the company's
+   * address geocoded at house level. Absent, the month cannot say that its
+   * shifts start at the company's configured base, and its verdict says so.
+   */
+  baseSource?: BaseSource;
+  /**
+   * The company requires the car back at the base when a shift ends (D8, a
+   * company setting, off by default). The drive home is then routed, counted
+   * as working time inside the shift and recorded as a `to_base` leg.
+   */
+  returnToBase?: boolean;
   /** The company's `vehicle_unavailability` rows, read as instants (`readUnavailability`). */
   vehicleUnavailability?: readonly UnavailabilityWindow[];
   /** What Uber reported for the month (`readUberMonth`). Absent: no Uber figure was read. */
@@ -289,6 +302,10 @@ export interface Provenance {
   routing: RoutingProvenance | null;
   /** The company the month was simulated for, when the caller named it. */
   tenantId: string | null;
+  /** The point every shift leaves from, where it came from (null: not stated) and its name. */
+  base: { lat: number; lon: number; source: BaseSource | null; label: string };
+  /** Whether the company requires the car back at the base when a shift ends. */
+  returnToBase: boolean;
   /**
    * The run's identity: a hash of everything that built the month, so the same
    * inputs give the same id and a record can be traced to its month.
@@ -420,8 +437,10 @@ export function generateFullMonth(
     pool: input.pool,
     usedTransmits: new Set(),
     travel: input.travel,
+    returnToBase: input.returnToBase === true,
   };
   const travel = input.travel ?? ESTIMATE_TRAVEL_MODEL;
+  const baseLabel = input.baseLabel ?? 'Betriebssitz';
 
   const period = buildPeriod(input.year, input.month, settings);
   const accepted: ShiftDecision[] = [];
@@ -641,6 +660,8 @@ export function generateFullMonth(
     travel: { source: travel.source, measured: travel.measured },
     routing: input.routing ?? null,
     tenantId: input.tenantId ?? null,
+    base: { lat: input.base.lat, lon: input.base.lon, source: input.baseSource ?? null, label: baseLabel },
+    returnToBase: ctx.returnToBase === true,
     runId: '',
   };
   provenance.runId = runIdOf(provenance);
@@ -648,13 +669,14 @@ export function generateFullMonth(
   const checks = routeChecks(month.rides, travel, opts);
   const repositioning = buildRepositioningLegs(month.shifts, month.rides, {
     base: input.base,
-    baseLabel: input.baseLabel ?? 'Betriebssitz',
+    baseLabel,
     travel,
     margins: opts,
     tenantId: provenance.tenantId,
     vehicleIdByPlate: new Map(input.vehicles.map(v => [v.plate, v.id])),
     seed: provenance.seed,
     runId: provenance.runId,
+    returnToBase: provenance.returnToBase,
   });
   const decisions = [...accepted, ...collapseDecisions(refusals.map(refusalDecision(input.vehicles)))];
 
@@ -674,7 +696,7 @@ export function generateFullMonth(
       violations: [
         ...validateFullMonth(month, period, input.driverNotesMap, settings, input.vehicles),
         ...checkDriverShifts(month.shifts, driverPlans, unavailability, opts.minDriverRestMinutes),
-        ...validateRides(month, input.base, travel, opts, CALENDAR_SHIFT_LIMITS),
+        ...validateRides(month, input.base, travel, opts, CALENDAR_SHIFT_LIMITS, provenance.returnToBase),
       ],
       decisions,
       routeChecks: checks,
@@ -716,7 +738,7 @@ function fnv1a(text: string): string {
 function runIdOf(p: Provenance): string {
   const mm = String(p.month).padStart(2, '0');
   const basis = JSON.stringify([p.generatorVersion, p.tenantId, p.seed, p.year, p.month, p.settings, p.options,
-    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null]);
+    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null, p.base, p.returnToBase]);
   return `SIM-${p.year}-${mm}-${p.seed}-${fnv1a(basis)}`;
 }
 

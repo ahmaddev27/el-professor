@@ -68,7 +68,7 @@ async function modelOf(router: TravelRouter, pool = POOL): Promise<{ model: Trav
 }
 
 const input = (over: Partial<FullMonthInput>): FullMonthInput => ({
-  year: 2026, month: 9, base: BASE, pool: POOL, vehicles: VEHICLES, drivers: DRIVERS, driverNotesMap: new Map(),
+  year: 2026, month: 9, base: BASE, baseSource: 'saved_point', pool: POOL, vehicles: VEHICLES, drivers: DRIVERS, driverNotesMap: new Map(),
   seed: 20261030, tenantId: TENANT,
   settings: { declinedRidesEnabled: true, cancellationFeeEnabled: true, cancellationFeeCents: 600, monthlyRevenueShareEnabled: true },
   options: { cancellationShare: 0.06 },

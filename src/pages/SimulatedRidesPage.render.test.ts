@@ -11,7 +11,9 @@ import { createFakeSupabase } from '../test-utils/fakeSupabase';
  * between them is the real one, so what is asserted is what the operator sees:
  * 28 days for February 2026, the rate before generating, a month with a broken
  * rule offering no download, and an estimate that exists only after the box is
- * ticked.
+ * ticked. Round 8: every shift starts at the company's base, the saved point
+ * or the company address found at house level, and with neither nothing is
+ * generated; the pool's centre is never the base.
  */
 
 const world = vi.hoisted(() => ({
@@ -19,6 +21,13 @@ const world = vi.hoisted(() => ({
   routerDown: false,
   injectViolation: false,
   generateCalls: 0,
+  /** What the screen handed the generator as its base. */
+  bases: [] as { base: { lat: number; lon: number }; source: unknown; label: unknown }[],
+  savedBase: true,
+  address: { city: 'Demostadt' } as Record<string, string>,
+  /** How the geocoder answers the company address: one house, only a street, or no answer. */
+  addressAnswer: 'located' as 'located' | 'too_coarse' | 'down',
+  addressQueries: [] as string[],
   delivered: [] as unknown[],
   built: [] as unknown[],
 }));
@@ -29,6 +38,10 @@ const POOL = Array.from({ length: 70 }, (_, i) => ({
   lon: 7.02 + (i % 10) * 0.007,
 }));
 const CENTER = { lat: 51.12, lon: 7.05 };
+// Deliberately not the pool's centre, so a fallback to it cannot pass for the base.
+const SAVED_BASE = { lat: 51.1036, lon: 7.0287 };
+const ADDRESS_POINT = { lat: 51.1418, lon: 7.0811 };
+const FULL_ADDRESS = { street: 'Musterweg', house_number: '7', postal_code: '40210', city: 'Demostadt' };
 
 const fake = createFakeSupabase(call => {
   if (call.table === 'driver_notes' && world.noteError) return { data: null, error: { message: 'boom' } };
@@ -50,7 +63,7 @@ const fake = createFakeSupabase(call => {
 
 vi.mock('../lib/supabase', () => ({ supabase: fake.client }));
 vi.mock('../contexts/SuperAdminContext', () => ({ useSuperAdmin: () => ({ effectiveCompanyId: 'company-1' }) }));
-vi.mock('../contexts/CompanySettingsContext', () => ({ useCompanySettings: () => ({ settings: { city: 'Demostadt' } }) }));
+vi.mock('../contexts/CompanySettingsContext', () => ({ useCompanySettings: () => ({ settings: world.address }) }));
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: () => {} }) }));
 vi.mock('../hooks/useCompanyScope', () => ({ useCompanyScope: () => ({ can: () => true, readOnly: false }) }));
 vi.mock('../hooks/useFahrtenbuch', () => ({ useFahrtenbuch: () => ({ createImport: async () => {} }) }));
@@ -58,7 +71,7 @@ vi.mock('../lib/tripAnalysisClient', () => ({
   loadCompanyDrivers: async () => [1, 2, 3].map(n => ({
     id: `drv-${n}`, name: `Fahrer ${n}`, status: 'active', planning_min_salary: null, planning_max_salary: null, planning_hourly_rate: null,
   })),
-  loadSettings: async () => null,
+  loadSettings: async () => (world.savedBase ? { base_latitude: SAVED_BASE.lat, base_longitude: SAVED_BASE.lon } : null),
 }));
 vi.mock('../contexts/LanguageContext', async () => {
   const { translate, translatePlural } = await import('../i18n');
@@ -76,14 +89,23 @@ vi.mock('../utils/simulatedRides/addressPool', async importActual => ({
 }));
 vi.mock('../lib/geocodeClient', () => ({
   createGeocodeClient: () => ({
-    geocode: async (batch: { id: string; text: string }[]) => ({
-      ok: true,
-      dataUpdated: null,
-      results: batch.map(q => {
-        const a = POOL.find(p => p.label === q.text)!;
-        return { id: q.id, kind: 'located', lat: a.lat, lon: a.lon, precision: 'exact', osm: null };
-      }),
-    }),
+    geocode: async (batch: { id: string; text: string }[]) => {
+      const base = batch.find(q => q.id === 'company-base');
+      if (base) {
+        world.addressQueries.push(base.text);
+        if (world.addressAnswer === 'down') return { ok: false, reason: 'function_unreachable' };
+        if (world.addressAnswer === 'too_coarse') return { ok: true, dataUpdated: null, results: [{ id: base.id, kind: 'unlocated', reason: 'too_coarse' }] };
+        return { ok: true, dataUpdated: null, results: [{ id: base.id, kind: 'located', ...ADDRESS_POINT, precision: 'exact', osm: null }] };
+      }
+      return {
+        ok: true,
+        dataUpdated: null,
+        results: batch.map(q => {
+          const a = POOL.find(p => p.label === q.text)!;
+          return { id: q.id, kind: 'located', lat: a.lat, lon: a.lon, precision: 'exact', osm: null };
+        }),
+      };
+    },
   }),
 }));
 vi.mock('../lib/travelRouteClient', async () => {
@@ -113,6 +135,7 @@ vi.mock('../utils/simulatedRides/fullMonth', async importActual => {
     ...actual,
     generateFullMonth: (input: Parameters<typeof actual.generateFullMonth>[0]) => {
       world.generateCalls += 1;
+      world.bases.push({ base: input.base, source: input.baseSource, label: input.baseLabel });
       const out = actual.generateFullMonth(input);
       if (out.ok && world.injectViolation) out.result.violations = ['Teststreit: eine Regel gebrochen'];
       return out;
@@ -169,6 +192,11 @@ describe('SimulatedRidesPage, calendar mode', () => {
     world.routerDown = false;
     world.injectViolation = false;
     world.generateCalls = 0;
+    world.bases.length = 0;
+    world.savedBase = true;
+    world.address = { city: 'Demostadt' };
+    world.addressAnswer = 'located';
+    world.addressQueries.length = 0;
     world.delivered.length = 0;
     world.built.length = 0;
   });
@@ -203,6 +231,58 @@ describe('SimulatedRidesPage, calendar mode', () => {
       [{ version: 1, sheets: [] }, 'SIMULIERT_test.xlsx'],
       [{ version: 1, sheets: [] }, 'SIMULIERT_betrieb.xlsx'],
     ]);
+    // The saved point is the base, and the geocoder was never asked for the address.
+    expect(world.bases).toEqual([{ base: SAVED_BASE, source: 'saved_point', label: 'Betriebssitz (gespeicherter Punkt)' }]);
+    expect(world.addressQueries).toEqual([]);
+  });
+
+  it('with no saved point, the company address found at house level is the base, labelled as derived', async () => {
+    world.savedBase = false;
+    world.address = { ...FULL_ADDRESS };
+    const renderer = await mount();
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('Erzeugter Kalendermonat'));
+    expect(world.addressQueries).toEqual(['Musterweg 7, 40210 Demostadt']);
+    expect(world.bases).toEqual([{
+      base: ADDRESS_POINT, source: 'company_address',
+      label: 'Musterweg 7, 40210 Demostadt (Betriebssitz aus der Firmenadresse abgeleitet)',
+    }]);
+  });
+
+  it('negative: no saved point and an incomplete address generate nothing, and the pool centre is not used instead', async () => {
+    world.savedBase = false;
+    const renderer = await mount();
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('Es wurde nichts erzeugt'));
+    expect(collect(renderer.root)).toContain('Firmenadresse in den Einstellungen ist unvollständig');
+    expect(world.generateCalls).toBe(0);
+    expect(world.addressQueries).toEqual([]);
+  });
+
+  it('negative: an address the geocoder finds only as a street is never the base', async () => {
+    world.savedBase = false;
+    world.address = { ...FULL_ADDRESS };
+    world.addressAnswer = 'too_coarse';
+    const renderer = await mount();
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('Es wurde nichts erzeugt'));
+    expect(collect(renderer.root)).toContain('nicht auf Hausnummer genau gefunden');
+    expect(world.generateCalls).toBe(0);
+  });
+
+  it('negative: with the geocoder unreachable, no month is generated without a base', async () => {
+    world.savedBase = false;
+    world.address = { ...FULL_ADDRESS };
+    world.addressAnswer = 'down';
+    const renderer = await mount();
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('Ohne Betriebssitz wird kein Monat erzeugt'));
+    expect(collect(renderer.root)).toContain('Geocoder nicht geantwortet');
+    expect(world.generateCalls).toBe(0);
   });
 
   it('a month that broke a rule is shown as an error and offers no download', async () => {

@@ -26,6 +26,7 @@ import { PoolError, buildAddressPool, readCachedPool, writeCachedPool, type Addr
 import {
   addDays, figuresOf, generateFromFigures, mondayOf, mondaysOfMonth, weekKey, type Finding, type FindingCode, type FiguresResult, type IncomeRow,
 } from '../utils/simulatedRides/figures';
+import { resolveBase, type BaseRefusal } from '../utils/simulatedRides/baseSelection';
 import { DEFAULT_CALENDAR_FORM, parseCalendarForm, type CalendarForm, type CalendarFormField } from '../utils/simulatedRides/calendarForm';
 import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type RoutingProvenance } from '../utils/simulatedRides/fullMonth';
 import type { UberMonthImport } from '../utils/simulatedRides/uberImport';
@@ -108,6 +109,13 @@ const ROUTING_FAILURE_KEYS: Record<RoutingFailureReason, TranslationKey> = {
   routing_failed: 'simrides.error.routing.routing_failed',
   base_unroutable: 'simrides.error.routing.base_unroutable',
   too_few_routes: 'simrides.error.routing.too_few_routes',
+};
+
+const BASE_REFUSAL_KEYS: Record<BaseRefusal, TranslationKey> = {
+  no_base_configured: 'simrides.cal.error.base.noBase',
+  address_incomplete: 'simrides.cal.error.base.addressIncomplete',
+  address_not_located: 'simrides.cal.error.base.addressNotLocated',
+  geocoder_unavailable: 'simrides.cal.error.base.geocoderUnavailable',
 };
 
 const FULL_MONTH_FAILURE_KEY = (failure: FullMonthFailure): TranslationKey => {
@@ -354,16 +362,25 @@ export default function SimulatedRidesPage() {
     if (!parsed.ok) { setFormError(parsed.field); return; }
     setPhase('events');
     try {
+      // Round 8 (§3, D7): every shift starts at the company's base, never at
+      // the middle of the address pool. No base, no month.
+      const located = await resolveBase({ saved: base, address: settings ?? null, geocoder: createGeocodeClient() });
+      if (!located.ok) {
+        console.warn('Fahrten simulieren: no Betriebssitz', located.reason, located.detail);
+        setError(t(BASE_REFUSAL_KEYS[located.reason]));
+        setPhase('idle');
+        return;
+      }
       const events = await readEvents(period.year, period.month, true);
       setPhase('pool');
       const { pool } = await ensurePool();
-      const origin = base ?? pool.center;
+      const origin = located.base;
       const sourcing = await sourcePoints(pool, origin);
       if (!sourcing) return;
       setPhase('generating');
       await nextTick();
       const outcome = generateFullMonth({
-        ...period, base: origin, pool: sourcing.points, seed,
+        ...period, base: origin, baseSource: located.source, baseLabel: located.label, pool: sourcing.points, seed,
         vehicles: cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev })),
         // A driver whose row could not be read has no hours range, so he is
         // reported as CONFIGURATION_REQUIRED rather than planned on a guess.
@@ -504,7 +521,7 @@ export default function SimulatedRidesPage() {
             <Field label={t('simrides.field.month')} hint={t('simrides.field.monthHint')}>
               <Input type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} disabled={busy} />
             </Field>
-            <Field label={t('simrides.field.city')} hint={base ? t('simrides.field.cityHintBase') : t('simrides.field.cityHint')}>
+            <Field label={t('simrides.field.city')} hint={base ? t('simrides.field.cityHintBase') : mode === 'calendar' ? t('simrides.field.cityHintCalendar') : t('simrides.field.cityHint')}>
               <Input value={city} onChange={e => setCity(e.target.value)} disabled={busy} />
             </Field>
           </div>

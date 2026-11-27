@@ -39,7 +39,9 @@ export interface VerificationCheck {
     | 'amounts_readable'
     | 'events_reviewed'
     | 'monthly_share'
-    | 'drivers_planned';
+    | 'drivers_planned'
+    | 'base_configured'
+    | 'rides_generated';
   /** German, for the screen and the workbook. */
   label: string;
   outcome: CheckOutcome;
@@ -134,6 +136,38 @@ function driversPlanned(result: FullMonthResult): VerificationCheck {
   return check('drivers_planned', label, 'passed', `${planned.length} Fahrer geplant`);
 }
 
+/**
+ * A month with no completed ride claims nothing, and every other check passes
+ * it vacuously: no pair to conflict, no leg to be late, no rule broken. Found
+ * by round 8's negative scenarios (no route home, no route at all), where the
+ * empty month read `VALIDATED_FOR_EXPORT`. It is `failed`, never a report.
+ */
+function ridesGenerated(result: FullMonthResult): VerificationCheck {
+  const label = 'Mindestens eine abgeschlossene Fahrt erzeugt';
+  const completed = result.month.rides.filter(r => r.status === 'completed').length;
+  if (completed > 0) return check('rides_generated', label, 'passed', `${completed} abgeschlossene Fahrten`);
+  const noRide = result.refusals.filter(r => r.reason === 'shift_produced_no_ride').length;
+  return check('rides_generated', label, 'failed',
+    `keine abgeschlossene Fahrt erzeugt${noRide > 0 ? ` (${noRide} Schichten ohne Fahrt: keine berechnete Route oder keine Zeit)` : ''}`);
+}
+
+/**
+ * Every shift starts at the company's configured base (round 8, §3). The month
+ * can only say so when the caller stated where the point came from: the saved
+ * point, or the company's address geocoded at house level (D7, labelled). A
+ * point of unstated origin is not called the company's base.
+ */
+function baseConfigured(result: FullMonthResult): VerificationCheck {
+  const label = 'Schichten beginnen am konfigurierten Betriebssitz';
+  const base = result.provenance.base;
+  const home = result.provenance.returnToBase ? ', Rueckkehr zum Betriebssitz am Schichtende' : '';
+  if (base.source === 'saved_point') return check('base_configured', label, 'passed', `gespeicherter Punkt${home}`);
+  if (base.source === 'company_address') {
+    return check('base_configured', label, 'passed', `${base.label}, auf Hausnummer genau geocodiert${home}`);
+  }
+  return check('base_configured', label, 'not_verified', 'Herkunft des Betriebssitzes nicht angegeben (CONFIGURATION_REQUIRED)');
+}
+
 export function verifyMonth(result: FullMonthResult): MonthVerification {
   const exportedDeclined = result.month.rides.filter(inExportScope).filter(r => r.status === 'declined').length;
   const differences = reconcile(result).filter(r => r.partsSum !== r.total);
@@ -155,6 +189,8 @@ export function verifyMonth(result: FullMonthResult): MonthVerification {
     eventsReviewed(result),
     monthlyShare(result),
     driversPlanned(result),
+    baseConfigured(result),
+    ridesGenerated(result),
   ];
   const verdict: ExportVerdict = checks.some(c => c.outcome === 'failed')
     ? 'NOT_VALIDATED'

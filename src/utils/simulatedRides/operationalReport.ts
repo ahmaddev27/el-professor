@@ -57,6 +57,7 @@ const PURPOSE_WORD: Record<RepositioningPurpose, string> = {
   from_base: 'Betriebssitz zur ersten Abholung',
   to_waiting_position: 'Zielort zum Warteplatz',
   to_pickup: 'zur naechsten Abholung',
+  to_base: 'letzter Zielort zurueck zum Betriebssitz',
 };
 
 export const LEG_HEADERS: readonly string[] = [

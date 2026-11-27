@@ -475,6 +475,12 @@ function routingLines(result: FullMonthResult): Row[] {
   ];
 }
 
+const BASE_SOURCE_TEXT: Record<NonNullable<FullMonthResult['provenance']['base']['source']> | 'none', string> = {
+  saved_point: 'gespeicherter Punkt (Fahrtenanalyse)',
+  company_address: 'aus der Firmenadresse abgeleitet, auf Hausnummer genau geocodiert',
+  none: 'nicht angegeben (CONFIGURATION_REQUIRED)',
+};
+
 export function sourceSheetRows(result: FullMonthResult, verification: MonthVerification = verifyMonth(result)): Row[] {
   const p = result.provenance;
   return [
@@ -491,6 +497,11 @@ export function sourceSheetRows(result: FullMonthResult, verification: MonthVeri
     ['Monat', p.month],
     ['Eingabequelle', 'period_driven: Tage aus dem Kalender, Einnahmen erzeugt, keine Messung'],
     ['Schichten je Fahrzeug und Tag', p.shiftsPerVehicleDay],
+    ['Betriebssitz', p.base.label],
+    ['Betriebssitz Herkunft', BASE_SOURCE_TEXT[p.base.source ?? 'none']],
+    ['Betriebssitz Breite', p.base.lat],
+    ['Betriebssitz Laenge', p.base.lon],
+    ['Rueckkehr zum Betriebssitz am Schichtende', yesNo(p.returnToBase)],
     ...settingLines('Einstellung ', p.settings),
     ...settingLines('Option ', p.options),
     ...settingLines('Eingabe ', p.inputs),

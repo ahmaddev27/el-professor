@@ -7506,4 +7506,15 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.check.code.driversPlanned': 'Fahrer nach ihren Einstellungen auf der Fahrerseite geplant',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.baseConfigured': 'Schichten beginnen am konfigurierten Betriebssitz',
+  'simrides.cal.error.base.addressIncomplete': 'Kein Betriebssitz gespeichert, und die Firmenadresse in den Einstellungen ist unvollständig: Straße, Hausnummer, PLZ und Ort werden gebraucht. Es wurde nichts erzeugt.',
+  'simrides.cal.error.base.addressNotLocated': 'Die Firmenadresse wurde nicht auf Hausnummer genau gefunden. Ein ungefährer Punkt wird nicht als Betriebssitz verwendet. Speichern Sie den Betriebssitz in der Fahrtenanalyse. Es wurde nichts erzeugt.',
+  'simrides.cal.error.base.geocoderUnavailable': 'Die Firmenadresse konnte nicht geprüft werden, weil der Geocoder nicht geantwortet hat. Ohne Betriebssitz wird kein Monat erzeugt. Versuchen Sie es später erneut oder speichern Sie den Betriebssitz in der Fahrtenanalyse.',
+  'simrides.cal.error.base.noBase':        'Kein Betriebssitz konfiguriert. Speichern Sie ihn in der Fahrtenanalyse oder tragen Sie die Firmenadresse mit Hausnummer in den Einstellungen ein. Es wurde nichts erzeugt.',
+  'simrides.field.cityHintCalendar':       'Die Stadt bestimmt die Adressen. Jede Schicht beginnt am Betriebssitz: am in der Fahrtenanalyse gespeicherten Punkt, sonst an der Firmenadresse aus den Einstellungen. Die Adressen werden einmal geladen und 90 Tage lang in diesem Browser gespeichert.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.ridesGenerated': 'Mindestens eine abgeschlossene Fahrt erzeugt',
 } as const;

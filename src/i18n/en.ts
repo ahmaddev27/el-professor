@@ -7432,4 +7432,15 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.check.code.driversPlanned': 'Drivers planned from their settings on the Drivers page',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.baseConfigured': 'Shifts start at the configured Betriebssitz',
+  'simrides.cal.error.base.addressIncomplete': 'No Betriebssitz is saved, and the company address in the settings is incomplete: street, house number, postcode and city are needed. Nothing was generated.',
+  'simrides.cal.error.base.addressNotLocated': 'The company address could not be found to the house number. An approximate point is never used as the Betriebssitz. Save the Betriebssitz in the trip analysis. Nothing was generated.',
+  'simrides.cal.error.base.geocoderUnavailable': 'The company address could not be checked because the geocoder did not answer. No month is generated without a Betriebssitz. Try again later, or save the Betriebssitz in the trip analysis.',
+  'simrides.cal.error.base.noBase':        'No Betriebssitz is configured. Save it in the trip analysis, or enter the company address with its house number in the settings. Nothing was generated.',
+  'simrides.field.cityHintCalendar':       'The city decides the addresses. Every shift starts at the Betriebssitz: the point saved in the trip analysis, otherwise the company address from the settings. The addresses are loaded once and kept in this browser for 90 days.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.ridesGenerated': 'At least one completed ride generated',
 };

@@ -2,7 +2,7 @@ import type { Rng } from './rng';
 import { PICKUP_HANDLING_SECONDS, interpolate, roadKm } from './geo';
 import { isUniqueWallTime, localHour } from './time';
 import { emptyDriveSeconds, isPreferredLeg, pickupDriveSeconds, type MarginOptions } from './repositioning';
-import { ESTIMATE_TRAVEL_MODEL, type TravelLeg, type TravelModel } from './travelModel';
+import { ESTIMATE_TRAVEL_MODEL, pointKey, type TravelLeg, type TravelModel } from './travelModel';
 import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimDriver, SimRide, SimShift, SimVehicle } from './types';
 
 /**
@@ -77,6 +77,14 @@ export interface Context {
    * never used.
    */
   travel?: TravelModel;
+  /**
+   * The company requires the car back at the base when a shift ends (round 8,
+   * decision D8: a company setting, off unless the company turns it on). The
+   * last drop-off is then one from which the drive home, with its margin, ends
+   * by the shift's planned end, and the shift ends on arrival. Absent or false:
+   * the shift ends with its last ride, as before. The weeks generator never sets it.
+   */
+  returnToBase?: boolean;
 }
 
 export const travelOf = (ctx: Context): TravelModel => ctx.travel ?? ESTIMATE_TRAVEL_MODEL;
@@ -101,6 +109,26 @@ export interface ShiftRun {
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * The drive from `from` back to the base, asked at the hour of `atMs`: the one
+ * definition the generator, the validator and the `to_base` record share. A
+ * drop-off at the base itself is a drive of nothing. Null when the model has
+ * no route, which is never read as zero.
+ */
+export function returnDrive(travel: TravelModel, base: GeoPoint, from: GeoPoint, atMs: number): TravelLeg | null {
+  if (pointKey(from) === pointKey(base)) return { seconds: 0, km: 0 };
+  return travel.drive(from, base, localHour(atMs));
+}
+
+/** True when a ride ending at `dropoff` after `rideSeconds` leaves the drive home and its margin room before `dueMs`. */
+function homeInTime(ctx: Context, startMs: number, dueMs: number): (dropoff: PoolAddress, leg: TravelLeg) => boolean {
+  return (dropoff, leg) => {
+    const endMs = startMs + leg.seconds * 1000;
+    const home = returnDrive(travelOf(ctx), ctx.base, dropoff, endMs);
+    return home !== null && endMs + emptyDriveSeconds(home.seconds, ctx.opts) * 1000 <= dueMs;
+  };
+}
 
 function nearest(pool: readonly PoolAddress[], to: GeoPoint, count: number): PoolAddress[] {
   return pool
@@ -173,13 +201,17 @@ function chooseDropoff(
   from: PoolAddress,
   budgetSeconds: number,
   hour: number,
+  /** A further condition on the drop-off: with return to base, that the drive home still fits. */
+  fits?: (dropoff: PoolAddress, leg: TravelLeg) => boolean,
 ): { dropoff: PoolAddress; leg: TravelLeg } | null {
   const travel = travelOf(ctx);
   const all: { a: PoolAddress; leg: TravelLeg; km: number }[] = [];
   for (const a of ctx.pool) {
     if (a === from) continue;
     const leg = travel.ride(from, a, hour);
-    if (leg && leg.km >= 0.6 && leg.km <= MAX_RIDE_KM && leg.seconds <= budgetSeconds) all.push({ a, leg, km: leg.km });
+    if (!leg || leg.km < 0.6 || leg.km > MAX_RIDE_KM || leg.seconds > budgetSeconds) continue;
+    if (fits && !fits(a, leg)) continue;
+    all.push({ a, leg, km: leg.km });
   }
   const picked = (x: (typeof all)[number]) => ({ dropoff: x.a, leg: x.leg });
   for (let i = 0; i < TARGET_TRIES; i++) {
@@ -400,7 +432,8 @@ export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): S
         const budget = (plan.plannedEndMs - approach.startMs) / 1000;
         if (budget < MIN_RIDE_BUDGET_SECONDS) refusal = 'no_budget';
         else {
-          const chosen = chooseDropoff(ctx, approach.pickup, budget, localHour(approach.startMs));
+          const fits = ctx.returnToBase ? homeInTime(ctx, approach.startMs, plan.plannedEndMs) : undefined;
+          const chosen = chooseDropoff(ctx, approach.pickup, budget, localHour(approach.startMs), fits);
           if (!chosen) refusal = 'no_dropoff';
           else step = { approach, chosen };
         }
@@ -438,7 +471,15 @@ export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): S
     prev = ride;
   }
   if (rides.length === 0 || !rides.every(stampsAreUnique)) return null;
-  return { rides, endMs: prev ? prev.endMs : plan.startMs, endedBy, refusedSteps };
+  return { rides, endMs: shiftEnd(ctx, plan, prev), endedBy, refusedSteps };
+}
+
+/** The last ride's end, or with return to base the car's arrival there (the drop-off was chosen so it has a route). */
+function shiftEnd(ctx: Context, plan: PlannedShift, last: PrevRide | null): number {
+  if (!last) return plan.startMs;
+  if (!ctx.returnToBase) return last.endMs;
+  const home = returnDrive(travelOf(ctx), ctx.base, last.dropoff, last.endMs);
+  return home === null ? last.endMs : last.endMs + home.seconds * 1000;
 }
 
 // ── The rules, checked independently of how the rides were made ─────────────
@@ -553,6 +594,35 @@ function checkOpeningLegs(shifts: readonly SimShift[], rides: readonly SimRide[]
   });
 }
 
+/**
+ * With return to base, the last drop-off is driven back to the base: the drive
+ * has a route, the shift lasts until the car arrives, and the drive with its
+ * margin ends by the shift's planned end.
+ */
+function checkClosingLegs(shifts: readonly SimShift[], rides: readonly SimRide[], base: GeoPoint, travel: TravelModel, margins: MarginOptions): string[] {
+  const last = new Map<string, SimRide>();
+  for (const r of rides) {
+    if (r.status !== 'completed' || r.endMs === null) continue;
+    const seen = last.get(r.shiftId);
+    if (!seen || (seen.endMs as number) < r.endMs) last.set(r.shiftId, r);
+  }
+  return shifts.flatMap(s => {
+    const ride = last.get(s.id);
+    if (!ride) return [];
+    const endMs = ride.endMs as number;
+    const leg = returnDrive(travel, base, ride.dropoff, endMs);
+    if (!leg) return [`${s.id}: no ${travel.source} route from the last drop-off back to the base`];
+    const out: string[] = [];
+    if (s.endMs < endMs + leg.seconds * 1000) out.push(`${s.id}: the shift ends before the car is back at the base`);
+    const due = s.plannedEndMs ?? s.endMs;
+    const needed = emptyDriveSeconds(leg.seconds, margins);
+    if (endMs + needed * 1000 > due) {
+      out.push(`${s.id}: the drive back to the base and its margin need ${needed}s, more than the ${(due - endMs) / 1000}s left of the shift`);
+    }
+    return out;
+  });
+}
+
 function checkRideChain(rides: readonly SimRide[], base: GeoPoint, travel: TravelModel, margins: MarginOptions): string[] {
   const out: string[] = [];
   for (const [shiftId, list] of groupBy(rides.filter(r => r.status === 'completed'), r => r.shiftId)) {
@@ -591,6 +661,8 @@ export function validateRides(
   margins: MarginOptions = DEFAULT_OPTIONS,
   // The weeks generator keeps 240 to 360; the calendar month passes its own (no floor).
   limits: ShiftLengthLimits = SHIFT_LIMITS,
+  /** The company requires the car back at the base (round 8, D8); the calendar month passes its setting. */
+  returnToBase = false,
 ): string[] {
   return [
     ...checkWholeMilliseconds(month.rides),
@@ -598,5 +670,6 @@ export function validateRides(
     ...checkVehicleDays(month.shifts),
     ...checkOpeningLegs(month.shifts, month.rides, base, travel, margins),
     ...checkRideChain(month.rides, base, travel, margins),
+    ...(returnToBase ? checkClosingLegs(month.shifts, month.rides, base, travel, margins) : []),
   ];
 }

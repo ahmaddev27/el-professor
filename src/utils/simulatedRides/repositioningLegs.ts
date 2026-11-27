@@ -32,13 +32,18 @@ import type { GeoPoint, PoolAddress, SimRide, SimShift } from './types';
  *   Abholort once the order came. A car that waited where it had dropped its
  *   passenger drove nowhere, so that first leg is left out rather than
  *   recorded as a drive of zero.
+ * - `to_base`: the last Zielort back to the Betriebssitz, when the company
+ *   requires the car back at the end of a shift (round 8, D8). It leaves when
+ *   the last ride ends and must be done, with its margin, by the shift's
+ *   planned end. A last drop-off at the base itself drove nowhere and is left
+ *   out, like the waiting leg.
  *
  * The status is the route check's vocabulary: a leg the model has no route for
  * is UNVERIFIABLE, never zero and never a pass; a leg of the straight-line
  * estimate is ESTIMATE_ONLY whatever its numbers say.
  */
 
-export type RepositioningPurpose = 'from_base' | 'to_waiting_position' | 'to_pickup';
+export type RepositioningPurpose = 'from_base' | 'to_waiting_position' | 'to_pickup' | 'to_base';
 
 export interface LegPlace { label: string; lat: number; lon: number }
 
@@ -58,13 +63,14 @@ export interface RepositioningLeg {
   shiftId: string;
   /** Null for the drive out of the base. */
   previousTripId: string | null;
+  /** Empty for the drive back to the base, which no ride follows. */
   nextTripId: string;
   from: LegPlace;
   to: LegPlace;
   departMs: number;
   /** Departure plus road time; null when there is no route. */
   arriveMs: number | null;
-  /** The time between departure and the moment the leg must be done by: the order (waiting position) or the ride's start (pickup). */
+  /** The time between departure and the moment the leg must be done by: the order (waiting position), the ride's start (pickup) or the shift's planned end (base). */
   availableSeconds: number;
   roadSeconds: number | null;
   roadKm: number | null;
@@ -92,6 +98,8 @@ export interface LegContext {
   vehicleIdByPlate: ReadonlyMap<string, string>;
   seed: number;
   runId: string;
+  /** The company requires the car back at the base when a shift ends. */
+  returnToBase?: boolean;
 }
 
 const placeOf = (p: GeoPoint, fallback: string): LegPlace => ({
@@ -110,7 +118,8 @@ interface LegSpec {
   purpose: RepositioningPurpose;
   shift: SimShift;
   previous: SimRide | null;
-  next: SimRide;
+  /** Null for the drive back to the base. */
+  next: SimRide | null;
   from: LegPlace;
   to: LegPlace;
   departMs: number;
@@ -121,7 +130,7 @@ interface LegSpec {
 }
 
 function legOf(spec: LegSpec, ctx: LegContext, n: number): RepositioningLeg {
-  const endsAtPickup = spec.purpose !== 'to_waiting_position';
+  const endsAtPickup = spec.purpose === 'from_base' || spec.purpose === 'to_pickup';
   const same = pointKey(spec.from) === pointKey(spec.to);
   const road = same ? { seconds: 0, km: 0 } : ctx.travel.drive(spec.from, spec.to, localHour(spec.hourMs));
   const usable = road !== null && Number.isFinite(road.seconds) && road.seconds >= 0 && Number.isFinite(road.km) && road.km >= 0;
@@ -143,7 +152,7 @@ function legOf(spec: LegSpec, ctx: LegContext, n: number): RepositioningLeg {
     driverAssignment: 'simulated',
     shiftId: spec.shift.id,
     previousTripId: spec.previous?.tripId ?? null,
-    nextTripId: spec.next.tripId ?? '',
+    nextTripId: spec.next?.tripId ?? '',
     from: spec.from,
     to: spec.to,
     departMs: spec.departMs,
@@ -200,6 +209,16 @@ export function buildRepositioningLegs(
       }
       specs.push({ purpose: 'to_pickup', shift, previous: prev, next, from: waiting, to: pickup, departMs: next.orderTransmittedMs, dueMs: next.startMs as number, hourMs: prevEnd });
     }
+    const last = list[list.length - 1];
+    const home = placeOf(ctx.base, ctx.baseLabel);
+    if (ctx.returnToBase && pointKey(last.dropoff) !== pointKey(home)) {
+      const lastEnd = last.endMs as number;
+      specs.push({
+        purpose: 'to_base', shift, previous: last, next: null,
+        from: placeOf(last.dropoff, 'Zielort'), to: home,
+        departMs: lastEnd, dueMs: shift.plannedEndMs ?? shift.endMs, hourMs: lastEnd,
+      });
+    }
   }
   return specs.map((spec, i) => legOf(spec, ctx, i + 1));
 }
@@ -220,7 +239,7 @@ export interface RepositioningSummary {
 
 export function summariseRepositioning(legs: readonly RepositioningLeg[]): RepositioningSummary {
   const byStatus: Record<RouteVerificationStatus, number> = { ROUTE_VERIFIED: 0, ROUTE_CONFLICT: 0, UNVERIFIABLE: 0, ESTIMATE_ONLY: 0 };
-  const byPurpose: Record<RepositioningPurpose, number> = { from_base: 0, to_waiting_position: 0, to_pickup: 0 };
+  const byPurpose: Record<RepositioningPurpose, number> = { from_base: 0, to_waiting_position: 0, to_pickup: 0, to_base: 0 };
   let preferredWindow = 0;
   let withRoute = 0;
   let metres = 0;
