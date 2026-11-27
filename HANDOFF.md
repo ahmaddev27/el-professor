@@ -2,7 +2,22 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — Mein Konto in tabs** (branch `design/account-tabs`, one PR into `staging`; no migration, look only). The owner asked for the panel's account page to be split into tabs and its look fixed. `AccountPage` is one component on `/admin/konto` and `/mein-konto`, so both changed.
+- **27.11.2026 (latest) — the Glass remake, batch R5: the components phase 5 left legacy** (branch `design/remake-r5`, one PR into `staging`; no migration, look only). Inline styles and hard-coded colours fall from 2992 / 2228 in 33 files to 349 / 366 in 14. What is left is the statutory documents (byte-identical to `origin/staging`), a few data-driven values, the staging banner and Google's button. `Docs/design/remake-v2/PLAN.md` §8 lists every file with its counts, the proof and what changed on purpose.
+  - **Moved:**
+    - the screen parts of the planning and document builders;
+    - both historical wizards;
+    - the Stundennachweis page around `Timesheet`;
+    - the Trinkgeld-Quittung and Mietwagenauftrag dialogs around `A4Document`;
+    - the three salary dialogs (now `Dialog`s that ignore close while writing);
+    - the landing page (theme-following);
+    - the toast;
+    - App.tsx's two full-page states.
+  - **Deleted:** `ConfirmationModal.tsx`. `LanguageSwitcher` has only the `ui` variant.
+  - **Proof:** one `design-harness/identity-r5-*.mjs` per payroll file, each after a negative control, plus a call checker over every file.
+  - **Review:** found three real defects, all fixed: a `??` precedence slip that greyed the wizard's coloured figures, a conflict fill identical to the non-conflict one, and `SalaryDetailsModal` closable mid-save.
+  - **Gate:** `npm run build` on the VPS under `nice`, green: 7480 tests, typecheck 161 at the lowered baseline, styles 349 / 366 in 14 files at the lowered baseline. The typecheck baseline is 161.
+  - **Next:** R6, retiring the legacy tokens, and the landing page's physical hero keyframes for RTL.
+- **27.11.2026 — Mein Konto in tabs** (merged into `staging` as #386; no migration, look only). The owner asked for the panel's account page to be split into tabs and its look fixed. `AccountPage` is one component on `/admin/konto` and `/mein-konto`, so both changed.
   - **Tabs:** Profil (a new identity card with initials, name and address, then the role and company facts and the name form), E-Mail, Passwort, and Passkeys only while GoTrue reports them. An active Passkeys tab falls back to Profil if passkeys go off.
   - **Every panel is `forceMount`** and hidden with `data-[state=inactive]:hidden`, so a pending email code survives a tab switch.
   - **The page is centred at `max-w-4xl`.** On `lg:` each form is two columns: title and hint, then fields.
