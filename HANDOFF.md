@@ -2,7 +2,19 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — the Glass remake, stage 1** (PR #380, `design/remake-v2` into `staging`; no migration, look only). **The owner approved the look on 27.11 and the PR is merged into `staging`, but staging is NOT deployed**: no GitHub Actions run while the repository is private, so the deploy job never started. Since CI ran nothing, the full `npm run build` was run here on the PR head instead, under `nice`, in 127 s. The typecheck count is 165 and the style counts are 4670 inline styles and 2607 colours in 57 files, all at their baselines. 336 test files passed and 2 were skipped; 7417 tests passed and 7 were skipped. `vite build` and the mail templates also passed. The screen batches R1–R6 are next. Plan and decisions: `Docs/design/remake-v2/PLAN.md`.
+- **27.11.2026 (latest) — the Glass remake, batch R1: `OverviewPage` and `LockedFeaturePage`** (branch `design/remake-r1`, PR into `staging`; no migration, look only). Both screens are on tokens and primitives. The chart series tokens `chart-1` … `chart-5` and `chart-1-soft` are new, each measured at 3:1 on canvas, sheet, raised and overlay in both themes. Five of the spec's values were moved along their hue to get there; the table is in `Docs/design/remake-v2/PLAN.md` §1, and §8 records what R1 moved, its proof and what it lost.
+  - **Proof.** `design-harness/identity-proof.mjs` against `origin/staging`, after a negative control. All 157 and all 8 logic calls are carried. The only handlers lost are 14 hover painters, which are `hover:` classes now.
+  - **Harness.** The R1 screens are in `design-harness/r1/` (fixtures and routes) and `design-harness/shots-r1.mjs`, with one line each in `fakes/supabase.ts` and `main.tsx`. A stand-in read must call `.then` on the builder, because a supabase query builder that nobody awaits never runs, and `settle()` then waits its full 180 s.
+  - **Gate.** CI does not run while the repository is private. The full `npm run build` therefore ran here under `nice`, in 176 s:
+    - the typecheck count is 165, at the baseline;
+    - the style counts are 4470 inline styles and 2494 colours in 56 files, with the baseline lowered for exactly those two files;
+    - 336 test files passed and 2 were skipped; 7457 tests passed and 7 were skipped;
+    - `vite build` and the mail templates passed.
+  - **Shots.** `Docs/design/remake-v2/r1/{before,after}/`.
+  - **Two questions for the owner:**
+    - The locked page's "Plan upgraden" mails `support@el-professor.de`, while the product's domain is `elprofessor.eu`. This is data, so it was left alone.
+    - Whether he wants Ctrl+B to collapse the sidebar.
+- **27.11.2026 — the Glass remake, stage 1** (PR #380, `design/remake-v2` into `staging`; no migration, look only). **The owner approved the look on 27.11 and the PR is merged into `staging`, but staging is NOT deployed**: no GitHub Actions run while the repository is private, so the deploy job never started. Since CI ran nothing, the full `npm run build` was run here on the PR head instead, under `nice`, in 127 s. The typecheck count is 165 and the style counts are 4670 inline styles and 2607 colours in 57 files, all at their baselines. 336 test files passed and 2 were skipped; 7417 tests passed and 7 were skipped. `vite build` and the mail templates also passed. The screen batches R1–R6 are next. Plan and decisions: `Docs/design/remake-v2/PLAN.md`.
   - **What moved:**
     - The tokens (`src/index.css` `@tokens light|dark`) and `tailwind.config.js`.
     - Geist and Geist Mono, self-hosted in `src/assets/fonts/`.

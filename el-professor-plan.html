@@ -1308,6 +1308,14 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>الخطة والقرارات:</strong> <code>Docs/design/remake-v2/PLAN.md</code>. والصور قبل وبعد بـ<code>Docs/design/remake-v2/</code>.</li>
           <li><strong>بعد موافقتك:</strong> الدفعات R1 لـR5 (الشاشات، يلي فيها كمان الأزرق المكتوب جوّا الكود)، وبعدين R6، يلي بيشيل المتغيّرات القديمة.</li>
         </ul>
+        <h3><span class="step-no">R1</span>الصفحة الرئيسية وصفحة «الميزة مقفولة» عالشكل الجديد <span class="pill warn">مبني، PR عالستيج · 27.11.2026</span></h3>
+        <ul class="list">
+          <li><strong>شو انتقل:</strong> <code>OverviewPage</code> و<code>LockedFeaturePage</code>، فاتح وغامق، كمبيوتر وموبايل. كل خط بالرسوم حافظ على لونو القديم، بس صار لونو من متغيّرات التصميم (<code>chart-1</code> لـ<code>chart-5</code>).</li>
+          <li><strong>المنطق ما تغيّر:</strong> الإثبات بالسكريبت، كل الـ157 استدعاء موجودين. راح بس تلوين «تمرير الماوس» يلي كان مكتوب باليد.</li>
+          <li><strong>صلّحنا:</strong> جدول الرواتب المفتوحة عالموبايل كان يقسم المبالغ على سطرين.</li>
+          <li><strong>الفحص:</strong> البناء الكامل نجح هون (176 ثانية، 7457 اختبار).</li>
+          <li><strong>الجاي:</strong> R2 (الملاحظات، الورشة، التنبيهات).</li>
+        </ul>
       </div>
     </section>
 

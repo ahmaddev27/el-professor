@@ -19,6 +19,7 @@ import { batch3Tables, recordBatch3Rpc, recordBatch3Write } from '../batch3/fixt
 import { batch1bFailsEveryTable, batch1bPrimaryTable, batch1bTables } from '../fixtures-batch1b';
 import { analysisFailure, analysisTables } from '../analysis/fixtures';
 import { applayoutTables } from '../applayout/fixtures';
+import { r1Tables } from '../r1/fixtures';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
@@ -61,6 +62,8 @@ function seed(): Map<string, Row[]> {
     ...analysisTables(),
     // The frame batch's tables, on its own screens only (applayout/fixtures.ts).
     ...applayoutTables(),
+    // Design remake R1's tables, on its own screens only (r1/fixtures.ts).
+    ...r1Tables(),
   ]);
 }
 
