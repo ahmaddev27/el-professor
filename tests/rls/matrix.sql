@@ -865,8 +865,8 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO user_sessions (user_id, session_token) VALUES ({admin}, 'mx-session-new-{s}')$q$,
   $q$last_active_at = last_active_at$q$),
 ( 7, 'drivers', $q$id = {id}$q$,
-  $q$INSERT INTO drivers (id, company_id, name) VALUES ({id}, {co}, 'MX driver {s}');
-     INSERT INTO drivers (id, company_id, name) VALUES ({ref:drivers2}, {co}, 'MX second driver {s}')$q$, NULL,
+  $q$INSERT INTO drivers (id, company_id, name, personalnummer) VALUES ({id}, {co}, 'MX driver {s}', 'MX-{s}-1');
+     INSERT INTO drivers (id, company_id, name, personalnummer) VALUES ({ref:drivers2}, {co}, 'MX second driver {s}', 'MX-{s}-2')$q$, NULL,
   $q$INSERT INTO drivers (company_id, name) VALUES ({co}, 'MX new driver {s}')$q$,
   $q$name = name$q$),
 ( 8, 'cars', $q$id = {id}$q$,
@@ -4240,6 +4240,18 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('income_import_uber_system(no run)',
      $q$SELECT income_import_uber_system(gen_random_uuid(), '[]'::jsonb)::text$q$,
      'PPPPPPP', NULL),
+    -- Placing the earners of a pull (20261126110000) is the job's, like the four
+    -- above: service_role alone. A client that could call it would create
+    -- active drivers with no person looking. Behaviour: tests/rls/driver-defaults.sql.
+    ('uber_pull_place_unlinked(no run)',
+     $q$SELECT uber_pull_place_unlinked(gen_random_uuid(), '[]'::jsonb)::text$q$,
+     'PPPPPPP', NULL),
+    -- What the new-driver form pre-fills (20261126100000). The screen's, so every
+    -- signed-in role may CALL it and the function answers NULL, not an error, to
+    -- a caller who may not edit drivers or has no company: Y everywhere but anon.
+    ('driver_next_personalnummer()',
+     $q$SELECT coalesce(driver_next_personalnummer(), 'none')$q$,
+     'PYYYYYY', NULL),
     -- The fifth is the screen's, so `authenticated` holds EXECUTE: it is
     -- STABLE and reads only through get_active_company_id(), so a caller with
     -- no company reads nothing rather than being refused. The platform account

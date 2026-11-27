@@ -54,6 +54,12 @@ export function createFakeSupabase(answer: (call: FakeCall) => FakeAnswer) {
 
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null }) },
+    // An RPC is recorded as the table `rpc:<name>` with its arguments as the payload.
+    rpc: (name: string, args?: unknown) => {
+      const call: FakeCall = { table: `rpc:${name}`, op: 'select', filters: [], payload: args };
+      calls.push(call);
+      return builder(call, { on: false });
+    },
     from: (table: string) => {
       const call: FakeCall = { table, op: 'select', filters: [] };
       calls.push(call);

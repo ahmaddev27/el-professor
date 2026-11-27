@@ -53,10 +53,14 @@ import { PARTNER_ENDPOINT_VAR, partnerEndpoint } from './partner-endpoint.ts';
 import { openPartnerToken } from './partner-token-seal.ts';
 import { parseEarningsBody, type UberDriverEarnings, type UnmatchedEarner } from './uber-earnings-core.ts';
 import {
+  earnersToPlace,
+  placementBlockReason,
   GAP_OUTCOME,
   outcomeOfRefusal,
   planCompany,
   planDay,
+  type EarnerToPlace,
+  type PlacementBlockReason,
   type UberPass,
   type UberPullCompany,
   type UberPullOutcome,
@@ -263,6 +267,16 @@ async function settle(ctx: Context, runId: string, s: Settled): Promise<boolean>
   return !error;
 }
 
+async function placeUnlinked(
+  ctx: Context, companyId: string, runId: string, earners: readonly EarnerToPlace[],
+): Promise<{ failed: true } | { failed: false; reason: PlacementBlockReason | null }> {
+  // Names go to the database and nowhere else: never into a log line.
+  const { data, error } = await ctx.admin.rpc('uber_pull_place_unlinked', { p_run_id: runId, p_earners: earners });
+  if (!error) return { failed: false, reason: placementBlockReason(data) };
+  logFailure(FN, 'place_unlinked', { ...LOG_CONTEXT, company_id: companyId }, error);
+  return { failed: true };
+}
+
 async function pullOneDay(
   ctx: Context, companyId: string, runId: string, day: string, pass: UberPass, token: OpenedToken,
 ): Promise<UberPullRunItem> {
@@ -279,8 +293,19 @@ async function pullOneDay(
   if (!earnings.ok) return stop({ outcome: earnings.outcome, detail: earnings.detail });
   const links = await loadLinks(ctx.admin, companyId);
   if (links === null) return stop({ outcome: 'failed', detail: 'links_unreadable' });
-  const plan = planDay(day, earnings.drivers, earnings.unmatched, links);
-  if (plan.unlinked > 0) return stop({ outcome: 'blocked_unlinked', drivers: plan.unlinked });
+  let plan = planDay(day, earnings.drivers, earnings.unmatched, links);
+  if (plan.unlinked > 0) {
+    // A new hire must not cost the company the day: the database links or
+    // creates them first (a few at once only; more is the full import's job).
+    const placed = await placeUnlinked(ctx, companyId, runId, earnersToPlace(earnings.drivers, day, links));
+    if (placed.failed) return stop({ outcome: 'failed', detail: 'placement_failed' });
+    const relinked = await loadLinks(ctx.admin, companyId);
+    if (relinked === null) return stop({ outcome: 'failed', detail: 'links_unreadable' });
+    plan = planDay(day, earnings.drivers, earnings.unmatched, relinked);
+    if (plan.unlinked > 0) {
+      return stop({ outcome: 'blocked_unlinked', drivers: plan.unlinked, detail: placed.reason });
+    }
+  }
 
   // An earner Reidey could not place sends no money, so the day is written for
   // the rest. Their names go on the run BEFORE the rows: if they cannot be

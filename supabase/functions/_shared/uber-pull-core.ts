@@ -266,6 +266,58 @@ export function driversWithRows(drivers: readonly UberDriverEarnings[], day: str
   return drivers.filter((d) => buildDayRows(day, [d]).length > 0);
 }
 
+/** What uber_pull_place_unlinked takes: Reidey's id and its spelling of the name. */
+export interface EarnerToPlace { external_driver_id: string; name: string }
+
+/** Most earners one call may place; the database refuses more (`too_many`). */
+export const MAX_PLACED_PER_DAY = 5;
+
+/**
+ * The earners with money on the day and no confirmed link, once each. They are
+ * the ones the database may place (link to a same-named driver, or create one)
+ * before the day is written, so a new hire does not lose the company a day.
+ */
+export function earnersToPlace(
+  drivers: readonly UberDriverEarnings[], day: string, linked: ReadonlySet<string>,
+): EarnerToPlace[] {
+  const seen = new Set<string>();
+  const out: EarnerToPlace[] = [];
+  for (const d of driversWithRows(drivers, day)) {
+    if (linked.has(d.externalDriverId) || seen.has(d.externalDriverId)) continue;
+    seen.add(d.externalDriverId);
+    out.push({ external_driver_id: d.externalDriverId, name: d.name });
+  }
+  return out;
+}
+
+/** Why a placement left an earner unplaced, as the run's detail and the screen's hint read it. */
+export const PLACEMENT_BLOCK_REASONS = [
+  'too_many', 'name_taken', 'name_inactive', 'name_missing', 'rejected', 'limit_reached',
+  'company_blocked', 'run_not_open',
+] as const;
+export type PlacementBlockReason = typeof PLACEMENT_BLOCK_REASONS[number];
+
+export function isPlacementBlockReason(value: unknown): value is PlacementBlockReason {
+  return typeof value === 'string' && (PLACEMENT_BLOCK_REASONS as readonly string[]).includes(value);
+}
+
+/**
+ * The reason `uber_pull_place_unlinked` gave for not placing everyone: its own
+ * refusal (`{ok: false, reason}`), else the first refused earner's. Only a
+ * reason on the list is kept, so the run's detail never carries a name.
+ */
+export function placementBlockReason(answer: unknown): PlacementBlockReason | null {
+  if (answer === null || typeof answer !== 'object') return null;
+  const a = answer as { ok?: unknown; reason?: unknown; refused?: unknown };
+  if (a.ok === false) return isPlacementBlockReason(a.reason) ? a.reason : null;
+  if (!Array.isArray(a.refused)) return null;
+  for (const r of a.refused) {
+    const reason = r !== null && typeof r === 'object' ? (r as { reason?: unknown }).reason : undefined;
+    if (isPlacementBlockReason(reason)) return reason;
+  }
+  return null;
+}
+
 /**
  * Maps the system writer's refusal reason to the outcome the run records.
  * An unknown reason is `refused`, with the reason in the detail.
