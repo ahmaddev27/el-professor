@@ -328,7 +328,7 @@ primitives alone**, and is checked in the shots.
 | batch | screens |
 |---|---|
 | R1 | `OverviewPage`, `LockedFeaturePage` — **done 27.11.2026** (below) |
-| R2 | `NotesPage`, `WerkstattPage`, `NotificationsPage` |
+| R2 | `NotesPage`, `WerkstattPage`, `NotificationsPage` — **done 27.11.2026** (below) |
 | R3 | `AccountPage`; then the OTP block's `ON_LEGACY_SURFACE` pairs retire |
 | R4 | the admin panel: `SuperAdminDashboard`, `CompaniesPage`, `PlatformDirectoriesPage`, `PlatformTeamPage`, `PlatformAuditPage`, `PlatformSettingsPage`, `PlatformPlansPage`, `SubscriptionBillingPage`, `AbnahmeDiagnosticPage` |
 | R5 | the components phase 5 left legacy on purpose: the salary dialogs, the planning and document builders' screen parts (never the documents), the toast, `ConfirmationModal` callers, and `LandingPage` |
@@ -344,6 +344,16 @@ primitives alone**, and is checked in the shots.
   - All 157 and all 8 logic calls are carried.
   - The only handlers lost are the hover painters, 12 on the Overview and 2 on the locked page, which are `hover:` classes now.
 - **Found in the shots.** At 375 px the open-salaries table broke every amount across two lines. Its figures and dates are `whitespace-nowrap` now, and the table scrolls inside a positioned frame.
+
+**R2, as built (27.11.2026, branch `design/remake-r2`, stacked on R1).**
+
+- **What moved.** `NotesPage`, `WerkstattPage` with its form `WerkstattCheckModal`, and `NotificationsPage`. Every one went to 0 inline styles and 0 colours: 86/1, 54/7, 46/2 and 34/1 before. No data-driven style was needed.
+- **Dialogs.** The note form and the Werkstatt form are `Dialog`s (they stay open while saving and show the failure); both deletes are `ConfirmDialog`. The Werkstatt form keeps its old rule that a click beside it does not throw the form away, and Escape and the close button do nothing while a save runs. Its submit sits in the footer with `form=`, the `CarModal` pattern.
+- **Colours.** Werkstatt: positive `positive`, negative `critical`, repaired `info` (its old hue was blue, and as a status it is a tone, not brand). Each card also carries a `Badge` with the word, so colour is not the only signal. Notes: the planning effect "exclude" is `critical`, "must include" `caution`.
+- **The proof.** `identity-proof.mjs` against `origin/staging`, after a negative control on each file. Every logic call is carried (74, 31, 25, and 20 of 22 on Notifications, where the two missing are the two `.map(…)` blocks whose markup was restyled; the `Toggle`s and `handleTypeToggle` inside them are carried). The logic regions differ only by presentation that moved below the marker: the two `inputStyle` objects, Werkstatt's `getStatusConfig` (words and colours in one map; the label is still read the same way) and Notifications' `iconColor`/`iconBg`. The handlers lost are hover painters (22, 14, 12 and 8). The status picker's three `setStatus('…')` buttons are one mapped `setStatus(option.key)`.
+- **Tests.** The four test files that open a dialog mock `ui`'s `Dialog` and `ConfirmDialog`, because `react-test-renderer` cannot draw a portal; the mocked `ConfirmDialog` keeps the real contract (`onConfirm()` then `onClose()`). A mutation control (confirm without `onConfirm`) fails the four delete tests. Two files outside the screens' own tests had to follow: `EditModals.writeRefusal.test.ts` (it opens `WerkstattCheckModal`; it mocks `Dialog` now too), and `scripts/style-ratchet.test.ts`, whose "a screen not yet converted" control was Werkstatt and is `AccountPage` now.
+- **Found in the shots.** A Werkstatt card read „Datum:17.9.2026“: the labels end in a colon with no space (also before R2); they carry `mr-1` now. „Heute“ was plain text beside two bordered arrows and is a secondary button in the page and the form. At 375 px the four status filters wrapped into three and one; they are two by two on a phone. In the form at 375 px, „→“ fell onto a line of its own; the calendar, both arrows and the month are one group now.
+- **Left as it was.** Both pages draw the edit button with a `CreditCard` icon (`CreditCard as Edit2`), as six other files do; the notes tests find the edit button by that icon. That is a question for the owner, not a look-only change.
 
 ## 9. Verification
 

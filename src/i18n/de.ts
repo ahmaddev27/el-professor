@@ -7492,4 +7492,8 @@ export const de = {
   'settings.uberPull.runs.unlinkedReason.rejected': 'Die Zuordnung dieses Uber-Fahrers wurde früher abgelehnt, deshalb wird er nicht automatisch angelegt. Auf der Fahrer-Seite zuordnen, dann den Tag über die Umsätze-Seite nachholen.',
   'settings.uberPull.runs.unlinkedReason.run_not_open': 'Der Tag war schon abgeschlossen, als der neue Fahrer angelegt werden sollte. Den Tag über die Umsätze-Seite nachholen.',
   'settings.uberPull.runs.unlinkedReason.too_many': 'Mehr als fünf neue Uber-Fahrer an einem Tag werden nachts nicht automatisch angelegt. Auf der Fahrer-Seite mit „Fahrer aus Reidey aktualisieren“ anlegen, dann den Tag über die Umsätze-Seite nachholen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'notes.nextMonth': 'Nächster Monat',
+  'notes.prevMonth': 'Vorheriger Monat',
 } as const;

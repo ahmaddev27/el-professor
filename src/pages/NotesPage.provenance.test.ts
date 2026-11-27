@@ -77,6 +77,26 @@ vi.mock('../contexts/LanguageContext', () => ({ useTranslation: () => world.tran
 vi.mock('../hooks/usePartnerCatchUp', () => ({
   usePartnerCatchUp: () => ({ catchUp: async () => false, fetching: false, available: false }),
 }));
+vi.mock('../components/ui', async importOriginal => {
+  const original = await importOriginal<typeof import('../components/ui')>();
+  const pass = ({ children }: { children?: unknown }) => createElement('div', null, children as never);
+  return {
+    ...original,
+    // Radix portals cannot be rendered by react-test-renderer: an open dialog
+    // draws its children inline, a closed one nothing.
+    Dialog: ({ open, children }: { open: boolean; children?: unknown }) =>
+      open ? createElement('div', null, children as never) : null,
+    DialogContent: pass, DialogHeader: pass, DialogFooter: pass, DialogTitle: pass, DialogDescription: pass,
+    // ConfirmDialog's contract, kept: confirm calls onConfirm() then onClose(),
+    // cancel calls onClose() alone.
+    ConfirmDialog: (p: { open: boolean; onConfirm: () => void; onClose: () => void; confirmLabel: string; cancelLabel?: string }) =>
+      p.open
+        ? createElement('div', null,
+            createElement('button', { onClick: p.onClose }, p.cancelLabel ?? 'common.cancel'),
+            createElement('button', { onClick: () => { p.onConfirm(); p.onClose(); } }, p.confirmLabel))
+        : null,
+  };
+});
 
 const eventTarget = () => ({ addEventListener: () => {}, removeEventListener: () => {} });
 Object.assign(globalThis, { window: eventTarget(), document: { ...eventTarget(), visibilityState: 'visible' } });

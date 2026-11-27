@@ -113,10 +113,6 @@
       "style": 87,
       "color": 37
     },
-    "src/components/WerkstattCheckModal.tsx": {
-      "style": 46,
-      "color": 2
-    },
     "src/components/auth/EmphasizedText.tsx": {
       "style": 1,
       "color": 0
@@ -169,14 +165,6 @@
       "style": 325,
       "color": 369
     },
-    "src/pages/NotesPage.tsx": {
-      "style": 86,
-      "color": 1
-    },
-    "src/pages/NotificationsPage.tsx": {
-      "style": 34,
-      "color": 1
-    },
     "src/pages/OverviewPage.tsx": {
       "style": 2,
       "color": 0
@@ -212,10 +200,6 @@
     "src/pages/SuperAdminDashboard.tsx": {
       "style": 174,
       "color": 25
-    },
-    "src/pages/WerkstattPage.tsx": {
-      "style": 54,
-      "color": 7
     },
     "src/utils/overviewHelpers.ts": {
       "style": 0,
