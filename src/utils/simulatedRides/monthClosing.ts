@@ -1,5 +1,5 @@
 import { CONTRACT_VERSION, type WorkbookPayload } from '../../lib/workbookContract';
-import type { FullMonthResult, SettingsSource } from './fullMonth';
+import { CALENDAR_MAX_WAIT_SECONDS, type FullMonthResult, type SettingsSource } from './fullMonth';
 import { REPORT_LABEL_VALUES, SIMULATED_LABEL_HEADER, SIMULATED_LABEL_VALUE, SIMULATED_NOTICE, SIMULATED_SHEET_NAME } from './marker';
 import {
   BASE_SOURCE_TEXT,
@@ -719,6 +719,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Stornogebuehr', 'nur wenn die Firma sie eingestellt hat'],
       ['Abgelehnte Auftraege', 'nie im Fahrtenbuch'],
       ['Leerfahrten', 'nie im Fahrtenbuch; eigenes Blatt'],
+      ['Wartezeit auf den naechsten Auftrag', `hoechstens ${CALENDAR_MAX_WAIT_SECONDS / 60} Minuten nach einer Fahrt (Entscheidung des Inhabers vom 27.11.2026)`],
     ]),
     ...section('Satz', [
       ['Einstellung', shareSettingText(f.share.setting)],

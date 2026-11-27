@@ -85,6 +85,13 @@ export interface Context {
    * the shift ends with its last ride, as before. The weeks generator never sets it.
    */
   returnToBase?: boolean;
+  /**
+   * The longest wait for the next order after a ride, in seconds. Absent: 100
+   * minutes, the weeks generator's tail, unchanged. The calendar month sets 30
+   * (owner, 27.11.2026: the shifts are blocks, the next order comes soon). The
+   * draw consumes the same randomness either way; only its ceiling moves.
+   */
+  maxWaitSeconds?: number;
 }
 
 export const travelOf = (ctx: Context): TravelModel => ctx.travel ?? ESTIMATE_TRAVEL_MODEL;
@@ -302,7 +309,7 @@ function stampsAreUnique(r: SimRide): boolean {
 
 /** A third of the real orders reach the car before its previous passenger is out. */
 const DURING_RIDE_SHARE = 0.34;
-/** The wait for an order after a ride: median 10 minutes, a long tail, none beyond 100. */
+/** The wait for an order after a ride: median 9 minutes, a long tail, none beyond 100 unless the context says less. */
 const WAIT_MEDIAN_SECONDS = 540;
 const WAIT_SIGMA = 1.5;
 const WAIT_MAX_SECONDS = 100 * 60;
@@ -379,7 +386,7 @@ function approachAfterRide(ctx: Context, prev: PrevRide, latestStartMs: number):
   const legTwo = pickupDriveSeconds(chosen.leg.seconds, ctx.opts);
   const earliestStart = prev.endMs + Math.max(legOne + legTwo, pickupDriveSeconds(direct.seconds, ctx.opts)) * 1000;
   if (earliestStart + JITTER_MARGIN_MS > latestStartMs) return null;
-  const wait = clampSeconds(logNormal(rng, WAIT_MEDIAN_SECONDS, WAIT_SIGMA), WAIT_MAX_SECONDS);
+  const wait = clampSeconds(logNormal(rng, WAIT_MEDIAN_SECONDS, WAIT_SIGMA), ctx.maxWaitSeconds ?? WAIT_MAX_SECONDS);
   const waitMs = Math.min(wait * 1000, latestStartMs - JITTER_MARGIN_MS - earliestStart);
   const transmitMs = prev.endMs + legOne * 1000 + waitMs + rng.int(0, 999);
   // The drive to the Abholort starts when the order comes, so it is measured

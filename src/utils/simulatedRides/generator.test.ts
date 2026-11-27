@@ -46,6 +46,19 @@ const input = (over: Partial<FiguresInput> = {}): FiguresInput => ({
   ...over,
 });
 
+// The calendar month caps the wait at 30 minutes (owner, 27.11.2026); the weeks mode keeps its tail (D6).
+describe('the weeks mode keeps its own wait for the next order', () => {
+  it('still has orders that come more than 45 minutes after the previous ride ended', () => {
+    const { month } = generateFromFigures(input());
+    let long = 0;
+    for (const shift of month.shifts) {
+      const rides = month.rides.filter(r => r.shiftId === shift.id && r.status === 'completed').sort((a, b) => a.startMs! - b.startMs!);
+      for (let i = 1; i < rides.length; i++) if (rides[i].orderTransmittedMs - rides[i - 1].endMs! > 45 * 60_000) long++;
+    }
+    expect(long).toBeGreaterThan(5);
+  });
+});
+
 describe('the generated month', () => {
   const result = generateFromFigures(input());
   const month = result.month;

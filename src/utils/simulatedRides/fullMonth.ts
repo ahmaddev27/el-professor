@@ -359,7 +359,15 @@ export interface Provenance {
  */
 export const CALENDAR_SHIFT_LIMITS = { minMinutes: 0, maxMinutes: MAX_DAY_MINUTES } as const;
 
-export const FULL_MONTH_GENERATOR_VERSION = 'full-month/4.0.0';
+// 4.1.0 (27.11.2026): the wait for the next order is capped at CALENDAR_MAX_WAIT_SECONDS.
+export const FULL_MONTH_GENERATOR_VERSION = 'full-month/4.1.0';
+
+/**
+ * The longest wait for the next order after a ride, in a calendar month (owner,
+ * 27.11.2026): a shift is a block of rides, so the car is not left standing for
+ * the weeks generator's 100 minutes. The weeks mode keeps its own tail (D6).
+ */
+export const CALENDAR_MAX_WAIT_SECONDS = 30 * 60;
 
 export interface FullMonthResult {
   month: GeneratedMonth;
@@ -530,6 +538,7 @@ export function generateFullMonth(
     usedTransmits: new Set(),
     travel: input.travel,
     returnToBase: input.returnToBase === true,
+    maxWaitSeconds: CALENDAR_MAX_WAIT_SECONDS,
   };
   const travel = input.travel ?? ESTIMATE_TRAVEL_MODEL;
   const baseLabel = input.baseLabel ?? 'Betriebssitz';

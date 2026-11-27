@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { findBlockingNote } from '../driverNoteValidation';
 import type { StructuredNote } from '../monatsplanungPhase3';
 import {
+  CALENDAR_MAX_WAIT_SECONDS,
   FULL_MONTH_GENERATOR_VERSION,
   generateFullMonth,
   type FullMonthDriver,
@@ -240,6 +241,27 @@ describe('a healthy month', () => {
     expect(r.internal.declined.counts.declined).toBeGreaterThan(0);
     const all = r.month.rides.map(x => x.orderTransmittedMs);
     expect(new Set(all).size).toBe(all.length);
+  });
+});
+
+describe('the wait for the next order (owner, 27.11.2026)', () => {
+  // A waiting leg is due when the order comes, so its slack is the wait plus under a second of jitter.
+  const waits = (x: FullMonthResult): number[] => x.repositioning
+    .filter(l => l.purpose === 'to_waiting_position' && l.slackSeconds !== null)
+    .map(l => l.slackSeconds as number);
+
+  it('is at most 30 minutes in a calendar month, and still spread out below it', () => {
+    const all = [run({ seed: 11 }), run({ seed: 12 }), run({ seed: 13 })].flatMap(waits);
+    expect(all.length).toBeGreaterThan(200);
+    expect(Math.max(...all)).toBeLessThanOrEqual(CALENDAR_MAX_WAIT_SECONDS + 1);
+    // The log-normal tail still reaches the cap, so the ceiling is binding rather than decorative.
+    expect(all.filter(w => w > CALENDAR_MAX_WAIT_SECONDS - 60).length).toBeGreaterThan(5);
+    expect(all.filter(w => w < 10 * 60).length).toBeGreaterThan(all.length / 3);
+  });
+
+  it('is named in the generator version, so an older month never shares a run id with a newer one', () => {
+    expect(FULL_MONTH_GENERATOR_VERSION).toBe('full-month/4.1.0');
+    expect(CALENDAR_MAX_WAIT_SECONDS).toBe(1_800);
   });
 });
 
