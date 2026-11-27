@@ -73,12 +73,12 @@ LANGUAGE plpgsql AS $$
 DECLARE v_ok boolean;
 BEGIN
   v_ok := CASE WHEN p_like THEN p_actual LIKE p_expected ELSE p_actual IS NOT DISTINCT FROM p_expected END;
-  INSERT INTO _dd_out VALUES (p_n, p_label, coalesce(p_actual, '<NULL>'), p_expected, v_ok);
+  INSERT INTO _dd_out VALUES (p_n, p_label, coalesce(p_actual, '<NULL>'), coalesce(p_expected, '<NULL>'), v_ok);
   IF v_ok THEN
     RAISE NOTICE 'ok  %  %', lpad(p_n::text, 3), p_label;
   ELSE
     RAISE WARNING 'XX  %  %', lpad(p_n::text, 3), p_label;
-    RAISE WARNING '        expected: %', p_expected;
+    RAISE WARNING '        expected: %', coalesce(p_expected, '<NULL>');
     RAISE WARNING '        actual:   %', coalesce(p_actual, '<NULL>');
   END IF;
 END $$;

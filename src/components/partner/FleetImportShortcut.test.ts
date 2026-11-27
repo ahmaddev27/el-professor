@@ -42,7 +42,7 @@ vi.mock('../../lib/uberBackfillDeps', () => ({ supabaseBackfillDeps: vi.fn() }))
 
 const { FleetImportShortcut } = await import('./FleetImportShortcut');
 
-async function render(props: Record<string, unknown>): Promise<ReactTestRenderer> {
+async function render(props: Parameters<typeof FleetImportShortcut>[0]): Promise<ReactTestRenderer> {
   let tree!: ReactTestRenderer;
   await act(async () => {
     tree = create(createElement(MemoryRouter, null, createElement(FleetImportShortcut, props)));
