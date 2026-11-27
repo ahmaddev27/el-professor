@@ -7422,4 +7422,7 @@ export const en: PartialDictionary = {
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'notes.nextMonth': 'Next month',
   'notes.prevMonth': 'Previous month',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sa.subs.actionsMenu': 'Actions',
 };

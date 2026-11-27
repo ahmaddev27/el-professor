@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle, UserCog, Download,
+  RefreshCw, ShieldAlert, UserPlus, Mail, Ban, CheckCircle, Users, Lock, UserCog, Download,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -8,7 +8,8 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey, TranslationVars } from '../i18n';
 import {
-  Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Alert, Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader,
+  DialogTitle, EmptyState, Field, Input, NativeSelect, PageHeader,
 } from '../components/ui';
 import { PlatformRpcError } from '../lib/platformRpc';
 import { PLATFORM_ROLES, type PlatformRole } from '../lib/platformAccess';
@@ -95,32 +96,6 @@ import { berlinToday } from '../utils/salaryCashReceiptFlow';
  * whole roster; from a partial one it draws no conclusion and leaves the
  * decision to the database.
  */
-
-const cardStyle: React.CSSProperties = {
-  background: 'var(--bg-surface)',
-  border: '1px solid var(--border)',
-};
-
-const controlStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.625rem 0.75rem',
-  borderRadius: '0.75rem',
-  fontSize: '0.875rem',
-  background: 'var(--bg-subtle)',
-  color: 'var(--text-primary)',
-  border: '1px solid var(--border)',
-};
-
-const thStyle: React.CSSProperties = {
-  color: 'var(--text-tertiary)',
-  fontSize: '0.7rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  fontWeight: 600,
-  whiteSpace: 'nowrap',
-};
-
-const labelStyle: React.CSSProperties = { color: 'var(--text-secondary)' };
 
 type Translate = (key: TranslationKey, vars?: TranslationVars) => string;
 
@@ -353,12 +328,18 @@ const PlatformTeamPage: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic; below, markup only draws.
+
   if (!mayManage) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center" style={cardStyle}>
-        <ShieldAlert size={40} className="mb-3" style={{ color: 'var(--warning)' }} />
-        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('admin.read.denied')}</p>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('admin.team.noAccessBody')}</p>
+      <div className="glass-card rounded-surface">
+        <EmptyState
+          icon={ShieldAlert}
+          title={t('admin.read.denied')}
+          description={t('admin.team.noAccessBody')}
+          className="py-16"
+        />
       </div>
     );
   }
@@ -377,45 +358,45 @@ const PlatformTeamPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.team.title')}</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.team.subtitle')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Withheld while the read failed or is running, and on an empty
-              roster: a file saying nobody holds platform rights would be the
-              most misleading artefact this screen could produce. An *incomplete*
-              roster is exported and labelled, which is a different case. */}
-          <Button
-            variant="secondary"
-            disabled={loading || problem !== null || members.length === 0}
-            onClick={handleExport}
-            title={t('common.exportExcel')}
-          >
-            <Download size={14} aria-hidden />{t('admin.export.download')}
-          </Button>
-          <button
-            onClick={() => void load()}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 font-ui">
+      <PageHeader
+        title={t('admin.team.title')}
+        description={t('admin.team.subtitle')}
+        className="pb-0"
+        actions={(
+          <>
+            {/* Withheld while the read failed or is running, and on an empty
+                roster: a file saying nobody holds platform rights would be the
+                most misleading artefact this screen could produce. An *incomplete*
+                roster is exported and labelled, which is a different case. */}
+            <Button
+              variant="secondary"
+              disabled={loading || problem !== null || members.length === 0}
+              onClick={handleExport}
+              title={t('common.exportExcel')}
+            >
+              <Download size={14} aria-hidden />{t('admin.export.download')}
+            </Button>
+            <Button variant="secondary" onClick={() => void load()}>
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
+            </Button>
+          </>
+        )}
+      />
 
       {/* The roster */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+          <RefreshCw size={24} className="animate-spin text-fg-subtle" />
         </div>
       ) : problem ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-2xl text-center px-6" style={cardStyle}>
-          <ShieldAlert size={32} className="mb-3" style={{ color: 'var(--warning)' }} />
-          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(problem)}</p>
-          {detail && <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{detail}</p>}
+        <div className="glass-card rounded-surface">
+          <EmptyState
+            icon={ShieldAlert}
+            title={t(problem)}
+            description={detail ?? undefined}
+            className="py-14"
+          />
         </div>
       ) : (
         <div className="space-y-3">
@@ -427,9 +408,8 @@ const PlatformTeamPage: React.FC = () => {
           )}
 
           {members.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 rounded-2xl" style={cardStyle}>
-              <Users size={36} className="mb-3" style={{ color: 'var(--text-tertiary)' }} />
-              <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('admin.team.empty')}</p>
+            <div className="glass-card rounded-surface">
+              <EmptyState icon={Users} title={t('admin.team.empty')} className="py-14" />
             </div>
           ) : (
             <>
@@ -437,33 +417,33 @@ const PlatformTeamPage: React.FC = () => {
                   the sidebar, so the note sits under the member rather than in a
                   column of its own; should it still not fit, it scrolls inside
                   its card instead of cutting the actions off. */}
-              <div className="hidden xl:block rounded-2xl" style={{ ...cardStyle, overflowX: 'auto' }}>
+              <div className="glass-card relative hidden overflow-x-auto rounded-surface xl:block">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <tr className="border-b border-line bg-wash">
                       {([
                         'admin.team.col.member', 'admin.team.col.role', 'admin.team.col.status',
                         'admin.team.col.grantedBy',
                       ] as const).map(key => (
-                        <th key={key} className="px-4 py-3.5 text-left" style={thStyle}>{t(key)}</th>
+                        <th key={key} className={THEAD_CELL}>{t(key)}</th>
                       ))}
-                      <th style={thStyle} />
+                      <th className={THEAD_CELL} />
                     </tr>
                   </thead>
                   <tbody>
                     {views.map(view => (
-                      <tr key={view.member.user_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="px-4 py-4 align-top" style={{ minWidth: '15rem' }}>
+                      <tr key={view.member.user_id} className="border-b border-line last:border-b-0">
+                        <td className="min-w-[15rem] px-4 py-4 align-top">
                           <MemberIdentity member={view.member} t={t} />
                           {view.member.note && (
-                            <p className="text-xs mt-1.5" style={{ color: 'var(--text-secondary)' }}>
+                            <p className="mt-1.5 text-xs text-fg-muted">
                               {t('admin.team.col.note')}: {view.member.note}
                             </p>
                           )}
                         </td>
                         <td className="px-4 py-4 align-top"><RoleBadge role={view.member.role} t={t} /></td>
                         <td className="px-4 py-4 align-top"><MemberStatus member={view.member} t={t} /></td>
-                        <td className="px-4 py-4 align-top" style={{ minWidth: '10rem' }}>
+                        <td className="min-w-[10rem] px-4 py-4 align-top">
                           <GrantedBy member={view.member} t={t} />
                         </td>
                         <td className="px-4 py-4 align-top">
@@ -478,26 +458,26 @@ const PlatformTeamPage: React.FC = () => {
               </div>
 
               {/* Narrower screens: one card per member, nothing to scroll sideways. */}
-              <ul className="xl:hidden space-y-3">
+              <ul className="space-y-3 xl:hidden">
                 {views.map(view => (
-                  <li key={view.member.user_id} className="rounded-2xl p-4 space-y-3" style={cardStyle}>
+                  <li key={view.member.user_id} className="glass-card space-y-3 rounded-surface p-4">
                     <div className="flex items-start justify-between gap-3">
                       <MemberIdentity member={view.member} t={t} />
                       <RoleBadge role={view.member.role} t={t} />
                     </div>
                     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                      <dt style={labelStyle}>{t('admin.team.col.status')}</dt>
+                      <dt className="text-fg-muted">{t('admin.team.col.status')}</dt>
                       <dd><MemberStatus member={view.member} t={t} /></dd>
-                      <dt style={labelStyle}>{t('admin.team.col.grantedBy')}</dt>
+                      <dt className="text-fg-muted">{t('admin.team.col.grantedBy')}</dt>
                       <dd><GrantedBy member={view.member} t={t} /></dd>
                       {view.member.note && (
                         <>
-                          <dt style={labelStyle}>{t('admin.team.col.note')}</dt>
-                          <dd style={{ color: 'var(--text-secondary)' }}>{view.member.note}</dd>
+                          <dt className="text-fg-muted">{t('admin.team.col.note')}</dt>
+                          <dd className="text-fg-muted">{view.member.note}</dd>
                         </>
                       )}
                     </dl>
-                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
                       <MemberActions {...view} {...actions} />
                     </div>
                   </li>
@@ -510,54 +490,45 @@ const PlatformTeamPage: React.FC = () => {
 
       {/* Adding somebody */}
       <section className="space-y-3">
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.team.addSection')}</h2>
+        <h2 className="text-lg font-semibold text-fg">{t('admin.team.addSection')}</h2>
         <Note text={t('admin.team.roleNote')} />
-        <div className="grid gap-4 lg:grid-cols-2">
-          <form onSubmit={invite} className="rounded-2xl p-5 space-y-3" style={cardStyle}>
-            <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <form onSubmit={invite} className="glass-card grid content-start gap-3 rounded-surface p-5">
+            <h3 className="flex items-center gap-2 font-semibold text-fg">
               <UserPlus size={16} />{t('admin.team.invite.title')}
             </h3>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.team.invite.hint')}</p>
-            <label className="block">
-              <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.invite.email')}</span>
-              <input type="email" required value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} style={controlStyle} />
-            </label>
-            <label className="block">
-              <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.invite.fullName')}</span>
-              <input required value={inviteName} onChange={e => setInviteName(e.target.value)} style={controlStyle} />
-            </label>
+            <p className="text-xs text-fg-subtle">{t('admin.team.invite.hint')}</p>
+            <Field label={t('admin.team.invite.email')}>
+              <Input type="email" required value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} />
+            </Field>
+            <Field label={t('admin.team.invite.fullName')}>
+              <Input required value={inviteName} onChange={e => setInviteName(e.target.value)} />
+            </Field>
             <RoleField t={t} value={inviteRole} onChange={setInviteRole} />
-            <label className="block">
-              <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.note')}</span>
-              <input value={inviteNote} maxLength={500} onChange={e => setInviteNote(e.target.value)} style={controlStyle} />
-            </label>
-            <button type="submit" disabled={inviting}
-              className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
-              style={{ background: 'var(--accent)', opacity: inviting ? 0.6 : 1 }}>
+            <Field label={t('admin.team.note')}>
+              <Input value={inviteNote} maxLength={500} onChange={e => setInviteNote(e.target.value)} />
+            </Field>
+            <Button type="submit" disabled={inviting} className="w-full">
               {inviting ? t('admin.common.saving') : t('admin.team.invite.submit')}
-            </button>
+            </Button>
           </form>
 
-          <form onSubmit={add} className="rounded-2xl p-5 space-y-3" style={cardStyle}>
-            <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+          <form onSubmit={add} className="glass-card grid content-start gap-3 rounded-surface p-5">
+            <h3 className="flex items-center gap-2 font-semibold text-fg">
               <UserPlus size={16} />{t('admin.team.add.title')}
             </h3>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.team.add.hint')}</p>
-            <label className="block">
-              <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.add.userId')}</span>
-              <input required value={addUserId} onChange={e => setAddUserId(e.target.value)}
-                placeholder="00000000-0000-0000-0000-000000000000" style={controlStyle} />
-            </label>
+            <p className="text-xs text-fg-subtle">{t('admin.team.add.hint')}</p>
+            <Field label={t('admin.team.add.userId')}>
+              <Input required value={addUserId} onChange={e => setAddUserId(e.target.value)}
+                placeholder="00000000-0000-0000-0000-000000000000" />
+            </Field>
             <RoleField t={t} value={addRole} onChange={setAddRole} />
-            <label className="block">
-              <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.note')}</span>
-              <input value={addNote} maxLength={500} onChange={e => setAddNote(e.target.value)} style={controlStyle} />
-            </label>
-            <button type="submit" disabled={adding}
-              className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-primary)', opacity: adding ? 0.6 : 1 }}>
+            <Field label={t('admin.team.note')}>
+              <Input value={addNote} maxLength={500} onChange={e => setAddNote(e.target.value)} />
+            </Field>
+            <Button type="submit" variant="secondary" disabled={adding} className="w-full">
               {adding ? t('admin.common.saving') : t('admin.team.add.submit')}
-            </button>
+            </Button>
           </form>
         </div>
       </section>
@@ -576,6 +547,8 @@ const PlatformTeamPage: React.FC = () => {
     </div>
   );
 };
+
+const THEAD_CELL = 'whitespace-nowrap px-4 py-3.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle';
 
 /**
  * Picking the new role, then confirming it.
@@ -643,47 +616,42 @@ const RoleChangeFlow: React.FC<{
 /** The address first — the list exists to say who each row is — then the id and since when. */
 const MemberIdentity: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ member, t }) => (
   <div className="min-w-0">
-    <p className="font-semibold" style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>
+    <p className="break-words font-semibold text-fg [overflow-wrap:anywhere]">
       {member.email ?? t('admin.team.noAddress')}
     </p>
-    <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+    <p className="mt-0.5 text-[11px] text-fg-muted">
       <span className="font-mono" title={member.user_id}>{t('admin.team.userId', { id: shortId(member.user_id) })}</span>
       {' · '}
-      {t('admin.team.since', { date: deDate(member.created_at) })}
+      <span className="tabular-nums">{t('admin.team.since', { date: deDate(member.created_at) })}</span>
     </p>
   </div>
 );
 
 /** Owner stands out: it is the only role that can change the team itself. */
 const RoleBadge: React.FC<{ role: string; t: Translate }> = ({ role, t }) => (
-  <span className="inline-block px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap"
-    style={role === 'owner'
-      ? { background: 'var(--warning-subtle)', color: 'var(--warning)' }
-      : { background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+  <Badge tone={role === 'owner' ? 'caution' : 'neutral'}>
     {roleLabel(t, role)}
-  </span>
+  </Badge>
 );
 
 const MemberStatus: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ member, t }) => {
   const active = member.status === 'active';
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap"
-        style={active
-          ? { background: 'var(--success-subtle)', color: 'var(--success)' }
-          : { background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+      <Badge tone={active ? 'positive' : 'neutral'}>
+        {active ? <CheckCircle aria-hidden /> : <Ban aria-hidden />}
         {t(active ? 'admin.team.status.active' : 'admin.team.status.disabled')}
-      </span>
+      </Badge>
       {!active && member.disabled_at && (
-        <span className="text-[11px] whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
+        <span className="whitespace-nowrap text-[11px] tabular-nums text-fg-muted">
           {t('admin.team.disabledSince', { date: deDate(member.disabled_at) })}
         </span>
       )}
       {active && member.invitation_pending && (
-        <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap"
-          style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
+        <Badge tone="brand">
+          <Mail aria-hidden />
           {t('admin.team.invitationPending')}
-        </span>
+        </Badge>
       )}
     </div>
   );
@@ -693,18 +661,18 @@ const MemberStatus: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ me
 const GrantedBy: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ member, t }) => {
   const granted = grantedBy(member);
   if (granted.kind === 'account') {
-    return <span className="text-xs" style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{granted.email}</span>;
+    return <span className="text-xs text-fg [overflow-wrap:anywhere]">{granted.email}</span>;
   }
   if (granted.kind === 'gone') {
     return (
-      <span className="text-xs" style={{ color: 'var(--text-secondary)' }} title={granted.userId}>
+      <span className="text-xs text-fg-muted" title={granted.userId}>
         {t('admin.team.grantedBy.gone')}
       </span>
     );
   }
   // The explanation is said once, above the list; the cell keeps it as a title.
   return (
-    <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}
+    <span className="text-xs font-medium text-fg-muted"
       title={t('admin.team.grantedBy.unrecordedHint')}>
       {t('admin.team.grantedBy.unrecorded')}
     </span>
@@ -720,51 +688,53 @@ const MemberActions: React.FC<MemberActionsProps> = ({
       {/* An active member who is not the last active owner; a disabled row keeps
           the role it was paused with, and re-enabling restores exactly that. */}
       {mayChangeRole(member, isLastOwner) && (
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => onChangeRole(member)}
           disabled={working}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border border-[var(--border)] text-[var(--text-secondary)] disabled:opacity-60"
         >
           <UserCog size={13} />{t('admin.team.role.change')}
-        </button>
+        </Button>
       )}
       {offersResend(member) && (
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => onResend(member.user_id)}
           disabled={working}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: working ? 0.6 : 1 }}
         >
           <Mail size={13} />{t('admin.team.resendInvite')}
-        </button>
+        </Button>
       )}
       {active && isLastOwner && (
-        <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium whitespace-nowrap"
-          style={{ color: 'var(--text-secondary)' }} title={t('admin.team.hint.lastOwner')}>
+        <span className="flex items-center gap-1.5 whitespace-nowrap px-2 py-1.5 text-xs font-medium text-fg-muted"
+          title={t('admin.team.hint.lastOwner')}>
           <Lock size={13} />{t('admin.team.lastOwner.label')}
         </span>
       )}
       {active && !isLastOwner && (
-        <button
+        <Button
+          variant="danger"
+          size="sm"
           onClick={() => onDisable(member.user_id)}
           disabled={working}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-          style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', opacity: working ? 0.6 : 1 }}
         >
           <Ban size={13} />{t('admin.team.disable')}
-        </button>
+        </Button>
       )}
       {/* Every disabled member can be re-enabled since 20260923110000: enabling
           restores the role the row already carries and cannot remove an owner. */}
       {!active && (
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => onEnable(member.user_id)}
           disabled={working}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
-          style={{ background: 'var(--success-subtle)', color: 'var(--success)', opacity: working ? 0.6 : 1 }}
+          className="text-positive"
         >
           <CheckCircle size={13} />{t('admin.team.enable')}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -786,34 +756,21 @@ const RoleField: React.FC<{
   value: PlatformRole;
   onChange: (role: PlatformRole) => void;
 }> = ({ t, value, onChange }) => (
-  <label className="block">
-    <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.role.label')}</span>
-    <select
+  <Field label={t('admin.team.role.label')} hint={t(ROLE_HINT_KEYS[value])}>
+    <NativeSelect
       value={value}
       onChange={e => onChange(isStaffRole(e.target.value) ? e.target.value : DEFAULT_STAFF_ROLE)}
-      style={controlStyle}
     >
       {STAFF_ROLE_OPTIONS.map(role => (
         <option key={role} value={role}>{roleLabel(t, role)}</option>
       ))}
-    </select>
-    <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>{t(ROLE_HINT_KEYS[value])}</p>
-  </label>
+    </NativeSelect>
+  </Field>
 );
 
 /** Takes the finished sentence, so a note may carry interpolated values. */
-const Note: React.FC<{ text: string; tone?: 'info' | 'warning' }> = ({ text, tone = 'info' }) => {
-  const Icon = tone === 'warning' ? AlertTriangle : Info;
-  return (
-    <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
-      style={tone === 'warning'
-        ? { background: 'var(--warning-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
-        : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-      <Icon size={14} className="flex-shrink-0 mt-0.5"
-        style={{ color: tone === 'warning' ? 'var(--warning)' : 'var(--text-tertiary)' }} />
-      <span>{text}</span>
-    </div>
-  );
-};
+const Note: React.FC<{ text: string; tone?: 'info' | 'warning' }> = ({ text, tone = 'info' }) => (
+  <Alert tone={tone === 'warning' ? 'caution' : 'neutral'} role="note">{text}</Alert>
+);
 
 export default PlatformTeamPage;

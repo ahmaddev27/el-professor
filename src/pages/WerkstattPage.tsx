@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Wrench, Calendar, AlertCircle, CheckCircle, CreditCard as Edit2, Trash2, Download } from 'lucide-react';
+import { Plus, Wrench, Calendar, AlertCircle, CheckCircle, Pencil as Edit2, Trash2, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { getWeeksOfMonth, getWeekNumberForDate, type WeekOfMonth } from '../utils/weekCalculations';

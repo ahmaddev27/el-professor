@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Download, Plus, CreditCard as Edit2, Trash2, Shield, ShieldCheck, Info, Eye } from 'lucide-react';
+import { Download, Plus, Pencil as Edit2, Trash2, Shield, ShieldCheck, Info, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { PAGE_DEFINITIONS, Role, RolePermission, RoleWithPermissions } from '../types/role';
 import RoleModal from './RoleModal';

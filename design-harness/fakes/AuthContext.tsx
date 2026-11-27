@@ -14,10 +14,12 @@ import { HARNESS_COMPANY_ID, HARNESS_USER_ID, isPlatformReader, scenario } from 
 
 export * from '../../src/contexts/AuthContext';
 
+/** Design remake R4: the platform panel, signed in as a platform account of its own. */
+const isPlatformOwner = (new URLSearchParams(window.location.search).get('screen') ?? '').startsWith('r4-');
 const mayEdit = scenario.role !== 'viewer';
-const email = isPlatformReader ? 'jana.brenner@elprofessor.example' : 'katrin.lindner@example.com';
-const companyId = isPlatformReader ? null : HARNESS_COMPANY_ID;
-const role = isPlatformReader ? 'viewer' : scenario.role;
+const email = isPlatformReader || isPlatformOwner ? 'jana.brenner@elprofessor.example' : 'katrin.lindner@example.com';
+const companyId = isPlatformReader || isPlatformOwner ? null : HARNESS_COMPANY_ID;
+const role = isPlatformReader || isPlatformOwner ? 'viewer' : scenario.role;
 
 const value = {
   user: { id: HARNESS_USER_ID, email, last_sign_in_at: new Date().toISOString() },
@@ -25,11 +27,11 @@ const value = {
     id: HARNESS_USER_ID,
     user_id: HARNESS_USER_ID,
     company_id: companyId,
-    full_name: isPlatformReader ? 'Jana Brenner' : PREVIEW_USER.name,
+    full_name: isPlatformReader || isPlatformOwner ? 'Jana Brenner' : PREVIEW_USER.name,
     email,
     role,
     status: 'active',
-    is_super_admin: isPlatformReader,
+    is_super_admin: isPlatformReader || isPlatformOwner,
   },
   profileLoaded: true,
   profileLoadFailed: false,
@@ -45,7 +47,7 @@ const value = {
   effectiveSubscriptionStatus: 'active',
   isSubscriptionActive: true,
   refreshSubscription: async () => undefined,
-  isSuperAdmin: isPlatformReader,
+  isSuperAdmin: isPlatformReader || isPlatformOwner,
   mustChangePassword: false,
   signIn: async () => ({ error: null }),
   signOut: async () => undefined,

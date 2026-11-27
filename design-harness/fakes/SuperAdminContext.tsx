@@ -33,11 +33,21 @@ const companyScope = isPlatformReader
       isPlatformSession: false,
     };
 
-const capabilities = scenario.role === 'billing'
+/** Design remake R4: the platform panel, as an `owner` holding every capability (r4/fixtures.ts answers its data). */
+const isPlatformOwner = (new URLSearchParams(window.location.search).get('screen') ?? '').startsWith('r4-');
+const OWNER_CAPABILITIES = [
+  'companies.read', 'business.read', 'support.session', 'company_users.manage', 'companies.lifecycle',
+  'companies.hard_delete', 'billing.manage', 'pricing.manage', 'codes.manage', 'settings.read',
+  'settings.manage', 'metrics.read', 'audit.read', 'staff.manage',
+];
+
+const capabilities = isPlatformOwner ? OWNER_CAPABILITIES : scenario.role === 'billing'
   ? ['companies.read', 'billing.manage', 'settings.read']
   : ['companies.read', 'business.read', 'audit.read', 'settings.read'];
 
-const platformAccess = isPlatformReader
+const platformAccess = isPlatformOwner
+  ? { role: 'owner', capabilities, companyContext: null }
+  : isPlatformReader
   ? {
       role: scenario.role === 'billing' ? 'billing' : 'read_only',
       capabilities,
@@ -63,9 +73,9 @@ const value = {
   companyScope,
   effectiveCompanyId: HARNESS_COMPANY_ID,
   platformAccess,
-  platformAccessStatus: isPlatformReader ? 'ready' : 'idle',
-  isPlatformStaff: isPlatformReader,
-  platformCan: (capability: string) => capabilities.includes(capability) && isPlatformReader,
+  platformAccessStatus: isPlatformReader || isPlatformOwner ? 'ready' : 'idle',
+  isPlatformStaff: isPlatformReader || isPlatformOwner,
+  platformCan: (capability: string) => capabilities.includes(capability) && (isPlatformReader || isPlatformOwner),
   platformReadsCompanyData: scenario.role === 'view',
   ownCompanyReadable: true,
   reloadPlatformAccess: () => undefined,

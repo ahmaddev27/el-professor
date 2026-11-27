@@ -22,7 +22,10 @@ import { getInvoiceSeller } from '../lib/platformSettingsClient';
 import { listPlans, type PlanCatalogue } from '../lib/platformPlansClient';
 import { Link } from 'react-router-dom';
 import { invoiceSellerFields } from '../lib/platformSettings';
-import { Alert, Button, ConfirmDialog, formatEuroCents } from '../components/ui';
+import {
+  Alert, Badge, Button, ConfirmDialog, EmptyState, Input, KpiCard, NativeSelect, cn, formatEuroCents,
+  type BadgeProps,
+} from '../components/ui';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import {
   buildInvoicesExport,
@@ -103,10 +106,7 @@ function fmtEur(v: number) {
  *
  * `hasNext` is `directoryHasNextPage`, which is false past `platform_read_offset`'s
  * ceiling — rows beyond it exist and no page can reach them, so a button that
- * would raise 22023 is never offered. Drawn with the design system rather than
- * with this screen's inline styles: the style ratchet holds every legacy file at
- * its count, and AdminLayout already renders `Button` on --bg-base for the Team
- * and Protokoll screens, so no new colour pair is introduced.
+ * would raise 22023 is never offered.
  */
 function Pager({
   page, pages, hasNext, onPage, t,
@@ -531,27 +531,35 @@ export default function SubscriptionBillingPage() {
     showToast('success', t('sa.subs.pdfDownloaded', { label }));
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged. Everything below
+  // only draws.
+
   // ── Status badge ──
   const StatusBadge = ({ status, dueDate }: { status: string; dueDate?: string }) => {
     const isOverdue = status === 'open' && dueDate && new Date(dueDate) < now;
     const displayStatus = isOverdue ? 'overdue' : status;
 
-    const config: Record<string, { bg: string; text: string; label: string; icon: React.ElementType }> = {
-      open:     { bg: 'rgba(59,130,246,0.12)', text: 'var(--accent)',  label: t('sa.subs.invoiceStatus.open'),     icon: Clock },
-      paid:     { bg: 'rgba(34,197,94,0.12)',   text: 'var(--success)', label: t('sa.subs.invoiceStatus.paid'),     icon: CheckCircle },
-      overdue:  { bg: 'rgba(239,68,68,0.12)',   text: 'var(--danger)',  label: t('sa.subs.invoiceStatus.overdue'),  icon: AlertTriangle },
-      canceled: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-tertiary)', label: t('sa.subs.invoiceStatus.canceled'), icon: XCircle },
+    // Open is informational, overdue critical, paid positive, cancelled neutral.
+    const config: Record<string, { tone: NonNullable<BadgeProps['tone']>; label: string; icon: React.ElementType }> = {
+      open:     { tone: 'info',     label: t('sa.subs.invoiceStatus.open'),     icon: Clock },
+      paid:     { tone: 'positive', label: t('sa.subs.invoiceStatus.paid'),     icon: CheckCircle },
+      overdue:  { tone: 'critical', label: t('sa.subs.invoiceStatus.overdue'),  icon: AlertTriangle },
+      canceled: { tone: 'neutral',  label: t('sa.subs.invoiceStatus.canceled'), icon: XCircle },
     };
     const c = config[displayStatus] || config.open;
     const Icon = c.icon;
 
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: c.bg, color: c.text }}>
-        <Icon size={12} />
+      <Badge tone={c.tone}>
+        <Icon aria-hidden />
         {c.label}
-      </span>
+      </Badge>
     );
   };
+
+  const menuItemClass =
+    'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-sunken focus-visible:outline-none focus-visible:bg-sunken [@media(pointer:coarse)]:min-h-11';
 
   // ── Actions dropdown ──
   const InvoiceActions = ({ inv }: { inv: PlatformInvoiceRow }) => {
@@ -560,73 +568,55 @@ export default function SubscriptionBillingPage() {
     return (
       <div className="relative">
         <button
+          type="button"
+          aria-label={t('sa.subs.actionsMenu')}
+          aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-          style={{ color: 'var(--text-tertiary)' }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          className="inline-flex items-center justify-center rounded-tight p-1.5 text-fg-subtle transition-colors hover:bg-sunken hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
         >
-          <MoreHorizontal size={16} />
+          <MoreHorizontal aria-hidden size={16} />
         </button>
         {open && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div
-              className="absolute right-0 top-8 z-50 w-52 rounded-xl py-1.5 shadow-xl"
-              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-            >
-              <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            <div className="glass-strong absolute right-0 top-8 z-50 w-52 rounded-tile py-1.5 font-ui">
+              <button className={cn(menuItemClass, 'text-fg')}
                 onClick={() => { setOpen(false); setDetailInvoice(inv); }}
               >
-                <Eye size={14} /> {t('sa.subs.actionView')}
+                <Eye aria-hidden size={14} /> {t('sa.subs.actionView')}
               </button>
               {canBilling && inv.status !== 'paid' && inv.status !== 'canceled' && (
-                <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
-                  style={{ color: 'var(--success)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                <button className={cn(menuItemClass, 'text-positive')}
                   onClick={() => { setOpen(false); setMarkPaidInvoice(inv); }}
                 >
-                  <Banknote size={14} /> {t('sa.subs.actionMarkPaidCash')}
+                  <Banknote aria-hidden size={14} /> {t('sa.subs.actionMarkPaidCash')}
                 </button>
               )}
               {canBilling && inv.status === 'paid' && (
-                <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
-                  style={{ color: 'var(--warning)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                <button className={cn(menuItemClass, 'text-caution')}
                   onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'unpaid', invoice: inv }); }}
                 >
-                  <XCircle size={14} /> {t('sa.subs.actionMarkUnpaid')}
+                  <XCircle aria-hidden size={14} /> {t('sa.subs.actionMarkUnpaid')}
                 </button>
               )}
               {canBilling && inv.status !== 'canceled' && (
-                <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
-                  style={{ color: 'var(--danger)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                <button className={cn(menuItemClass, 'text-critical')}
                   onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'cancel', invoice: inv }); }}
                 >
-                  <XCircle size={14} /> {t('sa.subs.actionCancel')}
+                  <XCircle aria-hidden size={14} /> {t('sa.subs.actionCancel')}
                 </button>
               )}
               {canBilling && inv.status !== 'paid' && (
-                <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors text-critical hover:bg-sunken"
+                <button className={cn(menuItemClass, 'text-critical')}
                   onClick={() => { setOpen(false); setInvoiceConfirm({ kind: 'delete', invoice: inv }); }}
                 >
-                  <Trash2 size={14} /> {t('sa.subs.actionDelete')}
+                  <Trash2 aria-hidden size={14} /> {t('sa.subs.actionDelete')}
                 </button>
               )}
-              <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              <button className={cn(menuItemClass, 'text-fg')}
                 onClick={() => { setOpen(false); void handleDownloadPdf(inv); }}
               >
-                <Download size={14} /> {t(inv.status === 'paid' ? 'sa.subs.actionReceiptPdf' : 'sa.subs.actionInvoicePdf')}
+                <Download aria-hidden size={14} /> {t(inv.status === 'paid' ? 'sa.subs.actionReceiptPdf' : 'sa.subs.actionInvoicePdf')}
               </button>
             </div>
           </>
@@ -636,7 +626,7 @@ export default function SubscriptionBillingPage() {
   };
 
   if (!isSuperAdmin) {
-    return <div className="p-8" style={{ color: 'var(--text-secondary)' }}>{t('sa.subs.accessDenied')}</div>;
+    return <div className="p-8 font-ui text-fg-muted">{t('sa.subs.accessDenied')}</div>;
   }
 
   // Since decision D14 the money is billing.manage's. A support or read_only
@@ -644,11 +634,6 @@ export default function SubscriptionBillingPage() {
   // it is told so here rather than shown an empty table, which would read as
   // "this customer has no invoices".
   if (!canBilling) {
-    // Drawn with the design system rather than with this screen's inline styles:
-    // the style ratchet holds every legacy file at its count, and new markup that
-    // spells a colour out again is what it exists to stop. AdminLayout already
-    // renders these primitives on --bg-base for the Team and Protokoll screens,
-    // so the pair is one tokens.contrast.test.ts already measures.
     return (
       <Alert tone="caution" icon={ShieldAlert} title={t('admin.read.denied')} className="font-ui">
         {t('sa.subs.noAccessBody')}
@@ -659,7 +644,7 @@ export default function SubscriptionBillingPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        <RefreshCw aria-hidden size={24} className="text-brand-text motion-safe:animate-spin" />
       </div>
     );
   }
@@ -673,41 +658,47 @@ export default function SubscriptionBillingPage() {
   const subscriptionPages = directoryReachablePageCount(subscriptionTotal, BILLING_PAGE_SIZE);
   const subscriptionHasNext = directoryHasNextPage(subscriptionPage, subscriptionTotal, BILLING_PAGE_SIZE);
 
+  const thClass = 'px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-fg-subtle';
+  const tableFrameClass = 'glass-card relative overflow-x-auto rounded-surface';
+  const rowClass = 'border-b border-line transition-colors last:border-b-0 hover:bg-sunken';
+  const filterSelectClass = 'h-10';
+  const filterSelectFrame = 'w-auto';
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-ui">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.subs.title')}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+          <h1 className="text-2xl font-semibold leading-[1.2] tracking-[-0.025em] text-fg">{t('sa.subs.title')}</h1>
+          <p className="mt-1 text-sm text-fg-muted">
             {t('sa.subs.subtitle')}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
+          <Button
+            type="button"
             onClick={() => setShowGenerateModal(true)}
-            className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
-            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+            className={canBilling ? undefined : 'hidden'}
           >
-            <FileText size={16} /> {t('sa.subs.generateInvoices')}
-          </button>
-          <button
+            <FileText aria-hidden size={16} /> {t('sa.subs.generateInvoices')}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
             onClick={() => setShowAssignModal(true)}
-            className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
-            style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
+            className={canBilling ? undefined : 'hidden'}
           >
-            <Plus size={16} /> {t('sa.subs.assignSubscription')}
-          </button>
+            <Plus aria-hidden size={16} /> {t('sa.subs.assignSubscription')}
+          </Button>
           <Link
             to="/admin/plaene"
-            className={`${canPricing ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
-            style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+            className={cn(
+              canPricing ? 'inline-flex' : 'hidden',
+              'h-10 items-center gap-2 rounded-control border border-line-strong bg-raised px-4 text-sm font-semibold text-fg transition-colors hover:bg-sunken',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:h-11',
+            )}
           >
-            <CreditCard size={16} /> {t('sa.subs.managePlans')}
+            <CreditCard aria-hidden size={16} /> {t('sa.subs.managePlans')}
           </Link>
         </div>
       </div>
@@ -717,33 +708,22 @@ export default function SubscriptionBillingPage() {
 
       {/* KPI Cards */}
       {!problem && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
           {[
-            { label: t('sa.subs.kpi.activeSubs'), value: activeSubCount, icon: CreditCard, color: 'var(--accent)' },
-            { label: t('sa.subs.kpi.openInvoices'), value: invoiceSummary.openCount, icon: Clock, color: 'var(--warning)' },
-            { label: t('sa.subs.kpi.paidThisMonth'), value: invoiceSummary.paidThisMonthCount, icon: CheckCircle, color: 'var(--success)' },
-            { label: t('sa.subs.invoiceStatus.overdue'), value: invoiceSummary.overdueCount, icon: AlertTriangle, color: 'var(--danger)' },
-            { label: t('sa.subs.kpi.expected'), value: fmtEur(invoiceSummary.filteredAmount), icon: TrendingUp, color: 'var(--accent)' },
-            { label: t('sa.subs.kpi.collected'), value: fmtEur(invoiceSummary.filteredCollected), icon: Banknote, color: 'var(--success)' },
-          ].map((kpi, i) => {
-            const Icon = kpi.icon;
-            return (
-              <div key={i} className="rounded-xl p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `color-mix(in srgb, ${kpi.color} 12%, transparent)` }}>
-                    <Icon size={16} style={{ color: kpi.color }} />
-                  </div>
-                </div>
-                <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{kpi.value}</p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{kpi.label}</p>
-              </div>
-            );
-          })}
+            { label: t('sa.subs.kpi.activeSubs'), value: activeSubCount, icon: CreditCard },
+            { label: t('sa.subs.kpi.openInvoices'), value: invoiceSummary.openCount, icon: Clock },
+            { label: t('sa.subs.kpi.paidThisMonth'), value: invoiceSummary.paidThisMonthCount, icon: CheckCircle },
+            { label: t('sa.subs.invoiceStatus.overdue'), value: invoiceSummary.overdueCount, icon: AlertTriangle },
+            { label: t('sa.subs.kpi.expected'), value: fmtEur(invoiceSummary.filteredAmount), icon: TrendingUp },
+            { label: t('sa.subs.kpi.collected'), value: fmtEur(invoiceSummary.filteredCollected), icon: Banknote },
+          ].map((kpi, i) => (
+            <KpiCard key={i} label={kpi.label} value={kpi.value} icon={kpi.icon} />
+          ))}
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
+      <div className="flex flex-wrap gap-0.5 rounded-control border border-edge bg-sunken p-[3px]">
         {(['invoices', 'subscriptions', 'plans'] as const).map(tab => {
           const labels = {
             invoices: t('sa.subs.tab.invoices'),
@@ -755,15 +735,16 @@ export default function SubscriptionBillingPage() {
           return (
             <button
               key={tab}
+              type="button"
+              aria-pressed={activeTab === tab}
               onClick={() => setActiveTab(tab)}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
-              style={{
-                background: activeTab === tab ? 'var(--bg-surface)' : 'transparent',
-                color: activeTab === tab ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                boxShadow: activeTab === tab ? 'var(--shadow-sm)' : 'none',
-              }}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-2 rounded-tight px-4 py-2 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10',
+                activeTab === tab ? 'bg-raised text-fg shadow-segment' : 'text-fg-subtle hover:text-fg',
+              )}
             >
-              <Icon size={15} />
+              <Icon aria-hidden size={15} />
               {labels[tab]}
             </button>
           );
@@ -775,32 +756,27 @@ export default function SubscriptionBillingPage() {
         <div className="space-y-4">
           {/* Filters. They are applied by the database now, so the search is
               submitted: one read, one audit row, per search rather than per key. */}
-          <div className="flex flex-wrap gap-3 items-center">
-            <form onSubmit={submitSearch} className="relative flex-1 min-w-[220px] max-w-md flex gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <form onSubmit={submitSearch} className="relative flex min-w-[220px] max-w-md flex-1 gap-2">
               <div className="relative flex-1">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
-                <input
+                <Search aria-hidden size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+                <Input
                   type="text"
                   placeholder={t('sa.subs.searchPlaceholder')}
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
                   maxLength={100}
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm"
-                  style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                  className="pl-9"
                 />
               </div>
-              {/* The design system's Button, for the reason Pager gives: a new
-                  inline style in a legacy file is what the style ratchet stops.
-                  `type="submit"` is explicit — the primitive defaults to
-                  "button", and this one submits the form. */}
+              {/* `type="submit"` is explicit: the primitive defaults to "button",
+                  and this one submits the form. */}
               <Button type="submit" size="md" className="font-semibold">
                 {t('admin.common.search')}
               </Button>
             </form>
             {/* The page on screen as a workbook. Withheld while the read failed
-                or is running: a file of nought invoices is a claim. Drawn with
-                the design system for the reason `Pager` gives — a new inline
-                style in a legacy file is what the style ratchet stops. */}
+                or is running: a file of nought invoices is a claim. */}
             <Button
               variant="secondary"
               size="md"
@@ -808,112 +784,104 @@ export default function SubscriptionBillingPage() {
               onClick={handleExportInvoices}
               title={t('common.exportExcel')}
             >
-              <Download size={14} />{t('admin.export.download')}
+              <Download aria-hidden size={14} />{t('admin.export.download')}
             </Button>
-            <select
+            <NativeSelect
+              containerClassName={filterSelectFrame}
+              className={filterSelectClass}
               value={query.month}
               onChange={e => change({ month: +e.target.value })}
-              className="px-3 py-2.5 rounded-xl text-sm"
-              style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
               <option value={0}>{t('sa.subs.filterAllMonths')}</option>
               {MONTH_KEYS.map((monthKey, i) => <option key={i} value={i + 1}>{t(monthKey)}</option>)}
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect
+              containerClassName={filterSelectFrame}
+              className={filterSelectClass}
               value={query.year}
               onChange={e => change({ year: +e.target.value })}
-              className="px-3 py-2.5 rounded-xl text-sm"
-              style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
               {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect
+              containerClassName={filterSelectFrame}
+              className={filterSelectClass}
               value={query.status}
               onChange={e => change({ status: e.target.value })}
-              className="px-3 py-2.5 rounded-xl text-sm"
-              style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
               <option value="all">{t('sa.subs.filterAllStatuses')}</option>
               <option value="open">{t('sa.subs.invoiceStatus.open')}</option>
               <option value="paid">{t('sa.subs.invoiceStatus.paid')}</option>
               <option value="canceled">{t('sa.subs.invoiceStatus.canceled')}</option>
-            </select>
-            <select
+            </NativeSelect>
+            <NativeSelect
+              containerClassName={filterSelectFrame}
+              className={filterSelectClass}
               value={query.companyId ?? 'all'}
               onChange={e => change({ companyId: e.target.value === 'all' ? null : e.target.value })}
-              className="px-3 py-2.5 rounded-xl text-sm"
-              style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
               <option value="all">{t('sa.subs.filterAllCompanies')}</option>
               {companies.map(company => (
                 <option key={company.id} value={company.id}>{company.name}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
-          {/* Invoice Table */}
-          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {([
-                      'sa.subs.col.company', 'sa.subs.col.plan', 'sa.subs.col.monthYear',
-                      'sa.subs.col.number', 'common.amount', 'common.status',
-                      'sa.subs.col.due', 'sa.subs.col.paidOn', null,
-                    ] as const).map((h, i) => (
-                      <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoices.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
-                        <Receipt size={32} className="mx-auto mb-2 opacity-40" />
-                        <p>{problem ? t(problem) : t('sa.subs.noInvoices')}</p>
-                      </td>
-                    </tr>
-                  ) : invoices.map(inv => (
-                    <tr
-                      key={inv.id}
-                      className="transition-colors"
-                      style={{ borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {inv.company_name || inv.company_id.slice(0, 8)}
-                      </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {inv.plan_name || '-'}
-                      </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {monthLabel(t, inv.invoice_month)} {inv.invoice_year}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                        {inv.invoice_number}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap font-semibold" style={{ color: 'var(--text-primary)' }}>
-                        {fmtEur(inv.amount)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={inv.status} dueDate={inv.due_date} />
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
-                        {(() => { try { return format(new Date(inv.due_date), 'dd.MM.yy'); } catch { return '-'; } })()}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
-                        {inv.paid_at ? (() => { try { return format(new Date(inv.paid_at), 'dd.MM.yy HH:mm'); } catch { return '-'; } })() : '-'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <InvoiceActions inv={inv} />
-                      </td>
-                    </tr>
+          {/* Invoice Table. The frame scrolls sideways, so the action column
+              stays reachable on a phone. */}
+          <div className={tableFrameClass}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line bg-wash">
+                  {([
+                    'sa.subs.col.company', 'sa.subs.col.plan', 'sa.subs.col.monthYear',
+                    'sa.subs.col.number', 'common.amount', 'common.status',
+                    'sa.subs.col.due', 'sa.subs.col.paidOn', null,
+                  ] as const).map((h, i) => (
+                    <th key={i} className={thClass}>{h ? t(h) : ''}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={9}>
+                      <EmptyState icon={Receipt} size="sm" title={problem ? t(problem) : t('sa.subs.noInvoices')} />
+                    </td>
+                  </tr>
+                ) : invoices.map(inv => (
+                  <tr key={inv.id} className={rowClass}>
+                    <td className="px-4 py-3 font-medium text-fg">
+                      {inv.company_name || inv.company_id.slice(0, 8)}
+                    </td>
+                    <td className="px-4 py-3 text-fg-muted">
+                      {inv.plan_name || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-fg-muted">
+                      {monthLabel(t, inv.invoice_month)} {inv.invoice_year}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-fg-subtle">
+                      {inv.invoice_number}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-fg">
+                      {fmtEur(inv.amount)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={inv.status} dueDate={inv.due_date} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular-nums text-fg-muted">
+                      {(() => { try { return format(new Date(inv.due_date), 'dd.MM.yy'); } catch { return '-'; } })()}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular-nums text-fg-muted">
+                      {inv.paid_at ? (() => { try { return format(new Date(inv.paid_at), 'dd.MM.yy HH:mm'); } catch { return '-'; } })() : '-'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <InvoiceActions inv={inv} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           {invoicePages > 1 && (
@@ -941,64 +909,56 @@ export default function SubscriptionBillingPage() {
               onClick={handleExportSubscriptions}
               title={t('common.exportExcel')}
             >
-              <Download size={14} />{t('admin.export.download')}
+              <Download aria-hidden size={14} />{t('admin.export.download')}
             </Button>
           </div>
-          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {([
-                      'sa.subs.col.company', 'sa.subs.col.plan', 'sa.subs.col.pricePerMonth',
-                      'common.status', 'sa.subs.col.start', 'sa.subs.col.payment',
-                      'sa.subs.col.billingDay',
-                    ] as const).map((h, i) => (
-                      <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t(h)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {subscriptions.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
-                        <CalendarDays size={32} className="mx-auto mb-2 opacity-40" />
-                        <p>{problem ? t(problem) : t('sa.subs.noSubscriptions')}</p>
-                      </td>
-                    </tr>
-                  ) : subscriptions.map(sub => (
-                    <tr
-                      key={sub.id}
-                      style={{ borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {sub.company_name || sub.company_id.slice(0, 8)}
-                      </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {sub.plan_name || '-'}
-                      </td>
-                      <td className="px-4 py-3 font-semibold" style={{ color: 'var(--text-primary)' }}>
-                        {fmtEur(sub.monthly_price)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={sub.status} />
-                      </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {(() => { try { return format(new Date(sub.starts_at), 'dd.MM.yyyy'); } catch { return sub.starts_at; } })()}
-                      </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {t('sa.subs.paymentCash')}
-                      </td>
-                      <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {t('sa.subs.dayOfMonth', { day: sub.billing_day })}
-                      </td>
-                    </tr>
+          <div className={tableFrameClass}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line bg-wash">
+                  {([
+                    'sa.subs.col.company', 'sa.subs.col.plan', 'sa.subs.col.pricePerMonth',
+                    'common.status', 'sa.subs.col.start', 'sa.subs.col.payment',
+                    'sa.subs.col.billingDay',
+                  ] as const).map((h, i) => (
+                    <th key={i} className={thClass}>{t(h)}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tr>
+              </thead>
+              <tbody>
+                {subscriptions.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <EmptyState icon={CalendarDays} size="sm" title={problem ? t(problem) : t('sa.subs.noSubscriptions')} />
+                    </td>
+                  </tr>
+                ) : subscriptions.map(sub => (
+                  <tr key={sub.id} className={rowClass}>
+                    <td className="px-4 py-3 font-medium text-fg">
+                      {sub.company_name || sub.company_id.slice(0, 8)}
+                    </td>
+                    <td className="px-4 py-3 text-fg-muted">
+                      {sub.plan_name || '-'}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-fg">
+                      {fmtEur(sub.monthly_price)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={sub.status} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular-nums text-fg-muted">
+                      {(() => { try { return format(new Date(sub.starts_at), 'dd.MM.yyyy'); } catch { return sub.starts_at; } })()}
+                    </td>
+                    <td className="px-4 py-3 text-fg-muted">
+                      {t('sa.subs.paymentCash')}
+                    </td>
+                    <td className="px-4 py-3 text-fg-muted">
+                      {t('sa.subs.dayOfMonth', { day: sub.billing_day })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           {subscriptionPages > 1 && (
@@ -1016,7 +976,7 @@ export default function SubscriptionBillingPage() {
       {/* Plans Tab: the catalogue that prices and gates, read-only. It is
           edited on its own page. */}
       {activeTab === 'plans' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {catalogueFailed || !catalogue ? (
             /* Not "no plans exist": the catalogue was not read (or is still
                being read), and a price of 0,00 EUR would be a claim. */
@@ -1028,26 +988,28 @@ export default function SubscriptionBillingPage() {
               )}
             </div>
           ) : catalogue.plans.map(plan => (
-            <div key={plan.slug} className="rounded-xl p-5 space-y-3" style={{
-              background: 'var(--bg-surface)',
-              border: `1px solid ${plan.is_active ? 'var(--border)' : 'var(--danger)'}`,
-              opacity: plan.is_active ? 1 : 0.6,
-            }}>
+            <div
+              key={plan.slug}
+              className={cn(
+                'glass-card space-y-3 rounded-surface p-5',
+                plan.is_active ? '' : 'border-critical opacity-60',
+              )}
+            >
               <div className="flex items-center justify-between">
-                <h3 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{plan.name}</h3>
+                <h3 className="text-lg font-bold text-fg">{plan.name}</h3>
                 {!plan.is_active && (
-                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}>{t('sa.status.inactive')}</span>
+                  <Badge tone="critical">{t('sa.status.inactive')}</Badge>
                 )}
               </div>
-              <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{formatEuroCents(plan.price_per_car_cents)}<span className="text-sm font-normal" style={{ color: 'var(--text-tertiary)' }}>{t('admin.plans.perCarSuffix')}</span></p>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <p className="whitespace-nowrap text-2xl font-bold tabular-nums text-brand-text">{formatEuroCents(plan.price_per_car_cents)}<span className="text-sm font-normal text-fg-subtle">{t('admin.plans.perCarSuffix')}</span></p>
+              <p className="text-sm text-fg-muted">
                 {t('admin.plans.field.features', { count: plan.features.length, total: catalogue.featureKeys.length })}
               </p>
             </div>
           ))}
           {catalogue && canPricing && (
-            <p className="col-span-full text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              <Link to="/admin/plaene" style={{ color: 'var(--accent)' }}>{t('sa.subs.managePlans')}</Link>
+            <p className="col-span-full text-sm text-fg-subtle">
+              <Link to="/admin/plaene" className="text-brand-text hover:underline">{t('sa.subs.managePlans')}</Link>
             </p>
           )}
         </div>

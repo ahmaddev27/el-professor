@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Trash2, CreditCard as Edit2, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2, Paperclip } from 'lucide-react';
+import { Plus, Search, Trash2, Pencil as Edit2, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, DownloadCloud, Loader2, Paperclip } from 'lucide-react';
 import {
   Alert, Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle, EmptyState, Field, Input,
   NativeSelect, PageHeader, cn,

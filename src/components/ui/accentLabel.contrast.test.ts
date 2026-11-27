@@ -156,9 +156,10 @@ const usesToken = (value: string, tokens: string[]) =>
  * A background written as a bare name — `background: btnColor` or
  * `background: getConfirmBgColor()` — rather than as a literal.
  *
- * Three of the nine filled `--danger` sites are written this way —
- * `CompaniesPage.tsx:268` (`btnColor`), `TrialBanner.tsx:59` (`fill`) and
- * `ConfirmationModal.tsx:117` (`getConfirmBgColor()`) — and the same three
+ * Three of the nine filled `--danger` sites were written this way —
+ * `CompaniesPage.tsx:268` (`btnColor`, gone since the Glass remake: its
+ * lifecycle dialog fills with `Button variant="danger"`), `TrialBanner.tsx:59`
+ * (`fill`) and `ConfirmationModal.tsx:117` (`getConfirmBgColor()`) — and the same three
  * carried three `--warning` fills and one `--success` fill that PR #76 left
  * standing, because it read literals only. A scanner that stops at the literal
  * reports "no offences" while the defect is one line up.
@@ -353,8 +354,9 @@ describe('status fill tokens', () => {
   it('is still wired into the scan of the real source', () => {
     // A parser that works on a fixture but is no longer reached by
     // findStatusFills() would leave the three sites that hid from PR #76
-    // unguarded — CompaniesPage.tsx:268, TrialBanner.tsx:59,
-    // ConfirmationModal.tsx:117 — and the rule below would still report [].
+    // unguarded — TrialBanner.tsx:59, ConfirmationModal.tsx:117 (and
+    // CompaniesPage.tsx:268 until the Glass remake) — and the rule below would
+    // still report [].
     expect(indirectSolidFills().length).toBeGreaterThan(0);
   });
 

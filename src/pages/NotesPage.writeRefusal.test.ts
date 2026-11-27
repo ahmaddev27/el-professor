@@ -84,7 +84,7 @@ async function mount(): Promise<ReactTestRenderer> {
   return tree;
 }
 
-const editButtons = (tree: ReactTestRenderer) => buttonsWithIcon(tree, 'credit-card');
+const editButtons = (tree: ReactTestRenderer) => buttonsWithIcon(tree, 'pencil');
 const deleteButtons = (tree: ReactTestRenderer) => buttonsWithIcon(tree, 'trash');
 const toasts = () => world.showToast.mock.calls.map(c => `${c[0]}:${c[1]}`);
 

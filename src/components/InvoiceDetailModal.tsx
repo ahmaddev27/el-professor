@@ -1,9 +1,10 @@
 import React from 'react';
-import { X, Download, CheckCircle, Clock, AlertTriangle, XCircle, Banknote } from 'lucide-react';
+import { Download, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import { invoiceCompanyAddress } from '../lib/platformBilling';
+import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui';
 
 // Month names are date formatting, which stays German in both UI languages
 // (see the header of src/i18n/index.ts).
@@ -68,36 +69,36 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
   const planName = invoice.plan_name || t('bill.invoice.subscriptionFallback');
   const kind = isPaid ? t('bill.invoice.receipt') : t('bill.invoice.invoice');
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the dialog's logic. Everything below only draws.
+
   const row = (label: string, value: string | React.ReactNode) => (
-    <div className="flex justify-between py-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
-      <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{label}</span>
-      <span className="text-sm font-medium text-right" style={{ color: 'var(--text-primary)' }}>{value}</span>
+    <div className="flex justify-between gap-4 border-b border-line py-2.5">
+      <span className="text-sm text-fg-subtle">{label}</span>
+      <span className="text-right text-sm font-medium text-fg">{value}</span>
     </div>
   );
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div>
-            <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
-              {t('bill.invoice.titled', { kind, number: invoice.invoice_number })}
-            </h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{companyName || t('common.unknown')}</p>
-          </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
-        </div>
+  const statusTone = isPaid ? 'positive' : isOverdue ? 'critical' : invoice.status === 'canceled' ? 'neutral' : 'info';
+  const StatusIcon = isPaid ? CheckCircle : isOverdue ? AlertTriangle : Clock;
 
-        <div className="p-5 space-y-4">
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-lg">
+            {t('bill.invoice.titled', { kind, number: invoice.invoice_number })}
+          </DialogTitle>
+          <DialogDescription>{companyName || t('common.unknown')}</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
           {/* Status banner */}
-          <div className="flex items-center gap-3 p-3.5 rounded-xl" style={{
-            background: isPaid ? 'rgba(34,197,94,0.08)' : isOverdue ? 'rgba(239,68,68,0.08)' : 'rgba(59,130,246,0.08)',
-            border: `1px solid ${isPaid ? 'var(--success)' : isOverdue ? 'var(--danger)' : 'var(--accent)'}`,
-          }}>
-            {isPaid ? <CheckCircle size={20} style={{ color: 'var(--success)' }} /> : isOverdue ? <AlertTriangle size={20} style={{ color: 'var(--danger)' }} /> : <Clock size={20} style={{ color: 'var(--accent)' }} />}
-            <span className="font-semibold text-sm" style={{ color: isPaid ? 'var(--success)' : isOverdue ? 'var(--danger)' : 'var(--accent)' }}>
+          <div>
+            <Badge tone={statusTone} className="h-8 px-3 text-sm">
+              <StatusIcon aria-hidden />
               {isPaid ? t('bill.invoice.paid') : isOverdue ? t('bill.invoice.overdue') : invoice.status === 'canceled' ? t('bill.invoice.canceled') : t('bill.invoice.open')}
-            </span>
+            </Badge>
           </div>
 
           {/* Details */}
@@ -107,28 +108,24 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
             {row(t('bill.invoice.plan'), planName)}
             {row(t('bill.invoice.period'), `${MONTHS_DE[invoice.invoice_month - 1]} ${invoice.invoice_year}`)}
             {row(t('bill.invoice.number'), invoice.invoice_number)}
-            {row(t('common.amount'), <span className="text-base font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(invoice.amount)}</span>)}
+            {row(t('common.amount'), <span className="whitespace-nowrap text-base font-bold tabular-nums text-brand-text">{fmtEur(invoice.amount)}</span>)}
             {row(t('bill.invoice.paymentMethod'), t('bill.invoice.cashPayment'))}
             {row(t('bill.invoice.dueOn'), (() => { try { return format(new Date(invoice.due_date), 'dd.MM.yyyy'); } catch { return invoice.due_date; } })())}
             {isPaid && invoice.paid_at && row(t('bill.invoice.paidOn'), (() => { try { return format(new Date(invoice.paid_at), 'dd.MM.yyyy, HH:mm', { locale: de }); } catch { return invoice.paid_at; } })())}
-            {isPaid && invoice.cash_received_amount != null && row(t('bill.invoice.received'), fmtEur(invoice.cash_received_amount))}
+            {isPaid && invoice.cash_received_amount != null && row(t('bill.invoice.received'), <span className="whitespace-nowrap tabular-nums">{fmtEur(invoice.cash_received_amount)}</span>)}
             {invoice.receipt_note && row(t('bill.invoice.note'), invoice.receipt_note)}
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {t('common.close')}
-          </button>
-          <button
-            onClick={onDownloadPdf}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--accent)' }}
-          >
-            <Download size={16} /> {t('bill.invoice.pdfButton', { kind })}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button type="button" onClick={onDownloadPdf}>
+            <Download aria-hidden /> {t('bill.invoice.pdfButton', { kind })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -2,7 +2,19 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — the Glass remake, batch R2: `NotesPage`, `WerkstattPage` with `WerkstattCheckModal`, and `NotificationsPage`** (branch `design/remake-r2`, stacked on R1's #381, PR into `staging`; no migration, look only). All four files are at 0 inline styles and 0 colours. `Docs/design/remake-v2/PLAN.md` §8 records what moved, the proof and what was lost.
+- **27.11.2026 (latest) — the Glass remake, batches R3 and R4: Mein Konto and the whole platform panel** (branch `design/remake-r3`, one PR into `staging`; no migration, look only). `AccountPage`, the dashboard, the company list and its dialogs, billing and its dialogs, the activation, discount and referral codes, Team, Protokoll, the directories, the settings page and its editors, and the Abnahme diagnostics are on tokens and primitives. No screen inside `AppLayout` or `AdminLayout` is legacy any more. `Docs/design/remake-v2/PLAN.md` §8 records what moved, the proof and every behaviour that changed.
+  - **Behaviour that changed on purpose:**
+    - The capability-gated row buttons (open a company, edit, restore, the manual subscription) now really hide: `inline-flex` used to outrank `hidden`.
+    - The overlays are `Dialog`s that ignore close while their request runs.
+    - The arrow keys switch tabs.
+    - The billing actions menu is named "Aktionen".
+    - Two buttons lost their amber, because `Button` has no caution variant.
+  - **Rule for later screens.** A `Button` or other `flex`/`inline-flex` element carrying `hidden={…}` needs `[&[hidden]]:hidden` too (now in CLAUDE.md).
+  - **Review.** An independent reviewer read the diff before the gate. It found a page that did not compile (`CompaniesPage`: a duplicate import, and `berlinToday` no longer imported), quick-action links without `flex`, and four dialogs that could be closed mid-request. All were fixed.
+  - **Gate.** CI does not run while the repository is private, so `npm run build` on the VPS, under `nice`, is the gate. It was green in 182 s: typecheck 163 (the baseline was lowered from 165), styles 2992/2228 in 33 files at the baseline, 336 test files with 7443 tests passed, and `vite build` passed. The first run was red on one new type error: three dialogs still imported `React` and no longer used it.
+  - **Harness.** `design-harness/r4/` and `design-harness/shots-r4.mjs`; a platform owner with every capability for `?screen=r4-*`. Shots in `Docs/design/remake-v2/r3|r4/{before,after}/`.
+  - **Pencil.** The owner chose the pencil for "edit" (`c2202e1`), which closes R2's open question.
+- **27.11.2026 — the Glass remake, batch R2: `NotesPage`, `WerkstattPage` with `WerkstattCheckModal`, and `NotificationsPage`** (branch `design/remake-r2`, stacked on R1's #381, PR into `staging`; no migration, look only). All four files are at 0 inline styles and 0 colours. `Docs/design/remake-v2/PLAN.md` §8 records what moved, the proof and what was lost.
   - **Proof.** `design-harness/identity-proof.mjs` against `origin/staging`, after a negative control on each file. Every logic call is carried; the logic regions differ only by presentation that moved below the marker; the handlers lost are hover painters.
   - **Tests.** The four test files that open a dialog mock `ui`'s `Dialog` and `ConfirmDialog` (a portal cannot render in `react-test-renderer`), with the real confirm contract; a mutation control fails the delete tests without it. Two keys were merged with `scripts/i18n-merge.mjs` (`notes.prevMonth`, `notes.nextMonth`).
   - **Harness.** `design-harness/r2/` and `design-harness/shots-r2.mjs`. lucide 0.344 kebab-cases the icon's own name, so `Trash2` is `svg.lucide-trash2`, not `lucide-trash-2`.

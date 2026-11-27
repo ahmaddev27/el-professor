@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **The Glass remake, batches R3 and R4 (27.11.2026, branch `design/remake-r3`, one PR against `staging`, no migration, look only).** Mein Konto and the whole platform panel are on the Glass tokens and primitives, so no screen inside either frame is legacy any more. What is left is R5 (the salary dialogs, the planning and document builders' screen parts, `ConfirmationModal`'s callers, the landing page) and R6 (retiring the legacy tokens). See `Docs/design/remake-v2/PLAN.md` §8.
+>
 > **The Glass remake, batch R2 (27.11.2026, branch `design/remake-r2`, stacked on R1, PR against `staging`, no migration, look only).** Notizen, Werkstatt (with its check form) and Benachrichtigungen are on the Glass tokens and primitives. One screen inside the company frame is still legacy, Mein Konto (R3). See `Docs/design/remake-v2/PLAN.md` §8.
 >
 > **The Glass remake, batch R1 (27.11.2026, branch `design/remake-r1`, PR against `staging`, no migration, look only).** The Overview and the locked-feature page are on the Glass tokens and primitives, and the charts draw from the new series tokens `chart-1` … `chart-5`. See `Docs/design/remake-v2/PLAN.md` §8.

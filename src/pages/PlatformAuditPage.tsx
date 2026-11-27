@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ShieldAlert, Info, ChevronDown, ChevronUp, ScrollText, Download } from 'lucide-react';
+import {
+  RefreshCw, ShieldAlert, ChevronDown, ChevronUp, ScrollText, Download, CheckCircle2, Clock, Ban, XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -22,7 +25,7 @@ import { buildAuditExport } from '../lib/panelExports';
 import { useExportChrome } from '../hooks/useExportChrome';
 import { useToast } from '../contexts/ToastContext';
 import { berlinToday } from '../utils/salaryCashReceiptFlow';
-import { Button } from '../components/ui';
+import { Alert, Badge, Button, EmptyState, Field as UiField, Input, NativeSelect, PageHeader } from '../components/ui';
 
 /**
  * Protokoll — who read what, and who changed what (plan 3.B / 3.G).
@@ -57,31 +60,6 @@ const OUTCOME_LABELS: Record<string, TranslationKey> = {
   ok:      'admin.audit.outcome.ok',
   denied:  'admin.audit.outcome.denied',
   error:   'admin.audit.outcome.error',
-};
-
-const OUTCOME_COLORS: Record<string, { color: string; background: string }> = {
-  ok:      { color: 'var(--success)', background: 'var(--success-subtle)' },
-  attempt: { color: 'var(--text-tertiary)', background: 'var(--bg-muted)' },
-  denied:  { color: 'var(--warning)', background: 'var(--warning-subtle)' },
-  error:   { color: 'var(--danger)', background: 'var(--danger-subtle)' },
-};
-
-const controlStyle: React.CSSProperties = {
-  padding: '0.5rem 0.75rem',
-  borderRadius: '0.75rem',
-  fontSize: '0.875rem',
-  background: 'var(--bg-surface)',
-  color: 'var(--text-primary)',
-  border: '1px solid var(--border)',
-};
-
-const thStyle: React.CSSProperties = {
-  color: 'var(--text-tertiary)',
-  fontSize: '0.7rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  fontWeight: 600,
-  whiteSpace: 'nowrap',
 };
 
 interface Filters {
@@ -252,53 +230,51 @@ const PlatformAuditPage: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic; below, markup only draws.
+
   if (!mayRead) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <ShieldAlert size={40} className="mb-3" style={{ color: 'var(--warning)' }} />
-        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('admin.read.denied')}</p>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('admin.audit.noAccessBody')}</p>
+      <div className="glass-card rounded-surface">
+        <EmptyState
+          icon={ShieldAlert}
+          title={t('admin.read.denied')}
+          description={t('admin.audit.noAccessBody')}
+          className="py-16"
+        />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.audit.title')}</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.audit.subtitle')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Withheld while the read failed, while one is running and while
-              nothing is loaded: an audit file of nought entries reads as "nothing
-              happened", which is the strongest claim on this screen. */}
-          <Button
-            variant="secondary"
-            disabled={loading || problem !== null || rows.length === 0}
-            onClick={handleExport}
-            title={t('common.exportExcel')}
-          >
-            <Download size={14} />{t('admin.export.download')}
-          </Button>
-          <button
-            onClick={() => void load(applied, null)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 font-ui">
+      <PageHeader
+        title={t('admin.audit.title')}
+        description={t('admin.audit.subtitle')}
+        className="pb-0"
+        actions={(
+          <>
+            {/* Withheld while the read failed, while one is running and while
+                nothing is loaded: an audit file of nought entries reads as "nothing
+                happened", which is the strongest claim on this screen. */}
+            <Button
+              variant="secondary"
+              disabled={loading || problem !== null || rows.length === 0}
+              onClick={handleExport}
+              title={t('common.exportExcel')}
+            >
+              <Download size={14} />{t('admin.export.download')}
+            </Button>
+            <Button variant="secondary" onClick={() => void load(applied, null)}>
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
+            </Button>
+          </>
+        )}
+      />
 
       {/* What this account is actually allowed to see, once the answer says so. */}
       {scope !== null && scope !== 'all' && (
-        <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
-          style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-          <Info size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />
-          <span>{t('admin.audit.scopeOwn')}</span>
-        </div>
+        <Alert tone="neutral" role="note">{t('admin.audit.scopeOwn')}</Alert>
       )}
 
       {/* Filters. Applied by the button: every read writes a row of its own. */}
@@ -306,54 +282,54 @@ const PlatformAuditPage: React.FC = () => {
         className="flex flex-wrap items-end gap-3"
         onSubmit={event => { event.preventDefault(); setExpanded(null); setApplied(draft); }}
       >
-        <Field labelKey="admin.audit.filter.category">
-          <select value={draft.category} onChange={e => setDraft({ ...draft, category: e.target.value })} style={controlStyle}>
+        <FilterField labelKey="admin.audit.filter.category">
+          <NativeSelect value={draft.category} onChange={e => setDraft({ ...draft, category: e.target.value })}>
             <option value="">{t('admin.common.allCategories')}</option>
             {AUDIT_CATEGORIES.map(category => (
               <option key={category} value={category}>{t(CATEGORY_LABELS[category])}</option>
             ))}
-          </select>
-        </Field>
+          </NativeSelect>
+        </FilterField>
 
-        <Field labelKey="admin.audit.filter.outcome">
-          <select value={draft.outcome} onChange={e => setDraft({ ...draft, outcome: e.target.value })} style={controlStyle}>
+        <FilterField labelKey="admin.audit.filter.outcome">
+          <NativeSelect value={draft.outcome} onChange={e => setDraft({ ...draft, outcome: e.target.value })}>
             <option value="">{t('admin.common.allOutcomes')}</option>
             {AUDIT_OUTCOMES.map(outcome => (
               <option key={outcome} value={outcome}>{t(OUTCOME_LABELS[outcome])}</option>
             ))}
-          </select>
-        </Field>
+          </NativeSelect>
+        </FilterField>
 
-        <Field labelKey="admin.audit.filter.action">
-          <input
+        <FilterField labelKey="admin.audit.filter.action">
+          <Input
             value={draft.actionPrefix}
             onChange={e => setDraft({ ...draft, actionPrefix: e.target.value })}
             placeholder="platform_read."
             maxLength={100}
-            style={controlStyle}
           />
-        </Field>
+        </FilterField>
 
         {companies.length > 0 && (
-          <Field labelKey="admin.audit.filter.company">
-            <select value={draft.companyId} onChange={e => setDraft({ ...draft, companyId: e.target.value })} style={controlStyle}>
+          <FilterField labelKey="admin.audit.filter.company">
+            <NativeSelect value={draft.companyId} onChange={e => setDraft({ ...draft, companyId: e.target.value })}>
               <option value="">{t('admin.common.allCompanies')}</option>
               {companies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
-            </select>
-          </Field>
+            </NativeSelect>
+          </FilterField>
         )}
 
-        <Field labelKey="admin.audit.filter.from">
-          <input type="date" value={draft.from} onChange={e => setDraft({ ...draft, from: e.target.value })} style={controlStyle} />
-        </Field>
-        <Field labelKey="admin.audit.filter.to">
-          <input type="date" value={draft.to} onChange={e => setDraft({ ...draft, to: e.target.value })} style={controlStyle} />
-        </Field>
+        <FilterField labelKey="admin.audit.filter.from">
+          <Input type="date" value={draft.from} onChange={e => setDraft({ ...draft, from: e.target.value })} />
+        </FilterField>
+        <FilterField labelKey="admin.audit.filter.to">
+          <Input type="date" value={draft.to} onChange={e => setDraft({ ...draft, to: e.target.value })} />
+        </FilterField>
 
         {scope === 'all' && (
-          <label className="flex items-center gap-2 text-sm pb-2" style={{ color: 'var(--text-secondary)' }}>
+          <label className="flex items-center gap-2 pb-2.5 text-sm text-fg-muted">
             <input
               type="checkbox"
+              className="size-4 accent-[rgb(var(--brand))]"
               checked={draft.mineOnly}
               onChange={e => setDraft({ ...draft, mineOnly: e.target.checked })}
             />
@@ -361,82 +337,69 @@ const PlatformAuditPage: React.FC = () => {
           </label>
         )}
 
-        <button type="submit" className="px-4 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
-          {t('admin.audit.apply')}
-        </button>
-        <button
+        <Button type="submit">{t('admin.audit.apply')}</Button>
+        <Button
           type="button"
+          variant="secondary"
           onClick={() => { setDraft(EMPTY_FILTERS); setApplied(EMPTY_FILTERS); }}
-          className="px-4 py-2 rounded-xl text-sm font-medium"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
         >
           {t('admin.common.reset')}
-        </button>
+        </Button>
       </form>
 
       {problem ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-2xl text-center px-6"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <ShieldAlert size={32} className="mb-3" style={{ color: 'var(--warning)' }} />
-          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(problem)}</p>
-          {failure && <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{failure}</p>}
+        <div className="glass-card rounded-surface">
+          <EmptyState icon={ShieldAlert} title={t(problem)} description={failure ?? undefined} className="py-14" />
         </div>
       ) : loading && rows.length === 0 ? (
         <div className="flex items-center justify-center py-20">
-          <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+          <RefreshCw size={24} className="animate-spin text-fg-subtle" />
         </div>
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-2xl"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <ScrollText size={36} className="mb-3" style={{ color: 'var(--text-tertiary)' }} />
-          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('admin.audit.empty')}</p>
+        <div className="glass-card rounded-surface">
+          <EmptyState icon={ScrollText} title={t('admin.audit.empty')} className="py-14" />
         </div>
       ) : (
         <>
-          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {([
-                      'admin.audit.col.time', 'admin.audit.col.actor', 'admin.audit.col.action',
-                      'admin.audit.col.outcome', 'admin.audit.col.target', 'admin.audit.col.company',
-                    ] as const).map(key => (
-                      <th key={key} className="px-5 py-3.5 text-left" style={thStyle}>{t(key)}</th>
-                    ))}
-                    <th style={thStyle} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(row => (
-                    <Row
-                      key={row.id}
-                      row={row}
-                      expanded={expanded === row.id}
-                      onToggle={() => setExpanded(expanded === row.id ? null : row.id)}
-                    />
+          <div className="glass-card relative overflow-x-auto rounded-surface">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line bg-wash">
+                  {([
+                    'admin.audit.col.time', 'admin.audit.col.actor', 'admin.audit.col.action',
+                    'admin.audit.col.outcome', 'admin.audit.col.target', 'admin.audit.col.company',
+                  ] as const).map(key => (
+                    <th key={key} className={THEAD_CELL}>{t(key)}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                  <th className={THEAD_CELL} />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <Row
+                    key={row.id}
+                    row={row}
+                    expanded={expanded === row.id}
+                    onToggle={() => setExpanded(expanded === row.id ? null : row.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
 
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs tabular-nums text-fg-subtle">
               {t('admin.audit.loaded', { count: deCount(rows.length) })}
             </p>
             {cursor ? (
-              <button
+              <Button
                 onClick={() => void load(applied, cursor)}
                 disabled={loading}
-                className="px-4 py-2 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: loading ? 0.6 : 1 }}
               >
                 {loading ? t('admin.common.loading') : t('admin.audit.loadMore')}
-              </button>
+              </Button>
             ) : (
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.audit.end')}</p>
+              <p className="text-xs text-fg-subtle">{t('admin.audit.end')}</p>
             )}
           </div>
         </>
@@ -445,61 +408,72 @@ const PlatformAuditPage: React.FC = () => {
   );
 };
 
-const Field: React.FC<{ labelKey: TranslationKey; children: React.ReactNode }> = ({ labelKey, children }) => {
+const THEAD_CELL = 'whitespace-nowrap px-5 py-3.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle';
+
+/** An outcome is a word and an icon: ok, refused, failed, or only attempted. */
+const OUTCOME_TONES: Record<string, { tone: 'positive' | 'critical' | 'caution'; icon: LucideIcon }> = {
+  ok:      { tone: 'positive', icon: CheckCircle2 },
+  attempt: { tone: 'caution', icon: Clock },
+  denied:  { tone: 'critical', icon: Ban },
+  error:   { tone: 'critical', icon: XCircle },
+};
+
+const FilterField: React.FC<{ labelKey: TranslationKey; children: React.ReactNode }> = ({ labelKey, children }) => {
   const { t } = useTranslation();
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-1">
-      <span className="text-[11px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>{t(labelKey)}</span>
+    <UiField label={t(labelKey)} className="min-w-0 max-w-full">
       {children}
-    </div>
+    </UiField>
   );
 };
 
 const Row: React.FC<{ row: AuditRow; expanded: boolean; onToggle: () => void }> = ({ row, expanded, onToggle }) => {
   const { t } = useTranslation();
-  const outcome = OUTCOME_COLORS[row.outcome] ?? OUTCOME_COLORS.attempt;
+  const outcome = OUTCOME_TONES[row.outcome] ?? OUTCOME_TONES.attempt;
+  const OutcomeIcon = outcome.icon;
   const categoryKey = CATEGORY_LABELS[row.category];
   const hasDetail = row.before_value !== null || row.after_value !== null;
 
   return (
     <>
-      <tr style={{ borderBottom: '1px solid var(--border)' }}>
-        <td className="px-5 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
+      <tr className="border-b border-line">
+        <td className="whitespace-nowrap px-5 py-3 text-xs tabular-nums text-fg-muted">
           {deDateTime(row.occurred_at)}
         </td>
         <td className="px-5 py-3">
-          <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+          <p className="text-sm text-fg">
             {row.actor_email ?? shortId(row.actor_user_id)}
           </p>
           {row.actor_role && (
-            <p className="text-[11px]" style={{ color: 'var(--warning)' }}>{row.actor_role}</p>
+            <p className="text-[11px] text-caution">{row.actor_role}</p>
           )}
         </td>
         <td className="px-5 py-3">
-          <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{row.action}</p>
-          <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <p className="text-sm font-medium text-fg">{row.action}</p>
+          <p className="text-[11px] text-fg-subtle">
             {categoryKey ? t(categoryKey) : row.category}
           </p>
         </td>
         <td className="px-5 py-3">
-          <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold" style={outcome}>
+          <Badge tone={outcome.tone}>
+            <OutcomeIcon aria-hidden />
             {OUTCOME_LABELS[row.outcome] ? t(OUTCOME_LABELS[row.outcome]) : row.outcome}
-          </span>
+          </Badge>
         </td>
-        <td className="px-5 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <td className="px-5 py-3 text-xs text-fg-muted">
           {row.target_type ?? EMPTY_CELL}
           {row.target_id && (
-            <span className="block" style={{ color: 'var(--text-tertiary)' }} title={row.target_id}>
+            <span className="block text-fg-subtle" title={row.target_id}>
               {shortId(row.target_id)}
             </span>
           )}
         </td>
-        <td className="px-5 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        <td className="px-5 py-3 text-xs text-fg-subtle">
           {row.company_name ?? EMPTY_CELL}
         </td>
         <td className="px-5 py-3 text-right">
           {hasDetail && (
-            <button onClick={onToggle} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}
+            <button onClick={onToggle} className="inline-flex items-center justify-center rounded-tight p-1.5 text-fg-subtle hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
               title={t('admin.audit.details')}>
               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
@@ -507,9 +481,9 @@ const Row: React.FC<{ row: AuditRow; expanded: boolean; onToggle: () => void }> 
         </td>
       </tr>
       {expanded && hasDetail && (
-        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+        <tr className="border-b border-line bg-sunken">
           <td colSpan={7} className="px-5 py-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Detail labelKey="admin.audit.before" value={row.before_value} />
               <Detail labelKey="admin.audit.after" value={row.after_value} />
             </div>
@@ -524,18 +498,8 @@ const Detail: React.FC<{ labelKey: TranslationKey; value: unknown }> = ({ labelK
   const { t } = useTranslation();
   return (
     <div>
-      <p className="text-[11px] font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t(labelKey)}</p>
-      <pre
-        className="text-xs rounded-xl p-3"
-        style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-secondary)',
-          overflowX: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
+      <p className="mb-1 text-[11px] font-semibold text-fg-subtle">{t(labelKey)}</p>
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-tile border border-edge bg-raised p-3 font-mono text-xs text-fg-muted">
         {value === null || value === undefined ? EMPTY_CELL : JSON.stringify(value, null, 2)}
       </pre>
     </div>

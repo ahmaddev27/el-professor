@@ -7496,4 +7496,7 @@ export const de = {
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'notes.nextMonth': 'Nächster Monat',
   'notes.prevMonth': 'Vorheriger Monat',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'sa.subs.actionsMenu': 'Aktionen',
 } as const;

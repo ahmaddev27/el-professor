@@ -85,7 +85,7 @@ async function openForEdit(type: string, behavior: string): Promise<ReactTestRen
   let tree!: ReactTestRenderer;
   await act(async () => { tree = create(createElement(NotesPage)); });
   await settle();
-  await press(buttonsWithIcon(tree, 'credit-card')[0]);
+  await press(buttonsWithIcon(tree, 'pencil')[0]);
   return tree;
 }
 

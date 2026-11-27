@@ -100,7 +100,7 @@ describe('WerkstattPage: delete and edit buttons follow the page right', () => {
   it('shows both for a role that may edit', async () => {
     const tree = await mount();
     expect(buttonsWithIcon(tree, 'trash')).toHaveLength(1);
-    expect(buttonsWithIcon(tree, 'credit-card')).toHaveLength(1); // the edit button
+    expect(buttonsWithIcon(tree, 'pencil')).toHaveLength(1); // the edit button
     expect(textOf(tree)).toContain('HH-AB-1234');
   });
 
@@ -110,7 +110,7 @@ describe('WerkstattPage: delete and edit buttons follow the page right', () => {
     expect(textOf(tree)).toContain('HH-AB-1234');
     expect(buttonsWithIcon(tree, 'trash')).toHaveLength(0);
     expect(buttonsWithIcon(tree, 'square-pen').length + buttonsWithIcon(tree, 'pencil').length
-      + buttonsWithIcon(tree, 'credit-card').length).toBe(0);
+      + buttonsWithIcon(tree, 'pencil').length).toBe(0);
   });
 });
 

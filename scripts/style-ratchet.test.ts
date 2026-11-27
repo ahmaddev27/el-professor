@@ -105,12 +105,13 @@ describe('the committed baseline', () => {
     files: Record<string, { style: number; color: number }>;
   };
 
-  it('still sees debt in a screen phase 5 has not reached, so a broken counter cannot pass by finding nothing', () => {
-    // Werkstatt was this control until the Glass remake's R2 moved it; Mein Konto
-    // is the last screen inside the company frame still on the legacy look (R3).
-    const source = readFileSync(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8');
+  it('still sees debt in a file the remake never converts, so a broken counter cannot pass by finding nothing', () => {
+    // Werkstatt, then Mein Konto, held this control until their batches converted
+    // them. The Gehaltsquittung sheet is a statutory document whose look is its
+    // content, so it stays on inline styles for good and cannot move this control again.
+    const source = readFileSync(new URL('../src/components/GehaltsquittungDocument.tsx', import.meta.url), 'utf8');
     expect(countStyleDebt(source).style).toBeGreaterThan(0);
-    expect(baseline.files['src/pages/AccountPage.tsx']?.style).toBeGreaterThan(0);
+    expect(baseline.files['src/components/GehaltsquittungDocument.tsx']?.style).toBeGreaterThan(0);
   });
 
   it('holds the phase 5 batch-1 screens at zero: they are on the design system', () => {
