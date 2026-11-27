@@ -87,7 +87,7 @@ sheets, which html2canvas draws, read none. The captured region of `DriverSalary
 and neither do the Gehaltsquittung, the Abrechnung share card, or any PDF builder. Every document paints
 fixed colours and pins its own font, so nothing printed moves.
 
-The legacy blocks retire in R6, once nothing reads them. **What the remap does not reach:** about twenty
+The legacy blocks retired in R6 (27.11.2026), once nothing read them. **What the remap does not reach:** about twenty
 legacy files hard-code blue hex values in their own markup. Those go with their batch (R1–R5), because
 changing a file's markup is that file's conversion.
 
@@ -335,7 +335,7 @@ primitives alone**, and is checked in the shots.
 | R3 | `AccountPage`; then the OTP block's `ON_LEGACY_SURFACE` pairs retire — **done 27.11.2026** (below, with R4) |
 | R4 | the admin panel: `SuperAdminDashboard`, `CompaniesPage`, `PlatformDirectoriesPage`, `PlatformTeamPage`, `PlatformAuditPage`, `PlatformSettingsPage`, `PlatformPlansPage`, `SubscriptionBillingPage`, `AbnahmeDiagnosticPage` — **done 27.11.2026** (below; `PlatformPlansPage` was already on tokens) |
 | R5 | the components phase 5 left legacy on purpose: the salary dialogs, the planning and document builders' screen parts (never the documents), the toast, `ConfirmationModal` callers, and `LandingPage` — **done 27.11.2026** (below) |
-| R6 | retire the legacy tokens once nothing reads them; the document components move their `var(--…)` reads to fixed values first, proved unchanged |
+| R6 | retire the legacy tokens once nothing reads them; the document components move their `var(--…)` reads to fixed values first, proved unchanged — **done 27.11.2026** (below) |
 
 **R1, as built (27.11.2026, branch `design/remake-r1`).**
 
@@ -449,7 +449,21 @@ primitives alone**, and is checked in the shots.
   - `SalaryDetailsModal.writeRefusal.test.ts` mocks `ConfirmDialog` with the real contract.
   - `responsiveRules.test.ts` follows the converted frames.
   - The typecheck baseline fell from 163 to 161: two unused names went with the old markup.
-- **Left for R6:** the landing page's hero keyframes in `src/index.css` are physical and do not mirror in Arabic.
+- **Left for R6:** the landing page's hero keyframes in `src/index.css` are physical and do not mirror in Arabic. Done in R6.
+
+**R6, as built (27.11.2026, branch `design/remake-r6`, one PR), with two Arabic fixes the owner reported the same evening.**
+
+- **The last readers of the legacy tokens moved to tokens.**
+  - `NoteProvenanceFields` and `NoteReviewPanel` draw their fields with `controlFrameClass` (the textarea with NotesPage's `h-auto resize-none py-2` pattern) and their text with `text-fg` / `text-fg-muted` / `text-fg-subtle`.
+  - `DriverSalarySummaryCard`'s two export buttons, which sit outside the captured card, are design-system `Button`s. Everything from `CARD — exported as image` to the end of the file is byte-identical (checked as a string).
+  - Seven stat figures in `HistoricalWorkingHoursWizard` passed `'var(--text-primary)'` or `'var(--text-secondary)'` as a **class name**, an R5 codemod slip, so they drew in the inherited colour. They are `text-fg` / `text-fg-muted`. Each changed line differs from staging's only in that value (checked by script).
+  - The one document that read a theme colour, the Timesheet's absence badge (`text-fg-subtle`), takes `text-[#525e59]`: the light theme's value, so the light sheet is unchanged and the dark one no longer changes the document. That is the style ratchet's one rise (StundennachweisPage colours 29 → 30); `DriverSalarySummaryCard` falls from 35 inline styles to 29, so the baseline is 343 / 367 in 14 files (from 349 / 366).
+- **`src/index.css`** loses both `@legacy-tokens` blocks, the sixteen unused legacy component classes (`.panel*`, `.text-main|sub|muted|accent`, `.btn-*`, `.input-base`, `.badge-*`, `.divider`) and five unused animations (`slide-in-right`, three `float-*` aliases, `fade-in`). The global `select` rule reads `--fg` on `--solid` (opaque, because the browser draws the option list over everything), not the legacy pair and four fixed hex values.
+- **The landing hero mirrors in Arabic.** Every sideways offset and every tilt in its keyframes and its reduced-motion rests is multiplied by `--hero-x`, which is `1` under `[dir='ltr']` and `-1` under `[dir='rtl']` (declared outside the Tailwind layer, which keeps only rules for classes it finds).
+- **Tests.** `accentLabel.contrast.test.ts` is deleted: it paired legacy fills with their labels, and its own control needed a source file still painting `var(--accent)`. `tokens.contrast.test.ts` loses its legacy section (a note says where its rules live on). `legacyTokensRetired.test.ts` fails if `index.css` defines a legacy name or any file under `src/` (and `index.html`) reads one, with a positive control over six spellings, two of them near misses (`--border-strong`, `--line-strong`) that must not match.
+- **The sidebar was missing in Arabic on every wide screen, in both shells** (owner's screenshot of `/admin/protokoll`, 27.11.2026). The drawer's closed state was `-translate-x-full rtl:translate-x-full`. Tailwind 3.4 writes `rtl:` as `:where(…)`, the specificity of one class, and emits it *after* the screen variants, so it beat `lg:translate-x-0` and slid the sticky sidebar out past the right edge, leaving its strip empty. Measured in the compiled CSS, not reasoned: `.lg\:translate-x-0` at line 7626, `.rtl\:translate-x-full:where(…)` at 7837. The closed state is `max-lg:-translate-x-full max-lg:rtl:translate-x-full` now, in `Sidebar` and `AdminSidebar`; no other `rtl:` class shares an element with a screen variant of the same utility.
+- **The Arabic face is Tajawal** (owner, 27.11.2026), replacing IBM Plex Sans Arabic: `@fontsource/tajawal`, Arabic subset only (400, 500, 700; it has no 600, so semibold draws 700). Latin text and figures stay Geist, so a figure on an Arabic screen is the same as on the German document.
+- **The date fields' `mm / dd / yyyy`** is the browser's own date control, which formats by the browser's UI language and never by the page's: an English Chrome shows it on the German screen too (`design-harness/capture.mjs` passes `--lang=de-DE` for exactly that reason). Arabic did not cause it, and replacing the native control is a separate decision.
 
 ## 9. Verification
 

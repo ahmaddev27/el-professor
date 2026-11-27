@@ -40,14 +40,8 @@
  * layout has no field for one and a prompt per toggle would be friction on the
  * commonest act. Adding the field later needs no migration.
  *
- * It is styled with the design system's tokens rather than the surrounding
- * file's inline `var(--bg-surface)` objects. Measured on this branch, light
- * `--bg-surface` (#ffffff) and `--raised` (#FFFFFF) are the same colour and
- * `--border` / `--line` differ by a shade, so the card sits in the legacy
- * detail view unchanged in light and a hair different in dark — the seam
- * CLAUDE.md already accepts for `AppLayout`. The alternative was ~25 new inline
- * styles in a file the style ratchet records at 264, which is the debt that gate
- * exists to refuse.
+ * It is styled with the design system's tokens, like the company detail view
+ * around it.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';

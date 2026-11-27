@@ -1,21 +1,21 @@
 import { useState } from 'react';
 import { useTranslation } from '../../contexts/LanguageContext';
 import type { ProvenanceFormValues } from '../../utils/noteProvenance';
+import { controlFrameClass } from '../ui/Input';
 
 /**
  * The optional part of the Notizen form that says when the event happened, when
  * it was reported, and where. Nothing in it changes the planning, and the
  * section says so before anyone fills it in.
  *
- * The classes carry the legacy variables the surrounding dialog uses, not inline
- * styles: the screen is not converted yet and the style ratchet is at its
- * baseline (the vehicle picker beside it does the same).
+ * The fields share the design system's control frame, so they match the
+ * Notizen form around them (and show the same focus ring).
  */
 
-const INPUT =
-  'w-full rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none';
-const LABEL = 'block text-xs font-medium mb-1 text-[var(--text-tertiary)]';
-const HINT = 'mt-1 text-xs text-[var(--text-tertiary)]';
+// Native date pickers follow the page's colour scheme only when told, as in Input.
+const INPUT = `${controlFrameClass} tabular-nums [color-scheme:light] dark:[color-scheme:dark]`;
+const LABEL = 'block text-xs font-medium mb-1 text-fg-muted';
+const HINT = 'mt-1 text-xs text-fg-subtle';
 
 export interface NoteProvenanceFieldsProps {
   values: ProvenanceFormValues;
@@ -33,9 +33,9 @@ export function NoteProvenanceFields({ values, onChange }: NoteProvenanceFieldsP
     <details
       open={open}
       onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}
-      className="rounded-lg border border-[var(--border)] p-3"
+      className="rounded-control border border-line p-3"
     >
-      <summary className="cursor-pointer text-sm font-medium text-[var(--text-secondary)]">
+      <summary className="cursor-pointer text-sm font-medium text-fg-muted">
         {t('notes.prov.section')}
       </summary>
       <p className={HINT}>{t('notes.prov.sectionHint')}</p>
@@ -66,7 +66,7 @@ export function NoteProvenanceFields({ values, onChange }: NoteProvenanceFieldsP
       </div>
 
       <fieldset className="mt-3">
-        <legend className="mb-1 text-xs font-medium text-[var(--text-tertiary)]">{t('notes.prov.position')}</legend>
+        <legend className="mb-1 text-xs font-medium text-fg-muted">{t('notes.prov.position')}</legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label htmlFor="note-latitude" className={LABEL}>{t('notes.prov.latitude')}</label>

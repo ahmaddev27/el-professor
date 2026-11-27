@@ -2,6 +2,12 @@
 
 Last updated: **27.11.2026**
 
+- **27.11.2026 (latest) — the Glass remake, batch R6, and two Arabic fixes** (branch `design/remake-r6`, PR #388 into `staging`; no migration, look only).
+  - **Sidebar missing in Arabic on wide screens, both shells:** the drawer's closed `rtl:translate-x-full` outranked `lg:translate-x-0` (Tailwind 3.4 emits `rtl:` after the screens at equal specificity), so the sticky sidebar slid out past the right edge. Now `max-lg:-translate-x-full max-lg:rtl:translate-x-full` in `Sidebar` and `AdminSidebar`.
+  - **Arabic face is Tajawal** (`@fontsource/tajawal`, Arabic subset 400/500/700, replacing `@fontsource/ibm-plex-sans-arabic`); Latin text and figures stay Geist.
+  - **R6:** the legacy tokens are gone from `src/index.css` with the unused legacy classes and animations; the last readers (note components, `DriverSalarySummaryCard`'s export buttons, seven `HistoricalWorkingHoursWizard` figures that passed a `var()` as a class) are on tokens; the Timesheet's absence badge has a fixed colour. `legacyTokensRetired.test.ts` replaces `accentLabel.contrast.test.ts`. The landing hero mirrors in RTL through `--hero-x`.
+  - **Date fields' `mm / dd / yyyy`** is the browser's native control following the browser's language; not caused by Arabic, not changed.
+  - Checks: full build green here (7402 tests passed, typecheck 161, styles 343/367). Before/after shots (Arabic, both shells, 1440/375, light/dark, drawer open) are outside the repo, in `/home/ahmad/design-inputs/owner-shots/rtl-fix-2026-11-27/`.
 - **27.11.2026 (latest) — the Glass remake, batch R5: the components phase 5 left legacy** (branch `design/remake-r5`, one PR into `staging`; no migration, look only). Inline styles and hard-coded colours fall from 2992 / 2228 in 33 files to 349 / 366 in 14. What is left is the statutory documents (byte-identical to `origin/staging`), a few data-driven values, the staging banner and Google's button. `Docs/design/remake-v2/PLAN.md` §8 lists every file with its counts, the proof and what changed on purpose.
   - **Moved:**
     - the screen parts of the planning and document builders;

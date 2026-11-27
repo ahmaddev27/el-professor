@@ -2,7 +2,7 @@
   "note": "Per-file counts of inline styles and hard-coded colours (scripts/style-ratchet.mjs). Lower them as screens move to the design system; they must never rise.",
   "files": {
     "src/components/DriverSalarySummaryCard.tsx": {
-      "style": 35,
+      "style": 29,
       "color": 74
     },
     "src/components/EnvironmentBanner.tsx": {
@@ -51,7 +51,7 @@
     },
     "src/pages/StundennachweisPage.tsx": {
       "style": 72,
-      "color": 29
+      "color": 30
     },
     "src/pages/SuperAdminDashboard.tsx": {
       "style": 1,

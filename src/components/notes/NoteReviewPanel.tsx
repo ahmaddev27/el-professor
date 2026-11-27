@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import { Paperclip } from 'lucide-react';
 import { useTranslation } from '../../contexts/LanguageContext';
-import { Alert, Badge, Button } from '../ui';
+import { Alert, Badge, Button, cn } from '../ui';
+import { controlFrameClass } from '../ui/Input';
 import type { ReviewDecision } from '../../lib/driverNoteProvenance';
 import {
   EVIDENCE_EXTENSIONS,
@@ -23,10 +24,10 @@ import {
  * them. Colour is never the only signal: a status is a word and a tone.
  */
 
-const TEXT = 'text-sm text-[var(--text-secondary)]';
-const MUTED = 'text-xs text-[var(--text-tertiary)]';
-const SECTION = 'rounded-lg border border-[var(--border)] p-3 space-y-2';
-const HEADING = 'text-sm font-medium text-[var(--text-primary)]';
+const TEXT = 'text-sm text-fg-muted';
+const MUTED = 'text-xs text-fg-subtle';
+const SECTION = 'rounded-control border border-line p-3 space-y-2';
+const HEADING = 'text-sm font-medium text-fg';
 const ACCEPT = [
   ...EVIDENCE_EXTENSIONS.map(ext => `.${ext}`),
   'application/pdf', 'image/jpeg', 'image/png', 'image/webp',
@@ -158,7 +159,7 @@ function ReviewSection(props: NoteReviewPanelProps & { status: VerificationStatu
 
       {mayEdit && rejecting && (
         <div className="space-y-2">
-          <label htmlFor="note-reject-reason" className="block text-xs font-medium text-[var(--text-tertiary)]">
+          <label htmlFor="note-reject-reason" className="block text-xs font-medium text-fg-muted">
             {t('notes.prov.action.reasonLabel')}
           </label>
           <textarea
@@ -166,7 +167,7 @@ function ReviewSection(props: NoteReviewPanelProps & { status: VerificationStatu
             rows={2}
             value={reason}
             onChange={event => setReason(event.target.value)}
-            className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+            className={cn(controlFrameClass, 'h-auto resize-none py-2 [@media(pointer:coarse)]:h-auto')}
           />
           <div className="flex gap-2">
             <Button
@@ -211,7 +212,7 @@ function EvidenceSection(props: NoteReviewPanelProps & { t: Translate }) {
       )}
       {!attached && mayEdit && (
         <div>
-          <label htmlFor="note-evidence-file" className="block text-xs font-medium mb-1 text-[var(--text-tertiary)]">
+          <label htmlFor="note-evidence-file" className="block text-xs font-medium mb-1 text-fg-muted">
             {t('notes.prov.evidence.attach')}
           </label>
           <input
@@ -224,7 +225,7 @@ function EvidenceSection(props: NoteReviewPanelProps & { t: Translate }) {
               event.target.value = '';
               if (file) onAttach(file);
             }}
-            className="block w-full text-sm text-[var(--text-secondary)]"
+            className="block w-full text-sm text-fg-muted"
           />
           <p className={MUTED}>{t('notes.prov.evidence.hint')}</p>
         </div>
