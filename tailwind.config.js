@@ -61,7 +61,11 @@ export default {
         },
         signal: token('signal'),
         focus: token('focus'),
-        positive: tone('positive'),
+        positive: {
+          ...tone('positive'),
+          solid: token('positive-solid'),
+          fg: token('positive-fg'),
+        },
         caution: tone('caution'),
         critical: {
           ...tone('critical'),

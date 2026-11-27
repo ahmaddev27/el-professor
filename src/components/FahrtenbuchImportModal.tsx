@@ -1144,7 +1144,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 const { summary } = preview;
                 const duplicates = preview.inFileDuplicates + preview.storedDuplicates;
                 const cards: { labelKey: TranslationKey; value: string | number; tone: string }[] = [
-                  { labelKey: 'imp.card.completed',     value: summary.completed,   tone: 'text-brand-text' },
+                  { labelKey: 'imp.card.completed',     value: summary.completed,   tone: 'text-positive' },
                   { labelKey: 'imp.card.canceledTrips', value: summary.cancelled,   tone: summary.cancelled > 0 ? 'text-caution' : 'text-fg-subtle' },
                   { labelKey: 'imp.card.unknownStatus', value: summary.unknown,     tone: summary.unknown > 0 ? 'text-critical' : 'text-fg-subtle' },
                   { labelKey: 'imp.card.needsReview',   value: summary.needsReview, tone: summary.needsReview > 0 ? 'text-caution' : 'text-positive' },

@@ -276,7 +276,7 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
                   <React.Fragment key={r.id}>
                     <tr className="border-b border-line transition-colors hover:bg-sunken">
                       <td className="px-4 py-3">
-                        <span className={cn('rounded-tight px-2.5 py-1 font-mono text-sm font-bold', r.is_active ? 'bg-brand-soft text-brand-text' : 'bg-sunken text-fg-subtle')}>
+                        <span className={cn('rounded-tight px-2.5 py-1 font-mono text-sm font-bold', r.is_active ? 'bg-positive-soft text-positive' : 'bg-sunken text-fg-subtle')}>
                           {r.ref_code}
                         </span>
                       </td>

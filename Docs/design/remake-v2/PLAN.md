@@ -6,8 +6,12 @@ design is the "Glass / Remake V2" system specified in
 `4b5290a5`, which is read-only and never copied wholesale. The owner decided the same day: **everything as
 in the file, colours included**.
 
-- **Follows the spec:** the emerald palette (`#047857` / `#34d399`), the glass recipe, the ambient
-  field and the grain, Geist and Geist Mono, every component, and the shell.
+- **Follows the spec:** the glass recipe, the ambient field and the grain, Geist and Geist Mono, every
+  component, and the shell. The spec's emerald palette (`#047857` / `#34d399`) was followed until the
+  owner's second decision of the same day (below).
+- **The brand is the logo's blue (owner, 27.11.2026, after the sidebar rail):** *"replace our primary
+  green with the blue of the logo and its shades, across the whole design."* It overrides the spec for
+  the **primary colour only**; everything else above stays. See §1a.
 - **Stays El-Professor's:** the product name, and the logo glyph (`public/brand/mark-on-dark.png`),
   which is drawn inside the spec's dark `.brand-mark` tile.
 - **Retired:** blue `#146BFF` and cyan `#00E7FF`.
@@ -35,13 +39,13 @@ below are El-Professor's, and only the values move.
 | `fg` / `fg-muted` / `fg-subtle` | `--ink` / `--ink-muted` / `--ink-subtle` | `#111916` / `#4f5b56` / `#525e59` (§1) | `#e5ebe8` / `#b5bfba` / `#acb7b2` (§1) |
 | `line`: dividers | `--line` | `17 25 22` @ .08 | `255 255 255` @ .08 |
 | `line-strong`: **control borders** | `--line-strong`, raised to 3:1 (§3) | `17 25 22` @ .50 | `255 255 255` @ .42 (§1) |
-| `brand`: primary fill, active mark | `--primary` | `#047857` | `#34d399` |
-| `brand-hover` | `--primary-hover` | `#065f46` | `#6ee7b7` |
-| `brand-fg`: text on brand | `--primary-ink` | `#ffffff` | `#04261a` |
-| `brand-soft`: selected/info fill | `--primary-soft` | `#e2f3eb` | `#0f2a20` |
-| `brand-text`: links, active nav text | `--primary-soft-ink` | `#05603f` | `#74e3b8` |
+| `brand`: primary fill, active mark | `--primary` → blue-500 / blue-400 (§1a) | `#0060ff` | `#70a3ff` |
+| `brand-hover` | `--primary-hover` → blue-600 / blue-300 | `#0051da` | `#a4c5ff` |
+| `brand-fg`: text on brand | `--primary-ink` → white / blue-950 | `#ffffff` | `#001244` |
+| `brand-soft`: selected/info fill | `--primary-soft` → blue-100 / a blue tint | `#e3edff` | `#0e1f3d` |
+| `brand-text`: links, active nav text | `--primary-soft-ink` → blue-600 / blue-300 | `#0051da` | `#a4c5ff` |
 | `signal`: was the brand cyan | `--declined-fg` (teal) | `#0b6259` | `#84d9cf` |
-| `focus`: focus outline | `--primary`, not `--focus` (§3) | `#047857` | `#34d399` |
+| `focus`: focus outline | `--primary`, not `--focus` (§3) | `#0060ff` | `#70a3ff` |
 | `positive` / `positive-soft` | `--success-fg` / `--success-bg` | `#05603f` / `#e6f5ee` | `#74e3b8` / `#0e2a1f` |
 | `caution` / `caution-soft` | `--warning-fg` / `--warning-bg` | `#8a4b06` / `#fcf2df` | `#f5c46b` / `#2e220c` |
 | `critical` / `critical-soft` | `--danger-fg` / `--danger-bg` | `#a8231b` / `#fdecec` | `#ffa39e` / `#331416` |
@@ -58,6 +62,52 @@ below are El-Professor's, and only the values move.
 - **Glass, not colours:** `--glass-edge` (a colour), `--glass-hi`, `--glass-shadow`, `--glass-sheet`,
   `--amb-1` … `--amb-4`, `--grain`, `--ease`, and the radius scale `--r-xs` … `--r-2xl`. These are
   values, not channel triples.
+
+### 1a. The brand is the logo's blue (27.11.2026)
+
+The owner sampled `public/brand/wordmark-on-dark.png`: the word "Professor" is a slight gradient from
+`#0058FF` to `#0066FF`, centred on `#0060FF` (the commonest pixels are `#0065FF`, `#005AFF`, `#0066FF`,
+`#005BFF`). `src/index.css` carries an eleven-step scale built from it in OKLCH at one hue, in its own
+`@scale brand-blue` block, with `#0060FF` as step 500 exactly:
+
+| 50 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 950 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `#F2F7FF` | `#E3EDFF` | `#CADDFF` | `#A4C5FF` | `#70A3FF` | **`#0060FF`** | `#0051DA` | `#0041B4` | `#003290` | `#00236B` | `#001244` |
+
+Every brand token is read off it, the light theme from the dark half and the dark theme from the light
+half, as the emerald did:
+
+- **Primary button.** Light: the gradient `#196AFF` → `#0060FF` under white (4.62:1 at the top, the
+  logo's 5.10:1 at the bottom; any lighter top and the label drops below AA), hover `#0058EC` →
+  `#0051DA`, and its shadow in `rgb(0 96 255)`. Dark: `#99BEFF` → `#70A3FF` under `#001244` (blue-950),
+  hover `#B8D2FF` → `#85B1FF`.
+- **Links and active navigation** (`brand-text`): blue-600 `#0051DA` in light, because the logo's own
+  `#0060FF` is 4.4:1 on the canvas; blue-300 in dark.
+- **Focus ring and the primary chart series:** blue-500 in light, blue-400 in dark.
+- **Chart series 2 was blue** (`#2F6FD6` / `#5B9CF6`) and now carries the old series-1 emerald
+  (`#0A845B` / `#2FBF8A`), so the overview never draws two blues side by side.
+- **The brand's own glow and the logo tile:** `--amb-1` (and dark `--amb-4`, the same emerald) is
+  blue-400, the light one at .24 rather than .30 because a blue glow reads stronger than a green one at
+  the same alpha; the mark tile is a dark navy (`#12305F` → `#070E1D`).
+
+**What did not move, on purpose.** Semantic green stays green: `positive` (paid, active, success badges,
+success toasts) carries meaning, not brand. `caution`, `critical`, `info`, `teal`, `violet`, `signal` and
+the neutral canvas, surfaces and shadows are unchanged — the owner kept the rest of the Glass look. Four
+places used the brand to mean "good" and were moved to `positive` so they stay green: the overview's
+Firmengewinn card when there is a profit (red on a loss; it needed a solid fill, so `positive-solid` and
+its label `positive-fg` are new, with the old emerald and its label as their values and a pair in the
+contrast test), an active referral code (`ReferralCodesManagement`), the count of completed rides in the
+Fahrtenbuch import (`FahrtenbuchImportModal`), and the notifications master switch when it is on
+(`NotificationsPage`). Left blue on purpose: a middle tier between `positive` and `caution` or
+`critical` (the historical wizard's "Kandidat vorhanden", an hour target at 60–89 %), informational
+tones, selection marks, and the Abrechnung difference, which sits in the shareable image and means "the
+driver owes", not "good". The
+logo files are unchanged, and so is `DriverSalarySummaryCard`, an image whose colours are its content.
+
+`tokens.contrast.test.ts` holds all of it in a block of its own: the scale has the eleven steps with the
+logo's blue as 500; every brand token is a step of it; the tints and gradient stops stay within 8° of
+the logo's hue; the light label reads on every blue the logo is drawn in; and chart series 1 and 2 stay
+apart in hue. Putting the emerald back on `--brand` fails it (negative control, 27.11.2026).
 
 **How alpha fits the RGB-channel convention.** A token stays a channel triple, and a translucent one gains
 a sibling, `--<name>-a`. Tailwind's colour becomes `rgb(var(--raised) / calc(var(--raised-a, 1) *
@@ -229,7 +279,7 @@ asked for reduced motion.
 
 | spec | ours | change |
 |---|---|---|
-| `.btn` (primary gradient, secondary glass, ghost, danger, sizes 30/36/44) | `Button` | Primary: the spec's gradient and its three-part shadow (dark: the light-emerald gradient). Secondary: the glass with `--glass-hi`. Ghost: a white wash on hover. Radius md = 10px. Weight 550, size 13.5px. Active state `translate-y-px scale-[.99]`, motion-safe. Coarse sizes kept. |
+| `.btn` (primary gradient, secondary glass, ghost, danger, sizes 30/36/44) | `Button` | Primary: the spec's gradient recipe and its three-part shadow, in the logo's blue since §1a (dark: the light-blue gradient). Secondary: the glass with `--glass-hi`. Ghost: a white wash on hover. Radius md = 10px. Weight 550, size 13.5px. Active state `translate-y-px scale-[.99]`, motion-safe. Coarse sizes kept. |
 | `.icon-btn` | `Button size="icon"` | 36px, ghost wash on hover. |
 | `.card` | `Card*` | `raised` fill, `--glass-edge` border, radius xl = 18px, the glass shadow stack, no blur. Head padding `16 18 0`, body `16 18 18`, foot `12 18` with a top border. Card title 15/600. |
 | `.stat` | `KpiCard` | Padding `16 16 14`, a 28px tinted icon tile, value 26px/600 in tabular figures. |

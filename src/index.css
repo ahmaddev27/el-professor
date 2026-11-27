@@ -37,7 +37,8 @@
 
 /* ── Design system tokens (Phase 2, remade 27.11.2026) ───────────────────────
  * The palette of src/components/ui and both shells: the "Glass" design remake
- * (Docs/design/remake-v2/PLAN.md). Emerald brand, a green-grey canvas with an
+ * (Docs/design/remake-v2/PLAN.md). The logo's blue as the brand (owner,
+ * 27.11.2026: it replaced the spec's emerald), a green-grey canvas with an
  * ambient glow and film grain behind translucent glass panes. Mapped onto our
  * token names by ROLE, never by the spec's names: our `--overlay` is the dialog
  * surface (the spec's glass-strong), our `--scrim` is the spec's overlay.
@@ -80,6 +81,29 @@ td select, th select { max-width: none; }
   }
 }
 
+/* @scale brand-blue
+ * The brand's scale, built in OKLCH at one hue from the logo's own blue: the
+ * "Professor" of public/brand/wordmark-on-dark.png runs from #0058FF to #0066FF
+ * and centres on #0060FF, which is step 500 exactly. Every brand token in both
+ * blocks below is one of these steps (tokens.contrast.test.ts checks that), so
+ * a light theme takes the dark half and a dark theme the light half of the same
+ * blue. Nothing paints from the scale directly; it is the source the tokens are
+ * read off, and the place to look when a new brand tone is needed.
+ */
+:root {
+  --blue-50:        242 247 255;  /* #F2F7FF */
+  --blue-100:       227 237 255;  /* #E3EDFF */
+  --blue-200:       202 221 255;  /* #CADDFF */
+  --blue-300:       164 197 255;  /* #A4C5FF */
+  --blue-400:       112 163 255;  /* #70A3FF */
+  --blue-500:       0 96 255;     /* #0060FF the logo */
+  --blue-600:       0 81 218;     /* #0051DA */
+  --blue-700:       0 65 180;     /* #0041B4 */
+  --blue-800:       0 50 144;     /* #003290 */
+  --blue-900:       0 35 107;     /* #00236B */
+  --blue-950:       0 18 68;      /* #001244 */
+}
+
 /* @tokens light */
 :root {
   --canvas:         232 239 236;  /* #E8EFEC page background, under the glow */
@@ -110,16 +134,18 @@ td select, th select { max-width: none; }
   --line-a:         0.08;
   --line-strong:    17 25 22;     /* ink at .50: control borders (spec .15 is under 3:1) */
   --line-strong-a:  0.5;
-  --brand:          4 120 87;     /* #047857 emerald: primary actions, active marks */
-  --brand-hover:    6 95 70;      /* #065F46 */
+  --brand:          0 96 255;     /* #0060FF blue-500, the logo's blue: primary actions, active marks (5.1:1 under white) */
+  --brand-hover:    0 81 218;     /* #0051DA blue-600 */
   --brand-fg:       255 255 255;  /* #FFFFFF text on brand */
-  --brand-soft:     226 243 235;  /* #E2F3EB selected and info fills */
-  --brand-text:     5 96 63;      /* #05603F links, active navigation */
+  --brand-soft:     227 237 255;  /* #E3EDFF blue-100: selected and info fills */
+  --brand-text:     0 81 218;     /* #0051DA blue-600: links, active navigation (#0060FF is 4.4:1 on the canvas) */
   --signal:         11 98 89;     /* #0B6259 teal, the second brand colour */
-  --focus:          4 120 87;     /* #047857 focus outline (spec #10B981 is 2.2:1) */
+  --focus:          0 96 255;     /* #0060FF blue-500 focus outline */
   --positive:       5 96 63;      /* #05603F */
   --positive-soft:  230 245 238;  /* #E6F5EE */
   --positive-dot:   18 162 114;   /* #12A272 */
+  --positive-solid: 4 120 87;     /* #047857 a fill that means "good" (the profit card), under white: the brand's emerald until the blue */
+  --positive-fg:    255 255 255;  /* #FFFFFF the label on that fill */
   --caution:        138 75 6;     /* #8A4B06 */
   --caution-soft:   252 242 223;  /* #FCF2DF */
   --caution-dot:    217 154 38;   /* #D99A26 */
@@ -142,15 +168,15 @@ td select, th select { max-width: none; }
   --neutral-dot:    152 163 158;  /* #98A39E */
   /* Chart series (R1). A series is a mark with no word beside it, so each one
      reaches 3:1 on every pane a chart sits on; tokens.contrast.test.ts measures it. */
-  --chart-1:        10 132 91;    /* #0A845B emerald (spec #0E9F6E is 2.3:1 on the canvas) */
-  --chart-2:        47 111 214;   /* #2F6FD6 blue */
+  --chart-1:        0 96 255;     /* #0060FF blue-500, the logo's blue */
+  --chart-2:        10 132 91;    /* #0A845B emerald, series 1 before the blue */
   --chart-3:        166 100 29;   /* #A6641D orange (spec #E0892B is 1.8:1) */
   --chart-4:        115 102 200;  /* #7366C8 violet (spec #8B7CF0 is 2.3:1) */
   --chart-5:        109 118 114;  /* #6D7672 grey (spec #98A39E is 1.7:1) */
-  --chart-1-soft:   14 159 110;   /* series 1 at .14, an area's fill */
+  --chart-1-soft:   0 96 255;     /* series 1 at .14, an area's fill */
   --chart-1-soft-a: 0.14;
-  --amb-1:          16 185 129;   /* the four ambient glows, each at its own alpha */
-  --amb-1-a:        0.3;
+  --amb-1:          112 163 255;  /* the four ambient glows, each at its own alpha; the first is blue-400 */
+  --amb-1-a:        0.24;
   --amb-2:          45 212 191;
   --amb-2-a:        0.22;
   --amb-3:          56 189 248;
@@ -171,11 +197,11 @@ td select, th select { max-width: none; }
   --elev-xs:        0 1px 2px rgb(17 25 22 / 0.05);
   --elev-md:        0 10px 30px -14px rgb(17 25 22 / 0.22), 0 2px 6px -2px rgb(17 25 22 / 0.06);
   --elev-lg:        0 30px 70px -24px rgb(17 25 22 / 0.38), 0 6px 16px -6px rgb(17 25 22 / 0.1);
-  --brand-gradient:       linear-gradient(180deg, #098663 0%, #047857 100%); /* spec top #0B9068: 4.04:1 under white */
-  --brand-gradient-hover: linear-gradient(180deg, #0a7f5c 0%, #065f46 100%);
-  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.24), 0 1px 2px rgb(4 120 87 / 0.3), 0 8px 20px -10px rgb(4 120 87 / 0.6);
-  --mark-gradient:  linear-gradient(150deg, #13402f, #08120e);
-  --mark-glow:      inset 0 1px 0 rgb(255 255 255 / 0.18), 0 6px 16px -8px rgb(4 60 44 / 0.6);
+  --brand-gradient:       linear-gradient(180deg, #196aff 0%, #0060ff 100%); /* top 4.62:1 under white, bottom the logo's 5.1:1 */
+  --brand-gradient-hover: linear-gradient(180deg, #0058ec 0%, #0051da 100%);
+  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.24), 0 1px 2px rgb(0 96 255 / 0.3), 0 8px 20px -10px rgb(0 96 255 / 0.55);
+  --mark-gradient:  linear-gradient(150deg, #12305f, #070e1d);
+  --mark-glow:      inset 0 1px 0 rgb(255 255 255 / 0.18), 0 6px 16px -8px rgb(0 35 107 / 0.6);
   --shadow-raised:  var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--glass-shadow);
   --shadow-overlay: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-lg);
 }
@@ -210,16 +236,18 @@ td select, th select { max-width: none; }
   --line-a:         0.08;
   --line-strong:    255 255 255;  /* white at .42 (spec .15 is under 3:1) */
   --line-strong-a:  0.42;
-  --brand:          52 211 153;   /* #34D399 */
-  --brand-hover:    110 231 183;  /* #6EE7B7 */
-  --brand-fg:       4 38 26;      /* #04261A */
-  --brand-soft:     15 42 32;     /* #0F2A20 */
-  --brand-text:     116 227 184;  /* #74E3B8 */
+  --brand:          112 163 255;  /* #70A3FF blue-400 */
+  --brand-hover:    164 197 255;  /* #A4C5FF blue-300 */
+  --brand-fg:       0 18 68;      /* #001244 blue-950 on the light blue */
+  --brand-soft:     14 31 61;     /* #0E1F3D */
+  --brand-text:     164 197 255;  /* #A4C5FF blue-300 */
   --signal:         132 217 207;  /* #84D9CF */
-  --focus:          52 211 153;   /* #34D399 */
+  --focus:          112 163 255;  /* #70A3FF blue-400 */
   --positive:       116 227 184;  /* #74E3B8 */
   --positive-soft:  14 42 31;     /* #0E2A1F */
   --positive-dot:   47 191 138;   /* #2FBF8A */
+  --positive-solid: 52 211 153;   /* #34D399 */
+  --positive-fg:    4 38 26;      /* #04261A */
   --caution:        245 196 107;  /* #F5C46B */
   --caution-soft:   46 34 12;     /* #2E220C */
   --caution-dot:    226 163 54;   /* #E2A336 */
@@ -240,20 +268,20 @@ td select, th select { max-width: none; }
   --neutral:        181 191 186;  /* #B5BFBA */
   --neutral-soft:   29 37 34;     /* #1D2522 */
   --neutral-dot:    111 123 118;  /* #6F7B76 */
-  --chart-1:        47 191 138;   /* #2FBF8A */
-  --chart-2:        91 156 246;   /* #5B9CF6 */
+  --chart-1:        112 163 255;  /* #70A3FF blue-400 */
+  --chart-2:        47 191 138;   /* #2FBF8A emerald, series 1 before the blue */
   --chart-3:        240 162 74;   /* #F0A24A */
   --chart-4:        155 141 243;  /* #9B8DF3 */
   --chart-5:        136 151 145;  /* #889791 (spec #6F7B76 is 2.2:1 on a card) */
-  --chart-1-soft:   47 191 138;
+  --chart-1-soft:   112 163 255;
   --chart-1-soft-a: 0.16;
-  --amb-1:          16 185 129;
+  --amb-1:          112 163 255;
   --amb-1-a:        0.22;
   --amb-2:          20 184 166;
   --amb-2-a:        0.14;
   --amb-3:          56 189 248;
   --amb-3-a:        0.09;
-  --amb-4:          16 185 129;
+  --amb-4:          112 163 255;
   --amb-4-a:        0.06;
 
   --grain:          0.05;
@@ -262,9 +290,9 @@ td select, th select { max-width: none; }
   --elev-xs:        0 1px 2px rgb(0 0 0 / 0.4);
   --elev-md:        0 12px 30px -12px rgb(0 0 0 / 0.6);
   --elev-lg:        0 30px 70px -20px rgb(0 0 0 / 0.75);
-  --brand-gradient:       linear-gradient(180deg, #6ee7b7 0%, #34d399 100%);
-  --brand-gradient-hover: linear-gradient(180deg, #8ff0c9 0%, #4ade9f 100%);
-  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.4), 0 8px 24px -10px rgb(52 211 153 / 0.55);
+  --brand-gradient:       linear-gradient(180deg, #99beff 0%, #70a3ff 100%);
+  --brand-gradient-hover: linear-gradient(180deg, #b8d2ff 0%, #85b1ff 100%);
+  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.4), 0 8px 24px -10px rgb(112 163 255 / 0.55);
 }
 
 /* ── Base: the canvas, the ambient field and the grain ────────────────────── */

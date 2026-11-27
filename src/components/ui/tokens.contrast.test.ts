@@ -130,6 +130,9 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // Since the remake the dark brand label is dark green, so the destructive
   // fill carries its own white label token rather than borrowing brand-fg.
   { fg: 'critical-fg', bg: 'critical-solid', min: TEXT },
+  // Since the brand became the logo's blue (27.11.2026) a fill that means
+  // "good" (the overview's profit card) carries its own green and label.
+  { fg: 'positive-fg', bg: 'positive-solid', min: TEXT },
   ...['positive', 'caution', 'critical'].flatMap(fg => [
     { fg, bg: 'canvas', min: TEXT },
     { fg, bg: 'raised', min: TEXT },
@@ -293,8 +296,9 @@ describe.each<Theme>(['light', 'dark'])('%s theme tokens', theme => {
 
 /**
  * The primary button is a gradient since the remake, so its label has to read
- * on both stops, at rest and on hover. The stops are hex in the token blocks;
- * the spec's light top stop (#0B9068) was 4.04:1 under white and is darkened.
+ * on both stops, at rest and on hover. The stops are hex in the token blocks.
+ * Since the brand became the logo's blue the light top stop is #196AFF (4.62:1
+ * under white): any lighter and the white label drops below AA.
  */
 describe.each<Theme>(['light', 'dark'])('%s primary button gradient', theme => {
   const label = parseTokens(theme)['brand-fg'] as Rgb;
@@ -302,5 +306,96 @@ describe.each<Theme>(['light', 'dark'])('%s primary button gradient', theme => {
     const stops = gradientStops(theme, name);
     expect(stops).toHaveLength(2);
     for (const stop of stops) expect(contrast(label, stop)).toBeGreaterThanOrEqual(TEXT);
+  });
+});
+
+/**
+ * The brand is the logo's blue (owner, 27.11.2026), replacing the spec's
+ * emerald. The blue was sampled from the "Professor" of
+ * public/brand/wordmark-on-dark.png: a slight gradient from #0058FF to #0066FF,
+ * centred on #0060FF. index.css carries an eleven-step scale built from it at
+ * one hue, and every brand token is read off that scale. This block holds the
+ * tokens to it, so a later edit cannot drift the primary to another hue, or
+ * back to green, without failing here. Semantic green (`positive`) is not a
+ * brand token and is not checked here: paid, active and success stay green.
+ */
+const LOGO_BLUE: Rgb = [0x00, 0x60, 0xff];
+/** The pixels most common in the wordmark's "Professor", 27.11.2026. */
+const LOGO_SAMPLES: Rgb[] = ['0058FF', '005AFF', '005BFF', '0060FF', '0065FF', '0066FF'].map(
+  hex => [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)) as Rgb,
+);
+const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+
+function hue([r, g, b]: Rgb): number {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max === min) return 0;
+  const d = max - min;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function blueScale(): Record<number, Rgb> {
+  const body = blockAfter('/* @scale brand-blue');
+  const scale: Record<number, Rgb> = {};
+  for (const m of body.matchAll(/--blue-(\d+):\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*;/g)) {
+    scale[Number(m[1])] = [Number(m[2]), Number(m[3]), Number(m[4])];
+  }
+  return scale;
+}
+
+describe('the brand is the logo\'s blue', () => {
+  const scale = blueScale();
+  const onScale = (colour: Rgb | Rgba) =>
+    STEPS.some(step => scale[step] && scale[step].every((c, i) => c === colour[i]));
+
+  it('has the eleven steps 50 to 950, with the logo\'s blue as 500', () => {
+    expect(Object.keys(scale).map(Number)).toEqual(STEPS);
+    expect(scale[500]).toEqual(LOGO_BLUE);
+  });
+
+  it('keeps the whole scale within 8 degrees of the logo\'s hue', () => {
+    for (const step of STEPS) expect(hueDistance(hue(scale[step]), hue(LOGO_BLUE))).toBeLessThanOrEqual(8);
+  });
+
+  it.each<Theme>(['light', 'dark'])('reads every %s brand token off the scale', theme => {
+    const tokens = parseTokens(theme);
+    const named = ['brand', 'brand-hover', 'brand-text', 'focus', 'chart-1', ...(theme === 'light' ? ['brand-soft'] : ['brand-fg'])];
+    for (const name of named) expect(onScale(tokens[name]), `--${name}`).toBe(true);
+  });
+
+  it.each<Theme>(['light', 'dark'])('keeps the %s brand tints and gradients on the logo\'s hue', theme => {
+    const tokens = parseTokens(theme);
+    const colours: Array<[string, Rgb]> = [
+      ['brand-soft', tokens['brand-soft'] as Rgb],
+      ['chart-1-soft', tokens['chart-1-soft'].slice(0, 3) as Rgb],
+      ...['brand-gradient', 'brand-gradient-hover'].flatMap(name =>
+        gradientStops(theme, name).map((stop, i) => [`${name} stop ${i + 1}`, stop] as [string, Rgb]),
+      ),
+    ];
+    for (const [name, colour] of colours) {
+      expect(hueDistance(hue(colour), hue(LOGO_BLUE)), name).toBeLessThanOrEqual(8);
+    }
+  });
+
+  // The pair the owner asked for: the light theme's white label on the
+  // logo's own blues, so a button painted in any of them reads. The dark
+  // theme's label is measured on its own (lighter) brand in PAIRS above.
+  it('lets the light label read on every blue the logo is drawn in', () => {
+    const label = parseTokens('light')['brand-fg'] as Rgb;
+    for (const sample of LOGO_SAMPLES) expect(contrast(label, sample)).toBeGreaterThanOrEqual(TEXT);
+  });
+
+  // Series 1 took the blue and series 2 the old emerald; two blues side by
+  // side in the overview's charts would read as one series. The light pair is
+  // 58 degrees apart (blue 217, emerald 160); the old blue pair was 2.
+  it.each<Theme>(['light', 'dark'])('keeps the %s chart series 1 and 2 apart in hue', theme => {
+    const tokens = parseTokens(theme);
+    expect(hueDistance(hue(tokens['chart-1'] as Rgb), hue(tokens['chart-2'] as Rgb))).toBeGreaterThanOrEqual(45);
   });
 });
