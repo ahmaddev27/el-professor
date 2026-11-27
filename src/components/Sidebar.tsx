@@ -30,7 +30,7 @@ interface NavItem {
   feature: FeatureKey;
 }
 
-const NAV_ITEMS: NavItem[] = [
+export const NAV_ITEMS: NavItem[] = [
   { path: '/overview',       icon: LayoutDashboard, labelKey: 'nav.overview',       feature: 'overview' },
   { path: '/belege',         icon: FileText,        labelKey: 'nav.belege',         feature: 'belege' },
   { path: '/fahrer',         icon: Users,           labelKey: 'nav.fahrer',         feature: 'fahrer' },
@@ -58,7 +58,7 @@ const NAV_ITEMS: NavItem[] = [
 // Basic plan is sold with a backup, so Datensicherung is listed on those terms
 // beside /billing and /settings rather than behind `rollen_nutzer`, which is
 // `advanced` and used to hide it from the very customers who had paid for it.
-const ADMIN_ITEMS: NavItem[] = [
+export const ADMIN_ITEMS: NavItem[] = [
   { path: '/users',          icon: UserCog,    labelKey: 'nav.users',         feature: 'rollen_nutzer' },
   { path: '/roles',          icon: Shield,     labelKey: 'nav.roles',         feature: 'rollen_nutzer' },
   { path: FLEET_IMPORT_PATH, icon: Download,   labelKey: 'import.title',      feature: 'overview' },

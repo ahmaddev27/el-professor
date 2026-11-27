@@ -25,7 +25,9 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> **Arabic, the third UI language (27.11.2026, branch `feat/arabic-ui`, one PR against `staging`, no migration).** All 7117 keys are translated into Modern Standard Arabic against a closed glossary (a German domain term in brackets at its first mention), the whole UI mirrors right-to-left, and the generated documents, the legal pages, money, dates and digits stay German. `src/rtlClasses.test.ts` keeps physical direction classes out of `src/` and `rtl:` classes out of the documents. The owner reviews the wording. See CLAUDE.md, *Language*.
+> **Both topbars follow Reidey's shell (27.11.2026, branch `design/shell-topbar`, one PR against `staging`, no migration).** The section's name at the start, language and theme (and the user menu in the company shell) at the end; the panel's duplicate amber "Administration" pill is gone and its sidebar lines are quiet grey.
+
+> **Arabic, the third UI language (27.11.2026, merged into `staging` as #384, no migration).** All 7117 keys are translated into Modern Standard Arabic against a closed glossary (a German domain term in brackets at its first mention), the whole UI mirrors right-to-left, and the generated documents, the legal pages, money, dates and digits stay German. `src/rtlClasses.test.ts` keeps physical direction classes out of `src/` and `rtl:` classes out of the documents. The owner reviews the wording. See CLAUDE.md, *Language*.
 
 > **The Glass remake, batches R3 and R4 (27.11.2026, branch `design/remake-r3`, one PR against `staging`, no migration, look only).** Mein Konto and the whole platform panel are on the Glass tokens and primitives, so no screen inside either frame is legacy any more. What is left is R5 (the salary dialogs, the planning and document builders' screen parts, `ConfirmationModal`'s callers, the landing page) and R6 (retiring the legacy tokens). See `Docs/design/remake-v2/PLAN.md` §8.
 >

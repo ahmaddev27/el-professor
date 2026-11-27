@@ -25,7 +25,7 @@ interface AdminNavItem {
  * every tenant's company record, subscriptions and payments — so they live in
  * their own shell and are never rendered inside the company-facing sidebar.
  */
-const ADMIN_NAV_ITEMS: AdminNavItem[] = [
+export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { path: '/admin',                  icon: BarChart3,   labelKey: 'admin.nav.platform',    requires: 'companies.read', end: true },
   { path: '/admin/companies',        icon: Building2,   labelKey: 'admin.nav.companies',   requires: 'companies.read' },
   // Decision D14 (24.09.2026): the invoices, the subscriptions and the payment
@@ -77,22 +77,23 @@ const AdminSidebar: React.FC = () => {
 
   const SidebarContent = () => (
     <div className="flex h-full flex-col px-[10px] pb-[10px] pt-[14px]">
-      {/* Identity — deliberately distinct from the company shell so it is always
-          obvious which context is being operated in. */}
+      {/* Identity: the panel's own name under the El-Professor mark, so it is
+          always obvious which context is being operated in. */}
       <div className="flex items-center gap-3 pb-3 ps-[46px] pe-2 lg:ps-1.5">
         <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mark shadow-mark">
-          {/* The El-Professor mark, as the owner asked on 28.09.2026. The warning
-              tint, the border and the warning-coloured subtitle below all stay:
-              the comment above this block says the panel's identity is
-              deliberately distinct from the company shell, and asking for the
-              logo was not asking to give that up. */}
+          {/* The El-Professor mark, as the owner asked on 28.09.2026. The
+              subtitle and the role line below are quiet text since 27.11.2026:
+              the owner asked for Reidey's look ("everything like the file"),
+              whose brand row carries no warning colour, and found the amber
+              lines out of place on the glass. A warning colour is for a state
+              that needs attention, like the support-session bar. */}
           <img src="/brand/mark-on-dark.png" alt="" className="h-6 w-6 object-contain" />
         </div>
         <div className="min-w-0">
           <p className="truncate text-base font-[650] tracking-[-0.02em] text-fg">
             {t('admin.title')}
           </p>
-          <p className="text-[10px] text-caution">
+          <p className="text-xs text-fg-subtle">
             {t('admin.subtitle')}
           </p>
         </div>
@@ -123,7 +124,7 @@ const AdminSidebar: React.FC = () => {
           </p>
         )}
         {platformAccess.role && (
-          <p className="px-2.5 pb-1 text-[10px] font-semibold text-caution">
+          <p className="px-2.5 pb-1 text-[10px] font-semibold text-fg-muted">
             {t(ROLE_LABEL_KEYS[platformAccess.role])}
           </p>
         )}
