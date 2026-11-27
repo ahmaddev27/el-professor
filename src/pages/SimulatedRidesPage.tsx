@@ -411,6 +411,10 @@ export default function SimulatedRidesPage() {
         }),
         driverNotesMap: events.notes, werkstattChecks: events.checks,
         vehicleUnavailability: readUnavailability(events.unavailability), uber: events.uber ?? undefined, realTrips,
+        // Section 5's share on the imported umsatz, computed and never booked.
+        // Until the company setting exists (S8) it is the seed's month draw,
+        // the rate the share preview above already names.
+        shareSetting: { mode: 'random', scope: 'month', seed },
         settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
         travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
       });

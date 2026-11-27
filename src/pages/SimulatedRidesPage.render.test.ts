@@ -228,6 +228,11 @@ describe('SimulatedRidesPage, calendar mode', () => {
     expect(text).toMatch(/VALIDATED_FOR_EXPORT|VERIFICATION_INCOMPLETE/);
     expect(text).toContain('Abgelehnt (intern)');
     expect(text).toContain('Leerfahrten');
+    // The money against Uber is its own answer (D10). With no Uber row for the
+    // month it is INCOMPLETE and says why; it never reads as reconciled.
+    expect(text).toContain('Finanzabgleich mit Uber - INCOMPLETE');
+    expect(text).toContain('Uber meldet für den Monat keine Zahlen');
+    expect(text).toContain('Anteil (berechnet, nicht gebucht)');
 
     const download = button(renderer.root, 'Fahrtenbuch-Bericht herunterladen (SIMULIERT)');
     expect(download.props.disabled).toBeFalsy();

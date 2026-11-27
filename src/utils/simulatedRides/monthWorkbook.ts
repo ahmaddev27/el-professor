@@ -481,6 +481,22 @@ const BASE_SOURCE_TEXT: Record<NonNullable<FullMonthResult['provenance']['base']
   none: 'nicht angegeben (CONFIGURATION_REQUIRED)',
 };
 
+/** The financial reconciliation's headline: its status, why, the tips and the share, never booked. */
+function financialLines(result: FullMonthResult): Row[] {
+  const f = result.financial;
+  return [
+    ['Finanzabgleich mit Uber (getrennt vom Exportstatus)', f.status],
+    ['Finanzabgleich Gruende', f.reasons.join(', ')],
+    ['Uber-Zahlen gelesen', yesNo(f.uberRead)],
+    ['Trinkgeld laut Uber (EUR)', euro(f.totals.tipsImportedCents)],
+    ['Trinkgeld auf simulierte Fahrten verteilt (EUR, SIMULIERT)', euro(f.totals.tipsAllocatedCents)],
+    ['Trinkgeld nicht verteilt (EUR)', euro(f.totals.tipsUnallocatedCents)],
+    ['Anteil: Grundlage', 'Uber-Umsatz je Fahrer und Betriebstag (importiert); Aktionen und Trinkgeld daneben, nicht darin'],
+    ['Anteil: Bedeutung', `${f.share.meaning} - berechnet und angezeigt, nicht gebucht`],
+    ['Anteil berechnet (EUR, Summe der Tage)', euro(f.totals.shareCents)],
+  ];
+}
+
 export function sourceSheetRows(result: FullMonthResult, verification: MonthVerification = verifyMonth(result)): Row[] {
   const p = result.provenance;
   return [
@@ -507,6 +523,8 @@ export function sourceSheetRows(result: FullMonthResult, verification: MonthVeri
     ['Fahrertage mit echten Fahrten (nicht simuliert)', p.realTrips ? p.realTrips.driverDays : 'nicht gelesen'],
     ['Echte Fahrten ohne eindeutigen Fahrer', p.realTrips ? p.realTrips.unattributed : 'nicht gelesen'],
     ['Echte Fahrten mit unlesbarem Betrag', p.realTrips ? p.realTrips.unreadableAmounts : 'nicht gelesen'],
+    // Section 5 and 6: the money against Uber, a status of its own beside the export status (D10).
+    ...financialLines(result),
     ...settingLines('Einstellung ', p.settings),
     ...settingLines('Option ', p.options),
     ...settingLines('Eingabe ', p.inputs),

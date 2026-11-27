@@ -3,6 +3,7 @@ import { checkDriverShifts, checkRealTrips, type FullMonthResult } from './fullM
 import { MAX_DAY_MINUTES } from './driverMonthPlan';
 import { reconcile } from './monthTotals';
 import { inExportScope } from './revenue';
+import { checkTips } from './reconciliation';
 
 /**
  * Whether a generated month may be called VALIDATED FOR EXPORT (external audit
@@ -42,7 +43,8 @@ export interface VerificationCheck {
     | 'drivers_planned'
     | 'base_configured'
     | 'rides_generated'
-    | 'real_trips_kept';
+    | 'real_trips_kept'
+    | 'tips_backed';
   /** German, for the screen and the workbook. */
   label: string;
   outcome: CheckOutcome;
@@ -198,6 +200,23 @@ function realTripsKept(result: FullMonthResult): VerificationCheck {
     `${real.trips.length} echte Fahrten (IMPORTIERT) unveraendert, ${driverDays} Fahrertage nicht simuliert`);
 }
 
+/**
+ * Every tip in the Fahrtenbuch is backed by an imported Trinkgeld total, on the
+ * same driver and day (or week), and each allocated total is met to the cent.
+ * Recomputed from the rides, so a tip written after generation is caught. What
+ * stayed unallocated is the financial status's matter (D10), not the export's:
+ * an imported tip the month could not carry invents nothing on a ride.
+ */
+function tipsBacked(result: FullMonthResult): VerificationCheck {
+  const label = 'Trinkgeld nur aus Uber-Zahlen, centgenau';
+  const broken = checkTips(result.month.rides, result.month.shifts, result.financial.tips);
+  if (broken.length > 0) return check('tips_backed', label, 'failed', `${broken.length} Verstoesse: ${broken.slice(0, 3).join('; ')}`);
+  const allocated = result.financial.tips.filter(a => a.outcome === 'allocated');
+  if (!result.financial.uberRead) return check('tips_backed', label, 'passed', 'keine Uber-Zahlen gelesen - kein Trinkgeld eingetragen, nichts erfunden');
+  return check('tips_backed', label, 'passed',
+    `${allocated.length} Uber-Trinkgeldsummen centgenau verteilt (SIMULIERT); ${result.financial.tips.length - allocated.length} nicht verteilt, im Finanzabgleich ausgewiesen`);
+}
+
 export function verifyMonth(result: FullMonthResult): MonthVerification {
   const exportedDeclined = result.month.rides.filter(inExportScope).filter(r => r.status === 'declined').length;
   const differences = reconcile(result).filter(r => r.partsSum !== r.total);
@@ -222,6 +241,7 @@ export function verifyMonth(result: FullMonthResult): MonthVerification {
     baseConfigured(result),
     ridesGenerated(result),
     realTripsKept(result),
+    tipsBacked(result),
   ];
   const verdict: ExportVerdict = checks.some(c => c.outcome === 'failed')
     ? 'NOT_VALIDATED'

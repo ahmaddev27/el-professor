@@ -7446,4 +7446,32 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.check.code.realTripsKept': 'Real trips unchanged, their driver-days not simulated',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.tipsBacked':    'Tips only from Uber figures, to the cent',
+  'simrides.cal.fin.reason.hand_rows':     'Uber rows entered by hand are not reconciled',
+  'simrides.cal.fin.reason.no_uber_figures': 'Uber reports no figures for the month',
+  'simrides.cal.fin.reason.share_meaning_unconfigured': 'Meaning of the share not configured (CONFIGURATION_REQUIRED)',
+  'simrides.cal.fin.reason.share_not_computable': 'Share not computable for a period',
+  'simrides.cal.fin.reason.share_not_configured': 'No share rate configured',
+  'simrides.cal.fin.reason.share_setting_invalid': 'Share rate invalid (only 30, 31, 32 or 33 %)',
+  'simrides.cal.fin.reason.tip_conflict':  'A daily and a weekly row for the same day: neither was used',
+  'simrides.cal.fin.reason.tip_mismatch':  'Tips on the rides differ from the Uber totals',
+  'simrides.cal.fin.reason.tip_negative':  'Negative tips: shown, not allocated',
+  'simrides.cal.fin.reason.tip_no_simulated_ride': 'Tips on days without a simulated ride of the driver: not allocated',
+  'simrides.cal.fin.reason.tip_week_across_boundary': 'Weekly total across the month boundary: not attributable',
+  'simrides.cal.fin.reason.uber_not_read': 'No Uber figures were read for the month',
+  'simrides.cal.fin.reason.uber_row_issues': 'Uber rows could not be attributed or read',
+  'simrides.cal.fin.separate':             'Separate from the Fahrtenbuch\'s release: an open reconciliation does not block a valid report.',
+  'simrides.cal.fin.share':                'Share (computed, not booked)',
+  'simrides.cal.fin.shareCaption':         'on revenue per driver and day',
+  'simrides.cal.fin.shareMeaning':         'Who receives the share and where it is booked is not configured yet (CONFIGURATION_REQUIRED). It is shown, not booked.',
+  'simrides.cal.fin.status.CONFIGURATION_REQUIRED': 'Tips reconciled; the meaning of the share is not configured yet',
+  'simrides.cal.fin.status.FAILED':        'Reconciliation failed: at least one cent cannot be accounted for',
+  'simrides.cal.fin.status.INCOMPLETE':    'Not fully reconciled',
+  'simrides.cal.fin.tipsAllocated':        'Tips allocated (simulated)',
+  'simrides.cal.fin.tipsImported':         'Tips according to Uber',
+  'simrides.cal.fin.tipsUnallocated':      'Tips not allocated',
+  'simrides.cal.fin.title':                'Financial reconciliation with Uber',
+  'simrides.cal.fin.umsatz':               'Uber revenue (imported)',
 };

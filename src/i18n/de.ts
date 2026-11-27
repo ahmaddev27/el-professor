@@ -7520,4 +7520,32 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.check.code.realTripsKept': 'Echte Fahrten unverändert, ihre Fahrertage nicht simuliert',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.tipsBacked':    'Trinkgeld nur aus Uber-Zahlen, centgenau',
+  'simrides.cal.fin.reason.hand_rows':     'Von Hand erfasste Uber-Zeilen sind nicht abgeglichen',
+  'simrides.cal.fin.reason.no_uber_figures': 'Uber meldet für den Monat keine Zahlen',
+  'simrides.cal.fin.reason.share_meaning_unconfigured': 'Bedeutung des Anteils nicht festgelegt (CONFIGURATION_REQUIRED)',
+  'simrides.cal.fin.reason.share_not_computable': 'Anteil für einen Zeitraum nicht berechenbar',
+  'simrides.cal.fin.reason.share_not_configured': 'Kein Anteilssatz festgelegt',
+  'simrides.cal.fin.reason.share_setting_invalid': 'Anteilssatz ungültig (nur 30, 31, 32 oder 33 %)',
+  'simrides.cal.fin.reason.tip_conflict':  'Tages- und Wochenzeile für denselben Tag: keine von beiden verwendet',
+  'simrides.cal.fin.reason.tip_mismatch':  'Trinkgeld auf den Fahrten weicht von den Uber-Summen ab',
+  'simrides.cal.fin.reason.tip_negative':  'Negatives Trinkgeld: ausgewiesen, nicht verteilt',
+  'simrides.cal.fin.reason.tip_no_simulated_ride': 'Trinkgeld an Tagen ohne simulierte Fahrt des Fahrers: nicht verteilt',
+  'simrides.cal.fin.reason.tip_week_across_boundary': 'Wochensumme über die Monatsgrenze: nicht zuordenbar',
+  'simrides.cal.fin.reason.uber_not_read': 'Keine Uber-Zahlen für den Monat gelesen',
+  'simrides.cal.fin.reason.uber_row_issues': 'Uber-Zeilen konnten nicht zugeordnet oder gelesen werden',
+  'simrides.cal.fin.separate':             'Getrennt von der Freigabe des Fahrtenbuchs: ein offener Finanzabgleich sperrt keinen gültigen Bericht.',
+  'simrides.cal.fin.share':                'Anteil (berechnet, nicht gebucht)',
+  'simrides.cal.fin.shareCaption':         'auf den Umsatz je Fahrer und Tag',
+  'simrides.cal.fin.shareMeaning':         'Wem der Anteil zusteht und worauf er gebucht wird, ist noch nicht festgelegt (CONFIGURATION_REQUIRED). Er wird angezeigt, nicht gebucht.',
+  'simrides.cal.fin.status.CONFIGURATION_REQUIRED': 'Trinkgeld abgeglichen; die Bedeutung des Anteils ist noch nicht festgelegt',
+  'simrides.cal.fin.status.FAILED':        'Abgleich fehlgeschlagen: mindestens ein Cent ist nicht erklärbar',
+  'simrides.cal.fin.status.INCOMPLETE':    'Nicht vollständig abgeglichen',
+  'simrides.cal.fin.tipsAllocated':        'Trinkgeld verteilt (simuliert)',
+  'simrides.cal.fin.tipsImported':         'Trinkgeld laut Uber',
+  'simrides.cal.fin.tipsUnallocated':      'Trinkgeld nicht verteilt',
+  'simrides.cal.fin.title':                'Finanzabgleich mit Uber',
+  'simrides.cal.fin.umsatz':               'Uber-Umsatz (importiert)',
 } as const;

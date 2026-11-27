@@ -17,6 +17,7 @@ import {
   type DriverPlanConfig,
 } from './driverMonthPlan';
 import { buildPeriod, operatingDayIn, type PeriodDay } from './period';
+import { fnv1a } from './hash';
 import { createRng } from './rng';
 import { countRevenue, inExportScope, revenueBasis, type RevenueBasis, type RevenueBreakdown } from './revenue';
 import { marginProblem } from './repositioning';
@@ -26,7 +27,8 @@ import {
   type RepositioningLeg,
   type RepositioningSummary,
 } from './repositioningLegs';
-import { applyMonthlyShare, selectMonthlyShareRate, type MonthlyShareRate, type ShareResult } from './monthlyRate';
+import { applyMonthlyShare, selectMonthlyShareRate, type MonthlyShareRate, type ShareResult, type ShareSetting } from './monthlyRate';
+import { allocateImportedTips, reconcileMonth, type FinancialReconciliation, type ReconcileUber } from './reconciliation';
 import { resolveSettings, type SettingsProblem, type SimulationTenantSettings } from './tenantSettings';
 import { routeChecks, summariseRouteChecks, type RouteCheck, type RouteCheckSummary } from './routeCheck';
 import {
@@ -37,7 +39,6 @@ import {
 } from './simulationConstraints';
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from './travelModel';
 import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, SimShift, SimVehicle } from './types';
-import type { UberMonthImport } from './uberImport';
 import type { BaseSource } from './baseSelection';
 import { unavailableDuring, type UnavailabilityWindow } from './vehicleAvailability';
 import { plateKey, type RealTrip, type RealTripsRead } from './realTrips';
@@ -184,8 +185,17 @@ export interface FullMonthInput {
   returnToBase?: boolean;
   /** The company's `vehicle_unavailability` rows, read as instants (`readUnavailability`). */
   vehicleUnavailability?: readonly UnavailabilityWindow[];
-  /** What Uber reported for the month (`readUberMonth`). Absent: no Uber figure was read. */
-  uber?: Pick<UberMonthImport, 'days' | 'periods'>;
+  /**
+   * What Uber reported for the month (`readUberMonth`). Absent: no Uber figure
+   * was read, and no ride carries a tip, because a tip is never drawn.
+   */
+  uber?: ReconcileUber;
+  /**
+   * The company's share setting (section 5). The share is taken of the
+   * imported `umsatz` and shown, never booked. Absent: no rate is applied, and
+   * the financial status says so.
+   */
+  shareSetting?: ShareSetting | null;
   /** Operating days that already hold real trips, by driver UUID: never simulated over. */
   realTripDays?: ReadonlyMap<string, ReadonlySet<string>>;
   /**
@@ -317,6 +327,8 @@ export interface Provenance {
   returnToBase: boolean;
   /** The real trips read for the month; null when none were read. */
   realTrips: { trips: number; driverDays: number; unattributed: number; unreadableAmounts: number; digest: string } | null;
+  /** What the tips and the share were reconciled against: the Uber figures' digest and the share setting. */
+  financial: { uberDigest: string | null; shareSetting: ShareSetting | null };
   /**
    * The run's identity: a hash of everything that built the month, so the same
    * inputs give the same id and a record can be traced to its month.
@@ -375,6 +387,12 @@ export interface FullMonthResult {
   vehicleUnavailability: UnavailabilityWindow[];
   /** The month's real trips exactly as read (`IMPORTIERT`); null when none were read. */
   realTrips: RealTripsRead | null;
+  /**
+   * The money against Uber (section 5 and 6): the tips' allocation, the share
+   * per driver-day and the financial status. Separate from the export verdict
+   * (D10): an unconfigured share never blocks a valid Fahrtenbuch.
+   */
+  financial: FinancialReconciliation;
 }
 
 /** One driver's month as built, against what was planned for him. */
@@ -685,6 +703,19 @@ export function generateFullMonth(
       : `AB${String(++declinedNo).padStart(5, '0')}`;
   }
 
+  // Section 6: no tip is drawn. The generator's draw stays drawn, so the
+  // shared random stream and every ride are what they were; every tip is then
+  // discarded and the imported Trinkgeld is spread over the driver's own
+  // completed rides of its day (or week), exactly, to the cent.
+  const tipAllocations = allocateImportedTips({ uber: input.uber ?? null, rides: month.rides, shifts: month.shifts, seed: input.seed });
+  const financial = reconcileMonth({
+    uber: input.uber ?? null,
+    rides: month.rides,
+    shifts: month.shifts,
+    allocations: tipAllocations,
+    shareSetting: input.shareSetting ?? null,
+  });
+
   // The Fahrtenbuch report's money is counted over its own rides only. A
   // declined order's fee is counted apart and reaches none of it.
   const revenue = countRevenue(month.rides.filter(inExportScope), settings);
@@ -738,6 +769,7 @@ export function generateFullMonth(
       unreadableAmounts: input.realTrips.unreadableAmounts.length,
       digest: fnv1a(input.realTrips.trips.map(t => `${t.tripId}|${t.operatingDay}|${t.driverId ?? ''}|${t.plate ?? ''}|${t.startMs ?? ''}|${t.endMs ?? ''}`).join('\n')),
     } : null,
+    financial: { uberDigest: uberDigestOf(input.uber), shareSetting: input.shareSetting ?? null },
     runId: '',
   };
   provenance.runId = runIdOf(provenance);
@@ -774,6 +806,7 @@ export function generateFullMonth(
         ...checkDriverShifts(month.shifts, driverPlans, unavailability, opts.minDriverRestMinutes),
         ...validateRides(month, input.base, travel, opts, CALENDAR_SHIFT_LIMITS, provenance.returnToBase),
         ...checkRealTrips(month, input.realTrips ?? null, opts),
+        ...financial.violations,
       ],
       decisions,
       routeChecks: checks,
@@ -786,8 +819,21 @@ export function generateFullMonth(
       driverOutcomes,
       vehicleUnavailability: [...unavailability],
       realTrips: input.realTrips ?? null,
+      financial,
     },
   };
+}
+
+/** The imported figures a run reconciled against, as one hash; null when none were read. */
+function uberDigestOf(uber: ReconcileUber | undefined): string | null {
+  if (!uber) return null;
+  const f = (x: { umsatzCents: number; aktionenCents: number; trinkgeldCents: number; bargeldCents: number }) =>
+    `${x.umsatzCents}|${x.aktionenCents}|${x.trinkgeldCents}|${x.bargeldCents}`;
+  return fnv1a([
+    ...uber.days.map(d => `D|${d.driverId}|${d.date}|${f(d.figures)}|${d.overlapsPeriod}`),
+    ...uber.periods.map(p => `P|${p.driverId}|${p.periodStart}|${p.periodEnd}|${p.placement}|${f(p.figures)}|${p.overlappingDailyDates.join(',')}`),
+    `H|${uber.handRows?.length ?? 0}|I|${uber.issues?.length ?? 0}`,
+  ].join('\n'));
 }
 
 /** The review a shift is accepted with, most specific first: a note, the TÜV, a workshop check. */
@@ -802,21 +848,11 @@ function reviewOf(
   return null;
 }
 
-/** FNV-1a, so a run id is stable across machines and runs. */
-function fnv1a(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
-}
-
 /** The run's id: the period, the seed and a hash of everything else that built it. */
 function runIdOf(p: Provenance): string {
   const mm = String(p.month).padStart(2, '0');
   const basis = JSON.stringify([p.generatorVersion, p.tenantId, p.seed, p.year, p.month, p.settings, p.options,
-    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null, p.base, p.returnToBase, p.realTrips]);
+    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null, p.base, p.returnToBase, p.realTrips, p.financial]);
   return `SIM-${p.year}-${mm}-${p.seed}-${fnv1a(basis)}`;
 }
 
