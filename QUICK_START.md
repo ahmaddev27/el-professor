@@ -1,9 +1,11 @@
 # 🚀 Quick Start - Salaries Feature
 
+> **Historical (note added 27.11.2026).** These steps were written for the hosted Supabase dashboard, before the self-hosted stack. The schema they set up is `supabase/migrations/20251012100000_create_salaries_system.sql`, which `deploy/deploy.sh` applies with every other migration: do not paste it into a database by hand. The root copy `apply_salaries_migration.sql` that these steps used to name was byte-identical to it and was deleted on 27.11.2026.
+
 ## ⚡ 3-Step Setup
 
 ### 1️⃣ Apply Database Migration (REQUIRED)
-Open the file `apply_salaries_migration.sql` and **copy ALL its contents** into your Supabase SQL Editor:
+Open the file `supabase/migrations/20251012100000_create_salaries_system.sql` and **copy ALL its contents** into your Supabase SQL Editor:
 1. Go to: https://supabase.com/dashboard → Your Project → SQL Editor
 2. Click "New query"
 3. Paste the entire SQL file
@@ -94,7 +96,7 @@ Example:
 → You need to run the SQL migration! See Step 1 above.
 
 ### "Column salary_ratio does not exist"
-→ Same - run the migration from `apply_salaries_migration.sql`
+→ Same - run the migration from `supabase/migrations/20251012100000_create_salaries_system.sql`
 
 ### Drivers don't show salary ratio
 → Edit each driver in Fahrer page to set their percentage
@@ -113,8 +115,7 @@ Example:
 - `src/components/SalariesManagement.tsx` - Main salaries component
 - `src/pages/SalariesPage.tsx` - Page wrapper
 - `supabase/migrations/20251012100000_create_salaries_system.sql` - Migration
-- `apply_salaries_migration.sql` - **COPY THIS TO SUPABASE SQL EDITOR**
-- `SALARIES_SETUP_INSTRUCTIONS.md` - Detailed setup guide
+- `Docs/SALARIES_SETUP_INSTRUCTIONS.md` - Detailed setup guide
 
 ### Modified Files:
 - `src/types/receipt.ts` - Added Salary types
@@ -154,4 +155,4 @@ Example:
 
 ## 🆘 Need More Help?
 
-See the full documentation in `SALARIES_SETUP_INSTRUCTIONS.md`
+See the full documentation in `Docs/SALARIES_SETUP_INSTRUCTIONS.md`

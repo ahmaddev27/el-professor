@@ -1,5 +1,7 @@
 # Salaries System Setup Instructions
 
+> **Historical (note added 27.11.2026).** These steps were written for the hosted Supabase dashboard, before the self-hosted stack. The schema they set up is `supabase/migrations/20251012100000_create_salaries_system.sql`, which `deploy/deploy.sh` applies with every other migration: do not paste it into a database by hand. The root copy `apply_salaries_migration.sql` that these steps used to name was byte-identical to it and was deleted on 27.11.2026.
+
 ## Quick Setup (Copy & Paste into Supabase)
 
 ### Step 1: Open Supabase SQL Editor
@@ -9,7 +11,7 @@
 4. Click "New query" button
 
 ### Step 2: Run the Migration
-1. Open the file `apply_salaries_migration.sql` in this project
+1. Open the file `supabase/migrations/20251012100000_create_salaries_system.sql` in this project
 2. Copy the ENTIRE contents of that file
 3. Paste it into the Supabase SQL Editor
 4. Click "Run" button (or press Ctrl+Enter / Cmd+Enter)
