@@ -15,6 +15,8 @@
  *   round8-YYYY-MM-inputs.json   the snapshot: inputs, base, and the route cache
  *   <workbook>.payload.json      the three workbooks as the export service gets them
  *   <workbook>.xlsx              the three workbooks, written by the export service
+ *   round8-YYYY-MM-figures.json  the month's figures, for the before/after comparison
+ *                                (`scripts/fleetbook-round8-before.mts`)
  *
  * --from-inputs repeats a month from its snapshot with no network at all: the
  * clients refuse every call, so an answer the snapshot does not hold stops the
@@ -40,6 +42,7 @@ import {
   DEMO_COMPANY_NAME, OFFLINE_DEPS, SNAPSHOT_VERSION, decideSettings, defaultSeed, parseArgs, runMonth, serializeEvents,
   type MonthSnapshot, type RunDeps, type RunOutcome, type SettingsRead,
 } from './lib/round8Month.mts';
+import { monthFigures } from './lib/round8Figures.mts';
 
 const STAGING_API_HOST = 'api-staging.elprofessor.eu';
 const STAGING_APP_URL = 'https://app.elprofessor.eu';
@@ -219,6 +222,12 @@ function summarize(snapshot: MonthSnapshot, outcome: Extract<RunOutcome, { ok: t
   ].join('\n'));
 }
 
+function writeFigures(snapshot: MonthSnapshot, outcome: Extract<RunOutcome, { ok: true }>): void {
+  const base = snapshot.base.ok ? snapshot.base.label : '—';
+  const figures = monthFigures({ label: 'Round 8', month: monthKey(snapshot), seed: snapshot.seed, base }, outcome.result, outcome.verification);
+  writeFileSync(path.join(OUT, `round8-${monthKey(snapshot)}-figures.json`), JSON.stringify(figures, null, 2));
+}
+
 function writePayloads(workbooks: readonly MonthReport[]): void {
   for (const w of workbooks) {
     writeFileSync(path.join(OUT, `${w.fileName.replace(/\.xlsx$/u, '')}.payload.json`), JSON.stringify(w.payload));
@@ -254,6 +263,7 @@ async function main(): Promise<void> {
   }
   if (!outcome.ok) fail(4, `month ${monthKey(snapshot)} refused at ${outcome.stage}: ${outcome.reason}`);
   summarize(snapshot, outcome);
+  writeFigures(snapshot, outcome);
   writePayloads(outcome.workbooks);
   if (session) await render(outcome.workbooks);
 }
