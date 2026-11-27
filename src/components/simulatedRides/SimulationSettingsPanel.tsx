@@ -23,8 +23,9 @@ import {
  * share rate and the return to the Betriebssitz. An administrator edits them;
  * everyone else reads them, because they decide what the month shows.
  *
- * The share's meaning is not a setting: it stays CONFIGURATION_REQUIRED (D1),
- * and the panel says so beside the rate rather than leaving it to the report.
+ * The share's meaning is not a setting: it is the company's share (D1, owner
+ * 27.11.2026), and the panel says so beside the rate rather than leaving it to
+ * the report.
  */
 
 export interface SimulationSettingsPanelProps {

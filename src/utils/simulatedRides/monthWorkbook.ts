@@ -13,6 +13,7 @@ import {
 } from './monthTotals';
 import { VERDICT_TEXT, verifyMonth, type MonthVerification, type CheckOutcome } from './monthVerification';
 import { operatingDayIn } from './period';
+import { SHARE_MEANING_TEXT } from './reconciliation';
 import { cancellationFeeOf, inExportScope } from './revenue';
 import type { RouteCheck } from './routeCheck';
 import type { ShiftDecision } from './simulationConstraints';
@@ -492,8 +493,8 @@ export function financialLines(result: FullMonthResult): Row[] {
     ['Trinkgeld auf simulierte Fahrten verteilt (EUR, SIMULIERT)', euro(f.totals.tipsAllocatedCents)],
     ['Trinkgeld nicht verteilt (EUR)', euro(f.totals.tipsUnallocatedCents)],
     ['Anteil: Grundlage', 'Uber-Umsatz je Fahrer und Betriebstag (importiert); Aktionen und Trinkgeld daneben, nicht darin'],
-    ['Anteil: Bedeutung', `${f.share.meaning} - berechnet und angezeigt, nicht gebucht`],
-    ['Anteil berechnet (EUR, Summe der Tage)', euro(f.totals.shareCents)],
+    ['Anteil: Bedeutung', `${SHARE_MEANING_TEXT[f.share.meaning]} (D1) - berechnet und angezeigt, nicht gebucht, nicht in den Fahrpreisen`],
+    ['Unternehmensanteil berechnet (EUR, Summe der Tage)', euro(f.totals.shareCents)],
   ];
 }
 

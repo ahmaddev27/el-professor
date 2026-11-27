@@ -24,7 +24,7 @@ import {
 } from './monthWorkbook';
 import { VERDICT_TEXT, verifyMonth, type MonthVerification } from './monthVerification';
 import type { RealTrip } from './realTrips';
-import type { DriverDayNote, DriverDayReconciliation, PeriodReconciliation, TipOutcome } from './reconciliation';
+import { SHARE_MEANING_TEXT, type DriverDayNote, type DriverDayReconciliation, type PeriodNote, type PeriodReconciliation, type TipOutcome } from './reconciliation';
 import type { RepositioningLeg, RepositioningPurpose } from './repositioningLegs';
 import { cancellationFeeOf } from './revenue';
 import type { ShareSetting } from './monthlyRate';
@@ -59,7 +59,7 @@ import type { SimRide, SimShift } from './types';
  * ## What it never does
  *
  * It changes no real trip, books nothing and calls no figure a salary. The
- * share is computed and shown, its meaning is CONFIGURATION_REQUIRED (D1); the
+ * share is the company's share (D1, owner 27.11.2026), computed and shown; the
  * commission is the product's rule applied to imported Uber figures, labelled
  * as a calculation; a gross wage is not computed because no pay model is set
  * (D4); booked salaries are not read (the simulator is no reader of the
@@ -325,11 +325,14 @@ export function paySheetRows(result: FullMonthResult): Row[] {
 
 // ── Sheet 4: Uber Tagesabgleich ────────────────────────────────────────────
 
+/** The share's column on sheets 4 and 6: it names what the share is (D1). */
+export const SHARE_HEADER = 'Unternehmensanteil (EUR, berechnet, nicht gebucht)';
+
 export const UBER_HEADERS: readonly string[] = [
   LABEL_HEADER, 'Zeilenart', 'Datum', 'Bis', 'Fahrer-ID', 'Fahrer', 'Umsatz (EUR, importiert)', 'Aktionen (EUR, importiert)',
-  'Bargeld (EUR, importiert)', 'Basis (EUR)', 'Satz (%)', 'Anteil (EUR, berechnet, nicht gebucht)',
+  'Bargeld (EUR, importiert)', 'Basis (EUR)', 'Satz (%)', SHARE_HEADER,
   'Trinkgeld importiert (EUR)', 'Trinkgeld verteilt (EUR, simuliert)', 'Differenz Trinkgeld (EUR, Verteilung)', 'Simulierte Fahrten',
-  'Simulierte Fahrpreise (EUR, nicht tatsaechlich)', 'Echte Fahrpreise (EUR, importiert)', 'Formelergebnis', 'Hinweise', 'Status',
+  'Simulierte Fahrpreise (EUR, nicht tatsaechlich)', 'Echte Fahrpreise (EUR, importiert)', 'Formelergebnis (EUR, Unternehmensanteil = Umsatz x Satz)', 'Hinweise', 'Status',
 ];
 
 const NOTE_TEXT: Record<DriverDayNote, string> = {
@@ -371,13 +374,25 @@ function dayTipOutcomes(result: FullMonthResult): Map<string, TipOutcome> {
 
 /**
  * D10 per row: a cent the allocation cannot account for fails; a figure that
- * is missing, or a tip that was not allocated, is incomplete; the rest waits
- * on the share's meaning (D1).
+ * is missing, or a tip that was not allocated, is incomplete; a row with no
+ * share rate needs configuring; the rest is reconciled.
  */
 function dayStatus(d: DriverDayReconciliation, tip: TipOutcome | undefined): string {
   if (d.tipDifferenceCents !== 0) return 'FAILED';
   if (d.notes.length > 0 || (tip !== undefined && tip !== 'allocated')) return 'INCOMPLETE';
-  return 'CONFIGURATION_REQUIRED';
+  return d.shareCents === null ? 'CONFIGURATION_REQUIRED' : 'RECONCILED';
+}
+
+const PERIOD_NOTE_TEXT: Record<PeriodNote, string> = {
+  negative_figure: 'negativer Uber-Wert',
+  also_in_days: 'Tage der Woche auch als Tageswert importiert',
+  share_not_computable: 'Anteil nicht berechenbar (Satz je Tag)',
+};
+
+/** The same rule for a weekly row; a week across the month boundary is not in the month at all. */
+function periodStatus(p: PeriodReconciliation, tip: TipOutcome | undefined): string {
+  if (p.placement !== 'inside_month' || p.notes.length > 0 || (tip !== undefined && tip !== 'allocated')) return 'INCOMPLETE';
+  return p.shareCents === null ? 'CONFIGURATION_REQUIRED' : 'RECONCILED';
 }
 
 export function uberSheetRows(result: FullMonthResult): Row[] {
@@ -395,16 +410,22 @@ export function uberSheetRows(result: FullMonthResult): Row[] {
       imported(d.bargeldCents), imported(d.basisCents), rateCell(d.rateBasisPoints), euroOrEmpty(d.shareCents),
       imported(d.tipsImportedCents), euro(d.tipsAllocatedCents), imported(d.tipDifferenceCents), d.simulatedCompleted,
       euro(d.simulatedFareCents), real === undefined ? '' : (real === null ? 'unlesbar' : euro(real)),
-      'CONFIGURATION_REQUIRED', notes.join('; '), dayStatus(d, tip),
+      euroOrEmpty(d.formulaTotalCents), notes.join('; '), dayStatus(d, tip),
     ];
   });
-  const periods = result.financial.periods.map((p): Row => [
-    LABEL.derived, p.placement === 'inside_month' ? 'Woche im Monat' : 'Woche ueber die Monatsgrenze (nicht im Monat gezaehlt)',
-    p.periodStart, p.periodEnd, p.driverId, p.driverName, euro(p.umsatzCents), euro(p.aktionenCents), '', euro(p.umsatzCents),
-    rateCell(p.rateBasisPoints), euroOrEmpty(p.shareCents), euro(p.tipsImportedCents), euro(p.tipsAllocatedCents),
-    euro(p.tipsImportedCents - p.tipsAllocatedCents), '', '', '', 'CONFIGURATION_REQUIRED',
-    'Wochenwert: nicht auf Tage aufgeteilt', p.placement === 'inside_month' ? 'CONFIGURATION_REQUIRED' : 'INCOMPLETE',
-  ]);
+  const periodTips = new Map(result.financial.tips.filter(t => t.scope === 'period').map(t => [`${t.driverId}|${t.from}|${t.to}`, t.outcome]));
+  const periods = result.financial.periods.map((p): Row => {
+    const tip = periodTips.get(`${p.driverId}|${p.periodStart}|${p.periodEnd}`);
+    const notes = ['Wochenwert: nicht auf Tage aufgeteilt', ...p.notes.map(n => PERIOD_NOTE_TEXT[n] ?? n),
+      ...(tip && tip !== 'allocated' ? [`Trinkgeld: ${TIP_OUTCOME_TEXT[tip] ?? tip}`] : [])];
+    return [
+      LABEL.derived, p.placement === 'inside_month' ? 'Woche im Monat' : 'Woche ueber die Monatsgrenze (nicht im Monat gezaehlt)',
+      p.periodStart, p.periodEnd, p.driverId, p.driverName, euro(p.umsatzCents), euro(p.aktionenCents), '', euro(p.umsatzCents),
+      rateCell(p.rateBasisPoints), euroOrEmpty(p.shareCents), euro(p.tipsImportedCents), euro(p.tipsAllocatedCents),
+      euro(p.tipsImportedCents - p.tipsAllocatedCents), '', '', '', euroOrEmpty(p.shareCents),
+      notes.join('; '), periodStatus(p, tip),
+    ];
+  });
   const unallocated = result.financial.tips.filter(t => t.outcome !== 'allocated').map((t): Row => [
     LABEL.derived, 'Trinkgeld nicht verteilt', t.from, t.to, t.driverId, t.driverName, '', '', '', '', '', '',
     euro(t.importedCents), euro(t.allocatedCents), euro(t.importedCents - t.allocatedCents), t.completedRides, '', '', '',
@@ -467,7 +488,7 @@ export function vehiclesSheetRows(result: FullMonthResult): Row[] {
 export const CALENDAR_HEADERS: readonly string[] = [
   LABEL_HEADER, 'Datum', 'Wochentag', 'Fahrpreise simuliert (EUR)', 'Fahrpreise echt (EUR, importiert)',
   'Trinkgeld simuliert (EUR)', 'Trinkgeld importiert (EUR)', 'Stornierungen simuliert', 'Stornogebuehren (EUR)',
-  'Umsatz importiert (EUR)', 'Lohnberechnung nach Regel (EUR, nicht gebucht)', 'Anteil (EUR, berechnet, nicht gebucht)',
+  'Umsatz importiert (EUR)', 'Lohnberechnung nach Regel (EUR, nicht gebucht)', SHARE_HEADER,
   'Fahrgast-km', 'Leer-km', 'Dienststunden (simuliert)', 'Schichten', 'Echte Fahrten', 'Tag ohne Aktivitaet',
 ];
 
@@ -647,7 +668,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
     ...section('Regeln', [
       ['Betriebstag', `${p.settings.operatingDayStartHour}:00 bis ${p.settings.operatingDayStartHour}:00 (${p.settings.timeZone})`],
       ['Anteil', 'Umsatz (importiert) x Satz, je Fahrer und Betriebstag; berechnet und angezeigt, nicht gebucht'],
-      ['Anteil: Bedeutung', `${f.share.meaning} (D1)`],
+      ['Anteil: Bedeutung', `${SHARE_MEANING_TEXT[f.share.meaning]} (D1, Entscheidung des Inhabers vom 27.11.2026); ein Prozentsatz des Umsatzes, kein Faktor auf die Fahrpreise`],
       ['Lohnberechnung nach Regel', '(Umsatz + Aktionen) x Provisionssatz + Trinkgeld, je Uber-Zeile auf Cent gerundet; keine Gehaltsbuchung'],
       ['Trinkgeld', 'nur aus Uber-Zahlen, centgenau auf simulierte Fahrten verteilt; nie erzeugt'],
       ['Stornogebuehr', 'nur wenn die Firma sie eingestellt hat'],

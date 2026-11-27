@@ -197,7 +197,7 @@ describe('checkTips: a cent nobody can account for is FAILED', () => {
   it('passes the allocation as made', () => {
     const { shifts, rides, uber, allocations } = allocated();
     expect(checkTips(rides, shifts, allocations)).toEqual([]);
-    expect(reconcileMonth({ uber, rides, shifts, allocations, shareSetting: { mode: 'fixed', percent: 33 } }).status).toBe('CONFIGURATION_REQUIRED');
+    expect(reconcileMonth({ uber, rides, shifts, allocations, shareSetting: { mode: 'fixed', percent: 33 } }).status).toBe('RECONCILED');
   });
 
   // Mutation controls: each forgery is one the allocation could plausibly make.
@@ -252,15 +252,17 @@ describe('reconcileMonth: the share on imported umsatz, computed and never booke
     const fin = reconcileMonth({ uber, rides, shifts, allocations, shareSetting: { mode: 'fixed', percent: 31 } });
     const alpha = fin.days.find(d => d.driverId === ALPHA && d.day === '2026-09-08')!;
     // 10 050 x 31 % = 3 115.5 -> 3 116; aktionen are beside the basis, not in it.
-    expect(alpha).toMatchObject({ basisCents: 10_050, aktionenCents: 1_500, rateBasisPoints: 3100, shareCents: 3_116, formulaTotalCents: null });
+    expect(alpha).toMatchObject({ basisCents: 10_050, aktionenCents: 1_500, rateBasisPoints: 3100, shareCents: 3_116, formulaTotalCents: 3_116 });
     const beta = fin.days.find(d => d.driverId === BETA)!;
     // -1 050 x 31 % = -325.5 -> -326, kept with its sign and flagged.
     expect(beta.shareCents).toBe(-326);
     expect(beta.notes).toContain('negative_figure');
     // The month's share is the sum of the days, not a share of the month.
     expect(fin.totals.shareCents).toBe(3_116 - 326);
-    expect(fin.share.meaning).toBe('CONFIGURATION_REQUIRED');
-    expect(fin.status).toBe('CONFIGURATION_REQUIRED');
+    expect(fin.share.meaning).toBe('company_share');
+    // The negative figure keeps the month from reading reconciled, though no tip moved.
+    expect(fin.reasons).toContain('uber_negative_figure');
+    expect(fin.status).toBe('INCOMPLETE');
   });
 
   it('draws each day\'s rate from 30-33 only, with a random daily setting', () => {
@@ -311,6 +313,73 @@ describe('reconcileMonth: the share on imported umsatz, computed and never booke
     const fin = reconcileMonth({ uber, rides, shifts, allocations, shareSetting: { mode: 'fixed', percent: 30 } });
     expect(fin.status).toBe('INCOMPLETE');
     expect(fin.reasons).toContain('uber_row_issues');
+  });
+});
+
+describe('reconcileMonth: RECONCILED only when every row is (D1, owner 27.11.2026)', () => {
+  type Setting = Parameters<typeof reconcileMonth>[0]['shareSetting'];
+  // Every simulated driver-day of smallMonth has a row, and no tip, so nothing is left unplaced.
+  const cleanDays = () => [
+    uberDay(ALPHA, '2026-09-08', { umsatzCents: 12_000 }),
+    uberDay(ALPHA, '2026-09-09', { umsatzCents: 8_000 }),
+    uberDay(BETA, '2026-09-08', { umsatzCents: 9_000 }),
+  ];
+  const reconcile = (uber: ReconcileUber | null, shareSetting: Setting = { mode: 'fixed', percent: 32 }) => {
+    const { shifts, rides } = smallMonth();
+    const allocations = allocateImportedTips({ uber, rides, shifts, seed: 3 });
+    return reconcileMonth({ uber, rides, shifts, allocations, shareSetting });
+  };
+
+  it('is RECONCILED with a rate and every row clean, and the share is the company share', () => {
+    const fin = reconcile({ days: cleanDays(), periods: [] });
+    expect(fin.reasons).toEqual([]);
+    expect(fin.status).toBe('RECONCILED');
+    expect(fin.share.meaning).toBe('company_share');
+    for (const d of fin.days) expect(d.formulaTotalCents).toBe(d.shareCents);
+  });
+
+  it('keeps a clean week inside the month RECONCILED', () => {
+    const fin = reconcile({ days: cleanDays(), periods: [uberPeriod(BETA, '2026-09-14', '2026-09-20', { umsatzCents: 40_000 })] });
+    expect(fin.periods[0]).toMatchObject({ notes: [], shareCents: 12_800 });
+    expect(fin.status).toBe('RECONCILED');
+  });
+
+  it('needs configuring, not reconciling, without a rate', () => {
+    const fin = reconcile({ days: cleanDays(), periods: [] }, null);
+    expect(fin.reasons).toEqual(['share_not_configured']);
+    expect(fin.status).toBe('CONFIGURATION_REQUIRED');
+  });
+
+  // Each of these left the month CONFIGURATION_REQUIRED before 27.11.2026 although its
+  // row on sheet 4 read INCOMPLETE; with RECONCILED reachable it would have read better.
+  it.each<[string, () => ReconcileUber, string]>([
+    ['a negative day figure with no tip', () => ({
+      days: [...cleanDays().slice(0, 2), uberDay(BETA, '2026-09-08', { umsatzCents: -500 }, { negativeTypes: ['umsatz'] })], periods: [],
+    }), 'uber_negative_figure'],
+    ['a negative week figure with no tip', () => ({
+      days: cleanDays(), periods: [uberPeriod(BETA, '2026-09-14', '2026-09-20', { aktionenCents: -300 }, { negativeTypes: ['aktionen'] })],
+    }), 'uber_negative_figure'],
+    ['a day also inside a week, with no tip', () => ({
+      days: [uberDay(ALPHA, '2026-09-08', { umsatzCents: 12_000 }, { overlapsPeriod: true }), ...cleanDays().slice(1)],
+      periods: [uberPeriod(ALPHA, '2026-09-07', '2026-09-13', { umsatzCents: 30_000 }, { overlappingDailyDates: ['2026-09-08'] })],
+    }), 'uber_day_in_period'],
+    ['a week across the month boundary, with no tip', () => ({
+      days: cleanDays(), periods: [uberPeriod(BETA, '2026-08-31', '2026-09-06', { umsatzCents: 30_000 }, { placement: 'crosses_month_boundary' })],
+    }), 'week_across_boundary'],
+    ['simulated rides on a day Uber has no row for', () => ({ days: cleanDays().slice(0, 2), periods: [] }), 'simulated_without_uber'],
+  ])('is INCOMPLETE for %s, and says why', (_name, uber, reason) => {
+    const fin = reconcile(uber());
+    expect(fin.reasons).toEqual([reason]);
+    expect(fin.status).toBe('INCOMPLETE');
+  });
+
+  it('does not add "no Uber row" on top of "Uber not read" or "no Uber figures"', () => {
+    const blind = reconcile(null);
+    expect(blind.reasons).toContain('uber_not_read');
+    expect(blind.reasons).not.toContain('simulated_without_uber');
+    const empty = reconcile({ days: [], periods: [] });
+    expect(empty.reasons).toContain('no_uber_figures');
+    expect(empty.reasons).not.toContain('simulated_without_uber');
   });
 });
 
@@ -391,7 +460,7 @@ describe('generateFullMonth: the tips are Uber\'s, never drawn', () => {
     for (const a of unplaced) expect(a.outcome).toBe('no_simulated_ride');
     expect(withUber.financial.totals.tipsImportedCents)
       .toBe(withUber.financial.totals.tipsAllocatedCents + withUber.financial.totals.tipsUnallocatedCents);
-    expect(withUber.financial.status).toBe(unplaced.length > 0 ? 'INCOMPLETE' : 'CONFIGURATION_REQUIRED');
+    expect(withUber.financial.status).toBe(unplaced.length > 0 ? 'INCOMPLETE' : 'RECONCILED');
   });
 
   it('shows the share per driver-day of the imported umsatz, never booked', () => {
@@ -400,8 +469,9 @@ describe('generateFullMonth: the tips are Uber\'s, never drawn', () => {
     expect(d.basisCents).toBe(18_037);
     expect(d.rateBasisPoints).toBe(3200);
     expect(d.shareCents).toBe(Math.round(18_037 * 0.32));
-    expect(d.formulaTotalCents).toBeNull();
-    expect(fin.share).toMatchObject({ meaning: 'CONFIGURATION_REQUIRED', basis: 'umsatz' });
+    // The configured formula's result is the company share (D1).
+    expect(d.formulaTotalCents).toBe(d.shareCents);
+    expect(fin.share).toMatchObject({ meaning: 'company_share', basis: 'umsatz' });
   });
 
   it('keeps the rides themselves where they were: only the tip column moves', () => {

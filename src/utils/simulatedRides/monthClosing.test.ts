@@ -18,6 +18,7 @@ import {
   NO_ACTUAL_HOURS,
   NO_GROSS_WAGE,
   NO_UBER_ROW,
+  SHARE_HEADER,
   UBER_NOT_READ,
   PURPOSE_WORD,
   WEEKS_ROW_LABEL,
@@ -278,7 +279,7 @@ describe('the sheets reconcile with each other (sheets 1, 4 and 6)', () => {
 
   it('the tips placed on rides and the share are the reconciliation\'s figures', () => {
     expect(cents(totalRow[at('Trinkgeld simuliert (EUR)')])).toBe(month.financial.totals.tipsAllocatedCents);
-    expect(cents(totalRow[at('Anteil (EUR, berechnet, nicht gebucht)')])).toBe(month.financial.totals.shareCents);
+    expect(cents(totalRow[at(SHARE_HEADER)])).toBe(month.financial.totals.shareCents);
     expect(month.financial.totals.shareCents).toBeGreaterThan(0);
   });
 });
@@ -397,7 +398,7 @@ describe('negatives: a missing input is said, never a fabricated zero', () => {
     const calendar = sheetOf(blind, CLOSING_SHEET_CALENDAR);
     for (const r of calendar.slice(1)) {
       expect(r[column(calendar, 'Umsatz importiert (EUR)')]).toBe(UBER_NOT_READ);
-      expect(r[column(calendar, 'Anteil (EUR, berechnet, nicht gebucht)')]).toBe(UBER_NOT_READ);
+      expect(r[column(calendar, SHARE_HEADER)]).toBe(UBER_NOT_READ);
     }
     const checks = sheetOf(blind, CLOSING_SHEET_CHECKS);
     expect(checkValue(checks, 'Finanzabgleich mit Uber (getrennt vom Exportstatus)')).toBe('INCOMPLETE');
@@ -407,7 +408,7 @@ describe('negatives: a missing input is said, never a fabricated zero', () => {
   it('share not configured: no share is computed anywhere and sheet 7 says it is not set', () => {
     const unset = run({ shareSetting: null });
     const uber = sheetOf(unset, CLOSING_SHEET_UBER);
-    const share = column(uber, 'Anteil (EUR, berechnet, nicht gebucht)');
+    const share = column(uber, SHARE_HEADER);
     for (const r of uber.slice(1)) expect(r[share]).toBe('');
     expect(checkValue(sheetOf(unset, CLOSING_SHEET_CHECKS), 'Einstellung')).toMatch(/^nicht festgelegt/);
   });
@@ -434,6 +435,65 @@ describe('negatives: a missing input is said, never a fabricated zero', () => {
     expect(checkValue(checks, 'Abgelehnte echte Auftraege (nicht im Fahrtenbuch)')).toBe('nicht gelesen');
     const none = sheetOf(run({ realTrips: noRealTrips() }), CLOSING_SHEET_CHECKS);
     expect(checkValue(none, 'Import-IDs der echten Fahrten')).toBe('keine');
+  });
+});
+
+describe('sheet 4: the month never reads better than its own rows (D1, owner 27.11.2026)', () => {
+  const rowStatuses = (r: FullMonthResult): unknown[] => {
+    const uber = sheetOf(r, CLOSING_SHEET_UBER);
+    const kind = column(uber, 'Zeilenart');
+    return uber.slice(1).filter(x => x[kind] === 'Tag' || String(x[kind]).startsWith('Woche')).map(x => x[column(uber, 'Status')]);
+  };
+  // Both drivers every day, no week; Alpha's real day carries no tip, so nothing is left unplaced.
+  const fullUber: ReconcileUber = {
+    days: SEPTEMBER_DAYS.flatMap((date, i) => [
+      uberDay(ALPHA, date, { umsatzCents: 18_000 + i * 37, trinkgeldCents: date === '2026-09-08' ? 0 : 301 + i * 7, tripCount: 9 }),
+      uberDay(BETA, date, { umsatzCents: 15_500 + i * 11, trinkgeldCents: 199 + i, tripCount: 8 }),
+    ]),
+    periods: [],
+  };
+  const reconciled = run({ uber: fullUber });
+
+  it('reads RECONCILED on every row, on sheet 7 and as a month, when every figure is placed', () => {
+    expect(reconciled.financial.reasons).toEqual([]);
+    expect(reconciled.financial.status).toBe('RECONCILED');
+    expect(new Set(rowStatuses(reconciled))).toEqual(new Set(['RECONCILED']));
+    expect(checkValue(sheetOf(reconciled, CLOSING_SHEET_CHECKS), 'Finanzabgleich mit Uber (getrennt vom Exportstatus)')).toBe('RECONCILED');
+  });
+
+  it('reads INCOMPLETE on a week across the month boundary, which is not in the month at all, even with no tip', () => {
+    const crossing = run({ uber: { ...fullUber, periods: [uberPeriod(BETA, '2026-09-28', '2026-10-04', 'crosses_month_boundary', { umsatzCents: 70_000 })] } });
+    const uber = sheetOf(crossing, CLOSING_SHEET_UBER);
+    const week = uber.filter(r => String(r[column(uber, 'Zeilenart')]).startsWith('Woche ueber die Monatsgrenze'));
+    expect(week).toHaveLength(1);
+    expect(week[0][column(uber, 'Status')]).toBe('INCOMPLETE');
+    expect(crossing.financial.reasons).toEqual(['week_across_boundary']);
+    expect(crossing.financial.status).toBe('INCOMPLETE');
+  });
+
+  it('reads CONFIGURATION_REQUIRED on every row and as a month with the same figures and no rate', () => {
+    const unset = run({ uber: fullUber, shareSetting: null });
+    expect(unset.financial.status).toBe('CONFIGURATION_REQUIRED');
+    expect(new Set(rowStatuses(unset))).toEqual(new Set(['CONFIGURATION_REQUIRED']));
+  });
+
+  it('prints the company share as the formula\'s result and names it on sheet 7', () => {
+    const uber = sheetOf(reconciled, CLOSING_SHEET_UBER);
+    const formula = column(uber, 'Formelergebnis (EUR, Unternehmensanteil = Umsatz x Satz)');
+    for (const r of uber.slice(1)) expect(r[formula]).toBe(r[column(uber, SHARE_HEADER)]);
+    expect(checkValue(sheetOf(reconciled, CLOSING_SHEET_CHECKS), 'Anteil: Bedeutung')).toMatch(/^Unternehmensanteil \(D1/);
+  });
+
+  it.each<[string, () => FullMonthResult]>([
+    ['the fixture month (a week across the boundary, a real day with a tip)', () => month],
+    ['no share rate', () => run({ shareSetting: null })],
+    ['Uber not read', () => run({ uber: null })],
+    ['every figure placed', () => reconciled],
+  ])('%s: a row that is not reconciled keeps the month from reading reconciled', (_name, get) => {
+    const r = get();
+    const rows = rowStatuses(r);
+    if (rows.some(x => x !== 'RECONCILED')) expect(r.financial.status).not.toBe('RECONCILED');
+    if (r.financial.status === 'RECONCILED') expect(rows.every(x => x === 'RECONCILED')).toBe(true);
   });
 });
 

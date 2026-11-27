@@ -7525,7 +7525,6 @@ export const de = {
   'simrides.cal.check.code.tipsBacked':    'Trinkgeld nur aus Uber-Zahlen, centgenau',
   'simrides.cal.fin.reason.hand_rows':     'Von Hand erfasste Uber-Zeilen sind nicht abgeglichen',
   'simrides.cal.fin.reason.no_uber_figures': 'Uber meldet für den Monat keine Zahlen',
-  'simrides.cal.fin.reason.share_meaning_unconfigured': 'Bedeutung des Anteils nicht festgelegt (CONFIGURATION_REQUIRED)',
   'simrides.cal.fin.reason.share_not_computable': 'Anteil für einen Zeitraum nicht berechenbar',
   'simrides.cal.fin.reason.share_not_configured': 'Kein Anteilssatz festgelegt',
   'simrides.cal.fin.reason.share_setting_invalid': 'Anteilssatz ungültig (nur 30, 31, 32 oder 33 %)',
@@ -7537,10 +7536,10 @@ export const de = {
   'simrides.cal.fin.reason.uber_not_read': 'Keine Uber-Zahlen für den Monat gelesen',
   'simrides.cal.fin.reason.uber_row_issues': 'Uber-Zeilen konnten nicht zugeordnet oder gelesen werden',
   'simrides.cal.fin.separate':             'Getrennt von der Freigabe des Fahrtenbuchs: ein offener Finanzabgleich sperrt keinen gültigen Bericht.',
-  'simrides.cal.fin.share':                'Anteil (berechnet, nicht gebucht)',
+  'simrides.cal.fin.share':                'Unternehmensanteil (berechnet, nicht gebucht)',
   'simrides.cal.fin.shareCaption':         'auf den Umsatz je Fahrer und Tag',
-  'simrides.cal.fin.shareMeaning':         'Wem der Anteil zusteht und worauf er gebucht wird, ist noch nicht festgelegt (CONFIGURATION_REQUIRED). Er wird angezeigt, nicht gebucht.',
-  'simrides.cal.fin.status.CONFIGURATION_REQUIRED': 'Trinkgeld abgeglichen; die Bedeutung des Anteils ist noch nicht festgelegt',
+  'simrides.cal.fin.shareMeaning':         'Der Anteil ist der Unternehmensanteil: importierter Uber-Umsatz × Satz, je Fahrer und Betriebstag. Er wird angezeigt, nicht gebucht, und fließt nicht in die Fahrpreise ein.',
+  'simrides.cal.fin.status.CONFIGURATION_REQUIRED': 'Trinkgeld abgeglichen; es ist kein gültiger Anteilssatz eingestellt',
   'simrides.cal.fin.status.FAILED':        'Abgleich fehlgeschlagen: mindestens ein Cent ist nicht erklärbar',
   'simrides.cal.fin.status.INCOMPLETE':    'Nicht vollständig abgeglichen',
   'simrides.cal.fin.tipsAllocated':        'Trinkgeld verteilt (simuliert)',
@@ -7553,7 +7552,7 @@ export const de = {
   'simrides.settings.adminOnly':        'Nur ein Administrator kann diese Einstellungen ändern.',
   'simrides.settings.description':      'Gelten für jeden Kalendermonat, der simuliert wird. Gespeichert für das Unternehmen, nicht für diese Sitzung.',
   'simrides.settings.loadFailed':       'Die Simulationseinstellungen konnten nicht geladen werden. Ein Monat wird erst simuliert, wenn sie gelesen sind.',
-  'simrides.settings.meaning':          'Was der Anteil bedeutet und wer ihn erhält, ist nicht festgelegt. Er wird auf den importierten Uber-Umsatz berechnet und angezeigt, nie gebucht.',
+  'simrides.settings.meaning':          'Der Anteil ist der Unternehmensanteil: ein Prozentsatz des importierten Uber-Umsatzes, kein Faktor auf die Fahrpreise. Er wird berechnet und angezeigt, nie gebucht.',
   'simrides.settings.mode':             'Anteil',
   'simrides.settings.mode.fixed':       'Fester Satz',
   'simrides.settings.mode.none':        'Nicht festgelegt',
@@ -7578,4 +7577,11 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.result.downloadClosing': 'Monatsabschluss herunterladen (SIMULIERT, mit echten Fahrten)',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.fin.reason.simulated_without_uber': 'Simulierte Fahrten an Tagen, für die Uber keine Zeile des Fahrers meldet',
+  'simrides.cal.fin.reason.uber_day_in_period': 'Ein Tag ist als Tageswert und in einer Wochensumme importiert',
+  'simrides.cal.fin.reason.uber_negative_figure': 'Negativer Uber-Wert: die Zeile ist nicht abgeglichen',
+  'simrides.cal.fin.reason.week_across_boundary': 'Wochensumme über die Monatsgrenze: nicht im Monat gezählt',
+  'simrides.cal.fin.status.RECONCILED':    'Trinkgeld centgenau abgeglichen, Unternehmensanteil für jeden Tag berechnet',
 } as const;

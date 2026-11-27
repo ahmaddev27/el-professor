@@ -98,13 +98,15 @@ function ShareBlock({ result }: { result: FullMonthResult }) {
   );
 }
 
-const FIN_TONE: Record<FinancialStatus, 'caution' | 'critical'> = {
+const FIN_TONE: Record<FinancialStatus, 'positive' | 'caution' | 'critical'> = {
+  RECONCILED: 'positive',
   CONFIGURATION_REQUIRED: 'caution',
   INCOMPLETE: 'caution',
   FAILED: 'critical',
 };
 
 const FIN_STATUS_KEY: Record<FinancialStatus, TranslationKey> = {
+  RECONCILED: 'simrides.cal.fin.status.RECONCILED',
   CONFIGURATION_REQUIRED: 'simrides.cal.fin.status.CONFIGURATION_REQUIRED',
   INCOMPLETE: 'simrides.cal.fin.status.INCOMPLETE',
   FAILED: 'simrides.cal.fin.status.FAILED',
@@ -121,9 +123,12 @@ const FIN_REASON_KEY: Record<FinancialReason, TranslationKey> = {
   tip_negative: 'simrides.cal.fin.reason.tip_negative',
   tip_no_simulated_ride: 'simrides.cal.fin.reason.tip_no_simulated_ride',
   share_not_computable: 'simrides.cal.fin.reason.share_not_computable',
+  uber_negative_figure: 'simrides.cal.fin.reason.uber_negative_figure',
+  uber_day_in_period: 'simrides.cal.fin.reason.uber_day_in_period',
+  week_across_boundary: 'simrides.cal.fin.reason.week_across_boundary',
+  simulated_without_uber: 'simrides.cal.fin.reason.simulated_without_uber',
   share_not_configured: 'simrides.cal.fin.reason.share_not_configured',
   share_setting_invalid: 'simrides.cal.fin.reason.share_setting_invalid',
-  share_meaning_unconfigured: 'simrides.cal.fin.reason.share_meaning_unconfigured',
 };
 
 /**

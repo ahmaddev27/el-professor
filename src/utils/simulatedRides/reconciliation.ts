@@ -33,20 +33,20 @@ import type { UberMonthImport } from './uberImport';
  * - a week across the month boundary.
  *
  * **The share** is taken of the imported `umsatz` of each driver-day, at the
- * rate the setting gives for that date. It is computed and shown, never
- * booked: who receives it, and on what base, is the owner's open decision D1,
- * so its meaning is `CONFIGURATION_REQUIRED` and no "total according to the
- * configured formula" is produced. Simulated fares stand beside it as
- * simulated, never as actual fares, and are not bent towards it.
+ * rate the setting gives for that date. **It is the company's share**
+ * (`company_share`, the owner's answer to D1 on 27.11.2026): imported Uber
+ * revenue x 30-33 %, a percentage and never a multiplier of the fares. It is
+ * computed and shown, never booked, and it is the configured formula's result
+ * (spec section 5, item 6). Simulated fares stand beside it as simulated,
+ * never as actual fares, and are not bent towards it or towards the revenue:
+ * the gap between them is shown, not closed.
  *
  * **The financial status** is separate from the Fahrtenbuch's export verdict
- * (D10), so an unconfigured share does not block a valid Fahrtenbuch:
+ * (D10), so a money problem does not block a valid Fahrtenbuch:
  * - `FAILED`: a cent the allocation cannot account for;
  * - `INCOMPLETE`: a figure the month could not read or place;
- * - `CONFIGURATION_REQUIRED`: everything else, while D1 stands.
- *
- * There is no "reconciled" status yet, because no month can reach one before
- * the share means something.
+ * - `CONFIGURATION_REQUIRED`: no share rate set, or a setting that is invalid;
+ * - `RECONCILED`: every tip allocated to the cent and every share computed.
  */
 
 /** The imported figures the reconciliation reads. Hand rows and reader issues are optional for old callers. */
@@ -84,6 +84,8 @@ export type DriverDayNote =
   | 'no_uber_row'
   | 'share_not_computable';
 
+export type PeriodNote = 'negative_figure' | 'also_in_days' | 'share_not_computable';
+
 /** One driver and one operating day: what Uber reported beside what was simulated. */
 export interface DriverDayReconciliation {
   day: string;
@@ -106,8 +108,8 @@ export interface DriverDayReconciliation {
   /** Simulated completed rides and their fares (SIMULIERT, not actual fares). */
   simulatedCompleted: number;
   simulatedFareCents: number;
-  /** Always null: the accounting formula is not configured (D1). */
-  formulaTotalCents: null;
+  /** The configured formula's result: the company share (D1). Null where no rate applies. */
+  formulaTotalCents: number | null;
   notes: DriverDayNote[];
 }
 
@@ -118,6 +120,8 @@ export interface PeriodReconciliation {
   periodStart: string;
   periodEnd: string;
   placement: 'inside_month' | 'crosses_month_boundary';
+  /** What keeps this week from being reconciled, besides its tip and its placement. */
+  notes: PeriodNote[];
   umsatzCents: number;
   aktionenCents: number;
   tipsImportedCents: number;
@@ -126,15 +130,24 @@ export interface PeriodReconciliation {
   shareCents: number | null;
 }
 
-export type FinancialStatus = 'CONFIGURATION_REQUIRED' | 'INCOMPLETE' | 'FAILED';
+export type FinancialStatus = 'RECONCILED' | 'CONFIGURATION_REQUIRED' | 'INCOMPLETE' | 'FAILED';
+
+/** What the share is (D1, owner 27.11.2026): the company's share of the imported revenue. */
+export type ShareMeaning = 'company_share';
+export const SHARE_MEANING: ShareMeaning = 'company_share';
+/** The meaning as the German documents print it. */
+export const SHARE_MEANING_TEXT: Record<ShareMeaning, string> = { company_share: 'Unternehmensanteil' };
 
 export type FinancialReason =
   | 'uber_not_read'
   | 'no_uber_figures'
   | 'share_not_configured'
   | 'share_setting_invalid'
-  | 'share_meaning_unconfigured'
   | 'share_not_computable'
+  | 'uber_negative_figure'
+  | 'uber_day_in_period'
+  | 'week_across_boundary'
+  | 'simulated_without_uber'
   | 'tip_no_simulated_ride'
   | 'tip_negative'
   | 'tip_conflict'
@@ -151,8 +164,8 @@ export interface FinancialReconciliation {
   violations: string[];
   uberRead: boolean;
   share: {
-    /** Always CONFIGURATION_REQUIRED until the owner answers D1. */
-    meaning: 'CONFIGURATION_REQUIRED';
+    /** The company's share (D1, owner 27.11.2026): computed and shown, never booked. */
+    meaning: ShareMeaning;
     basis: 'umsatz';
     setting: ShareSetting | null;
     settingProblem: ShareSettingProblem | null;
@@ -268,12 +281,14 @@ const REASON_ORDER: readonly FinancialReason[] = [
   'tip_mismatch',
   'uber_not_read', 'no_uber_figures', 'uber_row_issues', 'hand_rows',
   'tip_conflict', 'tip_week_across_boundary', 'tip_negative', 'tip_no_simulated_ride', 'share_not_computable',
-  'share_not_configured', 'share_setting_invalid', 'share_meaning_unconfigured',
+  'uber_negative_figure', 'uber_day_in_period', 'week_across_boundary', 'simulated_without_uber',
+  'share_not_configured', 'share_setting_invalid',
 ];
 
 const INCOMPLETE_REASONS: ReadonlySet<FinancialReason> = new Set([
   'uber_not_read', 'no_uber_figures', 'uber_row_issues', 'hand_rows',
   'tip_conflict', 'tip_week_across_boundary', 'tip_negative', 'tip_no_simulated_ride', 'share_not_computable',
+  'uber_negative_figure', 'uber_day_in_period', 'week_across_boundary', 'simulated_without_uber',
 ]);
 
 const dateParts = (day: string) => ({ year: +day.slice(0, 4), month: +day.slice(5, 7), day: +day.slice(8, 10) });
@@ -300,7 +315,7 @@ export function reconcileMonth(args: {
   const { uber, rides, shifts, allocations, shareSetting } = args;
   const settingProblem = shareSetting ? shareSettingProblem(shareSetting) : null;
   const dayOf = rideDays(shifts);
-  const reasons = new Set<FinancialReason>(['share_meaning_unconfigured']);
+  const reasons = new Set<FinancialReason>();
   if (!shareSetting) reasons.add('share_not_configured');
   else if (settingProblem) reasons.add('share_setting_invalid');
 
@@ -342,7 +357,7 @@ export function reconcileMonth(args: {
       tipsAllocatedCents: sim?.tipCents ?? 0,
       tipDifferenceCents: tip?.outcome === 'allocated' ? d.figures.trinkgeldCents - (sim?.tipCents ?? 0) : 0,
       simulatedCompleted: sim?.completed ?? 0, simulatedFareCents: sim?.fareCents ?? 0,
-      formulaTotalCents: null, notes,
+      formulaTotalCents: shareCents, notes,
     });
   }
   // A simulated driver-day Uber has no row for: shown, with nothing imported beside it.
@@ -362,16 +377,30 @@ export function reconcileMonth(args: {
     // A week has one rate only when every day of it has the same one: a fixed rate or the month's draw.
     const oneRate = inside && shareSetting !== null && !settingProblem && (shareSetting.mode === 'fixed' || shareSetting.scope === 'month');
     const rateBp = oneRate ? rateOn(shareSetting, p.periodStart) : null;
-    if (inside && shareSetting && !settingProblem && !oneRate) reasons.add('share_not_computable');
+    const notes: PeriodNote[] = [];
+    if (p.negativeTypes.length > 0) notes.push('negative_figure');
+    if (p.overlappingDailyDates.length > 0) notes.push('also_in_days');
+    if (inside && shareSetting && !settingProblem && !oneRate) {
+      notes.push('share_not_computable');
+      reasons.add('share_not_computable');
+    }
     const tip = allocations.find(a => a.scope === 'period' && a.driverId === p.driverId && a.from === p.periodStart && a.to === p.periodEnd);
     return {
       driverId: p.driverId, driverName: p.driverName, periodStart: p.periodStart, periodEnd: p.periodEnd, placement: p.placement,
-      umsatzCents: p.figures.umsatzCents, aktionenCents: p.figures.aktionenCents,
+      notes, umsatzCents: p.figures.umsatzCents, aktionenCents: p.figures.aktionenCents,
       tipsImportedCents: p.figures.trinkgeldCents, tipsAllocatedCents: tip?.allocatedCents ?? 0,
       rateBasisPoints: rateBp, shareCents: shareOf(p.figures.umsatzCents, rateBp),
     };
   });
 
+  // Every note that keeps a row of sheet 4 from being reconciled is a reason for
+  // the month too, so the month never reads better than its own rows.
+  if (days.some(d => d.notes.includes('negative_figure')) || periods.some(p => p.notes.includes('negative_figure'))) reasons.add('uber_negative_figure');
+  if (days.some(d => d.notes.includes('also_in_period')) || periods.some(p => p.notes.includes('also_in_days'))) reasons.add('uber_day_in_period');
+  if (periods.some(p => p.placement === 'crosses_month_boundary')) reasons.add('week_across_boundary');
+  // Only beside figures Uber did report: with none at all, `uber_not_read` or `no_uber_figures` says it.
+  const uberReported = uber !== null && (uber.days.length > 0 || uber.periods.length > 0);
+  if (uberReported && days.some(d => d.notes.includes('no_uber_row'))) reasons.add('simulated_without_uber');
   if (!uber) reasons.add('uber_not_read');
   else if (uber.days.length === 0 && uber.periods.length === 0) reasons.add('no_uber_figures');
   if ((uber?.issues ?? []).length > 0) reasons.add('uber_row_issues');
@@ -382,9 +411,9 @@ export function reconcileMonth(args: {
   if (violations.length > 0) reasons.add('tip_mismatch');
 
   const ordered = REASON_ORDER.filter(r => reasons.has(r));
-  const status: FinancialStatus = violations.length > 0
-    ? 'FAILED'
-    : ordered.some(r => INCOMPLETE_REASONS.has(r)) ? 'INCOMPLETE' : 'CONFIGURATION_REQUIRED';
+  const status: FinancialStatus = violations.length > 0 ? 'FAILED'
+    : ordered.some(r => INCOMPLETE_REASONS.has(r)) ? 'INCOMPLETE'
+      : ordered.length > 0 ? 'CONFIGURATION_REQUIRED' : 'RECONCILED';
 
   const tipsImportedCents = allocations.reduce((n, a) => n + a.importedCents, 0);
   const tipsAllocatedCents = rides.filter(completed).reduce((n, r) => n + tipCents(r), 0);
@@ -393,7 +422,7 @@ export function reconcileMonth(args: {
     reasons: ordered,
     violations,
     uberRead: uber !== null,
-    share: { meaning: 'CONFIGURATION_REQUIRED', basis: 'umsatz', setting: shareSetting, settingProblem },
+    share: { meaning: SHARE_MEANING, basis: 'umsatz', setting: shareSetting, settingProblem },
     tips: [...allocations],
     days,
     periods,

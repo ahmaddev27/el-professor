@@ -489,6 +489,12 @@ def verify_closing(path):
     check(not open_rows or status in ("INCOMPLETE", "FAILED"), "7: the financial status is not settled while a row of 4 is open",
           f"{len(open_rows)} open rows, status {status}")
     check(not failed or status == "FAILED", "7: a FAILED row of 4 fails the financial status", f"{len(failed)}")
+    # RECONCILED exists since D1 (27.11.2026): the month may read it only when every row of 4 does.
+    statuses = ("RECONCILED", "CONFIGURATION_REQUIRED", "INCOMPLETE", "FAILED")
+    check(status in statuses and all(r["Status"] in statuses for r in uber), "7: every status is one of the four", str(status))
+    unsettled = [r for r in uber if r["Status"] != "RECONCILED"]
+    check(status != "RECONCILED" or not unsettled, "7: RECONCILED only when every row of 4 is",
+          f"{len(unsettled)} rows not reconciled, status {status}")
 
     _, vehicles = table(book, "Fahrzeuge und Leerfahrten")
     legs = defaultdict(list)

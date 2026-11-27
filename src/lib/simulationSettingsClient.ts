@@ -7,7 +7,8 @@ import type { ShareSetting, SharePercent, ShareScope } from '../utils/simulatedR
  *
  * One row per company. Reading it is every role's (the simulator needs it);
  * writing it is an administrator's, which RLS decides. The share's meaning is
- * not stored and not settable here: it stays CONFIGURATION_REQUIRED (D1).
+ * not stored and not settable here: it is the company's share (D1, owner
+ * 27.11.2026), fixed in `reconciliation.ts`.
  *
  * The client is the caller's (the screen passes `supabase`), so a test needs
  * no browser to import this file.

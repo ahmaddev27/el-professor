@@ -250,7 +250,9 @@ describe('SimulatedRidesPage, calendar mode', () => {
     // month it is INCOMPLETE and says why; it never reads as reconciled.
     expect(text).toContain('Finanzabgleich mit Uber - INCOMPLETE');
     expect(text).toContain('Uber meldet für den Monat keine Zahlen');
-    expect(text).toContain('Anteil (berechnet, nicht gebucht)');
+    expect(text).toContain('Unternehmensanteil (berechnet, nicht gebucht)');
+    expect(text).toContain('Der Anteil ist der Unternehmensanteil');
+    expect(text).not.toContain('Simulierte Fahrten an Tagen, für die Uber keine Zeile');
     // No stored setting (S8): no rate is made up, the report says so, and the
     // return to the base stays off.
     expect(text).toContain('Kein Anteilssatz festgelegt');

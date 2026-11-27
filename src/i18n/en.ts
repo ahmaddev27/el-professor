@@ -7451,7 +7451,6 @@ export const en: PartialDictionary = {
   'simrides.cal.check.code.tipsBacked':    'Tips only from Uber figures, to the cent',
   'simrides.cal.fin.reason.hand_rows':     'Uber rows entered by hand are not reconciled',
   'simrides.cal.fin.reason.no_uber_figures': 'Uber reports no figures for the month',
-  'simrides.cal.fin.reason.share_meaning_unconfigured': 'Meaning of the share not configured (CONFIGURATION_REQUIRED)',
   'simrides.cal.fin.reason.share_not_computable': 'Share not computable for a period',
   'simrides.cal.fin.reason.share_not_configured': 'No share rate configured',
   'simrides.cal.fin.reason.share_setting_invalid': 'Share rate invalid (only 30, 31, 32 or 33 %)',
@@ -7463,10 +7462,10 @@ export const en: PartialDictionary = {
   'simrides.cal.fin.reason.uber_not_read': 'No Uber figures were read for the month',
   'simrides.cal.fin.reason.uber_row_issues': 'Uber rows could not be attributed or read',
   'simrides.cal.fin.separate':             'Separate from the Fahrtenbuch\'s release: an open reconciliation does not block a valid report.',
-  'simrides.cal.fin.share':                'Share (computed, not booked)',
+  'simrides.cal.fin.share':                'Company share (computed, not booked)',
   'simrides.cal.fin.shareCaption':         'on revenue per driver and day',
-  'simrides.cal.fin.shareMeaning':         'Who receives the share and where it is booked is not configured yet (CONFIGURATION_REQUIRED). It is shown, not booked.',
-  'simrides.cal.fin.status.CONFIGURATION_REQUIRED': 'Tips reconciled; the meaning of the share is not configured yet',
+  'simrides.cal.fin.shareMeaning':         'The share is the company share: imported Uber revenue × rate, per driver and operating day. It is shown, not booked, and does not go into the fares.',
+  'simrides.cal.fin.status.CONFIGURATION_REQUIRED': 'Tips reconciled; no valid share rate is set',
   'simrides.cal.fin.status.FAILED':        'Reconciliation failed: at least one cent cannot be accounted for',
   'simrides.cal.fin.status.INCOMPLETE':    'Not fully reconciled',
   'simrides.cal.fin.tipsAllocated':        'Tips allocated (simulated)',
@@ -7479,7 +7478,7 @@ export const en: PartialDictionary = {
   'simrides.settings.adminOnly':        'Only an administrator can change these settings.',
   'simrides.settings.description':      'Apply to every calendar month that is simulated. Stored for the company, not for this session.',
   'simrides.settings.loadFailed':       'The simulation settings could not be loaded. A month is simulated only once they have been read.',
-  'simrides.settings.meaning':          'What the share means and who receives it is not set. It is computed on the imported Uber revenue and shown, never booked.',
+  'simrides.settings.meaning':          'The share is the company share: a percentage of the imported Uber revenue, not a multiplier on the fares. It is computed and shown, never booked.',
   'simrides.settings.mode':             'Share',
   'simrides.settings.mode.fixed':       'Fixed rate',
   'simrides.settings.mode.none':        'Not set',
@@ -7504,4 +7503,11 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.result.downloadClosing': 'Download month closing (SIMULIERT, with the real trips)',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.fin.reason.simulated_without_uber': 'Simulated rides on days for which Uber reports no row for the driver',
+  'simrides.cal.fin.reason.uber_day_in_period': 'A day was imported both as a daily figure and inside a weekly total',
+  'simrides.cal.fin.reason.uber_negative_figure': 'Negative Uber figure: the row is not reconciled',
+  'simrides.cal.fin.reason.week_across_boundary': 'Weekly total across the month boundary: not counted in the month',
+  'simrides.cal.fin.status.RECONCILED':    'Tips reconciled to the cent, company share computed for every day',
 };
