@@ -865,8 +865,8 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO user_sessions (user_id, session_token) VALUES ({admin}, 'mx-session-new-{s}')$q$,
   $q$last_active_at = last_active_at$q$),
 ( 7, 'drivers', $q$id = {id}$q$,
-  $q$INSERT INTO drivers (id, company_id, name) VALUES ({id}, {co}, 'MX driver {s}');
-     INSERT INTO drivers (id, company_id, name) VALUES ({ref:drivers2}, {co}, 'MX second driver {s}')$q$, NULL,
+  $q$INSERT INTO drivers (id, company_id, name, personalnummer) VALUES ({id}, {co}, 'MX driver {s}', 'MX-{s}-1');
+     INSERT INTO drivers (id, company_id, name, personalnummer) VALUES ({ref:drivers2}, {co}, 'MX second driver {s}', 'MX-{s}-2')$q$, NULL,
   $q$INSERT INTO drivers (company_id, name) VALUES ({co}, 'MX new driver {s}')$q$,
   $q$name = name$q$),
 ( 8, 'cars', $q$id = {id}$q$,
