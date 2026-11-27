@@ -14,6 +14,7 @@ import { SHEET_DECLINED_INTERNAL, SHEET_LEGS, buildOperationalReport } from './o
 import { isPreferredLeg, pickupDriveSeconds, safetyMarginSeconds } from './repositioning';
 import { ESTIMATE_TRAVEL_MODEL, buildRoutedMatrix, matrixTravelModel, pointKey, selectRoutingPoints, type TravelModel } from './travelModel';
 import type { GeoPoint, PoolAddress } from './types';
+import { noRealTrips } from './realTrips';
 
 /**
  * The acceptance tests of external audit round 6, one block per item of the
@@ -68,7 +69,7 @@ async function modelOf(router: TravelRouter, pool = POOL): Promise<{ model: Trav
 }
 
 const input = (over: Partial<FullMonthInput>): FullMonthInput => ({
-  year: 2026, month: 9, base: BASE, baseSource: 'saved_point', pool: POOL, vehicles: VEHICLES, drivers: DRIVERS, driverNotesMap: new Map(),
+  year: 2026, month: 9, base: BASE, baseSource: 'saved_point', realTrips: noRealTrips(), pool: POOL, vehicles: VEHICLES, drivers: DRIVERS, driverNotesMap: new Map(),
   seed: 20261030, tenantId: TENANT,
   settings: { declinedRidesEnabled: true, cancellationFeeEnabled: true, cancellationFeeCents: 600, monthlyRevenueShareEnabled: true },
   options: { cancellationShare: 0.06 },

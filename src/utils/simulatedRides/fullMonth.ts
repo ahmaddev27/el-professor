@@ -40,6 +40,7 @@ import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, 
 import type { UberMonthImport } from './uberImport';
 import type { BaseSource } from './baseSelection';
 import { unavailableDuring, type UnavailabilityWindow } from './vehicleAvailability';
+import { plateKey, type RealTrip, type RealTripsRead } from './realTrips';
 
 /**
  * A full calendar month of simulated rides (external audit round 3, section 2).
@@ -187,6 +188,14 @@ export interface FullMonthInput {
   uber?: Pick<UberMonthImport, 'days' | 'periods'>;
   /** Operating days that already hold real trips, by driver UUID: never simulated over. */
   realTripDays?: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * The month's real trips (`readRealTrips`). Absent: nobody looked, and the
+   * month cannot say it simulated over no real driver-day, so it is
+   * VERIFICATION_INCOMPLETE. Present, they are carried unchanged, their
+   * driver-days are not simulated, their vehicles are held while they ran, and
+   * their drivers rest before and after them.
+   */
+  realTrips?: RealTripsRead;
 }
 
 /** What the caller measured before the month was built, printed on the source sheet. */
@@ -306,6 +315,8 @@ export interface Provenance {
   base: { lat: number; lon: number; source: BaseSource | null; label: string };
   /** Whether the company requires the car back at the base when a shift ends. */
   returnToBase: boolean;
+  /** The real trips read for the month; null when none were read. */
+  realTrips: { trips: number; driverDays: number; unattributed: number; unreadableAmounts: number; digest: string } | null;
   /**
    * The run's identity: a hash of everything that built the month, so the same
    * inputs give the same id and a record can be traced to its month.
@@ -362,6 +373,8 @@ export interface FullMonthResult {
   driverOutcomes: DriverMonthOutcome[];
   /** The vehicle windows the month was built around. */
   vehicleUnavailability: UnavailabilityWindow[];
+  /** The month's real trips exactly as read (`IMPORTIERT`); null when none were read. */
+  realTrips: RealTripsRead | null;
 }
 
 /** One driver's month as built, against what was planned for him. */
@@ -409,6 +422,53 @@ interface Busy {
 const clash = (list: readonly Busy[] | undefined, s: number, e: number, buffer: number): boolean =>
   (list ?? []).some(b => s < b.end + buffer && e > b.start - buffer);
 
+/**
+ * The instants real trips occupy, by plate key and by driver. A trip without
+ * both instants holds nothing here; its driver-day is still excluded by day.
+ */
+function realTripWindows(trips: readonly RealTrip[]): { byPlate: Map<string, Busy[]>; byDriver: Map<string, Busy[]> } {
+  const byPlate = new Map<string, Busy[]>();
+  const byDriver = new Map<string, Busy[]>();
+  for (const t of trips) {
+    if (t.startMs === null || t.endMs === null || t.endMs < t.startMs) continue;
+    const held = { start: t.startMs, end: t.endMs };
+    if (t.plate) byPlate.set(plateKey(t.plate), [...(byPlate.get(plateKey(t.plate)) ?? []), held]);
+    if (t.driverId) byDriver.set(t.driverId, [...(byDriver.get(t.driverId) ?? []), held]);
+  }
+  return { byPlate, byDriver };
+}
+
+/**
+ * The read-back for §4: a simulated shift never lies on a real driver-day,
+ * never takes a vehicle while a real trip ran in it (with the vehicle gap),
+ * never cuts the driver's rest before or after a real trip, and no simulated
+ * ride carries a real trip's id. Returns one line per broken rule.
+ */
+export function checkRealTrips(month: GeneratedMonth, real: RealTripsRead | null, opts: GeneratorOptions): string[] {
+  if (!real || real.trips.length === 0) return [];
+  const out: string[] = [];
+  const held = realTripWindows(real.trips);
+  const gapMs = opts.minVehicleGapMinutes * 60_000;
+  const restMs = opts.minDriverRestMinutes * 60_000;
+  for (const s of month.shifts) {
+    const end = s.plannedEndMs ?? s.endMs;
+    if (real.days.get(s.driver.id)?.has(s.operatingDay)) {
+      out.push(`${s.id}: driver ${s.driver.id} has real trips on ${s.operatingDay} and was simulated over`);
+    }
+    if (clash(held.byPlate.get(plateKey(s.vehicle.plate)), s.startMs, end, gapMs)) {
+      out.push(`${s.id}: vehicle ${s.vehicle.plate} is held by a real trip during the shift`);
+    }
+    if (clash(held.byDriver.get(s.driver.id), s.startMs, end, restMs)) {
+      out.push(`${s.id}: driver ${s.driver.id} has a real trip within the rest before or after the shift`);
+    }
+  }
+  const realIds = new Set(real.trips.map(t => t.tripId));
+  for (const r of month.rides) {
+    if (r.tripId && realIds.has(r.tripId)) out.push(`${r.tripId}: a simulated ride carries a real trip's id`);
+  }
+  return out;
+}
+
 /** The address pool `generateFromFigures` requires, for the same reason: a smaller one repeats. */
 const MIN_POOL = 8;
 
@@ -450,6 +510,14 @@ export function generateFullMonth(
   const vehicleBusy = new Map<string, Busy[]>();
   const driverLastEnd = new Map<string, number>();
   let nextShift = 1;
+  // A real trip holds its vehicle while it ran and is part of its driver's
+  // working time: a simulated shift keeps the vehicle gap and the driver's rest
+  // from both, exactly as from a simulated shift.
+  const realHeld = realTripWindows(input.realTrips?.trips ?? []);
+  for (const v of input.vehicles) {
+    const held = realHeld.byPlate.get(plateKey(v.plate));
+    if (held) vehicleBusy.set(v.plate, [...held]);
+  }
 
   const pool = input.drivers.filter(d => d.planning_enabled !== false && isActiveDriver(d));
   // A negative workshop check is reported, not confirmed, and names no window:
@@ -470,7 +538,7 @@ export function generateFullMonth(
     notes: input.driverNotesMap,
     uberActiveDays: uber.activeDays,
     uberWeeklyOnly: uber.weeklyOnly,
-    realTripDays: input.realTripDays,
+    realTripDays: input.realTrips?.days ?? input.realTripDays,
   }));
   const planByDriver = new Map(driverPlans.map(p => [p.driverId, p]));
   const dayPlanOf = new Map(driverPlans.flatMap(p => p.days.map(d => [`${p.driverId}|${d.date}`, d] as const)));
@@ -542,6 +610,7 @@ export function generateFullMonth(
         notes: input.driverNotesMap,
         vehicleBusy,
         driverLastEnd,
+        driverReal: realHeld.byDriver,
         refusals,
         shiftId: `S${nextShift}`,
       });
@@ -662,6 +731,13 @@ export function generateFullMonth(
     tenantId: input.tenantId ?? null,
     base: { lat: input.base.lat, lon: input.base.lon, source: input.baseSource ?? null, label: baseLabel },
     returnToBase: ctx.returnToBase === true,
+    realTrips: input.realTrips ? {
+      trips: input.realTrips.trips.length,
+      driverDays: [...input.realTrips.days.values()].reduce((n, days) => n + days.size, 0),
+      unattributed: input.realTrips.unattributed.length,
+      unreadableAmounts: input.realTrips.unreadableAmounts.length,
+      digest: fnv1a(input.realTrips.trips.map(t => `${t.tripId}|${t.operatingDay}|${t.driverId ?? ''}|${t.plate ?? ''}|${t.startMs ?? ''}|${t.endMs ?? ''}`).join('\n')),
+    } : null,
     runId: '',
   };
   provenance.runId = runIdOf(provenance);
@@ -697,6 +773,7 @@ export function generateFullMonth(
         ...validateFullMonth(month, period, input.driverNotesMap, settings, input.vehicles),
         ...checkDriverShifts(month.shifts, driverPlans, unavailability, opts.minDriverRestMinutes),
         ...validateRides(month, input.base, travel, opts, CALENDAR_SHIFT_LIMITS, provenance.returnToBase),
+        ...checkRealTrips(month, input.realTrips ?? null, opts),
       ],
       decisions,
       routeChecks: checks,
@@ -708,6 +785,7 @@ export function generateFullMonth(
       driverPlans,
       driverOutcomes,
       vehicleUnavailability: [...unavailability],
+      realTrips: input.realTrips ?? null,
     },
   };
 }
@@ -738,7 +816,7 @@ function fnv1a(text: string): string {
 function runIdOf(p: Provenance): string {
   const mm = String(p.month).padStart(2, '0');
   const basis = JSON.stringify([p.generatorVersion, p.tenantId, p.seed, p.year, p.month, p.settings, p.options,
-    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null, p.base, p.returnToBase]);
+    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null, p.base, p.returnToBase, p.realTrips]);
   return `SIM-${p.year}-${mm}-${p.seed}-${fnv1a(basis)}`;
 }
 
@@ -853,6 +931,8 @@ interface DriverShiftArgs {
   notes: Map<string, StructuredNote[]>;
   vehicleBusy: Map<string, Busy[]>;
   driverLastEnd: Map<string, number>;
+  /** The driver's real trips, as instants: rest is kept from them as from a shift. */
+  driverReal: ReadonlyMap<string, readonly Busy[]>;
   refusals: CapacityRefusal[];
   shiftId: string;
 }
@@ -889,8 +969,13 @@ function placeDriverShift(args: DriverShiftArgs): DriverShift {
   };
   if (plan.windowStartMs === null || plan.windowEndMs === null) return refuse('driver_window_unreadable');
   const lengthMs = plan.plannedMinutes * 60_000;
-  const earliest = Math.max(plan.windowStartMs, (args.driverLastEnd.get(driver.id) ?? -Infinity) + opts.minDriverRestMinutes * 60_000);
-  const latestStart = plan.windowEndMs - lengthMs;
+  const restMs = opts.minDriverRestMinutes * 60_000;
+  const { windowStartMs, windowEndMs } = plan;
+  const real = args.driverReal.get(driver.id) ?? [];
+  const earliest = Math.max(windowStartMs, (args.driverLastEnd.get(driver.id) ?? -Infinity) + restMs,
+    ...real.filter(b => b.end <= windowEndMs).map(b => b.end + restMs));
+  const latestEnd = Math.min(windowEndMs, ...real.filter(b => b.start >= windowStartMs).map(b => b.start - restMs));
+  const latestStart = latestEnd - lengthMs;
   if (earliest > latestStart) return refuse('driver_resting');
   const slots = Math.floor((latestStart - earliest) / QUARTER_MS);
   const vehicleGap = opts.minVehicleGapMinutes * 60_000;

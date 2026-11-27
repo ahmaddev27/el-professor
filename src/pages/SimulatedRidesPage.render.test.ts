@@ -18,6 +18,9 @@ import { createFakeSupabase } from '../test-utils/fakeSupabase';
 
 const world = vi.hoisted(() => ({
   noteError: false,
+  /** Round 8 S6: the month's real (imported) trips, and whether reading them fails. */
+  realTrips: [] as unknown[],
+  tripsError: false,
   routerDown: false,
   injectViolation: false,
   generateCalls: 0,
@@ -45,6 +48,7 @@ const FULL_ADDRESS = { street: 'Musterweg', house_number: '7', postal_code: '402
 
 const fake = createFakeSupabase(call => {
   if (call.table === 'driver_notes' && world.noteError) return { data: null, error: { message: 'boom' } };
+  if (call.table === 'fahrtenbuch_trips' && world.tripsError) return { data: null, error: { message: 'boom' } };
   const rows: Record<string, unknown[]> = {
     cars: [
       { id: 'car-1', kennzeichen: 'XX-AA 1', tuev_gueltig_bis: '2027-06-30' },
@@ -57,6 +61,7 @@ const fake = createFakeSupabase(call => {
     })),
     driver_notes: [],
     werkstatt_checks: [],
+    fahrtenbuch_trips: world.realTrips,
   };
   return { data: rows[call.table] ?? [], error: null };
 });
@@ -189,6 +194,8 @@ async function chooseFebruary(renderer: ReactTestRenderer) {
 describe('SimulatedRidesPage, calendar mode', () => {
   beforeEach(() => {
     world.noteError = false;
+    world.realTrips = [];
+    world.tripsError = false;
     world.routerDown = false;
     world.injectViolation = false;
     world.generateCalls = 0;
@@ -328,6 +335,38 @@ describe('SimulatedRidesPage, calendar mode', () => {
     await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
     await settle(() => collect(renderer.root).includes('konnten nicht gelesen werden'));
     expect(collect(renderer.root)).toContain('konnten nicht gelesen werden');
+    expect(world.generateCalls).toBe(0);
+  });
+
+  it('a real trip of the month is reported as kept, and its driver-day is not simulated over', async () => {
+    // Tuesday 10 February 2026, 09:00–09:30 Berlin time, driven by drv-1 in a real import.
+    world.realTrips = [{
+      id: 'real-1', import_id: 'imp-1', trip_date: '2026-02-10', start_at: '2026-02-10T08:00:00Z', end_at: '2026-02-10T08:30:00Z',
+      start_time: '09:00:00', end_time: '09:30:00', original_driver_id: 'drv-1', original_driver_name: 'Fahrer Eins', car_identifier: 'XX-AA 1',
+      route_start: 'Teststraße 1', route_end: 'Teststraße 2', price_amount: '12.40', tip_amount: '0.00', cash_amount: '0.00',
+      online_amount: '12.40', action_amount: '0.00', is_canceled: false, trip_status: 'completed', declined_fee_cents: null,
+      source_row_key: 'k-1', is_simulated: false,
+    }];
+    const renderer = await mount();
+    await chooseFebruary(renderer);
+    const before = fake.calls.length;
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('Erzeugter Kalendermonat'));
+    expect(collect(renderer.root)).toContain('Echte Fahrten unverändert, ihre Fahrertage nicht simuliert: 1 echte Fahrten (IMPORTIERT) unveraendert, 1 Fahrertage nicht simuliert');
+    // Read only, real rows only, around the month; the reader drops a simulated row that still arrives.
+    const trips = fake.calls.slice(before).filter(c => c.table === 'fahrtenbuch_trips');
+    expect(trips.map(c => c.op)).toEqual(['select']);
+    expect(trips[0].filters).toEqual(expect.arrayContaining(['eq:is_simulated', 'gte:trip_date', 'lte:trip_date']));
+    expect(world.generateCalls).toBe(1);
+  });
+
+  it('real trips that cannot be read stop the run: an unread Fahrtenbuch is not an empty one', async () => {
+    world.tripsError = true;
+    const renderer = await mount();
+    await chooseFebruary(renderer);
+    await act(async () => { button(renderer.root, 'Fahrten erzeugen').props.onClick(); });
+    await settle(() => collect(renderer.root).includes('konnten nicht gelesen werden'));
+    expect(collect(renderer.root)).toContain('die echten Fahrten des Monats konnten nicht gelesen werden');
     expect(world.generateCalls).toBe(0);
   });
 

@@ -52,6 +52,7 @@ const CHECK_KEY: Record<VerificationCheck['code'], TranslationKey> = {
   monthly_share: 'simrides.cal.check.code.monthlyShare',
   drivers_planned: 'simrides.cal.check.code.driversPlanned',
   base_configured: 'simrides.cal.check.code.baseConfigured',
+  real_trips_kept: 'simrides.cal.check.code.realTripsKept',
   rides_generated: 'simrides.cal.check.code.ridesGenerated',
 };
 

@@ -31,6 +31,9 @@ import { DEFAULT_CALENDAR_FORM, parseCalendarForm, type CalendarForm, type Calen
 import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type RoutingProvenance } from '../utils/simulatedRides/fullMonth';
 import type { UberMonthImport } from '../utils/simulatedRides/uberImport';
 import { loadUberMonth } from '../utils/simulatedRides/uberImportLoader';
+import { loadRealTripRows } from '../utils/simulatedRides/realTripsLoader';
+import { readRealTrips, type RealTripDriverRef, type RealTripRow } from '../utils/simulatedRides/realTrips';
+import { resolveSettings } from '../utils/simulatedRides/tenantSettings';
 import { readUnavailability, type VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
@@ -93,6 +96,8 @@ interface RunEvents {
   /** Calendar mode only: the cars' unavailability windows and the imported Uber figures (Round 8). */
   unavailability: VehicleUnavailabilityRow[];
   uber: UberMonthImport | null;
+  /** Calendar mode only: the month's real trips and the drivers they name (Round 8, §4). */
+  realTrips: { rows: RealTripRow[]; drivers: RealTripDriverRef[] } | null;
 }
 
 /** The pool a run draws from and the model that times it. `travel` absent is the labelled estimate. */
@@ -307,16 +312,17 @@ export default function SimulatedRidesPage() {
     if (!companyId) throw new Error(t('simrides.error.generic'));
     const { first, last } = monthBounds(year, month);
     try {
-      const [notes, facts, checks, unavailability, uber] = await Promise.all([
+      const [notes, facts, checks, unavailability, uber, realTrips] = await Promise.all([
         loadDriverNotes(companyId, addDays(first, -7)),
         loadDriverPlanningFacts(companyId),
         calendar ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
         calendar ? loadVehicleUnavailability(companyId, addDays(first, -1), addDays(last, 2)) : Promise.resolve([] as VehicleUnavailabilityRow[]),
         calendar ? loadUberMonth(companyId, year, month, supabase) : Promise.resolve(null),
+        calendar ? loadRealTripRows(companyId, year, month, supabase) : Promise.resolve(null),
       ]);
-      return { notes, facts, checks, unavailability, uber };
+      return { notes, facts, checks, unavailability, uber, realTrips };
     } catch (err) {
-      console.error('Fahrten simulieren: reading notes and vehicle facts failed', err);
+      console.error('Fahrten simulieren: reading notes, vehicle facts, Uber figures or real trips failed', err);
       throw new Error(t('simrides.error.events'));
     }
   };
@@ -379,6 +385,12 @@ export default function SimulatedRidesPage() {
       if (!sourcing) return;
       setPhase('generating');
       await nextTick();
+      // Real trips are kept as read and their driver-days are not simulated
+      // over; their operating day is cut the way the month's settings cut it.
+      const cut = resolveSettings(parsed.settings);
+      const realTrips = events.realTrips && cut.ok
+        ? readRealTrips({ ...period, ...events.realTrips, timeZone: cut.settings.timeZone, operatingDayStartHour: cut.settings.operatingDayStartHour })
+        : undefined;
       const outcome = generateFullMonth({
         ...period, base: origin, baseSource: located.source, baseLabel: located.label, pool: sourcing.points, seed,
         vehicles: cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev })),
@@ -398,7 +410,7 @@ export default function SimulatedRidesPage() {
           };
         }),
         driverNotesMap: events.notes, werkstattChecks: events.checks,
-        vehicleUnavailability: readUnavailability(events.unavailability), uber: events.uber ?? undefined,
+        vehicleUnavailability: readUnavailability(events.unavailability), uber: events.uber ?? undefined, realTrips,
         settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
         travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
       });

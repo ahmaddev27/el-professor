@@ -502,6 +502,11 @@ export function sourceSheetRows(result: FullMonthResult, verification: MonthVeri
     ['Betriebssitz Breite', p.base.lat],
     ['Betriebssitz Laenge', p.base.lon],
     ['Rueckkehr zum Betriebssitz am Schichtende', yesNo(p.returnToBase)],
+    // The real trips are records; this file holds the simulation only and names how many it left alone.
+    ['Echte Fahrten im Monat (IMPORTIERT, unveraendert, nicht in dieser Datei)', p.realTrips ? p.realTrips.trips : 'nicht gelesen'],
+    ['Fahrertage mit echten Fahrten (nicht simuliert)', p.realTrips ? p.realTrips.driverDays : 'nicht gelesen'],
+    ['Echte Fahrten ohne eindeutigen Fahrer', p.realTrips ? p.realTrips.unattributed : 'nicht gelesen'],
+    ['Echte Fahrten mit unlesbarem Betrag', p.realTrips ? p.realTrips.unreadableAmounts : 'nicht gelesen'],
     ...settingLines('Einstellung ', p.settings),
     ...settingLines('Option ', p.options),
     ...settingLines('Eingabe ', p.inputs),

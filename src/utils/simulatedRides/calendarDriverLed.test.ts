@@ -12,6 +12,7 @@ import { MAX_DAY_MINUTES } from './driverMonthPlan';
 import { verifyMonth } from './monthVerification';
 import { readUnavailability, type VehicleUnavailabilityRow } from './vehicleAvailability';
 import type { GeoPoint, PoolAddress, SimRide, SimShift } from './types';
+import { noRealTrips } from './realTrips';
 
 /**
  * Round 8, slice S4: the calendar month is led by the drivers. Each driver's
@@ -58,6 +59,7 @@ const input = (over: Partial<FullMonthInput> = {}): FullMonthInput => ({
   driverNotesMap: new Map(),
   seed: 2711,
   shiftsPerVehicleDay: 3,
+  realTrips: noRealTrips(),
   ...over,
 });
 

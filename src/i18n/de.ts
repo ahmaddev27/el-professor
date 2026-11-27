@@ -7341,7 +7341,7 @@ export const de = {
   'simrides.cal.shiftsHint':               '1 bis 3. Die Schichten kommen aus den Fahrern; ein Fahrzeug trägt höchstens so viele am Tag.',
   'simrides.cal.timeZone':                 'Zeitzone',
   'simrides.cal.timeZoneHint':             'IANA-Name, Standard Europe/Berlin.',
-  'simrides.error.events':                 'Notizen, Fahrzeugdaten oder Werkstattprüfungen konnten nicht gelesen werden. Es wurde nichts erzeugt.',
+  'simrides.error.events':                 'Notizen, Fahrzeugdaten, Werkstattprüfungen, die Uber-Zahlen oder die echten Fahrten des Monats konnten nicht gelesen werden. Es wurde nichts erzeugt.',
   'simrides.error.routing.base_unroutable': 'Vom Betriebssitz aus oder dorthin ist keine Route berechenbar. Es wurde nichts erzeugt.',
   'simrides.error.routing.routing_failed': 'Der Routenservice hat keine Strecke berechnet ({detail}). Es wurde nichts erzeugt.',
   'simrides.error.routing.too_few_addresses': 'Nach der Adressprüfung bleiben zu wenige Adressen ({detail}, nötig sind mindestens 8). Es wurde nichts erzeugt.',
@@ -7517,4 +7517,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.check.code.ridesGenerated': 'Mindestens eine abgeschlossene Fahrt erzeugt',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.realTripsKept': 'Echte Fahrten unverändert, ihre Fahrertage nicht simuliert',
 } as const;

@@ -5,6 +5,7 @@ import { generateFullMonth, type FullMonthInput, type FullMonthResult } from '..
 import { haversineKm } from '../../src/utils/simulatedRides/geo';
 import { buildRoutedMatrix, matrixTravelModel, selectRoutingPoints } from '../../src/utils/simulatedRides/travelModel';
 import type { PoolAddress } from '../../src/utils/simulatedRides/types';
+import { noRealTrips } from '../../src/utils/simulatedRides/realTrips';
 
 /**
  * An invented month for the report's tests and for the committed fixture of the
@@ -84,7 +85,7 @@ export async function buildFixtureMonth(o: FixtureOptions): Promise<FullMonthRes
     tuev_gueltig_bis: i === 1 ? `${o.year}-${String(o.month).padStart(2, '0')}-20` : `${o.year + 1}-04-30`,
   }));
   const out = generateFullMonth({
-    year: o.year, month: o.month, base: FIXTURE_BASE, baseSource: 'saved_point', pool, vehicles: plates, drivers: FIXTURE_DRIVERS,
+    year: o.year, month: o.month, base: FIXTURE_BASE, baseSource: 'saved_point', realTrips: noRealTrips(), pool, vehicles: plates, drivers: FIXTURE_DRIVERS,
     driverNotesMap: fixtureNotes(o.year, o.month), seed: o.seed,
     settings: {
       declinedRidesEnabled: true, declinedFeeCents: 600, cancellationFeeEnabled: true, cancellationFeeCents: 600,

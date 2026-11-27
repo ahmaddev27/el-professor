@@ -1,5 +1,5 @@
 import { isShareRateAllowed } from './monthlyRate';
-import { checkDriverShifts, type FullMonthResult } from './fullMonth';
+import { checkDriverShifts, checkRealTrips, type FullMonthResult } from './fullMonth';
 import { MAX_DAY_MINUTES } from './driverMonthPlan';
 import { reconcile } from './monthTotals';
 import { inExportScope } from './revenue';
@@ -41,7 +41,8 @@ export interface VerificationCheck {
     | 'monthly_share'
     | 'drivers_planned'
     | 'base_configured'
-    | 'rides_generated';
+    | 'rides_generated'
+    | 'real_trips_kept';
   /** German, for the screen and the workbook. */
   label: string;
   outcome: CheckOutcome;
@@ -168,6 +169,35 @@ function baseConfigured(result: FullMonthResult): VerificationCheck {
   return check('base_configured', label, 'not_verified', 'Herkunft des Betriebssitzes nicht angegeben (CONFIGURATION_REQUIRED)');
 }
 
+/**
+ * §4 and §12 classes 16 and 17: real trips are carried unchanged and their
+ * driver-days are not simulated over. The month can only claim that when the
+ * real trips were read, every one of them belongs to a named driver and every
+ * amount in them was readable; otherwise it says what it could not see.
+ */
+function realTripsKept(result: FullMonthResult): VerificationCheck {
+  const label = 'Echte Fahrten unveraendert, ihre Fahrertage nicht simuliert';
+  const real = result.realTrips;
+  if (!real) {
+    return check('real_trips_kept', label, 'not_verified', 'echte Fahrten des Monats nicht gelesen - ob ein Fahrertag echt war, ist unbekannt');
+  }
+  const broken = checkRealTrips(result.month, real, result.provenance.options);
+  if (broken.length > 0) return check('real_trips_kept', label, 'failed', `${broken.length} Verstoesse: ${broken.slice(0, 3).join('; ')}`);
+  if (real.unattributed.length > 0) {
+    const names = [...new Set(real.unattributed.map(t => t.driverName || '(ohne Namen)'))];
+    return check('real_trips_kept', label, 'not_verified',
+      `${real.unattributed.length} echte Fahrten keinem Fahrer eindeutig zuzuordnen (${names.slice(0, 3).join(', ')}${names.length > 3 ? ', ...' : ''}): ihr Fahrertag kann simuliert worden sein`);
+  }
+  if (real.unreadableAmounts.length > 0) {
+    return check('real_trips_kept', label, 'not_verified',
+      `${real.unreadableAmounts.length} unlesbare Betraege in echten Fahrten - nicht geschaetzt`);
+  }
+  if (real.trips.length === 0) return check('real_trips_kept', label, 'passed', 'keine echten Fahrten im Monat');
+  const driverDays = [...real.days.values()].reduce((n, days) => n + days.size, 0);
+  return check('real_trips_kept', label, 'passed',
+    `${real.trips.length} echte Fahrten (IMPORTIERT) unveraendert, ${driverDays} Fahrertage nicht simuliert`);
+}
+
 export function verifyMonth(result: FullMonthResult): MonthVerification {
   const exportedDeclined = result.month.rides.filter(inExportScope).filter(r => r.status === 'declined').length;
   const differences = reconcile(result).filter(r => r.partsSum !== r.total);
@@ -191,6 +221,7 @@ export function verifyMonth(result: FullMonthResult): MonthVerification {
     driversPlanned(result),
     baseConfigured(result),
     ridesGenerated(result),
+    realTripsKept(result),
   ];
   const verdict: ExportVerdict = checks.some(c => c.outcome === 'failed')
     ? 'NOT_VALIDATED'

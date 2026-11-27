@@ -7267,7 +7267,7 @@ export const en: PartialDictionary = {
   'simrides.cal.shiftsHint':               '1 to 3. The shifts come from the drivers; a vehicle carries at most this many a day.',
   'simrides.cal.timeZone':                 'Time zone',
   'simrides.cal.timeZoneHint':             'IANA name, default Europe/Berlin.',
-  'simrides.error.events':                 'Notes, vehicle data or workshop checks could not be read. Nothing was generated.',
+  'simrides.error.events':                 'Notes, vehicle data, workshop checks, the Uber figures or the month\'s real trips could not be read. Nothing was generated.',
   'simrides.error.routing.base_unroutable': 'No route can be calculated from or to the base. Nothing was generated.',
   'simrides.error.routing.routing_failed': 'The routing service calculated no route ({detail}). Nothing was generated.',
   'simrides.error.routing.too_few_addresses': 'Too few addresses remain after the check ({detail}, at least 8 are needed). Nothing was generated.',
@@ -7443,4 +7443,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'simrides.cal.check.code.ridesGenerated': 'At least one completed ride generated',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'simrides.cal.check.code.realTripsKept': 'Real trips unchanged, their driver-days not simulated',
 };

@@ -145,6 +145,9 @@ const READER_MODULE: Readonly<Record<string, string | null>> = {
   // Round 8: the imported Uber figures of the month the simulator plans
   // against (income, drivers, partner links), for the same module-less screen.
   'src/utils/simulatedRides/uberImportLoader.ts': null,
+  // Round 8 S6: the month's real Fahrtenbuch trips and the drivers they name,
+  // read so the simulator never plans over a real driver-day. Same screen.
+  'src/utils/simulatedRides/realTripsLoader.ts': null,
 
   // components, whose module is the screen that mounts them
   'src/components/AbrechnungScheduleCard.tsx':             'abrechnung',

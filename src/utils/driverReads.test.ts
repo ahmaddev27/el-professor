@@ -216,6 +216,13 @@ const DRIVER_READS: Record<string, readonly DeclaredRead[]> = {
       why: "Resolves the imported Uber figures of one calendar month to the driver they belong to (Round 8, S2). A record of money already earned: a driver deactivated since still earned that month's figures, and dropping him would leave his rows unattributed. It offers nobody for future work; who is planned is decided by the chooser and the drivers' own planning columns.",
     },
   ],
+  'utils/simulatedRides/realTripsLoader.ts': [
+    {
+      statement: "select('id, name')",
+      kind: 'record',
+      why: "Attributes the month's real (imported) trips to the driver who drove them (Round 8, S6), so that driver-day is never simulated over. A record of work already done: a driver deactivated since still drove those trips, and dropping him would leave them unattributed. It offers nobody for future work.",
+    },
+  ],
   'lib/tripAnalysisClient.ts': [
     {
       statement: "select('id, name, status, planning_min_salary",

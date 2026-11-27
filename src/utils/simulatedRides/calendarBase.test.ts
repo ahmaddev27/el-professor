@@ -5,6 +5,7 @@ import { verifyMonth } from './monthVerification';
 import { emptyDriveSeconds, pickupDriveSeconds } from './repositioning';
 import { ESTIMATE_TRAVEL_MODEL, pointKey, type TravelModel } from './travelModel';
 import type { GeoPoint, PoolAddress, SimRide, SimShift } from './types';
+import { noRealTrips } from './realTrips';
 
 /**
  * Round 8, slice S5 (§3 and §12 classes 6, 7, 8 and 23).
@@ -60,6 +61,8 @@ const input = (over: Partial<FullMonthInput> = {}): FullMonthInput => ({
   seed: 2712,
   shiftsPerVehicleDay: 3,
   travel: ROUTED,
+  // Read, and none: the verdict of these months is about the base, not about unread real trips.
+  realTrips: noRealTrips(),
   ...over,
 });
 
