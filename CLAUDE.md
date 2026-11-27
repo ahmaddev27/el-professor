@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> Keep this file at the repository root — Claude Code only auto-loads `CLAUDE.md` from the project root or `.claude/`. A copy under `Docs/` is not loaded and will silently drift.
+> Keep this file at the repository root — Claude Code only auto-loads `CLAUDE.md` from the project root or `.claude/`. A copy under `Docs/` is not loaded and silently drifts: the last one was months stale when it was deleted on 27.11.2026, so do not make another.
 
 ## Project
 
@@ -71,7 +71,7 @@ These are **characterization tests, not specifications.** They assert what the c
 Two things they already pin down:
 
 - The two holiday tables disagree every year, and the difference is always Easter Sunday: `getGermanNationalHolidays` (clean engine) counts Ostersonntag as a nationwide holiday, `getHolidaysForYear` does not. Ostersonntag is not a statutory holiday in Germany outside Brandenburg, so the clean engine grants a Feiertagszuschlag that is not owed — and since it is also a Sunday, the cumulation described in FINDINGS.md H19 compounds it.
-- **`weekCalculations` is 0-indexed throughout.** January is `0`; `getBusinessMonthRange(4, 2026)` returns the range of **May**. Nothing else in the codebase says so, and a caller passing a 1-indexed month silently reads the wrong month.
+- **`weekCalculations` is 0-indexed throughout.** January is `0`; `getBusinessMonthRange(4, 2026)` returns the range of **May**. Nothing else in the codebase says so, and a caller passing a 1-indexed month silently reads the wrong month. Its SQL twin is the opposite: `get_business_month()` (`20260402065740`, never redefined since) returns `EXTRACT(month …)` of the week's Monday, so April is `4` there and `3` here, and a month handed from one to the other needs the `± 1`.
 
 `vitest.config.ts` pins `TZ=Europe/Berlin`. The payroll code walks local calendar days, so night, Sunday and holiday classification is timezone-dependent and the snapshots only mean anything in the product's own zone.
 
@@ -610,13 +610,19 @@ Deleting it did **not** shrink the bundle — Rollup was already tree-shaking it
 
 ## Repository hazards
 
-- **The docs contradict the code. The code wins.** `Docs/MIGRATION_COMPLETE.md` and `Docs/MYSQL_MIGRATION_GUIDE.md` describe a completed migration to a PHP/MySQL backend that **never happened**. The `backend/` directory and `src/lib/api.ts` they document have since been deleted as dead code; Supabase was always the only backend. `Docs/RLS_FIX_EXPLANATION.md` claims `user_profiles.id` is a `bigint`; the first migration creates it as `uuid`. Confirm every constant, table and RPC name in source before relying on a doc.
+- **The docs contradict the code. The code wins.** The two worst were deleted on 27.11.2026: `Docs/MIGRATION_COMPLETE.md` and `Docs/MYSQL_MIGRATION_GUIDE.md` described a completed migration to a PHP/MySQL backend that **never happened** (Supabase was always the only backend; the `backend/` directory and `src/lib/api.ts` they documented had been deleted as dead code already). The rest of the baseline's Bolt-era documents went the same day, each for a reason the code gave:
+  - `PROJECT_DOCUMENTATION.md` and `Docs/SRS_DOCUMENTATION.md` described a `creator` role, a free trial, OCR through `extract-receipt` and a German-only UI. The code has none of these.
+  - The two business-calendar notes grouped receipts by `date`, not `business_date`.
+  - Three setup guides for the hosted Supabase dashboard: `QUICK_START.md`, `Docs/SALARIES_SETUP_INSTRUCTIONS.md` and `Docs/APPLY_MIGRATION_STEPS.md`.
+
+  What remains still drifts. `Docs/TECHNICAL_REFERENCE.md` predates the self-hosted stack in places: its §5 still lists a `creator` role and its §6 still lists `/super-admin` as the panel. Confirm every constant, table and RPC name in source before relying on a doc.
+- **`Docs/RLS_FIX_EXPLANATION.md` is right about production, and this file used to say otherwise.** It says `user_profiles.id` is a `bigint` beside a `uuid` `user_id`. The first migration (`20250930122526_raspy_cliff.sql`) creates `id uuid`, but production's own `--schema-only` dump, `tests/fixtures/schema.sql`, has `id bigint NOT NULL` — the chain and production disagree, which is the completeness caveat under *Known defects*, and `Docs/migration/04-CHAIN-REPLAY-RESULT.md` says only production settles it. So it was kept when the other two went: compare a profile with `auth.uid()` through `user_id`, never through `id`.
 - **Status documents travel with every change.** `PROGRESS.md` (progress log, Arabic, for the owner), `HANDOFF.md` (where things stand, for whoever picks the work up), the "Project status" section at the top of `README.md` and the progress table in `el-professor-plan.html` are updated in the same PR as each fix or feature. `README.md` used to hold two concatenated copies of itself; the stale second copy was removed on 14.09.2026, and on 15.09.2026 its developer reference (§1–25) moved to `Docs/TECHNICAL_REFERENCE.md`, which still predates the self-hosted stack in places — the code wins.
-- `Docs/` duplicates several root docs byte-for-byte. Editing one leaves the other stale.
-- Root-level `*.sql` fix scripts (`FIX_INCOME_POLICIES.sql`, `fix_admin_role.sql`, `apply_salaries_migration.sql`, …) are **not** part of the migration chain. Only `supabase/migrations/` is schema history — with the completeness caveat above.
+- **One copy of each document.** `Docs/` used to duplicate root docs byte for byte. The last two copies, `Docs/PROJECT_DOCUMENTATION.md` and `Docs/QUICK_START.md`, went with `Docs/CLAUDE.md` on 27.11.2026. Their root originals were deleted the same day, with the other Bolt-era documents, and no file under `Docs/` is identical to a root file now. A second copy goes stale the day the first is edited.
+- **Only `supabase/migrations/` is schema history** — with the completeness caveat above. The twelve root-level `*.sql` fix scripts (`FIX_INCOME_POLICIES.sql`, `fix_admin_role.sql`, `apply_salaries_migration.sql`, …) were never part of the migration chain and were deleted on 27.11.2026: nothing but prose named them, and `apply_salaries_migration.sql` was a byte-identical copy of `20251012100000_create_salaries_system.sql`. They remain in git history.
 - Large files to grep rather than read whole: `HistoricalWorkingHoursWizard.tsx` (11.7k), `StundennachweisPage.tsx` (4.0k), `MonatsplanungStundennachweisPreview.tsx` (3.9k), `historicalWorkingHoursCleanEngine.ts` (2.8k).
 - **A committed hook never runs a script from outside the checkout.** Until 27.11.2026 `.claude/settings.json` registered a `PostToolUse` hook on Write that ran `python3 /tmp/cc-agent/57153190/project/.claude/strip-prose.py`, a path from the machine the codebase was scaffolded on. It never ran anywhere: the path existed on no machine and `|| true` hid the failure. On the shared VPS, though, `/tmp` is world-writable, so whoever created that file would have had code run as the working user on every Write. The hook was removed, with `.claude/strip-prose.py` (which nothing else named, and which would have cut a `.ts`/`.tsx` file's leading lines up to the first one that looked like code), and with them the whole `.claude/settings.json`, which held nothing else. A hook added later names a script inside the repository, never one in `/tmp` or another shared directory.
-- `.bolt/` is leftover Bolt scaffolding. `vite.config.ts.timestamp-*.mjs` files are Vite temp artifacts and are gitignored.
+- `vite.config.ts.timestamp-*.mjs` files are Vite temp artifacts and are gitignored. `.bolt/`, the leftover Bolt scaffolding, was deleted on 27.11.2026.
 
 ## Audit and remediation
 

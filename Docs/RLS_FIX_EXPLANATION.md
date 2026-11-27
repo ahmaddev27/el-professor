@@ -236,7 +236,7 @@ If you want to standardize on UUIDs everywhere:
 
 ## 🎯 Action Items
 
-1. ✅ Use the corrected SQL in `apply_salaries_migration.sql`
+1. ✅ Use the corrected SQL in `supabase/migrations/20251012100000_create_salaries_system.sql` (the root copy `apply_salaries_migration.sql` was deleted on 27.11.2026)
 2. ✅ Run it in Supabase SQL Editor
 3. ✅ Verify success with the included verification queries
 4. ✅ Test admin permissions work correctly
