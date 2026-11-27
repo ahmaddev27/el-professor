@@ -103,9 +103,23 @@ over the glow (§3):**
 | light primary gradient top | `#0b9068` | `#098663` | white is 4.04:1 on the spec's top stop |
 | critical label | `brand-fg` | `critical-fg` (white, both themes) | the dark `brand-fg` is dark green, 3.4:1 on the red |
 
-**Not in stage 1:** the chart series tokens. No stage-1 component draws a chart from them, and the spec's
-orange, violet and grey are under 3:1 on a card, so they are added and measured with the first chart
-that uses them (R1).
+**The chart series came with R1** (the Overview's charts, the first to use them): `chart-1` … `chart-5`
+and `chart-1-soft`, in Tailwind as `chart-1` … `chart-5` and `chart-1-soft`. A series line, bar or slice
+carries meaning apart from its legend, so unlike a tone's dot it must reach 3:1 (SC 1.4.11) on every pane
+a chart sits on — canvas, sheet, raised and overlay — and `tokens.contrast.test.ts` measures all forty
+pairs. Five spec values did not, so each was darkened (light) or lightened (dark) along its own hue to
+just past 3:1, the smallest change that passes:
+
+| token | spec | ours | spec's worst |
+|---|---|---|---|
+| light `chart-1` | `#0e9f6e` | `#0a845b` | 2.27:1 on the canvas |
+| light `chart-3` | `#e0892b` | `#a6641d` | 1.81:1 |
+| light `chart-4` | `#8b7cf0` | `#7366c8` | 2.26:1 |
+| light `chart-5` | `#98a39e` | `#6d7672` | 1.74:1 |
+| dark `chart-5` | `#6f7b76` | `#889791` | 2.19:1 on a card |
+
+`chart-2` and the other four dark series are the spec's values. `chart-1-soft` is the spec's tint and is
+not measured: it is an area's fill under its own line, never a mark alone.
 
 ## 2. The glass recipe, the ambient field, and the fallbacks
 
@@ -313,12 +327,23 @@ primitives alone**, and is checked in the shots.
 
 | batch | screens |
 |---|---|
-| R1 | `OverviewPage`, `LockedFeaturePage` |
+| R1 | `OverviewPage`, `LockedFeaturePage` — **done 27.11.2026** (below) |
 | R2 | `NotesPage`, `WerkstattPage`, `NotificationsPage` |
 | R3 | `AccountPage`; then the OTP block's `ON_LEGACY_SURFACE` pairs retire |
 | R4 | the admin panel: `SuperAdminDashboard`, `CompaniesPage`, `PlatformDirectoriesPage`, `PlatformTeamPage`, `PlatformAuditPage`, `PlatformSettingsPage`, `PlatformPlansPage`, `SubscriptionBillingPage`, `AbnahmeDiagnosticPage` |
 | R5 | the components phase 5 left legacy on purpose: the salary dialogs, the planning and document builders' screen parts (never the documents), the toast, `ConfirmationModal` callers, and `LandingPage` |
 | R6 | retire the legacy tokens once nothing reads them; the document components move their `var(--…)` reads to fixed values first, proved unchanged |
+
+**R1, as built (27.11.2026, branch `design/remake-r1`).**
+
+- **What moved.** Both screens draw from tokens and primitives only. The Overview's style counts went from 187 inline styles and 110 colours to 2 and 0. The two left are a tooltip row's series colour and a ranking bar's width, both data. `LockedFeaturePage` went from 15 and 3 to 0 and 0.
+- **The Overview's colours.** Every series and status keeps its old hue on a token: Umsatz `chart-2`, Gewinn `chart-1`, Gehälter `chart-3`, Kosten `critical`, the four slices of the revenue mix `chart-2/3/4/1`, and the plan tiers `info` / `caution` / `positive`. The profit total is the brand fill when the month made money and `critical-solid` when it did not.
+- **The proof.** `identity-proof.mjs` against `origin/staging`, after a negative control:
+  - The logic regions differ only by the helper components the Overview kept above its main component. These are 196 contiguous old lines, from `DeltaBadge` to `PlanStatusCard`, which are presentation and now sit below the marker.
+  - On the locked page, the difference is the 6 lines of its colour map.
+  - All 157 and all 8 logic calls are carried.
+  - The only handlers lost are the hover painters, 12 on the Overview and 2 on the locked page, which are `hover:` classes now.
+- **Found in the shots.** At 375 px the open-salaries table broke every amount across two lines. Its figures and dates are `whitespace-nowrap` now, and the table scrolls inside a positioned frame.
 
 ## 9. Verification
 

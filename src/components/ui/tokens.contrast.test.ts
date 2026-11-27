@@ -221,6 +221,12 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
     { fg, bg: `${fg}-soft`, min: TEXT },
   ]),
   { fg: 'toast-fg', bg: 'toast', min: TEXT },
+  // R1 (the Overview's charts). A series line, bar or slice carries meaning on
+  // its own, apart from its legend, so unlike a tone's dot it needs 3:1
+  // (SC 1.4.11) on every pane a chart is drawn on.
+  ...['chart-1', 'chart-2', 'chart-3', 'chart-4', 'chart-5'].flatMap(fg =>
+    ['canvas', 'sheet', 'raised', 'overlay'].map(bg => ({ fg, bg, min: NON_TEXT })),
+  ),
 ];
 
 /**

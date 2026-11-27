@@ -132,6 +132,15 @@ td select, th select { max-width: none; }
   --neutral:        79 91 86;     /* #4F5B56 */
   --neutral-soft:   238 241 240;  /* #EEF1F0 */
   --neutral-dot:    152 163 158;  /* #98A39E */
+  /* Chart series (R1). A series is a mark with no word beside it, so each one
+     reaches 3:1 on every pane a chart sits on; tokens.contrast.test.ts measures it. */
+  --chart-1:        10 132 91;    /* #0A845B emerald (spec #0E9F6E is 2.3:1 on the canvas) */
+  --chart-2:        47 111 214;   /* #2F6FD6 blue */
+  --chart-3:        166 100 29;   /* #A6641D orange (spec #E0892B is 1.8:1) */
+  --chart-4:        115 102 200;  /* #7366C8 violet (spec #8B7CF0 is 2.3:1) */
+  --chart-5:        109 118 114;  /* #6D7672 grey (spec #98A39E is 1.7:1) */
+  --chart-1-soft:   14 159 110;   /* series 1 at .14, an area's fill */
+  --chart-1-soft-a: 0.14;
   --amb-1:          16 185 129;   /* the four ambient glows, each at its own alpha */
   --amb-1-a:        0.3;
   --amb-2:          45 212 191;
@@ -223,6 +232,13 @@ td select, th select { max-width: none; }
   --neutral:        181 191 186;  /* #B5BFBA */
   --neutral-soft:   29 37 34;     /* #1D2522 */
   --neutral-dot:    111 123 118;  /* #6F7B76 */
+  --chart-1:        47 191 138;   /* #2FBF8A */
+  --chart-2:        91 156 246;   /* #5B9CF6 */
+  --chart-3:        240 162 74;   /* #F0A24A */
+  --chart-4:        155 141 243;  /* #9B8DF3 */
+  --chart-5:        136 151 145;  /* #889791 (spec #6F7B76 is 2.2:1 on a card) */
+  --chart-1-soft:   47 191 138;
+  --chart-1-soft-a: 0.16;
   --amb-1:          16 185 129;
   --amb-1-a:        0.22;
   --amb-2:          20 184 166;

@@ -70,6 +70,14 @@ export default {
         violet: tone('violet'),
         teal: tone('teal'),
         neutral: tone('neutral'),
+        chart: {
+          1: token('chart-1'),
+          2: token('chart-2'),
+          3: token('chart-3'),
+          4: token('chart-4'),
+          5: token('chart-5'),
+          '1-soft': token('chart-1-soft'),
+        },
       },
       fontFamily: {
         sans,

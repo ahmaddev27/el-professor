@@ -17,6 +17,7 @@ import '../src/index.css';
 import { BATCH3_ROUTES, batch3InitialEntry } from './batch3/routes';
 import { ANALYSIS_ROUTES, analysisInitialEntry } from './analysis/routes';
 import { APPLAYOUT_ROUTES, applayoutInitialEntry } from './applayout/routes';
+import { R1_ROUTES, r1InitialEntry } from './r1/routes';
 import { applyStoredPreferences, scenario } from './scenario';
 
 /**
@@ -46,7 +47,7 @@ createRoot(document.getElementById('root')!).render(
     <LanguageProvider>
       <ThemeProvider>
         <ToastProvider>
-          <MemoryRouter initialEntries={[applayoutInitialEntry() ?? analysisInitialEntry() ?? batch3InitialEntry() ?? ROUTES[scenario.screen]]}>
+          <MemoryRouter initialEntries={[r1InitialEntry() ?? applayoutInitialEntry() ?? analysisInitialEntry() ?? batch3InitialEntry() ?? ROUTES[scenario.screen]]}>
             <Routes>
               <Route path="/" element={<AppLayout isSupportAdmin={false} />}>
                 <Route path="cars" element={<CarsPage />} />
@@ -64,6 +65,8 @@ createRoot(document.getElementById('root')!).render(
                 {ANALYSIS_ROUTES}
                 {/* Phase 5, the frame: the screens that were never converted. */}
                 {APPLAYOUT_ROUTES}
+                {/* Design remake R1: the locked page. */}
+                {R1_ROUTES}
               </Route>
             </Routes>
           </MemoryRouter>

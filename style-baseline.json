@@ -65,10 +65,6 @@
       "style": 5,
       "color": 0
     },
-    "src/components/LockedFeaturePage.tsx": {
-      "style": 15,
-      "color": 3
-    },
     "src/components/ManualSubscriptionModal.tsx": {
       "style": 22,
       "color": 7
@@ -182,8 +178,8 @@
       "color": 1
     },
     "src/pages/OverviewPage.tsx": {
-      "style": 187,
-      "color": 110
+      "style": 2,
+      "color": 0
     },
     "src/pages/PlatformAuditPage.tsx": {
       "style": 49,

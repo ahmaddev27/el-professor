@@ -25,6 +25,8 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
+> **The Glass remake, batch R1 (27.11.2026, branch `design/remake-r1`, PR against `staging`, no migration, look only).** The Overview and the locked-feature page are on the Glass tokens and primitives, and the charts draw from the new series tokens `chart-1` … `chart-5`. Four screens inside the company frame are still legacy (R2, R3). See `Docs/design/remake-v2/PLAN.md` §8.
+>
 > **The Glass remake, stage 1 (27.11.2026, branch `design/remake-v2`, PR against `staging`, no migration, look only; approved by the owner and merged into `staging` on 27.11.2026, **not yet deployed**: no GitHub Actions run while the repository is private).** Emerald replaces the blue, the panes are glass over an ambient glow, and the font is Geist. The tokens, every primitive, both shells and `/design-preview` are moved, and the screens follow in batches. See `Docs/design/remake-v2/PLAN.md`.
 >
 > **A new Uber driver no longer stops the daily pull (26.11.2026, branch `fix/new-drivers-from-uber`, PR #375 against `staging`, two migrations).** The pull links or creates up to five new drivers (`uber_pull_place_unlinked`, active, name only) and then imports the day; a departed namesake is refused, not linked. A new driver's e-mail language defaults to German and the staff number to the company's last + 1 (`drivers_assign_personalnummer`, owner drivers excluded). The Fahrer and Fahrzeuge pages refresh their own data from Reidey without importing earnings.
