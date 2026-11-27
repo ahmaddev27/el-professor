@@ -381,6 +381,7 @@ export const de = {
   'ui.shell.collapseSidebar': 'Seitenleiste einklappen',
   'ui.shell.expandSidebar':   'Seitenleiste ausklappen',
   'ui.shell.mainNavigation':  'Hauptnavigation',
+  'ui.shell.closeNavigation': 'Navigation schließen',
   'ui.shell.openNavigation':  'Navigation öffnen',
   'ui.shell.skipToContent':   'Zum Inhalt springen',
   'ui.table.emptyTitle':      'Keine Einträge',

@@ -6,6 +6,11 @@ import { Button } from './Button';
 import { Sheet, SheetContent, SheetTitle } from './Dialog';
 import { Tooltip } from './Tooltip';
 import { cn } from './cn';
+import {
+  readSidebarCollapsed as readCollapsed,
+  writeSidebarCollapsed as writeCollapsed,
+  SHELL_DESKTOP_QUERY as DESKTOP_QUERY,
+} from './sidebarRail';
 
 /**
  * The application frame: grouped sidebar, top bar, content column.
@@ -49,26 +54,8 @@ export interface AppShellProps {
   children: ReactNode;
 }
 
-const COLLAPSED_STORAGE_KEY = 'ya-shell-collapsed';
-
-/** Tailwind's `lg`, where the fixed sidebar replaces the drawer. */
-const DESKTOP_QUERY = '(min-width: 1024px)';
-
-function readCollapsed(): boolean {
-  try {
-    return localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeCollapsed(collapsed: boolean) {
-  try {
-    localStorage.setItem(COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
-  } catch {
-    // A remembered sidebar width is a convenience; the shell works without it.
-  }
-}
+// The collapse choice and its storage key are shared with both live shells'
+// sidebars, so the preview and the product remember one setting.
 
 function BrandLockup({ collapsed }: { collapsed: boolean }) {
   return (

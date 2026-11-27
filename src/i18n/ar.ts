@@ -363,6 +363,7 @@ export const ar: PartialDictionary = {
   'ui.shell.collapseSidebar': 'طي الشريط الجانبي',
   'ui.shell.expandSidebar': 'توسيع الشريط الجانبي',
   'ui.shell.mainNavigation': 'التنقل الرئيسي',
+  'ui.shell.closeNavigation': 'إغلاق التنقل',
   'ui.shell.openNavigation': 'فتح التنقل',
   'ui.shell.skipToContent': 'الانتقال إلى المحتوى',
   'ui.table.emptyTitle': 'لا توجد إدخالات',

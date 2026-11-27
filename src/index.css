@@ -411,6 +411,15 @@ table { font-variant-numeric: tabular-nums; }
     -webkit-backdrop-filter: blur(6px) saturate(120%);
     backdrop-filter: blur(6px) saturate(120%);
   }
+  /* The collapsed sidebar's tooltip, the spec's `.sb-tip`: strong glass with
+     a lighter blur than a dialog, the hairline ring and a medium shadow. */
+  .glass-tip {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--overlay) / var(--overlay-a));
+    box-shadow: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-md);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+  }
   .glass-toast {
     background-color: rgb(var(--toast) / var(--toast-a));
     color: rgb(var(--toast-fg));

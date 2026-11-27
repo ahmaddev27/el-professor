@@ -308,6 +308,21 @@ dark `line-strong`) fails exactly the four pairs it should.
   and the build flag still keeps them out of production.
 - **No new shell behaviour** — no Ctrl/⌘+B, no stored collapsed state for the company shell. That is
   logic, and stage 1 is look only. It is listed as an open question.
+- **The rail and the gutter (27.11.2026, owner, after a screenshot of `/admin/team` in Arabic):** both
+  live sidebars now collapse to the 68px rail, which overrides the line above for the collapse itself.
+  - One stored choice for every shell: `ya-shell-collapsed`, read and written by
+    `src/components/ui/sidebarRail.tsx`, which `AppShell` now imports instead of its own copy.
+  - The rail applies from `lg` (1024px) up, where our drawer ends; the spec's 961px is its drawer's edge.
+    Width and padding move over .28s with the spec's ease, under `motion-safe`.
+  - In the rail, labels hide, group labels become 1px hairlines (still read out), the brand row stacks,
+    and every item keeps its name as an `aria-label` and as the spec's `.sb-tip` (`.glass-tip`: strong
+    glass, `blur(18px)`, 12.5px/550, 10px beside the item, on the left in RTL, portaled, on our tooltip layer `z-[60]`, under the toasts' 80 — the spec's 1500 is its own scale).
+  - The toggle is a 32px icon button in the brand row with `aria-controls`, `aria-expanded` and a label,
+    and its panel icon mirrors in RTL. The drawer's menu button gained a label and `aria-expanded`.
+  - **Gutter:** the sidebar takes `lg:m-[10px]` (10px on every side). The sheet's column keeps
+    `lg:py-[10px] lg:pe-[10px]`, as the spec's `.main` pads with `padding-inline-start: 0`, so the panes
+    are now 10px apart instead of touching.
+  - Still not built: Ctrl/⌘+B and the counts' corner badges (no item carries a count).
 
 ## 8. Order of work
 

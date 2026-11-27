@@ -10,6 +10,8 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import type { PlatformCapability, PlatformRole } from '../lib/platformAccess';
+import { cn } from './ui';
+import { RailTip, RailTipProvider, SidebarToggle, SHELL_SIDEBAR_ID, useSidebarRail } from './ui/sidebarRail';
 
 interface AdminNavItem {
   path: string;
@@ -72,14 +74,20 @@ const AdminSidebar: React.FC = () => {
   // One look for every sidebar destination, as Sidebar draws the company one:
   // the active entry is a glass chip (NavLink's aria-current drives it), hover
   // is a class. The two imperative hover painters this file had are gone.
+  // The collapsible rail, as in the company sidebar (owner, 27.11.2026):
+  // `rail` is true only on a wide screen with the sidebar collapsed, and every
+  // item then keeps its name as an aria-label and a tooltip.
+  const { collapsed, rail, toggle: toggleCollapsed } = useSidebarRail();
+  const railItemClass = rail ? 'justify-center px-0' : '';
+
   const navItemClass = 'group flex h-9 w-full items-center gap-3 rounded-control border border-transparent px-2.5 text-[13.5px] font-medium text-fg-muted transition-colors hover:bg-raised hover:text-fg aria-[current=page]:border-edge aria-[current=page]:bg-raised aria-[current=page]:text-fg aria-[current=page]:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11';
   const iconClass = 'shrink-0 group-aria-[current=page]:text-brand';
 
-  const SidebarContent = () => (
-    <div className="flex h-full flex-col px-[10px] pb-[10px] pt-[14px]">
+  const sidebarContent = (
+    <div className={cn('flex h-full flex-col pb-[10px] pt-[14px] lg:motion-safe:transition-[padding] lg:motion-safe:duration-[280ms] lg:motion-safe:ease-glass', rail ? 'px-2' : 'px-[10px]')}>
       {/* Identity: the panel's own name under the El-Professor mark, so it is
           always obvious which context is being operated in. */}
-      <div className="flex items-center gap-3 pb-3 ps-[46px] pe-2 lg:ps-1.5">
+      <div className={rail ? 'flex flex-col items-center gap-2 pb-1.5 pt-1.5' : 'flex items-center gap-3 pb-3 ps-[46px] pe-2 lg:ps-1.5'}>
         <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-mark shadow-mark">
           {/* The El-Professor mark, as the owner asked on 28.09.2026. The
               subtitle and the role line below are quiet text since 27.11.2026:
@@ -89,7 +97,7 @@ const AdminSidebar: React.FC = () => {
               that needs attention, like the support-session bar. */}
           <img src="/brand/mark-on-dark.png" alt="" className="h-6 w-6 object-contain" />
         </div>
-        <div className="min-w-0">
+        <div className={rail ? 'hidden' : 'min-w-0 flex-1'}>
           <p className="truncate text-base font-[650] tracking-[-0.02em] text-fg">
             {t('admin.title')}
           </p>
@@ -97,33 +105,38 @@ const AdminSidebar: React.FC = () => {
             {t('admin.subtitle')}
           </p>
         </div>
+        <SidebarToggle collapsed={collapsed} onToggle={toggleCollapsed} />
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto py-2">
+      <nav className={cn('flex-1 space-y-0.5 overflow-y-auto py-2', rail && '[scrollbar-width:none]')}>
         {ADMIN_NAV_ITEMS.filter(item => platformCan(item.requires)).map(item => {
           const Icon = item.icon;
           return (
+            <RailTip key={item.path} rail={rail} label={t(item.labelKey)}>
             <NavLink
-              key={item.path}
               to={item.path}
               end={item.end}
               onClick={() => setIsMobileMenuOpen(false)}
-              className={navItemClass}
+              aria-label={rail ? t(item.labelKey) : undefined}
+              className={cn(navItemClass, railItemClass)}
             >
               <Icon size={18} className={iconClass} />
-              <span>{t(item.labelKey)}</span>
+              <span className={rail ? 'hidden' : 'min-w-0 truncate'}>{t(item.labelKey)}</span>
             </NavLink>
+            </RailTip>
           );
         })}
       </nav>
 
       <div className="space-y-1 border-t border-line pt-2">
-        {profile?.email && (
+        {/* Who is signed in, and as what: text with no room in the rail,
+            where the account item below still leads to the same record. */}
+        {!rail && profile?.email && (
           <p className="truncate px-2.5 pb-1 text-[10px] text-fg-subtle">
             {profile.email}
           </p>
         )}
-        {platformAccess.role && (
+        {!rail && platformAccess.role && (
           <p className="px-2.5 pb-1 text-[10px] font-semibold text-fg-muted">
             {t(ROLE_LABEL_KEYS[platformAccess.role])}
           </p>
@@ -134,21 +147,27 @@ const AdminSidebar: React.FC = () => {
             the copy registered under /admin, not at /mein-konto, which lives in
             the company shell and would surround it with tenant navigation this
             account cannot use. */}
+        <RailTip rail={rail} label={t('admin.nav.account')}>
         <NavLink
           to="/admin/konto"
           onClick={() => setIsMobileMenuOpen(false)}
-          className={navItemClass}
+          aria-label={rail ? t('admin.nav.account') : undefined}
+          className={cn(navItemClass, railItemClass)}
         >
           <UserCog size={18} className={iconClass} />
-          <span>{t('admin.nav.account')}</span>
+          <span className={rail ? 'hidden' : 'min-w-0 truncate'}>{t('admin.nav.account')}</span>
         </NavLink>
+        </RailTip>
+        <RailTip rail={rail} label={t('common.logout')}>
         <button
           onClick={handleLogout}
-          className="flex h-9 w-full items-center gap-3 rounded-control px-2.5 text-[13.5px] font-medium text-critical transition-colors hover:bg-critical-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11"
+          aria-label={rail ? t('common.logout') : undefined}
+          className={cn('flex h-9 w-full items-center gap-3 rounded-control px-2.5 text-[13.5px] font-medium text-critical transition-colors hover:bg-critical-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:h-11', railItemClass)}
         >
           <LogOut size={18} className="shrink-0" />
-          <span>{t('common.logout')}</span>
+          <span className={rail ? 'hidden' : 'min-w-0 truncate'}>{t('common.logout')}</span>
         </button>
+        </RailTip>
       </div>
     </div>
   );
@@ -157,6 +176,9 @@ const AdminSidebar: React.FC = () => {
     <>
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        aria-label={isMobileMenuOpen ? t('ui.shell.closeNavigation') : t('ui.shell.openNavigation')}
+        aria-expanded={isMobileMenuOpen}
+        aria-controls={SHELL_SIDEBAR_ID}
         className="fixed start-4 top-3 z-50 rounded-control border border-line bg-raised p-2 text-fg-muted shadow-raised transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
       >
         {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
@@ -169,12 +191,19 @@ const AdminSidebar: React.FC = () => {
         />
       )}
 
+      {/* `lg:m-[10px]` is the spec's shell gutter: 10 px all round the pane,
+          so 10 px between it and the sheet too (the sheet's column pads only
+          its other three sides, as the spec's `.main` does). The width and
+          padding move over .28 s; the drawer below `lg` slides over .32 s. */}
       <aside
-        className={`glass-drawer fixed start-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-s-0 motion-safe:transition-transform motion-safe:duration-[320ms] motion-safe:ease-glass lg:sticky lg:top-[10px] lg:ms-[10px] lg:mt-[10px] lg:h-[calc(100dvh-20px)] lg:w-[254px] lg:shrink-0 lg:translate-x-0 lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised ${
-          isMobileMenuOpen ? 'translate-x-0' : 'max-lg:-translate-x-full max-lg:rtl:translate-x-full'
-        }`}
+        id={SHELL_SIDEBAR_ID}
+        className={cn(
+          'glass-drawer fixed start-0 top-0 z-40 h-full w-[286px] transform rounded-none border-y-0 border-s-0 max-lg:motion-safe:transition-transform max-lg:motion-safe:duration-[320ms] max-lg:motion-safe:ease-glass lg:sticky lg:top-[10px] lg:m-[10px] lg:h-[calc(100dvh-20px)] lg:shrink-0 lg:translate-x-0 lg:overflow-x-hidden lg:rounded-pane lg:border lg:bg-sheet lg:shadow-raised lg:motion-safe:transition-[width] lg:motion-safe:duration-[280ms] lg:motion-safe:ease-glass',
+          rail ? 'lg:w-[68px]' : 'lg:w-[254px]',
+          isMobileMenuOpen ? 'translate-x-0' : 'max-lg:-translate-x-full max-lg:rtl:translate-x-full',
+        )}
       >
-        <SidebarContent />
+        <RailTipProvider>{sidebarContent}</RailTipProvider>
       </aside>
     </>
   );
