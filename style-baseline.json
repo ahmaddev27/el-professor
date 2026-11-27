@@ -9,14 +9,6 @@
       "style": 101,
       "color": 41
     },
-    "src/components/AdminLayout.tsx": {
-      "style": 14,
-      "color": 0
-    },
-    "src/components/AdminSidebar.tsx": {
-      "style": 19,
-      "color": 3
-    },
     "src/components/AssignSubscriptionModal.tsx": {
       "style": 22,
       "color": 3
@@ -121,14 +113,6 @@
       "style": 20,
       "color": 1
     },
-    "src/components/Sidebar.tsx": {
-      "style": 0,
-      "color": 1
-    },
-    "src/components/SupportReasonModal.tsx": {
-      "style": 0,
-      "color": 1
-    },
     "src/components/TrinkgeldQuittungModal.tsx": {
       "style": 87,
       "color": 37
@@ -160,10 +144,6 @@
     "src/components/settings/settingsEditorKit.tsx": {
       "style": 12,
       "color": 0
-    },
-    "src/components/ui/Dialog.tsx": {
-      "style": 0,
-      "color": 1
     },
     "src/contexts/ToastContext.tsx": {
       "style": 5,

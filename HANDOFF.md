@@ -2,7 +2,37 @@
 
 Last updated: **27.11.2026**
 
-- **27.11.2026 (latest) — files nothing needs are gone** (branch `chore/remove-unneeded-files`, PR against `staging`; no migration, no product code; **no CI ran**, because the repository is private and Actions refuses every job for billing).
+- **27.11.2026 (latest) — the Glass remake, stage 1** (PR #380, `design/remake-v2` into `staging`; no migration, look only). **The owner approved the look on 27.11 and the PR is merged into `staging`, but staging is NOT deployed**: no GitHub Actions run while the repository is private, so the deploy job never started. Since CI ran nothing, the full `npm run build` was run here on the PR head instead, under `nice`, in 127 s. The typecheck count is 165 and the style counts are 4670 inline styles and 2607 colours in 57 files, all at their baselines. 336 test files passed and 2 were skipped; 7417 tests passed and 7 were skipped. `vite build` and the mail templates also passed. The screen batches R1–R6 are next. Plan and decisions: `Docs/design/remake-v2/PLAN.md`.
+  - **What moved:**
+    - The tokens (`src/index.css` `@tokens light|dark`) and `tailwind.config.js`.
+    - Geist and Geist Mono, self-hosted in `src/assets/fonts/`.
+    - The ambient glow and grain, on `body::before` and `body::after`.
+    - The glass classes (`glass-card|sheet|strong|drawer|topbar|scrim|toast`).
+    - Every primitive in `src/components/ui`.
+    - `AppLayout` and its parts, `AdminLayout` and `AdminSidebar`, which are off inline styles now.
+    - `/design-preview`.
+  - **The legacy tokens are remapped to the emerald family, not kept.** The owner retired the blue, and no document reads a CSS variable: measured, every document sheet paints fixed colours.
+    - About 20 legacy files hard-code blue hex; they go with their batch.
+    - The Abrechnung share card pins Barlow in its own style object, because it is an image.
+  - **Translucent tokens** carry `--<name>-a`. Tailwind maps them as `rgb(var(--x) / calc(var(--x-a, 1) * <alpha-value>))`.
+    - `tokens.contrast.test.ts` composites every pair over the canvas, each glow's peak, the sheet, a card and a dialog over the scrim, and takes the worst case.
+    - Four spec values failed and were tuned (light `fg-subtle`, dark `fg-muted`/`fg-subtle`/`line-strong`). The table is in PLAN.md §1.
+    - The destructive fill takes `critical-fg`, never `brand-fg`, which is dark green in dark mode.
+    - `ON_LEGACY_PAGE` is gone: nothing paints `--bg-base` any more.
+  - **Two traps, both handled in CSS — keep them:**
+    - **The sheet and the topbar blur through a `::before` layer, never on the element.** A `backdrop-filter` makes an element the containing block of every `position: fixed` descendant, so legacy inline dialogs would open inside the content sheet, and UserMenu's click-outside layer would shrink to the topbar. The glow and the grain sit at z −3 and −2 so the layer (−1) blurs them.
+    - **`.page-settle` fills `backwards`.** A transform left in effect has the same containing-block effect.
+    - **Dialogs, menus and the drawer keep the blur on the element**, so a legacy `fixed inset-0` modal must never be rendered *inside* a design-system `DialogContent` or `SheetContent`: it would open inside that box. Today none is. `SalaryDetailsModal` and `MonatsplanungAppliedRuns` hold both kinds, and render their legacy modals outside the content. The pseudo-element trick is not used there, because a scrolling pane's `::before` covers only its first screen.
+  - **Checks:**
+    - ui and design-preview vitest: 354 passed.
+    - Typecheck ratchet: at its baseline of 165.
+    - Style ratchet: 33 inline styles and 6 colours lower; baseline updated.
+    - Identity proof against `HEAD` over the eight shell files: logic identical. AdminSidebar's only losses are its hover painters and inline-style constant, and the agent's negative control fired.
+    - Not run: the full build and the full test suite; both wait on the owner.
+  - **Shots:** `Docs/design/remake-v2/<batch>/{before,after}/`, at 1440 and at 375 on a touch phone, light and dark, from the harness.
+    - `/design-preview` is in `Docs/design/remake-v2/design-preview/after/`. Its before is the approved prototype set in `Docs/design/prototype/`. These are viewport shots, because AppShell scrolls inside its own pane.
+    - **Read the full-page shots knowing one artefact:** Chrome's full-page capture paints a `position: fixed` layer over the first viewport only. Below 900px (or 812 on the phone) the glow is therefore missing and the canvas reads darker, which shows as a band at the bottom of a long dark page. In a browser the glow follows the viewport.
+- **27.11.2026 — files nothing needs are gone** (branch `chore/remove-unneeded-files`, PR against `staging`; no migration, no product code; **no CI ran**, because the repository is private and Actions refuses every job for billing).
   - **Deleted, 26 files, in two passes.** First pass, 19 files:
     - `Docs/CLAUDE.md`, the stale copy that was not loaded.
     - `Docs/PROJECT_DOCUMENTATION.md` and `Docs/QUICK_START.md`, byte-identical to the root files, which went in the second pass. No other `Docs/` file is identical to a root file (compared by blob hash over every tracked file).

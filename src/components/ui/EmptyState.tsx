@@ -16,13 +16,13 @@ export function EmptyState({ icon: Icon, title, description, action, size = 'md'
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center px-6 text-center font-ui',
-        size === 'md' ? 'py-14' : 'py-9',
+        'flex flex-col items-center justify-center px-5 text-center font-ui',
+        size === 'md' ? 'py-11' : 'py-8',
         className,
       )}
     >
       {Icon ? (
-        <div className="mb-4 flex size-11 items-center justify-center rounded-surface bg-sunken text-fg-subtle">
+        <div className="mb-4 flex size-12 items-center justify-center rounded-[14px] bg-sunken shadow-hi text-fg-subtle">
           <Icon aria-hidden className="size-5" />
         </div>
       ) : null}

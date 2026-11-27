@@ -3,15 +3,18 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from './cn';
 
 export const badgeVariants = cva(
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 font-ui text-xs font-semibold [&_svg]:size-3.5 [&_svg]:shrink-0',
+  'inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2 font-ui text-xs font-[550] before:size-1.5 before:shrink-0 before:rounded-full [&:has(svg)]:before:hidden [&_svg]:size-3.5 [&_svg]:shrink-0',
   {
     variants: {
       tone: {
-        neutral: 'bg-sunken text-fg-muted',
-        brand: 'bg-brand-soft text-brand-text',
-        positive: 'bg-positive-soft text-positive',
-        caution: 'bg-caution-soft text-caution',
-        critical: 'bg-critical-soft text-critical',
+        neutral: 'bg-neutral-soft text-neutral before:bg-neutral-dot',
+        brand: 'bg-brand-soft text-brand-text before:bg-brand',
+        positive: 'bg-positive-soft text-positive before:bg-positive-dot',
+        caution: 'bg-caution-soft text-caution before:bg-caution-dot',
+        critical: 'bg-critical-soft text-critical before:bg-critical-dot',
+        info: 'bg-info-soft text-info before:bg-info-dot',
+        violet: 'bg-violet-soft text-violet before:bg-violet-dot',
+        teal: 'bg-teal-soft text-teal before:bg-teal-dot',
       },
     },
     defaultVariants: { tone: 'neutral' },

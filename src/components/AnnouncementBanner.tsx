@@ -51,8 +51,8 @@ function rememberDismissal(a: Announcement): void {
 // This item also renders inside the platform panel, which is still the legacy
 // AdminLayout: the tokens are global CSS variables, so it draws the same there.
 const TONE_STYLE: Record<Announcement['tone'], { box: string; text: string; Icon: React.ElementType }> = {
-  info:    { box: 'border-brand/20 bg-brand-soft',     text: 'text-brand-text', Icon: Info },
-  warning: { box: 'border-caution/20 bg-caution-soft', text: 'text-caution',    Icon: AlertTriangle },
+  info:    { box: 'border-brand/20 bg-brand-soft shadow-hi',     text: 'text-brand-text', Icon: Info },
+  warning: { box: 'border-caution/20 bg-caution-soft shadow-hi', text: 'text-caution',    Icon: AlertTriangle },
 };
 
 /** One announcement, as a tenant sees it. The settings screen's preview renders the same. */

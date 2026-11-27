@@ -262,7 +262,7 @@ const SetPasswordPage: React.FC = () => {
 
   if (checkingSession) {
     return (
-      <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center bg-canvas font-ui">
+      <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center font-ui">
         <div aria-hidden className="size-10 rounded-full border-2 border-line border-b-brand motion-safe:animate-spin" />
       </main>
     );
