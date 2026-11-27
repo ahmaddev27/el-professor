@@ -155,7 +155,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)' }} className="w-full max-w-md">
         <div style={{ borderBottom: '1px solid var(--border)' }} className="p-6 flex items-center justify-between">
-          <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold flex items-center space-x-2">
+          <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold flex items-center space-x-2 rtl:space-x-reverse">
             <DollarSign size={24} />
             <span>{payment ? t('sal.payment.editTitle') : t('sal.payment.newTitle')}</span>
           </h2>
@@ -228,14 +228,14 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </label>
             <div className="space-y-2">
               <div className="relative">
-                <DollarSign style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
+                <DollarSign style={{ color: 'var(--text-tertiary)', position: 'absolute', insetInlineStart: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
                   value={formData.amount}
                   onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem', opacity: fieldLock === 'none' ? 1 : 0.6 }}
+                  style={{ ...inputStyle, paddingInlineStart: '2.25rem', opacity: fieldLock === 'none' ? 1 : 0.6 }}
                   placeholder="0.00"
                   disabled={loading || fieldLock !== 'none'}
                   readOnly={fieldLock !== 'none'}
@@ -262,12 +262,12 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               {t('sal.payment.date')} *
             </label>
             <div className="relative">
-              <Calendar style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
+              <Calendar style={{ color: 'var(--text-tertiary)', position: 'absolute', insetInlineStart: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
               <input
                 type="date"
                 value={formData.payment_date}
                 onChange={(e) => setFormData({ ...formData, payment_date: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem' }}
+                style={{ ...inputStyle, paddingInlineStart: '2.25rem' }}
                 disabled={loading}
                 required
               />
@@ -282,11 +282,11 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               {t('common.description')}
             </label>
             <div className="relative">
-              <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
+              <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', insetInlineStart: '0.75rem', top: '0.75rem' }} size={18} />
               <textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
+                style={{ ...inputStyle, paddingInlineStart: '2.25rem', resize: 'vertical' }}
                 placeholder={t('sal.payment.descriptionPlaceholder')}
                 rows={3}
                 disabled={loading}
@@ -294,7 +294,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4">
+          <div className="flex justify-end space-x-3 rtl:space-x-reverse pt-4">
             <button
               type="button"
               onClick={onClose}
@@ -311,7 +311,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
               onMouseEnter={e => { if (!loading && !blocked) e.currentTarget.style.background = 'var(--accent-hover)'; }}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-              className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center space-x-2 rtl:space-x-reverse disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save size={20} />
               <span>{loading ? t('common.saving') : t('common.save')}</span>

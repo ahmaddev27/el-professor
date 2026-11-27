@@ -997,7 +997,7 @@ export function AbrechnungPage() {
         header: t('common.driver'),
         value: item => item.driver_name,
         sortable: true,
-        className: 'pl-3 pr-1 sm:px-4',
+        className: 'ps-3 pe-1 sm:px-4',
         cell: row => {
           // Widened to the union, where `in` narrows; a type parameter does not.
           const item: WeeklyAbrechnung | MonthlyAbrechnung = row;
@@ -1007,7 +1007,7 @@ export function AbrechnungPage() {
           return 'week_count' in item ? (
             <span className="font-medium">
               {item.driver_name}
-              <span className="ml-2 whitespace-nowrap text-xs font-normal text-fg-subtle">
+              <span className="ms-2 whitespace-nowrap text-xs font-normal text-fg-subtle">
                 ({item.week_count} {item.week_count === 1 ? t('common.week') : t('common.weeks')})
               </span>
               {phoneStatus}
@@ -1027,7 +1027,7 @@ export function AbrechnungPage() {
         id: 'barZurueck',
         header: t('abr.col.barZurueck'),
         kind: 'currency',
-        className: 'pl-1 pr-1 sm:px-4',
+        className: 'ps-1 pe-1 sm:px-4',
         value: item => Number(item.bar_zuruck),
         sortable: true,
         cell: item => barZurueck(Number(item.bar_zuruck)),
@@ -1048,7 +1048,7 @@ export function AbrechnungPage() {
         id: 'handoverStatus',
         header: t('abr.handover.col.status'),
         hideBelow: 'sm',
-        className: 'pl-2 pr-3 sm:px-4',
+        className: 'ps-2 pe-3 sm:px-4',
         value: item => handoverStateOf(item).status,
         cell: item => statusBadge(handoverStateOf(item)),
       },
@@ -1245,7 +1245,7 @@ export function AbrechnungPage() {
             {hint ? <p className="text-xs text-fg-muted">{hint}</p> : null}
           </div>
         </div>
-        <p className={cn('ml-auto shrink-0 text-xl font-semibold tabular-nums', text)}>{amount}</p>
+        <p className={cn('ms-auto shrink-0 text-xl font-semibold tabular-nums', text)}>{amount}</p>
       </div>
     );
   };
@@ -1499,6 +1499,7 @@ export function AbrechnungPage() {
       {detailModalData && (
         <div
           ref={shareableCardRef}
+          dir="ltr" lang="de"
           style={{
             position: 'fixed', left: '-9999px', top: 0, zIndex: -1,
             background: isDark ? '#0d1117' : '#ffffff',

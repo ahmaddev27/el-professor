@@ -277,7 +277,7 @@ function WillDelete({ preview }: { preview: UndoPreview }) {
   return (
     <section className="grid gap-1.5">
       <h3 className="text-sm font-semibold text-fg">{t('import.undo.willDelete')}</h3>
-      <ul className="list-disc space-y-1 pl-5 text-sm text-fg-muted">
+      <ul className="list-disc space-y-1 ps-5 text-sm text-fg-muted">
         <li>
           {income.rows === 0
             ? t('import.undo.noIncome')
@@ -306,7 +306,7 @@ function WillKeep({ preview }: { preview: UndoPreview }) {
   return (
     <section className="grid gap-1.5">
       <h3 className="text-sm font-semibold text-fg">{t('import.undo.willKeep')}</h3>
-      <ul className="list-disc space-y-1 pl-5 text-sm text-fg-muted">
+      <ul className="list-disc space-y-1 ps-5 text-sm text-fg-muted">
         <li>{t('import.undo.keepHand', { count: String(preview.handTypedRows) })}</li>
         {preview.drivers.keep.map(row => <KeptRow key={row.id} row={row} t={t} />)}
         {preview.cars.keep.map(row => <KeptRow key={row.id} row={row} t={t} />)}

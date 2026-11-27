@@ -78,7 +78,7 @@ const ForgotPasswordPage: React.FC = () => {
       subtitle={challenge ? challenge.email : t('forgot.subtitle')}
       footer={
         <Link to="/login" className={authQuietLinkClass}>
-          <ArrowLeft size={14} aria-hidden="true" />
+          <ArrowLeft size={14} aria-hidden="true" className="rtl:-scale-x-100" />
           {t('forgot.backToLogin')}
         </Link>
       }
@@ -99,7 +99,7 @@ const ForgotPasswordPage: React.FC = () => {
           {error && <NoticeBox tone="error" announce>{formatOtpMessage(error, t, tPlural)}</NoticeBox>}
 
           <Field label={t('forgot.emailLabel')} id="forgot-email">
-            <div className="relative">
+            <div className="relative" dir="ltr">
               <Mail aria-hidden className={authFieldIconClass} />
               <Input
                 id="forgot-email"

@@ -12,7 +12,7 @@ import { cn } from './cn';
 const scrimClass = 'glass-scrim motion-safe:data-[state=open]:animate-ui-fade-in';
 
 const closeButtonClass = [
-  'absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-tight text-fg-subtle transition-colors [@media(pointer:coarse)]:right-2 [@media(pointer:coarse)]:top-2 [@media(pointer:coarse)]:size-10',
+  'absolute end-3 top-3 inline-flex size-8 items-center justify-center rounded-tight text-fg-subtle transition-colors [@media(pointer:coarse)]:end-2 [@media(pointer:coarse)]:top-2 [@media(pointer:coarse)]:size-10',
   'hover:bg-sunken hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
 ].join(' ');
 
@@ -56,7 +56,7 @@ export const DialogContent = forwardRef<
 DialogContent.displayName = 'DialogContent';
 
 export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('grid gap-1.5 pr-8', className)} {...props} />;
+  return <div className={cn('grid gap-1.5 pe-8', className)} {...props} />;
 }
 
 export function DialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
@@ -88,8 +88,8 @@ const sheetVariants = cva(
       side: {
         // Below the staging banner when there is one; see EnvironmentBanner.
         right:
-          'bottom-0 right-0 top-[var(--env-banner-height,0px)] w-full border-l sm:max-w-md motion-safe:data-[state=open]:animate-ui-slide-in-right',
-        left: 'bottom-0 left-0 top-[var(--env-banner-height,0px)] w-[min(18rem,calc(100vw-3rem))] border-r motion-safe:data-[state=open]:animate-ui-slide-in-left',
+          'bottom-0 end-0 top-[var(--env-banner-height,0px)] w-full border-s sm:max-w-md motion-safe:data-[state=open]:animate-ui-slide-in-right motion-safe:data-[state=open]:rtl:animate-ui-slide-in-left',
+        left: 'bottom-0 start-0 top-[var(--env-banner-height,0px)] w-[min(18rem,calc(100vw-3rem))] border-e motion-safe:data-[state=open]:animate-ui-slide-in-left motion-safe:data-[state=open]:rtl:animate-ui-slide-in-right',
         bottom:
           'inset-x-0 bottom-0 max-h-[90dvh] rounded-t-pane border-t motion-safe:data-[state=open]:animate-ui-slide-in-bottom',
       },
@@ -117,7 +117,7 @@ export const SheetContent = forwardRef<
 SheetContent.displayName = 'SheetContent';
 
 export function SheetHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('grid gap-1 border-b border-line px-6 py-5 pr-14', className)} {...props} />;
+  return <div className={cn('grid gap-1 border-b border-line px-6 py-5 pe-14', className)} {...props} />;
 }
 
 export function SheetBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {

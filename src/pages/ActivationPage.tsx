@@ -194,8 +194,8 @@ const ActivationPage: React.FC = () => {
     <div className="mx-auto grid max-w-lg grid-cols-1 gap-5 py-4 font-ui">
 
       {/* Back button */}
-      <Button variant="ghost" size="sm" onClick={() => navigate('/billing')} className="-ml-2 justify-self-start">
-        <ArrowLeft aria-hidden />
+      <Button variant="ghost" size="sm" onClick={() => navigate('/billing')} className="-ms-2 justify-self-start">
+        <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
         {t('activation.backToBilling')}
       </Button>
 

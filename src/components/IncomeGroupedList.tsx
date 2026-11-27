@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
-import type { TranslationKey } from '../i18n';
+import { wordLocale, type Language, type TranslationKey } from '../i18n';
 import {
   driversOfMonth,
   driversOfWeek,
@@ -35,9 +35,9 @@ const MONTH_KEYS: readonly TranslationKey[] = [
 ];
 
 /** 'Di.' / 'Tue', display only, from the ISO date so no time zone moves it. */
-function weekdayShort(iso: string, language: string): string {
+function weekdayShort(iso: string, language: Language): string {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'de-DE', { weekday: 'short', timeZone: 'UTC' })
+  return new Intl.DateTimeFormat(wordLocale(language), { weekday: 'short', timeZone: 'UTC' })
     .format(new Date(Date.UTC(y!, m! - 1, d!)));
 }
 
@@ -54,7 +54,7 @@ interface Entry {
 
 // Summe is always a column; the four parts are columns from lg up and sit
 // under the name below it, so a phone never scrolls sideways.
-const CELL = 'px-3 py-2 text-right align-middle tabular-nums whitespace-nowrap';
+const CELL = 'px-3 py-2 text-end align-middle tabular-nums whitespace-nowrap';
 const PART_CELL = `${CELL} hidden text-fg-muted lg:table-cell`;
 
 /**
@@ -149,20 +149,20 @@ export function IncomeGroupedList({ rows, level }: Props) {
     return (
       <tbody key={entry.key} className="border-t border-border">
         <tr className={isOpen ? 'bg-sunken' : undefined}>
-          <th scope="row" className="p-0 text-left font-normal">
+          <th scope="row" className="p-0 text-start font-normal">
             <button
               type="button"
               aria-expanded={isOpen}
               aria-controls={panelId}
               onClick={() => toggle(entry.key)}
               className={
-                'flex min-h-12 w-full items-start gap-2 px-3 py-2 text-left [@media(pointer:coarse)]:min-h-14 '
+                'flex min-h-12 w-full items-start gap-2 px-3 py-2 text-start [@media(pointer:coarse)]:min-h-14 '
                 + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus'
               }
             >
               <ChevronRight
                 aria-hidden
-                className={`mt-1 size-4 shrink-0 text-fg-subtle transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                className={`mt-1 size-4 shrink-0 text-fg-subtle transition-transform ${isOpen ? 'rotate-90' : 'rtl:-scale-x-100'}`}
               />
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="font-medium text-fg">{entry.title}</span>
@@ -179,7 +179,7 @@ export function IncomeGroupedList({ rows, level }: Props) {
         </tr>
         {isOpen && entry.drivers.map((driver, i) => (
           <tr key={driver.driverName} id={i === 0 ? panelId : undefined} className="bg-sunken">
-            <td className="py-2 pl-9 pr-3 align-top">
+            <td className="py-2 ps-9 pe-3 align-top">
               <span className="flex flex-col gap-0.5">
                 <span className="text-sm text-fg">{driver.driverName}</span>
                 {parts(driver.totals)}
@@ -198,7 +198,7 @@ export function IncomeGroupedList({ rows, level }: Props) {
         <caption className="sr-only">{t('inc.group.viewLabel')}</caption>
         <thead>
           <tr className="text-xs text-fg-muted">
-            <th scope="col" className="px-3 py-2 text-left font-medium">{t(LEVEL_KEY[level])}</th>
+            <th scope="col" className="px-3 py-2 text-start font-medium">{t(LEVEL_KEY[level])}</th>
             <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.nettoFahrpreis')}</th>
             <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.typeAktionen')}</th>
             <th scope="col" className={`${PART_CELL} font-medium`}>{t('inc.typeTrinkgeld')}</th>

@@ -568,7 +568,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
               <thead>
                 <tr className="bg-wash border-b border-line">
                   {TABLE_HEADER_KEYS.map(key => (
-                    <th key={key} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap text-fg-subtle">{t(key)}</th>
+                    <th key={key} className="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap text-fg-subtle">{t(key)}</th>
                   ))}
                 </tr>
               </thead>
@@ -592,12 +592,12 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                           ••{c.code_last4 ?? '????'}
                         </span>
                         {isHidden && (
-                          <Badge tone="neutral" className="ml-1">
+                          <Badge tone="neutral" className="ms-1">
                             {t('codes.badge.hidden')}
                           </Badge>
                         )}
                         {isDeleted && (
-                          <Badge tone="critical" className="ml-1">
+                          <Badge tone="critical" className="ms-1">
                             {t('codes.badge.deleted')}
                           </Badge>
                         )}
@@ -856,7 +856,7 @@ function GeneratedCodeModal({
         onPointerDownOutside={e => e.preventDefault()}
         onEscapeKeyDown={e => e.preventDefault()}
       >
-        <DialogHeader className="items-center pr-0">
+        <DialogHeader className="items-center pe-0">
           <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-brand/25 bg-brand-soft">
             <KeyRound className="text-brand-text" size={24} />
           </div>
@@ -873,7 +873,7 @@ function GeneratedCodeModal({
           </div>
         </div>
 
-        <Alert tone="caution" icon={Clock} className="text-left">
+        <Alert tone="caution" icon={Clock} className="text-start">
           <p className="text-xs">
             {t('codes.generated.validityBefore')}{' '}
             <strong className="text-caution">{t('codes.generated.validityStrong')}</strong>{' '}
@@ -947,7 +947,7 @@ function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => 
           {rows.map(([label, value]) => (
             <div key={label} className="flex justify-between gap-3 py-1.5 text-sm border-b border-line">
               <span className="text-fg-subtle">{label}</span>
-              <span className="text-right font-medium text-fg">{value}</span>
+              <span className="text-end font-medium text-fg">{value}</span>
             </div>
           ))}
         </div>

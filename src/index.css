@@ -5,6 +5,14 @@
 @import '@fontsource/barlow/600.css';
 @import '@fontsource/barlow/700.css';
 
+/* IBM Plex Sans Arabic (SIL OFL 1.1), the Arabic UI's face. Only the Arabic-subset files are imported
+   (the 4 weights the UI uses); the package's own Latin and Cyrillic subsets are not, so nothing but Arabic
+   glyphs ever comes from it. Self-hosted through @fontsource, nothing loads from a font CDN. */
+@import '@fontsource/ibm-plex-sans-arabic/arabic-400.css';
+@import '@fontsource/ibm-plex-sans-arabic/arabic-500.css';
+@import '@fontsource/ibm-plex-sans-arabic/arabic-600.css';
+@import '@fontsource/ibm-plex-sans-arabic/arabic-700.css';
+
 /* Geist and Geist Mono, self-hosted (src/assets/fonts, SIL OFL 1.1): the design remake's faces
    (Docs/design/remake-v2/PLAN.md §4). Nothing loads from a font CDN, and a browser downloads a face
    only when it has to render one. */

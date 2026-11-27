@@ -199,7 +199,7 @@ function PlansEditor() {
       />
 
       <Alert tone="neutral">
-        <ul className="list-disc space-y-1 pl-4 text-fg-muted">
+        <ul className="list-disc space-y-1 ps-4 text-fg-muted">
           <li>{t('admin.plans.rule.monotonic')}</li>
           <li>{t('admin.plans.rule.fixedPlans')}</li>
           <li>{t('admin.plans.rule.perCar')}</li>
@@ -266,7 +266,7 @@ function PlansEditor() {
             const slug = derivedMinPlan(rows, key);
             return (
               <li key={key} className="flex items-center justify-between gap-3 py-2 text-[13px]">
-                <span className="text-fg">{featureLabel(key)} <code className="ml-1 text-[11px] text-fg-subtle">{key}</code></span>
+                <span className="text-fg">{featureLabel(key)} <code className="ms-1 text-[11px] text-fg-subtle">{key}</code></span>
                 <span className={slug ? 'font-medium text-fg' : 'font-medium text-critical'}>
                   {slug ? planLabel(slug) : t('admin.plans.derived.none')}
                 </span>

@@ -110,6 +110,7 @@ const A4Document: React.FC<{
 
   return (
     <div
+      dir="ltr" lang="de"
       style={{
         width: w,
         minHeight: forExport ? 1123 : undefined,

@@ -915,14 +915,14 @@ export function NotesPage() {
       <div className="glass-card space-y-4 rounded-surface p-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="relative min-w-0">
-            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-fg-subtle" />
+            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-5 -translate-y-1/2 text-fg-subtle" />
             <Input
               type="text"
               placeholder={t('notes.searchPlaceholder')}
               aria-label={t('notes.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="ps-10"
             />
           </div>
           <NativeSelect
@@ -966,7 +966,7 @@ export function NotesPage() {
             <div className="flex flex-wrap items-center gap-3 rounded-tile bg-sunken p-3">
               <Button variant="secondary" size="icon" onClick={() => handleMonthChange('prev')}
                 aria-label={t('notes.prevMonth')}
-              ><ChevronLeft aria-hidden /></Button>
+              ><ChevronLeft aria-hidden className="rtl:-scale-x-100" /></Button>
               <div className="min-w-[140px] text-center">
                 <div className="text-sm font-semibold text-fg">
                   {selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
@@ -974,7 +974,7 @@ export function NotesPage() {
               </div>
               <Button variant="secondary" size="icon" onClick={() => handleMonthChange('next')}
                 aria-label={t('notes.nextMonth')}
-              ><ChevronRight aria-hidden /></Button>
+              ><ChevronRight aria-hidden className="rtl:-scale-x-100" /></Button>
               <Button variant="secondary"
                 onClick={() => { setSelectedMonth(new Date()); setSelectedWeek(getWeekNumberForDate(new Date())); }}
               >{t('common.today')}</Button>
@@ -1055,7 +1055,7 @@ export function NotesPage() {
                     </Badge>
                   )}
                 </div>
-                {mayEdit && <div className="ml-2 flex shrink-0 gap-2">
+                {mayEdit && <div className="ms-2 flex shrink-0 gap-2">
                   <Button variant="ghost" size="icon-sm" onClick={() => handleEdit(note)}
                     aria-label={t('common.edit')} className="text-brand-text hover:bg-brand-soft hover:text-brand-text">
                     <Edit2 aria-hidden />

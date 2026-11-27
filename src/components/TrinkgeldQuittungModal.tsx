@@ -119,7 +119,7 @@ const A4Document: React.FC<A4DocProps> = ({ data, settings, forExport = false })
   };
 
   return (
-    <div style={sheet}>
+    <div dir="ltr" lang="de" style={sheet}>
 
       {/* ── 1. Header: company name + address ── */}
       <div style={{ marginBottom: '32px' }}>
@@ -706,7 +706,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
               >
                 {loading
                   ? <><RefreshCw size={14} className="animate-spin" /> {t('a4.tqLoading')}</>
-                  : <>{t('a4.tqGeneratePreview')} <ChevronRight size={14} /></>}
+                  : <>{t('a4.tqGeneratePreview')} <ChevronRight size={14} className="rtl:-scale-x-100" /></>}
               </button>
             </>
           ) : (
@@ -718,7 +718,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
               >
-                <ArrowLeft size={14} /> {t('common.back')}
+                <ArrowLeft size={14} className="rtl:-scale-x-100" /> {t('common.back')}
               </button>
               <button
                 onClick={handleExport}

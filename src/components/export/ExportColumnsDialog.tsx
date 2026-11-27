@@ -76,7 +76,7 @@ function SheetList({ sheet, state, heading, onChange }: SheetListProps) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="min-w-0 text-sm font-semibold text-fg">{heading}</h3>
         <div className="flex flex-wrap items-center gap-1">
-          <span className="mr-2 text-xs tabular-nums text-fg-subtle">
+          <span className="me-2 text-xs tabular-nums text-fg-subtle">
             {t('export.columns.count', { selected: selectedCount, total: state.order.length })}
           </span>
           <Button type="button" variant="ghost" size="sm" onClick={() => setAll(true)}>{t('export.columns.selectAll')}</Button>
@@ -147,7 +147,7 @@ export function ExportColumnsDialog({ sheets, onCancel, onConfirm }: ExportColum
           <DialogTitle>{t('export.columns.title')}</DialogTitle>
           <DialogDescription>{t('export.columns.description')}</DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[55dvh] grid-cols-1 gap-5 overflow-y-auto pr-1">
+        <div className="grid max-h-[55dvh] grid-cols-1 gap-5 overflow-y-auto pe-1">
           {sheets.map((sheet, i) => (
             <SheetList
               key={sheet.tableId}

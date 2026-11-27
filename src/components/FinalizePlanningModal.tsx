@@ -1132,7 +1132,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                       </div>
                     )}
                     {c.ok && c.detail !== DETAIL_OK && (
-                      <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{c.detail}</span>
+                      <span className="ms-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{c.detail}</span>
                     )}
                     {/* Suggestions for failed checks */}
                     {!c.ok && suggestions && (
@@ -1148,7 +1148,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                           }
                         </button>
                         {expandedSuggestions.has(i) && (
-                          <ul className="mt-1.5 space-y-1 pl-3 border-l-2" style={{ borderColor: 'rgba(37,99,235,0.3)' }}>
+                          <ul className="mt-1.5 space-y-1 ps-3 border-s-2" style={{ borderColor: 'rgba(37,99,235,0.3)' }}>
                             {suggestions.map((suggestionKey, si) => (
                               <li key={suggestionKey} className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                                 <span className="font-semibold" style={{ color: '#2563eb' }}>

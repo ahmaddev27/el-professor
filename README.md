@@ -21,9 +21,11 @@
 
 A multi-tenant SaaS for German taxi and Mietwagen fleets: import the monthly Fahrtenbuch (the XLSX ride log), assign drivers to vehicle blocks, and produce the Stundennachweise and a corrected Fahrtenbuch that reconcile with the Steuerberater's figures. Around that it keeps drivers, vehicles, Belege, salaries, the weekly Abrechnung and the cash till.
 
-A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Functions); there is no application server of our own. The UI is German and English with German as the fallback, and generated documents, domain terms, money and dates stay German (`41,47`, `DD.MM.YYYY`). Since 23.09.2026 every screen is converted: the engines name a dictionary key beside their German text (PR #112) and the last visible labels, buttons and empty states go through `t(...)`.
+A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Functions); there is no application server of our own. The UI is German, English and Arabic (right-to-left) with German as the fallback, and generated documents, domain terms, money and dates stay German (`41,47`, `DD.MM.YYYY`). Since 23.09.2026 every screen is converted: the engines name a dictionary key beside their German text (PR #112) and the last visible labels, buttons and empty states go through `t(...)`.
 
 ## Status
+
+> **Arabic, the third UI language (27.11.2026, branch `feat/arabic-ui`, one PR against `staging`, no migration).** All 7117 keys are translated into Modern Standard Arabic against a closed glossary (a German domain term in brackets at its first mention), the whole UI mirrors right-to-left, and the generated documents, the legal pages, money, dates and digits stay German. `src/rtlClasses.test.ts` keeps physical direction classes out of `src/` and `rtl:` classes out of the documents. The owner reviews the wording. See CLAUDE.md, *Language*.
 
 > **The Glass remake, batches R3 and R4 (27.11.2026, branch `design/remake-r3`, one PR against `staging`, no migration, look only).** Mein Konto and the whole platform panel are on the Glass tokens and primitives, so no screen inside either frame is legacy any more. What is left is R5 (the salary dialogs, the planning and document builders' screen parts, `ConfirmationModal`'s callers, the landing page) and R6 (retiring the legacy tokens). See `Docs/design/remake-v2/PLAN.md` §8.
 >

@@ -100,7 +100,7 @@ export function applyStoredPreferences(): void {
   const lang = params.get('lang');
   try {
     if (theme === 'light' || theme === 'dark') localStorage.setItem('ya-theme', theme);
-    if (lang === 'de' || lang === 'en') localStorage.setItem('ya-language', lang);
+    if (lang === 'de' || lang === 'en' || lang === 'ar') localStorage.setItem('ya-language', lang);
   } catch {
     // Storage blocked: the app's defaults (dark, German) apply.
   }

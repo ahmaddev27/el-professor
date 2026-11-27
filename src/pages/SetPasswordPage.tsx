@@ -321,7 +321,7 @@ const SetPasswordPage: React.FC = () => {
                   type={show ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className={cn(authFieldWithIconClass, 'pr-11')}
+                  className={cn(authFieldWithIconClass, 'pe-11')}
                   placeholder={t('setpw.minChars')}
                   autoComplete="new-password"
                   required
@@ -333,7 +333,7 @@ const SetPasswordPage: React.FC = () => {
                   size="icon-sm"
                   onClick={() => setShow(!show)}
                   aria-label={show ? t('auth.hidePassword') : t('auth.showPassword')}
-                  className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                  className="absolute end-0.5 top-1/2 -translate-y-1/2"
                 >
                   {show ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
                 </Button>

@@ -415,7 +415,7 @@ const OverviewPage: React.FC = () => {
               </p>
             </div>
           </div>
-          <ChevronRight size={18} aria-hidden className="shrink-0 text-caution motion-safe:transition-transform group-hover:translate-x-1" />
+          <ChevronRight size={18} aria-hidden className="shrink-0 text-caution motion-safe:transition-transform group-hover:translate-x-1 rtl:group-hover:-translate-x-1 rtl:-scale-x-100" />
         </Link>
       )}
 
@@ -539,7 +539,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/gehaelter" className={`flex items-center gap-1 rounded-chip text-xs font-semibold text-critical [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                  {t('overview.alerts.manage')} <ChevronRight size={12} aria-hidden />
+                  {t('overview.alerts.manage')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
                 </Link>
               </div>
             )}
@@ -557,7 +557,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/gehaelter" className={`flex items-center gap-1 rounded-chip text-xs font-semibold text-caution [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                  {t('overview.alerts.manage')} <ChevronRight size={12} aria-hidden />
+                  {t('overview.alerts.manage')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
                 </Link>
               </div>
             )}
@@ -582,7 +582,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/werkstatt" className={`flex items-center gap-1 rounded-chip text-xs font-semibold text-critical [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                  {t('nav.werkstatt')} <ChevronRight size={12} aria-hidden />
+                  {t('nav.werkstatt')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
                 </Link>
               </div>
             )}
@@ -600,7 +600,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/cars" className={`flex items-center gap-1 rounded-chip text-xs font-semibold text-critical [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                  {t('nav.cars')} <ChevronRight size={12} aria-hidden />
+                  {t('nav.cars')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
                 </Link>
               </div>
             )}
@@ -618,7 +618,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/cars" className={`flex items-center gap-1 rounded-chip text-xs font-semibold text-caution [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                  {t('nav.cars')} <ChevronRight size={12} aria-hidden />
+                  {t('nav.cars')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
                 </Link>
               </div>
             )}
@@ -634,7 +634,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/benutzer" className={`flex items-center gap-1 rounded-chip text-xs font-semibold text-brand-text [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                  {t('nav.users')} <ChevronRight size={12} aria-hidden />
+                  {t('nav.users')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
                 </Link>
               </div>
             )}
@@ -651,7 +651,7 @@ const OverviewPage: React.FC = () => {
           {!panelOn('trend') ? (
             <ModuleOffNotice moduleKeys={panelOff('trend')} />
           ) : (
-          <ResponsiveContainer width="100%" height={220}>
+          <div dir="ltr"><ResponsiveContainer width="100%" height={220}>
             <AreaChart data={trendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="gU" x1="0" y1="0" x2="0" y2="1">
@@ -673,7 +673,7 @@ const OverviewPage: React.FC = () => {
               <Area type="monotone" dataKey={t('overview.load.gehaelter')} stroke={C.gehaelter} strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
               <Area type="monotone" dataKey={t('overview.chart.kosten')}   stroke={C.kosten}   strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
             </AreaChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer></div>
           )}
         </Panel>
 
@@ -685,7 +685,7 @@ const OverviewPage: React.FC = () => {
             <ModuleOffNotice moduleKeys={panelOff('revenueMix')} />
           ) : revenueComposition.length > 0 ? (
             <>
-              <ResponsiveContainer width="100%" height={140}>
+              <div dir="ltr"><ResponsiveContainer width="100%" height={140}>
                 <PieChart>
                   <Pie data={revenueComposition} cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3} dataKey="value">
                     {revenueComposition.map((d, i) => <Cell key={i} fill={pieVar(d.nameKey)} />)}
@@ -700,7 +700,7 @@ const OverviewPage: React.FC = () => {
                     }}
                   />
                 </PieChart>
-              </ResponsiveContainer>
+              </ResponsiveContainer></div>
               <div className="mt-3 space-y-2">
                 {revenueComposition.map(d => {
                   const total = revenueComposition.reduce((s, x) => s + x.value, 0);
@@ -713,7 +713,7 @@ const OverviewPage: React.FC = () => {
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="font-semibold text-fg">{fmt(d.value)} €</span>
-                        <span className="w-7 text-right text-fg-subtle">{pct}%</span>
+                        <span className="w-7 text-end text-fg-subtle">{pct}%</span>
                       </div>
                     </div>
                   );
@@ -781,7 +781,7 @@ const OverviewPage: React.FC = () => {
                 </div>
                 <span className="text-sm font-semibold">{t('overview.kpi.firmengewinn')}</span>
               </div>
-              <div className="shrink-0 text-right">
+              <div className="shrink-0 text-end">
                 <p className="text-lg font-semibold tabular-nums">
                   {currentMetrics.profit >= 0 ? '+' : ''}{fmt(currentMetrics.profit)} €
                 </p>
@@ -883,7 +883,7 @@ const OverviewPage: React.FC = () => {
               className={`group flex items-center justify-between gap-3 rounded-tile bg-sunken p-3 motion-safe:transition-colors hover:bg-brand-soft [@media(pointer:coarse)]:min-h-11 ${FOCUS_RING}`}
             >
               <span className="text-sm font-medium text-fg">{t('overview.cash.detailed')}</span>
-              <ChevronRight size={16} aria-hidden className="shrink-0 text-fg-subtle" />
+              <ChevronRight size={16} aria-hidden className="shrink-0 text-fg-subtle rtl:-scale-x-100" />
             </Link>
           </div>
           )}
@@ -899,7 +899,7 @@ const OverviewPage: React.FC = () => {
             // drove nothing.
             <ModuleOffNotice moduleKeys={panelOff('driverChart')} />
           ) : driverPerformance.filter(d => d.umsatz > 0).length > 0 ? (
-            <ResponsiveContainer width="100%" height={Math.max(180, driverPerformance.filter(d => d.umsatz > 0).length * 40)}>
+            <div dir="ltr"><ResponsiveContainer width="100%" height={Math.max(180, driverPerformance.filter(d => d.umsatz > 0).length * 40)}>
               <BarChart
                 /* The series key is the <Bar> dataKey, so both come from the same
                    t(...) call: hard-coded German keys left every bar empty in the
@@ -922,7 +922,7 @@ const OverviewPage: React.FC = () => {
                 <Bar dataKey={t('overview.drivers.gehalt')}   fill={C.gehaelter} radius={[0, 3, 3, 0]} barSize={8} />
                 <Bar dataKey={t('overview.drivers.ausgaben')} fill={C.kosten}   radius={[0, 3, 3, 0]} barSize={8} />
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer></div>
           ) : (
             <div className="flex h-40 items-center justify-center text-sm text-fg-subtle">
               {t('overview.drivers.noneMonth')}
@@ -958,7 +958,7 @@ const OverviewPage: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="mb-1 flex items-center justify-between">
                           <p className="truncate text-xs font-semibold text-fg">{driver.name}</p>
-                          <span className={`ml-1 shrink-0 text-xs font-semibold tabular-nums ${driver.netContribution >= 0 ? 'text-positive' : 'text-critical'}`}>
+                          <span className={`ms-1 shrink-0 text-xs font-semibold tabular-nums ${driver.netContribution >= 0 ? 'text-positive' : 'text-critical'}`}>
                             {driver.netContribution >= 0 ? '+' : ''}{fmt(driver.netContribution)} €
                           </span>
                         </div>
@@ -1032,7 +1032,7 @@ const OverviewPage: React.FC = () => {
             title={t('overview.fleet.title')} sub={t('overview.fleet.sub')} icon={<Wrench size={16} aria-hidden />}
             action={
               <Link to="/werkstatt" className={`flex items-center gap-1 rounded-chip text-xs font-medium text-brand-text [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                {t('common.all')} <ChevronRight size={12} aria-hidden />
+                {t('common.all')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
               </Link>
             }
           />
@@ -1101,7 +1101,7 @@ const OverviewPage: React.FC = () => {
             title={t('overview.salaries.title')} sub={t('overview.salaries.sub')} icon={<CreditCard size={16} aria-hidden />}
             action={
               <Link to="/gehaelter" className={`flex items-center gap-1 rounded-chip text-xs font-medium text-brand-text [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                {t('overview.alerts.manage')} <ChevronRight size={12} aria-hidden />
+                {t('overview.alerts.manage')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
               </Link>
             }
           />
@@ -1112,7 +1112,7 @@ const OverviewPage: React.FC = () => {
               <thead>
                 <tr className="border-b border-line bg-wash">
                   {[t('overview.salaries.driver'), t('overview.salaries.due'), t('overview.salaries.paid'), t('overview.salaries.open'), t('overview.salaries.status')].map((h, i) => (
-                    <th key={h} className={`px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-subtle ${i === 0 ? 'text-left' : i === 4 ? 'text-center' : 'text-right'}`}>{h}</th>
+                    <th key={h} className={`px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-subtle ${i === 0 ? 'text-start' : i === 4 ? 'text-center' : 'text-end'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1135,9 +1135,9 @@ const OverviewPage: React.FC = () => {
                         </div>
                       </div>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium text-fg">{fmt(alert.amountDue)} €</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium text-positive">{fmt(alert.amountPaid)} €</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-critical">{fmt(alert.remaining)} €</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-end font-medium text-fg">{fmt(alert.amountDue)} €</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-end font-medium text-positive">{fmt(alert.amountPaid)} €</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-end font-semibold text-critical">{fmt(alert.remaining)} €</td>
                     <td className="px-3 py-2.5 text-center">
                       <span
                         className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -1155,7 +1155,7 @@ const OverviewPage: React.FC = () => {
               <tfoot>
                 <tr className="border-t-2 border-line-strong">
                   <td className="px-3 py-2.5 font-semibold text-fg" colSpan={3}>{t('overview.salaries.totalOpen')}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-critical">{fmt(totalOpenSalary)} €</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-end font-semibold text-critical">{fmt(totalOpenSalary)} €</td>
                   <td />
                 </tr>
               </tfoot>
@@ -1171,7 +1171,7 @@ const OverviewPage: React.FC = () => {
             title={t('overview.receipts.title')} sub={t('overview.receipts.sub')} icon={<ReceiptIcon size={16} aria-hidden />}
             action={
               <Link to="/belege" className={`flex items-center gap-1 rounded-chip text-xs font-medium text-brand-text [@media(pointer:coarse)]:min-h-10 ${FOCUS_RING}`}>
-                {t('common.all')} <ChevronRight size={12} aria-hidden />
+                {t('common.all')} <ChevronRight size={12} aria-hidden className="rtl:-scale-x-100" />
               </Link>
             }
           />
@@ -1197,7 +1197,7 @@ const OverviewPage: React.FC = () => {
                     <p className="truncate text-sm font-semibold text-fg">{r.receiptNumber}</p>
                     <p className="truncate text-xs text-fg-subtle">{r.description || r.driverName}</p>
                   </div>
-                  <div className="shrink-0 text-right tabular-nums">
+                  <div className="shrink-0 text-end tabular-nums">
                     {r.expense > 0 && <p className="text-sm font-semibold text-critical">-{r.expense.toFixed(2)} €</p>}
                     <p className="text-xs text-fg-subtle">{format(new Date(r.date), 'dd.MM.yyyy')}</p>
                   </div>
@@ -1228,7 +1228,7 @@ const OverviewPage: React.FC = () => {
                   <p className="text-sm font-semibold text-fg">{item.title}</p>
                   <p className="text-xs text-fg-subtle">{item.sub}</p>
                 </div>
-                <ChevronRight size={16} aria-hidden className="shrink-0 text-fg-subtle" />
+                <ChevronRight size={16} aria-hidden className="shrink-0 text-fg-subtle rtl:-scale-x-100" />
               </Link>
             ))}
           </div>

@@ -75,7 +75,7 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
   const row = (label: string, value: string | React.ReactNode) => (
     <div className="flex justify-between gap-4 border-b border-line py-2.5">
       <span className="text-sm text-fg-subtle">{label}</span>
-      <span className="text-right text-sm font-medium text-fg">{value}</span>
+      <span className="text-end text-sm font-medium text-fg">{value}</span>
     </div>
   );
 

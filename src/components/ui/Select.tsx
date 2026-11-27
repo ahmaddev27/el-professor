@@ -29,7 +29,7 @@ export const SelectTrigger = forwardRef<
       ref={ref}
       className={cn(
         controlFrameClass,
-        'flex items-center justify-between gap-2 text-left data-[placeholder]:text-fg-subtle [&>span]:truncate',
+        'flex items-center justify-between gap-2 text-start data-[placeholder]:text-fg-subtle [&>span]:truncate',
         className,
       )}
       {...props}
@@ -74,13 +74,13 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex h-[34px] cursor-default select-none items-center rounded-tight pl-8 pr-3 text-[13px] outline-none [@media(pointer:coarse)]:h-11',
+      'relative flex h-[34px] cursor-default select-none items-center rounded-tight ps-8 pe-3 text-[13px] outline-none [@media(pointer:coarse)]:h-11',
       'data-[highlighted]:bg-sunken data-[state=checked]:font-semibold data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     {...props}
   >
-    <span className="absolute left-2 flex size-4 items-center justify-center">
+    <span className="absolute start-2 flex size-4 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
         <Check aria-hidden className="size-4 text-brand-text" />
       </SelectPrimitive.ItemIndicator>

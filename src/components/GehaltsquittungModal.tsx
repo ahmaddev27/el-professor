@@ -329,7 +329,7 @@ function SelectStep({ flow }: { flow: GehaltsquittungFlow }) {
         </DialogClose>
         <Button onClick={flow.goToAmount} disabled={!flow.canContinue} loading={flow.balance.status === 'loading'}>
           {t('gq.next')}
-          <ChevronRight aria-hidden />
+          <ChevronRight aria-hidden className="rtl:-scale-x-100" />
         </Button>
       </DialogFooter>
     </>
@@ -435,7 +435,7 @@ function AmountStep({ flow }: { flow: GehaltsquittungFlow }) {
           </DialogClose>
         ) : (
           <Button variant="secondary" onClick={flow.goBack}>
-            <ArrowLeft aria-hidden />
+            <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
             {t('common.back')}
           </Button>
         )}
@@ -444,7 +444,7 @@ function AmountStep({ flow }: { flow: GehaltsquittungFlow }) {
           disabled={flow.alreadyPaid || !balanceFigures || flow.overlap !== null || flow.salaryMissing}
         >
           {t('gq.toPreview')}
-          <ChevronRight aria-hidden />
+          <ChevronRight aria-hidden className="rtl:-scale-x-100" />
         </Button>
       </DialogFooter>
     </>
@@ -644,7 +644,7 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
 
       <DialogFooter>
         <Button variant="secondary" onClick={flow.goBack} disabled={flow.sending || uncertain || flow.conflict}>
-          <ArrowLeft aria-hidden />
+          <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
           {t('common.back')}
         </Button>
         {flow.conflict ? (

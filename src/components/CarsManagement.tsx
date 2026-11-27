@@ -294,7 +294,7 @@ export default function CarsManagement() {
       // At 375 px the plate, the status and both row actions share 335 px; with
       // the table's standard padding the delete button fell off the edge (the
       // approved prototype has the same clipping). Tighter only on a phone.
-      className: 'pl-3 pr-1 sm:px-4',
+      className: 'ps-3 pe-1 sm:px-4',
     },
     {
       id: 'drivers',
@@ -323,7 +323,7 @@ export default function CarsManagement() {
       value: car => getTuevStatus(car.tuev_gueltig_bis).daysLeft,
       sortable: true,
       cell: car => <TuevStatusCell info={getTuevStatus(car.tuev_gueltig_bis)} />,
-      className: 'pl-2 pr-0 sm:px-4',
+      className: 'ps-2 pe-0 sm:px-4',
     },
     { id: 'lastHu', header: t('fleet.lastHu'), kind: 'date', value: car => car.letzte_hu, sortable: true, hideBelow: 'lg' },
   ];

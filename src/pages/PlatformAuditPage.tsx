@@ -408,7 +408,7 @@ const PlatformAuditPage: React.FC = () => {
   );
 };
 
-const THEAD_CELL = 'whitespace-nowrap px-5 py-3.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle';
+const THEAD_CELL = 'whitespace-nowrap px-5 py-3.5 text-start text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-subtle';
 
 /** An outcome is a word and an icon: ok, refused, failed, or only attempted. */
 const OUTCOME_TONES: Record<string, { tone: 'positive' | 'critical' | 'caution'; icon: LucideIcon }> = {
@@ -471,7 +471,7 @@ const Row: React.FC<{ row: AuditRow; expanded: boolean; onToggle: () => void }> 
         <td className="px-5 py-3 text-xs text-fg-subtle">
           {row.company_name ?? EMPTY_CELL}
         </td>
-        <td className="px-5 py-3 text-right">
+        <td className="px-5 py-3 text-end">
           {hasDetail && (
             <button onClick={onToggle} className="inline-flex items-center justify-center rounded-tight p-1.5 text-fg-subtle hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
               title={t('admin.audit.details')}>

@@ -385,7 +385,7 @@ export default function BargeldbestandPage() {
   const balancePositive = totals.balanceCents >= 0;
 
   const columns: DataTableColumn<CashLedgerEntry>[] = [
-    { id: 'date', header: t('common.date'), kind: 'date', value: entry => entry.date, sortable: true, className: 'pl-3 pr-2 sm:px-4' },
+    { id: 'date', header: t('common.date'), kind: 'date', value: entry => entry.date, sortable: true, className: 'ps-3 pe-2 sm:px-4' },
     {
       id: 'type',
       header: t('fleet.typeColumn'),
@@ -423,7 +423,7 @@ export default function BargeldbestandPage() {
       id: 'amount',
       header: t('common.amount'),
       kind: 'currency',
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
       cell: entry => (
         <span className={cn('font-semibold', entry.direction === 'in' ? 'text-positive' : 'text-critical')}>
           {entry.direction === 'in' ? '+' : '-'}

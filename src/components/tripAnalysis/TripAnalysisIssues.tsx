@@ -99,7 +99,7 @@ export function TripAnalysisIssues({ issues, driverNames, onShowTrips, singleDri
       header: t('ta.col.finding'),
       value: issue => t(ISSUE_TYPE_KEYS[issue.type]),
       sortable: true,
-      className: 'pl-3 pr-2 sm:px-4',
+      className: 'ps-3 pe-2 sm:px-4',
       cell: issue => {
         const detail = issueDetail(t, issue);
         return (
@@ -151,7 +151,7 @@ export function TripAnalysisIssues({ issues, driverNames, onShowTrips, singleDri
     {
       id: 'evidence',
       header: t('ta.col.evidence'),
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
       cell: issue =>
         issue.tripIds.length === 0 ? (
           <span className="text-fg-subtle">—</span>

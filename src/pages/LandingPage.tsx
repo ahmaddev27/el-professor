@@ -213,7 +213,7 @@ const HeroDashboard: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: 10 }}>
           <AlertTriangle size={11} style={{ color: '#fbbf24', flexShrink: 0 }} />
           <span style={{ fontSize: 9, color: 'rgba(251,191,36,0.8)' }}>{t('landing.mock.alert')}</span>
-          <span style={{ marginLeft: 'auto', fontSize: 9, color: '#fbbf24', fontWeight: 700 }}>{t('landing.mock.alertAction')}</span>
+          <span style={{ marginInlineStart: 'auto', fontSize: 9, color: '#fbbf24', fontWeight: 700 }}>{t('landing.mock.alertAction')}</span>
         </div>
       </div>
     </div>
@@ -437,14 +437,14 @@ const AbrechnungPanel: React.FC = () => {
       { name: 'Stefan B.', umsatz: '1.960 €', lohn: '784 €', status: t('landing.mock.statusOpen'), color: '#fbbf24' },
     ].map((r, i) => (
       <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-        <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg,#06b6d4,#818cf8)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#fff', marginRight: 10, flexShrink: 0 }}>
+        <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg,#06b6d4,#818cf8)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#fff', marginInlineEnd: 10, flexShrink: 0 }}>
           {r.name.charAt(0)}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>{r.name}</div>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>{t('landing.mock.kpiRevenue')} {r.umsatz}</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
+        <div style={{ textAlign: 'end' }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{r.lohn}</div>
           <div style={{ fontSize: 9, fontWeight: 700, color: r.color }}>{r.status}</div>
         </div>
@@ -505,7 +505,7 @@ const FuhrparkPanel: React.FC = () => {
       { kz: 'SG-GH 3456', mod: 'Mercedes Vito', km: '154.300', status: 'OK', c: '#34d399' },
     ].map((v, i) => (
       <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '7px 0', borderBottom: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-        <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 10, flexShrink: 0 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginInlineEnd: 10, flexShrink: 0 }}>
           <Car size={13} style={{ color: 'rgba(255,255,255,0.4)' }} />
         </div>
         <div style={{ flex: 1 }}>
@@ -905,7 +905,7 @@ const LandingPage: React.FC = () => {
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 52px rgba(6,182,212,0.55)'; (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 32px rgba(6,182,212,0.35)'; (e.currentTarget as HTMLElement).style.transform = 'none'; }}
                 >
-                  {t('landing.hero.ctaPrimary')} <ArrowRight size={15} />
+                  {t('landing.hero.ctaPrimary')} <ArrowRight size={15} className="rtl:-scale-x-100" />
                 </Link>
                 <a href="#features" style={{
                   display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -1236,7 +1236,7 @@ const LandingPage: React.FC = () => {
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 60px rgba(6,182,212,0.6)'; (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 40px rgba(6,182,212,0.4)'; (e.currentTarget as HTMLElement).style.transform = 'none'; }}
               >
-                {t('landing.cta.primary')} <ArrowRight size={15} />
+                {t('landing.cta.primary')} <ArrowRight size={15} className="rtl:-scale-x-100" />
               </Link>
               <a href="#features" style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,

@@ -59,8 +59,8 @@ const Toggle: React.FC<{
   size?: 'sm' | 'md';
 }> = ({ checked, onChange, disabled, size = 'md' }) => {
   const w = size === 'sm' ? 'w-8 h-4' : 'w-11 h-6';
-  const knob = size === 'sm' ? 'w-3 h-3 top-0.5 left-0.5' : 'w-5 h-5 top-0.5 left-0.5';
-  const translate = size === 'sm' ? 'translate-x-4' : 'translate-x-5';
+  const knob = size === 'sm' ? 'w-3 h-3 top-0.5 start-0.5' : 'w-5 h-5 top-0.5 start-0.5';
+  const translate = size === 'sm' ? 'translate-x-4 rtl:-translate-x-4' : 'translate-x-5 rtl:-translate-x-5';
 
   return (
     <button

@@ -21,7 +21,9 @@ const tone = name => ({
 
 // Geist for every word the product shows, Geist Mono for codes and figures that
 // are read character by character. Self-hosted in src/assets/fonts.
-const sans = ['Geist', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'];
+// IBM Plex Sans Arabic follows Geist: Latin glyphs stay Geist, Arabic ones come from Plex
+// (its @font-face rules carry the Arabic unicode-range only; see src/index.css).
+const sans = ['Geist', 'IBM Plex Sans Arabic', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'];
 const mono = ['Geist Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'];
 
 export default {

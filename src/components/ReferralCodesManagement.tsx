@@ -267,7 +267,7 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
               <thead>
                 <tr className="bg-wash border-b border-line">
                   {TABLE_HEADER_KEYS.map((key, i) => (
-                    <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap text-fg-subtle">{key ? t(key) : ''}</th>
+                    <th key={i} className="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap text-fg-subtle">{key ? t(key) : ''}</th>
                   ))}
                 </tr>
               </thead>
@@ -348,7 +348,7 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
                               .map(c => (
                                 <span key={c.id} className="glass-card rounded-tight px-2.5 py-1 text-xs font-medium text-fg">
                                   {c.name}
-                                  <span className="ml-1.5 tabular-nums text-fg-subtle">
+                                  <span className="ms-1.5 tabular-nums text-fg-subtle">
                                     {format(new Date(c.created_at), 'dd.MM.yy', { locale: de })}
                                   </span>
                                 </span>

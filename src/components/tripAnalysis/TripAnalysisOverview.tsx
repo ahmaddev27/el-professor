@@ -87,12 +87,12 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
       header: t('ta.col.driver'),
       value: row => row.name,
       sortable: true,
-      className: 'pl-3 pr-2 sm:px-4',
+      className: 'ps-3 pe-2 sm:px-4',
       cell: row => (
         <span className="block py-1">
           <Button variant="link" onClick={() => onOpenDriver(row.driverId)} aria-label={t('ta.openDriver', { name: row.name })}>
             {row.name}
-            <ChevronRight aria-hidden />
+            <ChevronRight aria-hidden className="rtl:-scale-x-100" />
           </Button>
           <span className="mt-1 flex flex-wrap gap-1">
             {row.linked ? <BudgetStateBadge state={row.budgetState} /> : <Badge tone="caution">{t('ta.notLinked')}</Badge>}
@@ -177,7 +177,7 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
       kind: 'number',
       value: row => row.overByMinutes,
       sortable: true,
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
       cell: row =>
         row.overByMinutes === null ? (
           <span className="text-fg-subtle">{t('ta.notComputable')}</span>

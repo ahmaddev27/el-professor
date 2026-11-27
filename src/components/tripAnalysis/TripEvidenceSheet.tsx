@@ -52,7 +52,7 @@ export function TripEvidenceSheet({ evidence, tripsById, onClose }: Props) {
       id: 'start',
       header: t('ta.col.start'),
       value: row => row.trip.start_ms,
-      className: 'pl-3 pr-2 sm:px-4',
+      className: 'ps-3 pe-2 sm:px-4',
       cell: row => (
         <span className="block py-1 tabular-nums">
           {formatBerlinDateTime(row.trip.start_ms) || '—'}
@@ -93,7 +93,7 @@ export function TripEvidenceSheet({ evidence, tripsById, onClose }: Props) {
       id: 'price',
       header: t('ta.col.price'),
       kind: 'number',
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
       cell: row => (
         <span className="tabular-nums">
           {formatTripPrice(row.trip.price, row.trip.currency) || '—'}

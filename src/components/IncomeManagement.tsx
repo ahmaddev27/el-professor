@@ -654,7 +654,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
       value={formData.amount}
       onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
       aria-label={t('common.amount')}
-      className="ml-auto w-[6.5rem] text-right sm:w-32"
+      className="ms-auto w-[6.5rem] text-end sm:w-32"
     />
   );
 
@@ -709,7 +709,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           </span>
         ),
       // At 375 px the driver, the amount and both row actions share the width.
-      className: 'pl-3 pr-1 sm:px-4',
+      className: 'ps-3 pe-1 sm:px-4',
     },
     {
       id: 'type',
@@ -757,13 +757,13 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 on a suffix across 266 rows of a money screen.
                 TS2367 marks it until someone decides. */}
             {income.type === 'nettofahrt' && income.trip_count != null && (
-              <span className="ml-2 text-xs font-normal text-fg-subtle">
+              <span className="ms-2 text-xs font-normal text-fg-subtle">
                 {t('inc.tripsSuffix', { count: income.trip_count })}
               </span>
             )}
           </>
         ),
-      className: 'pl-1 pr-2 sm:px-4',
+      className: 'ps-1 pe-2 sm:px-4',
     },
   ];
 
@@ -837,7 +837,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
       value: row => row.driver.name,
       sortable: true,
       cell: row => <span className="font-medium text-fg">{row.driver.name}</span>,
-      className: 'pl-3 pr-1 sm:px-4',
+      className: 'ps-3 pe-1 sm:px-4',
     },
     { id: 'netto', header: t('inc.nettoFahrpreis'), kind: 'currency', value: row => row.nettoFahrpreis, sortable: true, className: 'px-2 sm:px-4' },
     { id: 'aktionen', header: t('inc.typeAktionen'), kind: 'currency', value: row => row.aktionen, sortable: true, hideBelow: 'md' },
@@ -872,7 +872,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
       value: row => row.summe,
       sortable: true,
       cell: row => <span className="font-semibold">{euro(row.summe)}</span>,
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
     },
   ];
 
@@ -1073,7 +1073,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
               {/* Amount fields */}
               <fieldset className="grid gap-3 border-t border-line pt-4">
-                <legend className="float-left w-full text-[13px] font-medium text-fg-muted">{t('inc.amountsHint')}</legend>
+                <legend className="float-start w-full text-[13px] font-medium text-fg-muted">{t('inc.amountsHint')}</legend>
                 <div className="clear-both grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {/* Netto-Fahrpreis → type umsatz */}
                   <Field label={t('inc.nettoFahrpreisEuro')}>
@@ -1176,7 +1176,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           <section aria-labelledby="income-per-driver" className="grid gap-2">
             <h2 id="income-per-driver" className="text-[15px] font-semibold text-fg">
               {t('inc.perDriverTitle')}
-              <span className="ml-2 text-[13px] font-normal text-fg-subtle">{t('inc.perDriverHint')}</span>
+              <span className="ms-2 text-[13px] font-normal text-fg-subtle">{t('inc.perDriverHint')}</span>
             </h2>
             <DataTable
               caption={t('inc.perDriverTitle')}

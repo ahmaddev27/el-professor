@@ -731,8 +731,8 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Button variant="ghost" size="sm" className="-ml-2.5 mb-3" onClick={onBack}>
-            <ArrowLeft size={14} />{t('sa.companies.backToAll')}
+          <Button variant="ghost" size="sm" className="-ms-2.5 mb-3" onClick={onBack}>
+            <ArrowLeft size={14} className="rtl:-scale-x-100" />{t('sa.companies.backToAll')}
           </Button>
           <div className="flex items-center gap-3">
             <div className={cn('flex size-12 shrink-0 items-center justify-center rounded-surface text-xl font-bold', isArchived ? 'bg-neutral-soft text-neutral' : 'bg-brand-soft text-brand-text')}>
@@ -768,7 +768,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
             {actionMenuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setActionMenuOpen(false)} />
-                <div className="glass-strong absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-tile py-1">
+                <div className="glass-strong absolute end-0 z-20 mt-1 w-52 overflow-hidden rounded-tile py-1">
 
                   {/* Operational status changes */}
                   {isOperational && company.status !== 'active' && (
@@ -927,7 +927,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       <div className="overflow-hidden rounded-surface border border-critical bg-critical-soft" hidden={!canLifecycle && !canHardDelete}>
         <button
           onClick={() => setDangerOpen(v => !v)}
-          className="flex w-full items-center justify-between px-5 py-4 text-left [@media(pointer:coarse)]:min-h-11"
+          className="flex w-full items-center justify-between px-5 py-4 text-start [@media(pointer:coarse)]:min-h-11"
         >
           <div className="flex items-center gap-2">
             <Lock size={14} className="text-critical" />
@@ -1314,8 +1314,8 @@ export default function CompaniesPage() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[200px] flex-1">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
-          <Input className="pl-8" aria-label={t('sa.companies.searchPlaceholder')} placeholder={t('sa.companies.searchPlaceholder')} value={search} onChange={e => setSearch(e.target.value)} />
+          <Search size={14} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+          <Input className="ps-8" aria-label={t('sa.companies.searchPlaceholder')} placeholder={t('sa.companies.searchPlaceholder')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <Tabs value={statusFilter} onValueChange={value => setStatusFilter(value as 'all' | CompanyStatus)} className="max-w-full">
           <TabsList variant="segmented">
@@ -1447,9 +1447,9 @@ export default function CompaniesPage() {
 // ─── Presentation helpers (phase 5) ───────────────────────────────────────────
 // Module-level so the components above can use them; they only draw.
 
-const MENU_ITEM_CLASS = 'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors [@media(pointer:coarse)]:min-h-11';
+const MENU_ITEM_CLASS = 'flex w-full items-center gap-2.5 px-3 py-2 text-start text-sm transition-colors [@media(pointer:coarse)]:min-h-11';
 const SECTION_LABEL_CLASS = 'text-sm font-semibold uppercase tracking-wide text-fg-subtle';
-const TH_CLASS = 'whitespace-nowrap px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-subtle';
+const TH_CLASS = 'whitespace-nowrap px-5 py-3 text-start text-[11px] font-semibold uppercase tracking-wide text-fg-subtle';
 
 function InfoItem({ icon: Icon, label, children }: { icon?: React.ElementType; label: React.ReactNode; children: React.ReactNode }) {
   return (

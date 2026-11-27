@@ -123,7 +123,7 @@ const VerifyEmailPage: React.FC = () => {
       <form onSubmit={sendCode} className="grid gap-4" noValidate>
         {error && <NoticeBox tone="error" announce>{formatOtpMessage(error, t, tPlural)}</NoticeBox>}
         <Field label={t('auth.email')} id="verify-email">
-          <div className="relative">
+          <div className="relative" dir="ltr">
             <Mail aria-hidden className={authFieldIconClass} />
             <Input
               id="verify-email"
@@ -152,7 +152,7 @@ const VerifyEmailPage: React.FC = () => {
       subtitle={t('signup.verify.heading')}
       footer={
         <Link to="/login" className={authQuietLinkClass}>
-          <ArrowLeft size={14} aria-hidden="true" />
+          <ArrowLeft size={14} aria-hidden="true" className="rtl:-scale-x-100" />
           {t('forgot.backToLogin')}
         </Link>
       }

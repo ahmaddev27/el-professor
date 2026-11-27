@@ -242,7 +242,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           <span className="pt-0.5 sm:hidden">{statusBadge(driver)}</span>
         </span>
       ),
-      className: 'pl-3 pr-1 sm:min-w-[9rem] sm:px-4',
+      className: 'ps-3 pe-1 sm:min-w-[9rem] sm:px-4',
     },
     {
       id: 'status',

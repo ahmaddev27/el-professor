@@ -445,7 +445,7 @@ const AccountPage: React.FC = () => {
                 type={showPw ? 'text' : 'password'}
                 value={newPw}
                 onChange={e => setNewPw(e.target.value)}
-                className="pr-10"
+                className="pe-10"
                 placeholder={t('account.password.new')}
                 aria-label={t('account.password.new')}
                 autoComplete="new-password"
@@ -453,7 +453,7 @@ const AccountPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowPw(v => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-tight p-1 text-fg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:right-0 [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center"
+                className="absolute end-2 top-1/2 -translate-y-1/2 rounded-tight p-1 text-fg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:end-0 [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center"
                 aria-label={showPw ? t('account.password.hide') : t('account.password.show')}
               >
                 {showPw ? <EyeOff size={16} /> : <Eye size={16} />}

@@ -84,10 +84,10 @@ export function LegalPageView({ page, state, onRetry }: {
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
-        <h1 lang="de" className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
+        <h1 lang="de" dir="ltr" className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
           {LEGAL_TITLES[page]}
         </h1>
-        {language === 'en' ? <p className="mt-2 text-sm text-fg-muted">{t('legal.germanOnly')}</p> : null}
+        {language !== 'de' ? <p className="mt-2 text-sm text-fg-muted">{t('legal.germanOnly')}</p> : null}
 
         <div className="mt-6 sm:mt-8">
           <LegalPageBody page={page} state={state} onRetry={onRetry} />

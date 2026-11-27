@@ -14,12 +14,17 @@
  */
 export type AuthSurface = 'dark' | 'app';
 
-/** An icon inside a field, at its left edge; the field gets `authFieldWithIconClass`. */
+/**
+ * An icon inside a field, at its start edge; the field gets `authFieldWithIconClass`.
+ * An e-mail field is left-to-right in every language (ui/Input pins it), so its
+ * wrapper carries `dir="ltr"` too: otherwise in Arabic the icon sits at the right
+ * while the padding it needs is on the left.
+ */
 export const authFieldIconClass =
-  'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle';
+  'pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle';
 
 /** Room for that icon in a design-system Input. */
-export const authFieldWithIconClass = 'pl-9';
+export const authFieldWithIconClass = 'ps-9';
 
 const focusRing =
   'rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';

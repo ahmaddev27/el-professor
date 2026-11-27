@@ -88,14 +88,14 @@ const AdminLayout: React.FC = () => {
     <div className="min-h-dvh font-ui text-fg lg:flex">
       <AdminSidebar />
 
-      <div className="min-w-0 flex-1 lg:py-[10px] lg:pr-[10px]">
+      <div className="min-w-0 flex-1 lg:py-[10px] lg:pe-[10px]">
        <div className="glass-sheet min-h-dvh rounded-none border-0 lg:min-h-[calc(100dvh-20px)] lg:overflow-clip lg:rounded-pane lg:border">
         {/* A session opened from the panel stays visible in the panel: the
             sixty minutes run whether or not anyone is inside the company, and
             "Beenden" has to be reachable from where it was started. */}
         <SupportSessionBar />
         <header className="glass-topbar sticky top-0 z-20 h-[60px] lg:rounded-t-pane">
-          <div className="flex h-full items-center justify-between pl-16 pr-4 sm:pr-6 lg:pl-6 lg:pr-5">
+          <div className="flex h-full items-center justify-between ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
             <div className="flex items-center gap-3">
               <button
                 onClick={toggleTheme}

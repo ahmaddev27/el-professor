@@ -24,7 +24,7 @@ interface AuthShellProps {
  */
 const AuthShell: React.FC<AuthShellProps> = ({ title, subtitle, children, footer, width = 'narrow', above }) => (
   <main className="relative flex min-h-[calc(100dvh-var(--env-banner-height,0px))] flex-col items-center justify-center px-4 pb-10 pt-16 font-ui text-fg">
-    <div className="absolute right-4 top-4">
+    <div className="absolute end-4 top-4">
       <LanguageSwitcher variant="ui" />
     </div>
 
