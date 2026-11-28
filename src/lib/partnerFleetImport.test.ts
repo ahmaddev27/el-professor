@@ -71,6 +71,19 @@ describe('the real reason of a refused pull', () => {
     expect(pullReasonKey('not_connected')).not.toBe('import.error.pullGeneric');
   });
 
+  it('never says "nothing was changed" once the import itself has thrown', async () => {
+    const importThrew = await runImportLeg('drivers', {
+      pull: async () => ({ data: { ok: true, seen: 7 }, error: null }),
+      importRpc: async () => { throw new Error('connection lost'); },
+    });
+    expect(importThrew).toEqual({ scope: 'drivers', status: 'failed', reason: 'import.error.importGeneric' });
+    const pullThrew = await runImportLeg('drivers', {
+      pull: async () => { throw new Error('connection lost'); },
+      importRpc: async () => ({ data: null, error: null }),
+    });
+    expect(pullThrew).toEqual({ scope: 'drivers', status: 'failed', reason: 'import.error.pullGeneric' });
+  });
+
   it('carries the pull counts into a finished leg', async () => {
     const outcome = await runImportLeg('drivers', {
       pull: async () => ({ data: { ok: true, seen: 7, new: 2, departed: 1 }, error: null }),

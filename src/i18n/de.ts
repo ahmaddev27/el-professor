@@ -7623,10 +7623,13 @@ export const de = {
   'import.update.seen':                  'Gesehen',
   'import.update.skipped':               'Nicht übernommen',
   'partner.links.reason.nameAmbiguous':  'Mehrere aktive Fahrer tragen diesen Namen.',
-  'partner.links.reason.nameInactive':   'Ein deaktivierter Fahrer trägt diesen Namen.',
+  'partner.links.reason.nameInactive':   'Ein deaktivierter Fahrer trägt diesen Namen. Ist es derselbe Fahrer, aktivieren Sie ihn zuerst; dann steht er hier zur Auswahl.',
   'partner.links.reason.nameMissing':    'Reidey sendet keinen Namen für diesen Fahrer.',
   'partner.links.reason.nameTaken':      'Der Fahrer mit diesem Namen ist schon mit einem anderen Reidey-Fahrer verknüpft.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'settings.uberPull.runs.unlinkedReason.name_ambiguous': 'Ein neuer Uber-Fahrer trägt einen Namen, den mehrere aktive Fahrer haben. Nachts wird er keinem davon zugeordnet, damit der Umsatz nicht beim Falschen landet. Auf der Fahrer-Seite mit „Fahrer aus Reidey aktualisieren“ entscheiden, dann den Tag über die Umsätze-Seite nachholen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'drivers.links.loadFailed': 'Die Reidey-Verknüpfungen konnten nicht geladen werden. Die Reidey-Spalte und die offenen Entscheidungen fehlen deshalb; laden Sie die Seite neu.',
 } as const;

@@ -22,7 +22,7 @@
  * has a tab for it: a notice above the list opens this table in a dialog, and
  * the page reloads its links after each decision.
  *
- ## The drivers come from the page, not from a second query
+ * ## The drivers come from the page, not from a second query
  *
  * `FahrerPage` already holds them. Querying again would be a second list that
  * can disagree with the one beside it on the same screen.

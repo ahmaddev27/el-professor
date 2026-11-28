@@ -44,8 +44,8 @@
 --  Why it is safe to automate: a link is written only when one active driver
 --  carries the exact name and nothing else could be meant. A wrong automatic
 --  link is also not silent: link_method records HOW the link came to be, and
---  linked_by who pressed the button (NULL for the nightly job), so a person can
---  tell an automatic link from a confirmed one and undo it.
+--  linked_by who pressed the button (NULL for the nightly job), so the row tells
+--  an automatic link from a confirmed one. Nothing in the product unlinks yet.
 --
 --  Every automatic link goes through app_private.partner_driver_link_apply, the
 --  core of partner_driver_link_confirm: status, driver, linked_by, linked_at,

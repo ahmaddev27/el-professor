@@ -462,7 +462,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         driver={deleting}
         onClose={() => setDeleting(null)}
         onChanged={() => onDriverDeleted?.()}
-        onDeactivate={driver => canEdit(driver) && handleToggleStatus(driver)}
+        onDeactivate={deleting && canEdit(deleting) ? driver => { void handleToggleStatus(driver); } : undefined}
       />
     </div>
   );

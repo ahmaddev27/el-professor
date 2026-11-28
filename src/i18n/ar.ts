@@ -7248,8 +7248,9 @@ export const ar: PartialDictionary = {
   'import.update.seen': 'شوهد',
   'import.update.skipped': 'لم يُنقل',
   'partner.links.reason.nameAmbiguous': 'عدة سائقين مفعّلين يحملون هذا الاسم.',
-  'partner.links.reason.nameInactive': 'سائق غير مفعّل يحمل هذا الاسم.',
+  'partner.links.reason.nameInactive': 'سائق غير مفعّل يحمل هذا الاسم. إذا كان السائق نفسه، فعّله أولًا، وعندها يمكن اختياره هنا.',
   'partner.links.reason.nameMissing': 'لا يرسل Reidey اسمًا لهذا السائق.',
   'partner.links.reason.nameTaken': 'السائق الذي يحمل هذا الاسم مرتبط بالفعل بسائق آخر في Reidey.',
   'settings.uberPull.runs.unlinkedReason.name_ambiguous': 'يحمل سائق Uber جديد اسمًا يحمله عدة سائقين مفعّلين. لا يُسند ليلًا إلى أيٍّ منهم، حتى لا يذهب الإيراد إلى الشخص الخطأ. اتخذ القرار في صفحة السائقين عبر «تحديث السائقين من Reidey»، ثم استدرك اليوم من صفحة الإيرادات.',
+  'drivers.links.loadFailed': 'تعذّر تحميل روابط Reidey، لذلك لا يظهر عمود Reidey ولا القرارات المفتوحة. أعد تحميل الصفحة.',
 };

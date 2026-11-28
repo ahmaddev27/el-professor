@@ -7549,10 +7549,13 @@ export const en: PartialDictionary = {
   'import.update.seen':                  'Seen',
   'import.update.skipped':               'Not imported',
   'partner.links.reason.nameAmbiguous':  'Several active drivers have this name.',
-  'partner.links.reason.nameInactive':   'A deactivated driver has this name.',
+  'partner.links.reason.nameInactive':   'A deactivated driver has this name. If it is the same driver, activate them first; then they can be chosen here.',
   'partner.links.reason.nameMissing':    'Reidey sends no name for this driver.',
   'partner.links.reason.nameTaken':      'The driver with this name is already linked to another Reidey driver.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'settings.uberPull.runs.unlinkedReason.name_ambiguous': 'A new Uber driver has a name that several active drivers share. At night they are matched to none of them, so the earnings do not end up with the wrong person. Decide on the Drivers page with “Update drivers from Reidey”, then catch up the day on the Earnings page.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'drivers.links.loadFailed': 'The Reidey links could not be loaded, so the Reidey column and the open decisions are missing; reload the page.',
 };

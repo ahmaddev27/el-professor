@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { pageWriteRights } from '../lib/pageWriteRights';
@@ -18,6 +18,8 @@ import { useFleetUpdate } from '../components/partner/useFleetUpdate';
 import { supabase } from '../lib/supabase';
 import { fetchLinkRows, summariseLinks, type LinkSummary } from '../lib/partnerDriverLinks';
 
+const NO_LINKS: LinkSummary = { byDriver: new Map(), pending: 0 };
+
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
   // The rights of the company the session is in — see BelegePage.
@@ -36,9 +38,15 @@ const FahrerPage: React.FC = () => {
   // it internally; the Reidey links are read directly, so this needs the value.
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   // The Reidey links, read once per load: they decide the badge on each row and
-  // the notice about proposals waiting for a decision. A failed read is empty,
-  // not an error: the list itself is what the page is for.
-  const [links, setLinks] = useState<LinkSummary>({ byDriver: new Map(), pending: 0 });
+  // the notice about proposals waiting for a decision. A failed read keeps the
+  // list, but says so: an absent notice would claim nothing waits, and an empty
+  // Reidey column that no driver is linked.
+  const [links, setLinks] = useState<LinkSummary>(NO_LINKS);
+  const [linksFailed, setLinksFailed] = useState(false);
+  // Only the newest read may install its answer, so a company switched while a
+  // read is in flight never shows the previous company's links.
+  const linksRequest = useRef(0);
+  const linksCompany = useRef<string | null>(null);
 
   const canEditDriver = (driver: Driver): boolean => {
     return canEdit(driver.createdBy);
@@ -51,11 +59,23 @@ const FahrerPage: React.FC = () => {
   }, [dbLoading]);
 
   const loadLinks = useCallback(async () => {
+    const request = ++linksRequest.current;
+    if (linksCompany.current !== companyId) {
+      linksCompany.current = companyId;
+      setLinks(NO_LINKS);
+      setLinksFailed(false);
+    }
     if (!companyId) return;
     try {
-      setLinks(summariseLinks(await fetchLinkRows(supabase, companyId)));
+      const summary = summariseLinks(await fetchLinkRows(supabase, companyId));
+      if (request !== linksRequest.current) return;
+      setLinks(summary);
+      setLinksFailed(false);
     } catch (error) {
+      if (request !== linksRequest.current) return;
       console.error('Error loading partner links:', error);
+      setLinks(NO_LINKS);
+      setLinksFailed(true);
     }
   }, [companyId]);
 
@@ -173,6 +193,7 @@ const FahrerPage: React.FC = () => {
         headerNotice={(
           <>
             <FleetUpdateOutcome update={update} />
+            {linksFailed ? <Alert tone="caution" role="note">{t('drivers.links.loadFailed')}</Alert> : null}
             <PendingLinksNotice
               count={links.pending}
               companyId={companyId}

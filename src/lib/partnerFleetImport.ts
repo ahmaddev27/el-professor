@@ -212,11 +212,16 @@ function failedPull(scope: ImportScope, reason: string | undefined): LegOutcome 
 }
 
 export async function runImportLeg(scope: ImportScope, deps: ImportDeps): Promise<LegOutcome> {
+  // A throw after the pull came from the import RPC, whose transaction may have
+  // committed before the answer was lost, so "nothing was changed" would be a
+  // claim this leg cannot make.
+  let pulledOk = false;
   try {
     const pulled = await deps.pull(scope);
     if (pulled.error) return failedPull(scope, await pullFailureReason(pulled.error));
     const answer = pulled.data as Record<string, unknown> | null;
     if (!answer?.ok) return failedPull(scope, typeof answer?.reason === 'string' ? answer.reason : undefined);
+    pulledOk = true;
     const imported = await deps.importRpc(IMPORT_RPC[scope]);
     if (imported.error) {
       return { scope, status: 'failed', reason: importErrorKey((imported.error as { hint?: unknown }).hint) };
@@ -227,7 +232,7 @@ export async function runImportLeg(scope: ImportScope, deps: ImportDeps): Promis
       ? { scope, status: 'done', seen: pull.seen ?? 0, pull, result }
       : { scope, status: 'failed', reason: 'import.error.importGeneric' };
   } catch {
-    return { scope, status: 'failed', reason: 'import.error.pullGeneric' };
+    return { scope, status: 'failed', reason: pulledOk ? 'import.error.importGeneric' : 'import.error.pullGeneric' };
   }
 }
 
