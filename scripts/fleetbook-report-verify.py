@@ -2,6 +2,7 @@
 
     python scripts/fleetbook-report-verify.py <SIMULIERT_Monatsbericht_….xlsx> <SIMULIERT_Betriebsbericht_….xlsx>
     python scripts/fleetbook-report-verify.py <SIMULIERT_Monatsabschluss_….xlsx>
+    python scripts/fleetbook-report-verify.py --cents < values.json   (the rounding seam its vitest uses)
 
 External audit round 6. The month comes as two files: the Fahrtenbuch report
 (passenger rides and cancellations) and the internal operational report (empty
@@ -59,7 +60,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from openpyxl import load_workbook
 
 BERLIN = ZoneInfo("Europe/Berlin")
 UTC = ZoneInfo("UTC")
@@ -83,8 +83,21 @@ CLOSING_LABELS = {"SIMULIERT", "IMPORTIERT", "ABGELEITET"}
 VERDICTS = ("VALIDATED_FOR_EXPORT", "VERIFICATION_INCOMPLETE", "NOT_VALIDATED")
 
 
+def load_workbook(path, **options):
+    # Imported on first use, so the --cents seam the build's vitest runs needs no openpyxl.
+    from openpyxl import load_workbook as openpyxl_load_workbook
+    return openpyxl_load_workbook(path, **options)
+
+
 def cents(x):
-    return round(float(x) * 100) if x not in (None, "") else 0
+    # Half away from zero, as the workbook rounds (Math.round on a km, toCents on money). Python's
+    # round() goes half to even: a 7.185 km drive is 718.5 hundredths and read 718 where the file wrote 719.
+    if x in (None, ""):
+        return 0
+    scaled = float(x) * 100
+    whole = math.floor(abs(scaled))
+    rounded = whole + 1 if abs(scaled) - whole >= 0.5 else whole
+    return -rounded if scaled < 0 else rounded
 
 
 def instant(text):
@@ -594,6 +607,9 @@ def main(argv):
     # The console's code page is not UTF-8 everywhere (Windows: cp1252, cp1256); the report is German.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    if len(argv) == 2 and argv[1] == "--cents":
+        print(json.dumps([cents(v) for v in json.load(sys.stdin)]))
+        return 0
     if len(argv) == 2 and "Monatsabschluss" in Path(argv[1]).name:
         check, summary = verify_closing(argv[1])
     elif len(argv) == 3:
