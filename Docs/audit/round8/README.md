@@ -27,16 +27,24 @@ Branch `feat/fleetbook-round8`, one PR against `staging`. One commit per slice: 
 
 These steps need staging, so the steering session runs them, in this order:
 
-1. As root, run the DEMO seed: `docker exec -i ya-mobility-staging-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/seed-demo-company.sql`.
-   - To set a base, add `-v demo_base_lat=<lat> -v demo_base_lon=<lon>`.
-   - It writes only DEMO Monatsplanung GmbH's rows and ends with a read-only report.
-2. Build each month as the DEMO login:
+Both SQL files are read from a checkout of `staging` at or after the commit that added `scripts/seed-demo-company-check.sql`; `git show <sha>:<path>` pins the exact text that runs. `DB` below is `docker exec -i ya-mobility-staging-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1`.
+
+1. As root, the read-only check: `git show <sha>:scripts/seed-demo-company-check.sql | $DB`.
+   - It is one `BEGIN READ ONLY … ROLLBACK`, so it cannot write.
+   - Its three `ready` lines must all read `t`, or the seed stops and writes nothing.
+   - It also shows the company's simulation settings row, or that it has none.
+2. As root, the DEMO seed: `git show <sha>:scripts/seed-demo-company.sql | $DB -v demo_share_percent=31 -v demo_return_to_base=on`.
+   - It writes only DEMO Monatsplanung GmbH's rows, and every insert is guarded by `NOT EXISTS`, so a second run adds nothing.
+   - `demo_share_percent` (30, 31, 32 or 33) writes the company's `company_simulation_settings` row, a fixed share, only when the company has none. A row an administrator saved on the screen is never changed. Leave both variables out to keep "no share, no return to base".
+   - To set a base, add `-v demo_base_lat=<lat> -v demo_base_lon=<lon>`; it is written only when none is saved.
+   - Then run step 1 again to see what the months will read.
+3. Build each month as the DEMO login:
    ```
    R8_E2E_ENV=~/workspace/el-professor/e2e/.env.local npx vite-node scripts/fleetbook-round8-month.mts --fetch --month 2026-09 --out ~/design-inputs/round8-out
    ```
    Then run the same command with `--month 2026-10`.
-   - Until round 8 is deployed, staging has no `company_simulation_settings`, so the settings come from the arguments `--share-percent 30..33` and `--return-to-base`. Sheet 7 then names them as the source.
-3. Run `python3 scripts/fleetbook-report-verify.py <closing.xlsx>` and `npx vite-node scripts/fleetbook-route-check.mts --legs <closing.xlsx> --out ~/design-inputs/round8-out` on each closing.
-4. For the comparison, follow the commands in the header of `scripts/fleetbook-round8-before.mts`. They use a detached worktree at `c1de16a`.
+   - Since `a11c512` staging has `company_simulation_settings`, so the company's row decides the share and the return to base, and the script refuses `--share-percent` and `--return-to-base` (exit 2). Sheet 7 names the row as the source. The arguments only stand in on a stack without the table.
+4. Run `python3 scripts/fleetbook-report-verify.py <closing.xlsx>` and `npx vite-node scripts/fleetbook-route-check.mts --legs <closing.xlsx> --out ~/design-inputs/round8-out` on each closing.
+5. For the comparison, follow the commands in the header of `scripts/fleetbook-round8-before.mts`. They use a detached worktree at `c1de16a`.
 
 A month repeats without the network from its snapshot (`--from-inputs`), and the same seed gives byte-identical payloads.
