@@ -42,6 +42,20 @@
 
 BEGIN;
 
+-- The kit's auth schema is a stub: GoTrue's tables exist only when a file
+-- creates them, and this transaction rolls them back with everything else.
+ALTER TABLE auth.users
+  ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS banned_until       timestamptz,
+  ADD COLUMN IF NOT EXISTS deleted_at         timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at         timestamptz DEFAULT now();
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  not_after  timestamptz
+);
+
 -- ─── helpers ────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION _pu_clear() RETURNS void
