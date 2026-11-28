@@ -43,6 +43,7 @@ const DEFAULTS: ScheduleForm = { enabled: false, time: '06:00', replaceCorrectio
 const UNLINKED_REASON_KEY: Record<PlacementBlockReason, TranslationKey> = {
   too_many: 'settings.uberPull.runs.unlinkedReason.too_many',
   name_taken: 'settings.uberPull.runs.unlinkedReason.name_taken',
+  name_ambiguous: 'settings.uberPull.runs.unlinkedReason.name_ambiguous',
   name_inactive: 'settings.uberPull.runs.unlinkedReason.name_inactive',
   name_missing: 'settings.uberPull.runs.unlinkedReason.name_missing',
   rejected: 'settings.uberPull.runs.unlinkedReason.rejected',

@@ -292,7 +292,7 @@ export function earnersToPlace(
 
 /** Why a placement left an earner unplaced, as the run's detail and the screen's hint read it. */
 export const PLACEMENT_BLOCK_REASONS = [
-  'too_many', 'name_taken', 'name_inactive', 'name_missing', 'rejected', 'limit_reached',
+  'too_many', 'name_taken', 'name_ambiguous', 'name_inactive', 'name_missing', 'rejected', 'limit_reached',
   'company_blocked', 'run_not_open',
 ] as const;
 export type PlacementBlockReason = typeof PLACEMENT_BLOCK_REASONS[number];

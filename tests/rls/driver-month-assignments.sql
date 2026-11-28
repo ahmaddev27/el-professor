@@ -1422,18 +1422,17 @@ BEGIN
     'ERR P0001 driver_month_assignment_is_final',
     _dma_try(_dma_owner(), NULL, format('DELETE FROM driver_month_assignments WHERE id = %L', v_id)));
 
-  v_probe := format($p$DO $q$
-    DECLARE n bigint;
-    BEGIN
-      DELETE FROM drivers WHERE id = %L;
-      SELECT count(*) INTO n FROM driver_month_assignments WHERE driver_id = %L;
-      IF n <> 0 THEN RAISE EXCEPTION 'assignments left: %%', n; END IF;
-      SELECT count(*) INTO n FROM driver_month_assignment_shifts WHERE company_id = %L;
-      IF n <> 0 THEN RAISE EXCEPTION 'windows left: %%', n; END IF;
-    END $q$
-  $p$, c_drv_x, c_drv_x, c_x);
-  PERFORM _dma_expect('deletion: deleting the DRIVER takes his committed assignment and its window with it, and is not refused',
-    'rows 0', _dma_try(_dma_owner(), NULL, v_probe));
+  -- MOVED 27.11.2026 by 20261127130000: a driver with a committed assignment is
+  -- a driver something refers to, and the guard on drivers refuses the delete
+  -- whatever the assignment's own foreign key would have cascaded. What used to
+  -- be asserted here, the cascade, is now only reachable through the company.
+  PERFORM _dma_expect('deletion: deleting the DRIVER is refused while his committed assignment names him',
+    'ERR 23503 driver_has_references',
+    _dma_try(_dma_owner(), NULL, format('DELETE FROM drivers WHERE id = %L', c_drv_x)));
+  PERFORM _dma_expect('deletion: and the assignment and its window are still there',
+    '1|1',
+    (SELECT count(*)::text FROM driver_month_assignments a WHERE a.driver_id = c_drv_x)
+    || '|' || (SELECT count(*)::text FROM driver_month_assignment_shifts c WHERE c.company_id = c_x));
 
   v_probe := format($p$DO $q$
     DECLARE n bigint;

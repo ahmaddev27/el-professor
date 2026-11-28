@@ -34,7 +34,7 @@ export type ImportScope = 'drivers' | 'vehicles';
  * as one, rather than left to be rediscovered.
  */
 export type SkipReason =
-  | 'name_missing' | 'name_taken' | 'limit_reached'
+  | 'name_missing' | 'name_taken' | 'name_ambiguous' | 'name_inactive' | 'limit_reached'
   | 'plate_missing' | 'plate_duplicate' | 'plate_unavailable';
 
 export interface SkippedRow {
@@ -47,12 +47,20 @@ export interface SkippedRow {
 export interface ImportResult {
   created: number;
   linked: number;
+  /**
+   * The company's links still waiting for a person after the run (drivers
+   * only). Null when the answer carried neither `pending` nor a `skipped_count`
+   * to stand in for it: a count nobody sent is not shown as zero.
+   */
+  pending: number | null;
   skipped: SkippedRow[];
 }
 
 const SKIP_KEYS: Record<SkipReason, TranslationKey> = {
   name_missing: 'import.skip.nameMissing',
   name_taken: 'import.skip.nameTaken',
+  name_ambiguous: 'import.skip.nameAmbiguous',
+  name_inactive: 'import.skip.nameInactive',
   limit_reached: 'import.skip.limitReached',
   plate_missing: 'import.skip.plateMissing',
   plate_duplicate: 'import.skip.plateDuplicate',
@@ -117,7 +125,15 @@ export function parseImportResult(data: unknown, scope: ImportScope): ImportResu
       reason,
     };
   });
-  return { created, linked, skipped };
+  return { created, linked, pending: scope === 'drivers' ? pendingCount(row) : null, skipped };
+}
+
+/**
+ * `pending` is what the 27.11.2026 import answers; the answer before it only
+ * had `skipped_count`, which for the roster was the same set of links.
+ */
+function pendingCount(row: Record<string, unknown>): number | null {
+  return count(row.pending) ?? count(row.skipped_count);
 }
 
 // ── One button, every leg (14.10.2026) ──────────────────────────────────────
@@ -134,8 +150,17 @@ export const IMPORT_RPC: Record<ImportScope, string> = {
   vehicles: 'partner_vehicles_import',
 };
 
+/** What `partner-pull` counted. A figure the answer did not carry stays null. */
+export interface PullCounts {
+  seen: number | null;
+  new: number | null;
+  departed: number | null;
+  returned: number | null;
+  truncated: boolean;
+}
+
 export type LegOutcome =
-  | { scope: ImportScope; status: 'done'; seen: number; result: ImportResult }
+  | { scope: ImportScope; status: 'done'; seen: number; pull: PullCounts; result: ImportResult }
   | { scope: ImportScope; status: 'failed'; reason: TranslationKey }
   /** The partner does not offer this yet. Not a failure of the data or the click. */
   | { scope: ImportScope; status: 'unavailable'; reason: TranslationKey };
@@ -145,24 +170,61 @@ export interface ImportDeps {
   importRpc(rpc: string): Promise<{ data: unknown; error: unknown }>;
 }
 
+export function parsePullCounts(answer: Record<string, unknown> | null): PullCounts {
+  return {
+    seen: count(answer?.seen),
+    new: count(answer?.new),
+    departed: count(answer?.departed),
+    returned: count(answer?.returned),
+    truncated: answer?.truncated === true,
+  };
+}
+
+/**
+ * The reason a failed `partner-pull` call carried.
+ *
+ * Every non-2xx answer of an edge function reaches supabase-js as a
+ * `FunctionsHttpError` with `data: null`; the function's own `{ok:false, reason}`
+ * is only in the body of `error.context`, a fetch `Response`. Reading `data`
+ * alone turned every refusal (token rejected, not connected, partner down) into
+ * the generic "could not be fetched" sentence. The body is read from a clone so
+ * a caller that already consumed it still works, and anything unreadable (a
+ * network failure, Kong's own 502, a body that is not JSON) answers undefined,
+ * which stays the generic sentence.
+ */
+export async function pullFailureReason(error: unknown): Promise<string | undefined> {
+  const context = (error as { context?: unknown } | null)?.context as
+    { clone?: () => { json: () => Promise<unknown> }; json?: () => Promise<unknown> } | undefined;
+  try {
+    const body = context?.clone ? await context.clone().json() : await context?.json?.();
+    const reason = (body as { reason?: unknown } | null)?.reason;
+    return typeof reason === 'string' ? reason : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function failedPull(scope: ImportScope, reason: string | undefined): LegOutcome {
+  const key = pullReasonKey(reason);
+  return reason === 'vehicles_unavailable'
+    ? { scope, status: 'unavailable', reason: key }
+    : { scope, status: 'failed', reason: key };
+}
+
 export async function runImportLeg(scope: ImportScope, deps: ImportDeps): Promise<LegOutcome> {
   try {
     const pulled = await deps.pull(scope);
-    if (pulled.error) throw pulled.error;
-    const answer = pulled.data as { ok?: boolean; reason?: string; seen?: number } | null;
-    if (!answer?.ok) {
-      const reason = pullReasonKey(answer?.reason);
-      return answer?.reason === 'vehicles_unavailable'
-        ? { scope, status: 'unavailable', reason }
-        : { scope, status: 'failed', reason };
-    }
+    if (pulled.error) return failedPull(scope, await pullFailureReason(pulled.error));
+    const answer = pulled.data as Record<string, unknown> | null;
+    if (!answer?.ok) return failedPull(scope, typeof answer?.reason === 'string' ? answer.reason : undefined);
     const imported = await deps.importRpc(IMPORT_RPC[scope]);
     if (imported.error) {
       return { scope, status: 'failed', reason: importErrorKey((imported.error as { hint?: unknown }).hint) };
     }
     const result = parseImportResult(imported.data, scope);
+    const pull = parsePullCounts(answer);
     return result
-      ? { scope, status: 'done', seen: answer.seen ?? 0, result }
+      ? { scope, status: 'done', seen: pull.seen ?? 0, pull, result }
       : { scope, status: 'failed', reason: 'import.error.importGeneric' };
   } catch {
     return { scope, status: 'failed', reason: 'import.error.pullGeneric' };

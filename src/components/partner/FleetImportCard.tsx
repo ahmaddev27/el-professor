@@ -27,6 +27,7 @@ import {
   skipReasonKey,
   type FleetOutcome,
   type ImportDeps,
+  type ImportResult,
   type ImportScope,
   type LegOutcome,
 } from '../../lib/partnerFleetImport';
@@ -50,7 +51,7 @@ interface FleetImportCardProps {
   mayImport: boolean;
 }
 
-const LEG_TITLE = { drivers: 'import.drivers.title', vehicles: 'import.vehicles.title' } as const;
+export const LEG_TITLE = { drivers: 'import.drivers.title', vehicles: 'import.vehicles.title' } as const;
 
 export const PARTNER_IMPORT_DEPS: ImportDeps = {
   pull: scope => supabase.functions.invoke('partner-pull', { body: { scope } }),
@@ -233,7 +234,6 @@ function ImportOutcome({ scope, title, seen, result }: {
   scope: ImportScope; title: string; seen: number; result: Extract<LegOutcome, { status: 'done' }>['result'];
 }) {
   const { t } = useTranslation();
-  const shown = result.skipped.slice(0, SKIPPED_SHOWN);
   const nothing = result.created + result.linked + result.skipped.length === 0;
 
   return (
@@ -248,23 +248,31 @@ function ImportOutcome({ scope, title, seen, result }: {
               skipped: String(result.skipped.length),
             })}
       </Alert>
-      {result.skipped.length > 0 ? (
-        <div>
-          <p className="mb-2 text-sm font-medium text-fg">{t('import.skippedTitle')}</p>
-          <ul className="space-y-1.5">
-            {shown.map(row => (
-              <li key={row.linkId} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="font-medium text-fg">{row.label || '—'}</span>
-                <Badge tone="caution">{t(skipReasonKey(row.reason, scope))}</Badge>
-              </li>
-            ))}
-          </ul>
-          {result.skipped.length > shown.length ? (
-            <p className="mt-2 text-sm text-fg-muted">
-              {t('import.skippedMore', { count: String(result.skipped.length - shown.length) })}
-            </p>
-          ) : null}
-        </div>
+      <SkippedList scope={scope} skipped={result.skipped} />
+    </div>
+  );
+}
+
+/** The rows the import left alone, each with the reason in words. */
+export function SkippedList({ scope, skipped }: { scope: ImportScope; skipped: ImportResult['skipped'] }) {
+  const { t } = useTranslation();
+  if (skipped.length === 0) return null;
+  const shown = skipped.slice(0, SKIPPED_SHOWN);
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium text-fg">{t('import.skippedTitle')}</p>
+      <ul className="space-y-1.5">
+        {shown.map(row => (
+          <li key={row.linkId} className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium text-fg">{row.label || '—'}</span>
+            <Badge tone="caution">{t(skipReasonKey(row.reason, scope))}</Badge>
+          </li>
+        ))}
+      </ul>
+      {skipped.length > shown.length ? (
+        <p className="mt-2 text-sm text-fg-muted">
+          {t('import.skippedMore', { count: String(skipped.length - shown.length) })}
+        </p>
       ) : null}
     </div>
   );

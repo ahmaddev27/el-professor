@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
  * Every read of `public.drivers` in the browser, classified — and the guard that
  * makes the nineteenth one declare itself.
  *
- * A driver is deactivated, never deleted (see `driverStatus.ts` for the eight
- * cascades that settle it). The owner's instruction is that a deactivated driver
+ * A driver with history is deactivated, never deleted (see `driverStatus.ts` for
+ * the eight cascades that settle it; since 27.11.2026 only a driver nothing
+ * refers to may be deleted, and the database refuses every other delete). The owner's instruction is that a deactivated driver
  * appears in **no other list** — not the plan generator, not the Fahrtenbuch, not
  * anywhere a driver is offered for future work. The counter-rule is just as
  * load-bearing: a **record** of what happened must still show them, or a past

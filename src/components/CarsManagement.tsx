@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Car as CarIcon, Download, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, ShieldX, Trash2, type LucideIcon } from 'lucide-react';
+import { useState, useEffect, type ReactNode } from 'react';
+import { Car as CarIcon, CheckCircle2, CircleOff, Download, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, ShieldX, Trash2, type LucideIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { usePlan } from '../contexts/PlanContext';
@@ -101,7 +101,14 @@ function TuevStatusCell({ info }: { info: TuevInfo }) {
   );
 }
 
-export default function CarsManagement() {
+interface CarsManagementProps {
+  /** The page's update button, drawn before Export (the page owns the partner state). */
+  headerActions?: ReactNode;
+  /** The update's outcome, drawn under the header. */
+  headerNotice?: ReactNode;
+}
+
+export default function CarsManagement({ headerActions, headerNotice }: CarsManagementProps = {}) {
   const [cars, setCars] = useState<CarWithDrivers[]>([]);
   const [loading, setLoading] = useState(true);
   /*
@@ -284,17 +291,40 @@ export default function CarsManagement() {
   // Everything above is the screen's logic and is unchanged; everything below
   // only draws it.
 
+  // `cars.status` is 'active' or 'inactive'; a row that carries none counts as
+  // active, as `activeCars` above does.
+  const statusBadge = (car: CarWithDrivers) =>
+    (car as { status?: string | null }).status === 'inactive' ? (
+      <Badge tone="neutral"><CircleOff aria-hidden />{t('overview.status.inactive')}</Badge>
+    ) : (
+      <Badge tone="positive"><CheckCircle2 aria-hidden />{t('overview.status.active')}</Badge>
+    );
+
   const columns: DataTableColumn<CarWithDrivers>[] = [
     {
       id: 'kennzeichen',
       header: t('werkstatt.plate'),
       value: car => car.kennzeichen,
       sortable: true,
-      cell: car => <span className="whitespace-nowrap font-semibold tabular-nums">{car.kennzeichen}</span>,
+      cell: car => (
+        <span className="grid min-w-0 gap-1 py-1">
+          <span className="whitespace-nowrap font-semibold tabular-nums">{car.kennzeichen}</span>
+          {/* The status column is hidden on a phone; it moves under the plate. */}
+          <span className="sm:hidden">{statusBadge(car)}</span>
+        </span>
+      ),
       // At 375 px the plate, the status and both row actions share 335 px; with
       // the table's standard padding the delete button fell off the edge (the
       // approved prototype has the same clipping). Tighter only on a phone.
       className: 'ps-3 pe-1 sm:px-4',
+    },
+    {
+      id: 'status',
+      header: t('common.status'),
+      value: car => (car as { status?: string | null }).status ?? 'active',
+      sortable: true,
+      cell: statusBadge,
+      hideBelow: 'sm',
     },
     {
       id: 'drivers',
@@ -386,6 +416,7 @@ export default function CarsManagement() {
         }
         actions={
           <>
+            {headerActions}
             <Button variant="secondary" onClick={handleExport} disabled={loadFailed}>
               <Download aria-hidden />
               {t('common.exportExcelShort')}
@@ -406,6 +437,7 @@ export default function CarsManagement() {
           widest child's content, and the tab row alone would push the page
           past 375 px. */}
       <div className="grid grid-cols-1 gap-4">
+        {headerNotice}
         {carLimitReached && (
           <Alert id={LIMIT_ALERT_ID} tone="critical" icon={CarIcon} title={t('fleet.carLimitReachedHeading')}>
             {t('fleet.carLimitReachedBody', { limit: carLimit })}

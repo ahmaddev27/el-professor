@@ -40,13 +40,18 @@ vi.mock('../../lib/uberBackfillDeps', () => ({ supabaseBackfillDeps: vi.fn() }))
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const { FleetUpdateButton, FleetUpdateOutcome } = await import('./FleetUpdate');
 const { FleetImportShortcut } = await import('./FleetImportShortcut');
+const { useFleetUpdate } = await import('./useFleetUpdate');
 
-async function render(props: Parameters<typeof FleetImportShortcut>[0]): Promise<ReactTestRenderer> {
+function Page({ onImported }: { onImported?: () => void }) {
+  const update = useFleetUpdate('drivers', onImported);
+  return createElement('div', null, createElement(FleetUpdateButton, { update }), createElement(FleetUpdateOutcome, { update }));
+}
+
+async function render(element: ReturnType<typeof createElement>): Promise<ReactTestRenderer> {
   let tree!: ReactTestRenderer;
-  await act(async () => {
-    tree = create(createElement(MemoryRouter, null, createElement(FleetImportShortcut, props)));
-  });
+  await act(async () => { tree = create(createElement(MemoryRouter, null, element)); });
   await settle();
   return tree;
 }
@@ -61,34 +66,49 @@ beforeEach(() => {
   world.invoke.mockResolvedValue({ data: { ok: true, seen: 3 }, error: null });
 });
 
-describe('FleetImportShortcut', () => {
-  it('runs the drivers leg alone, in place, then asks the page to reload', async () => {
+describe('the update button', () => {
+  it('runs the drivers leg alone, in place, reloads the page and states the figures', async () => {
     const onImported = vi.fn();
-    const tree = await render({ scope: 'drivers', onImported });
+    const tree = await render(createElement(Page, { onImported }));
     await press(buttonsLabelled(tree, 'import.shortcut.updateDrivers')[0]);
     expect(world.invoke).toHaveBeenCalledTimes(1);
     expect(world.invoke).toHaveBeenCalledWith('partner-pull', { body: { scope: 'drivers' } });
     expect(rpcs()).toEqual(['rpc:partner_drivers_import']);
     expect(onImported).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(tree.toJSON())).toContain('import.doneBody');
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain('import.update.seen');
+    expect(text).toContain('import.update.created');
+    expect(text).toContain('import.update.linked');
   });
 
   it('keeps the link to the full import when the company is not connected', async () => {
     world.connected = false;
-    const tree = await render({ scope: 'drivers' });
+    const tree = await render(createElement(Page));
     expect(buttonsLabelled(tree, 'import.shortcut.updateDrivers')).toHaveLength(0);
     expect(tree.root.findByProps({ to: '/datenimport' })).toBeTruthy();
   });
 
   it('keeps the link for a caller who may not import', async () => {
     world.isAdmin = false;
-    const tree = await render({ scope: 'drivers' });
+    const tree = await render(createElement(Page));
     expect(buttonsLabelled(tree, 'import.shortcut.updateDrivers')).toHaveLength(0);
     expect(tree.root.findByProps({ to: '/datenimport' })).toBeTruthy();
   });
 
-  it('the empty variant still links to the full import and runs nothing', async () => {
-    const tree = await render({ empty: true, scope: 'drivers' });
+  it('shows the partner\'s real reason when the pull is refused', async () => {
+    world.invoke.mockResolvedValue({
+      data: null,
+      error: { context: { clone: () => ({ json: async () => ({ reason: 'not_connected' }) }) } },
+    });
+    const tree = await render(createElement(Page));
+    await press(buttonsLabelled(tree, 'import.shortcut.updateDrivers')[0]);
+    expect(JSON.stringify(tree.toJSON())).not.toContain('import.error.pullGeneric');
+  });
+});
+
+describe('FleetImportShortcut (the empty prompt)', () => {
+  it('links to the full import and runs nothing', async () => {
+    const tree = await render(createElement(FleetImportShortcut));
     expect(tree.root.findByProps({ to: '/datenimport' })).toBeTruthy();
     expect(world.invoke).not.toHaveBeenCalled();
     expect(rpcs()).toEqual([]);

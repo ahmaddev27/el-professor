@@ -835,6 +835,14 @@ ON CONFLICT DO NOTHING;
 -- `key`; what a move writes is in `_mx_move` below.
 
 CREATE TEMP TABLE _mx_spec (ord int, tbl text, key text, fixture text, ins_pre text, ins text, upd text);
+-- Added after the VALUES list below, because a VALUES list must be rectangular:
+-- del_pre / del_key (optional, NULL = the ordinary row and no preparation): a
+-- table whose DELETE is refused for the ordinary fixture row for a reason that
+-- is not the policy. drivers is the one: since 20261127130000 a trigger refuses
+-- the delete of a driver anything refers to, and the fixture driver is referred
+-- to by dozens of fixtures, so the probe takes a driver of its own, made by the
+-- owner in the probe's own rolled-back subtransaction and referred to by nothing.
+-- What the cell then measures is the policy; the guard has its own file.
 
 INSERT INTO _mx_spec VALUES
 ( 1, 'companies', $q$id = {co}$q$, NULL, NULL,
@@ -1458,6 +1466,12 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO company_simulation_settings (company_id, share_mode, share_scope, seed) VALUES ({co}, 'random', 'month', 7)$q$,
   $q$return_to_base = return_to_base$q$);
 
+ALTER TABLE _mx_spec ADD COLUMN del_pre text, ADD COLUMN del_key text;
+UPDATE _mx_spec
+   SET del_pre = $q$INSERT INTO drivers (id, company_id, name) VALUES ({new}, {co}, 'MX deletable driver {s}')$q$,
+       del_key = $q$id = {new}$q$
+ WHERE tbl = 'drivers';
+
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
 -- filled for the row's own side, so `mov` names the other side's company, admin
@@ -1853,7 +1867,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('drivers',                            'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('drivers',                            'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('drivers',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('drivers',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+-- 27.11.2026 (20261127130000): the delete asks for an administrator and for nothing that refers to the driver.
+-- editor and supervisor Y. -> .. (the page gate is gone for this one command). The probed row is a driver of its
+-- own (del_pre), so the C a referenced fixture would give is not what is measured: the guard is in
+-- driver-delete-guard.sql.
+('drivers',                           'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('drivers',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('fahrtenbuch_assignment_audit',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
@@ -2755,12 +2773,13 @@ BEGIN
         cell := '';
         FOREACH side IN ARRAY ARRAY['a', 'b'] LOOP
           pre  := CASE v_op WHEN 'I' THEN _mx_fill(r.ins_pre, r.tbl, side)
-                            WHEN 'M' THEN _mx_fill(r.mov_pre, r.tbl, side) END;
+                            WHEN 'M' THEN _mx_fill(r.mov_pre, r.tbl, side)
+                            WHEN 'D' THEN _mx_fill(r.del_pre, r.tbl, side) END;
           stmt := CASE v_op
                     WHEN 'S' THEN format('SELECT count(*) FROM %I WHERE %s', r.tbl, _mx_fill(r.key, r.tbl, side))
                     WHEN 'I' THEN _mx_fill(r.ins, r.tbl, side)
                     WHEN 'U' THEN format('UPDATE %I SET %s WHERE %s', r.tbl, r.upd, _mx_fill(r.key, r.tbl, side))
-                    WHEN 'D' THEN format('DELETE FROM %I WHERE %s', r.tbl, _mx_fill(r.key, r.tbl, side))
+                    WHEN 'D' THEN format('DELETE FROM %I WHERE %s', r.tbl, _mx_fill(coalesce(r.del_key, r.key), r.tbl, side))
                     -- guarded, because format() turns a NULL clause into an empty one
                     WHEN 'M' THEN CASE WHEN r.mov IS NOT NULL THEN
                                     format('UPDATE %I SET %s WHERE CURRENT OF (SELECT … WHERE %s FOR UPDATE)',
@@ -3107,9 +3126,19 @@ BEGIN
     got := left(_mx_try(r.who, NULL, format('SELECT count(*) FROM drivers WHERE id = %L', r.drv)), 1)
         || left(_mx_try(r.who, NULL, format('INSERT INTO drivers (company_id, name) VALUES (%L, %L)', r.co, 'MX state probe')), 1)
         || left(_mx_try(r.who, NULL, format('UPDATE drivers SET name = name WHERE id = %L', r.drv)), 1)
-        || left(_mx_try(r.who, NULL, format('DELETE FROM drivers WHERE id = %L', r.drv)), 1);
+        -- 27.11.2026 (20261127130000): the delete takes a driver of its own, made
+        -- by the owner in the rolled-back probe, because the guard refuses one
+        -- anything refers to and a state scenario measures the state. And it asks
+        -- for an administrator, so the invited editor, admitted everywhere else,
+        -- reaches no row: its last letter moves Y -> '.'.
+        || left(_mx_try(r.who,
+                        format('INSERT INTO drivers (id, company_id, name) VALUES (%L, %L, %L)',
+                               _mx_id('state-del', r.who), r.co, 'MX state deletable'),
+                        format('DELETE FROM drivers WHERE id = %L', _mx_id('state-del', r.who))), 1);
     PERFORM _mx_expect('state', r.label || ': drivers S I U D', got,
-      CASE WHEN r.allowed THEN 'YYYY' ELSE '.R..' END);
+      CASE WHEN r.allowed AND r.who LIKE 'admin-%' THEN 'YYYY'
+           WHEN r.allowed THEN 'YYY.'
+           ELSE '.R..' END);
 
     -- 20260923130000 (slice C): the RPC asks current_role_permits('documents',
     -- true) after its own company branch. The two allowed principals are the
@@ -4322,7 +4351,19 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNNNY', NULL),
     ('platform_company_delete(company marked deleted, its name)',
      $q$SELECT platform_company_delete('c0000000-0000-4000-8000-0000000000dd', 'MX Deleted')::text$q$,
-     'PNNNNNY', NULL);
+     'PNNNNNY', NULL),
+
+    -- 20261127130000, would deleting this driver be refused, and by whom. It
+    -- answers {ok, ...} with no `success` key, so the probe projects the `ok`
+    -- member, which is the one thing that tells an administrator's answer from
+    -- a refusal's. The company administrator reads the fixture driver of its
+    -- own company (referenced by dozens of fixtures: ok is true all the same,
+    -- it is `deletable` that is false). Everybody else, the administrator of
+    -- the other company included (driver_not_found), gets ok = false. Anon has
+    -- no EXECUTE. tests/rls/driver-delete-guard.sql reads the whole answer.
+    ('driver_delete_check(driver of A)',
+     $q$SELECT (driver_delete_check({ref:drivers}) ->> 'ok')$q$,
+     'PNNNYNN', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -4338,6 +4379,7 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('platform_view_company_id() is company A',                     'YY'),
     ('platform_support_company_id() is company A',                  '0Y'),
     ('is_company_admin()',                                          'NY'),
+    ('driver_delete_check(driver of A)',                           'NY'),
     ('current_role_permits(drivers, edit)',                          'NY'),
     -- both principals carry the text role `viewer`, not `admin`
     ('is_role(admin)',                                              'NN'),
@@ -4443,7 +4485,7 @@ BEGIN
     FROM (VALUES
       ('get_user_company_id() is company A'), ('get_active_company_id() is company A'),
       ('platform_view_company_id() is company A'), ('platform_support_company_id() is company A'),
-      ('is_company_admin()'), ('current_role_permits(drivers, edit)'), ('is_role(admin)'),
+      ('is_company_admin()'), ('driver_delete_check(driver of A)'), ('current_role_permits(drivers, edit)'), ('is_role(admin)'),
       ('platform_context_open(company A, view)'), ('platform_context_close()'),
       ('get_weekly_abrechnung(2026, 3) shows company A''s line'),
       ('get_monthly_abrechnung(2026, 3) shows company A''s line'),

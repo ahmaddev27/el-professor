@@ -1,8 +1,10 @@
 /**
  * What "deactivated" means for a driver, in one place.
  *
- * A driver is never deleted (owner's decision, 25.10.2026, confirming what
- * `8da4e26` built on 21.10.2026). Eight foreign keys CASCADE off
+ * A driver with history is never deleted. Since 27.11.2026 (owner, reversing
+ * 25.10.2026) an administrator may delete a driver NOTHING refers to, and the
+ * database refuses every other delete (`driver_delete_check`, lib/driverDelete.ts);
+ * everyone else is deactivated, which is what this file is about. Eight foreign keys CASCADE off
  * `public.drivers` — `salaries`, `driver_notes`, `car_driver_assignments`,
  * `historical_reconciliation_drivers`, `historical_reconciliation_results`,
  * `salary_cash_receipts`, `driver_month_budget` and `driver_month_assignments` —

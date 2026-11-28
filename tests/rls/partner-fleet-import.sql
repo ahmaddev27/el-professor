@@ -241,13 +241,15 @@ DECLARE
   co_b constant uuid := 'c0000000-0000-4000-8000-00000000000b';
   v_b_before integer := (SELECT count(*) FROM drivers WHERE company_id = co_b);
 BEGIN
-  -- 1001 links (Anna), 1002 Bernd, 1003 Carla, 1004 the fallback name and 1006
-  -- Dora (departed) are created; 1005 and 1007 have no usable name and 1008 is
-  -- Bernd again. 1009 was rejected by a person and is not looked at.
-  PERFORM _fi_rec(12, 'one linked, four created, three reported - and the existing name is not created again',
+  -- 1001 links (Anna), 1002 Bernd, 1003 Carla and 1006 Dora (departed) are
+  -- created; 1004, 1005 and 1007 have no usable name (the fallback name is one
+  -- since 20261127120000, and no longer creates a driver called Unbekannter
+  -- Fahrer) and 1008 is Bernd again. 1009 was rejected by a person and is not
+  -- looked at. MOVED by 20261127120000, from '4/1/3' to '3/1/4'.
+  PERFORM _fi_rec(12, 'one linked, three created, four reported - and the existing name is not created again',
     _fi_call(admin_a, _fi_drivers()) || ' / ' ||
     (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND lower(btrim(name)) = 'anna  existing'),
-    '4/1/3 / 1');
+    '3/1/4 / 1');
 
   PERFORM _fi_rec(13, 'the existing driver''s name is byte-identical: the partner never writes it',
     (SELECT name FROM drivers WHERE id = '2f000000-0000-4000-8000-0000000000d1'), 'Anna  Existing');
@@ -292,13 +294,16 @@ DECLARE
   admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
   co_a constant uuid := 'c0000000-0000-4000-8000-00000000000a';
 BEGIN
-  PERFORM _fi_rec(21, 'the first "Unbekannter Fahrer" was created, and only one',
-    (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND name = 'Unbekannter Fahrer'), '1');
-  -- 1005 and 1007: no usable name. 1008: Bernd again, whose name is taken by 1002.
+  -- MOVED by 20261127120000, from '1' to '0': the partner's fallback name is
+  -- name_missing even when nobody of that name exists, so no driver called
+  -- Unbekannter Fahrer is created.
+  PERFORM _fi_rec(21, 'the partner''s fallback name creates no driver',
+    (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND name = 'Unbekannter Fahrer'), '0');
+  -- 1004, 1005 and 1007: no usable name. 1008: Bernd again, whose name is taken by 1002.
   PERFORM _fi_rec(22, 'the rest are reported with their own reasons, not created',
-    _fi_call(admin_a, _fi_driver_reasons()), 'name_missing,name_missing,name_taken');
+    _fi_call(admin_a, _fi_driver_reasons()), 'name_missing,name_missing,name_missing,name_taken');
   PERFORM _fi_rec(23, 'a second run creates nothing new',
-    _fi_call(admin_a, _fi_drivers()), '0/0/3');
+    _fi_call(admin_a, _fi_drivers()), '0/0/4');
 END $$;
 
 -- ─── 4. the driver limit: what fits is created, the limit is not raised ────

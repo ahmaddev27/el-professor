@@ -514,18 +514,23 @@ BEGIN
   PERFORM _sc_eq('no one deletes a signed copy',
     _sc_try(admin_a, $f$DELETE FROM storage.objects WHERE bucket_id = 'salary-receipts'$f$), 'no_rows'::text);
 
-  -- ── deleting a driver still works ───────────────────────────────────────
+  -- ── deleting a driver with a receipt is refused ─────────────────────────
+  -- MOVED 27.11.2026 by 20261127130000. This section recorded that the delete
+  -- worked and took the salary, the receipt and its payment with it, leaving
+  -- the cash movement behind. A driver with a salary is a driver rows refer
+  -- to, so the guard on drivers now refuses it with its hint, and every one of
+  -- those rows stays. The cash movement staying is unchanged.
   r_s3 := _sc_confirm(admin_a, gen_random_uuid(), s3, 200.00);
-  PERFORM _sc_eq('a driver with a receipt can still be deleted',
-    _sc_try(admin_a, format('DELETE FROM drivers WHERE id = %L', drv_a2)), 'ok'::text);
+  PERFORM _sc_eq('a driver with a receipt cannot be deleted',
+    _sc_try(admin_a, format('DELETE FROM drivers WHERE id = %L', drv_a2)), 'driver_has_references'::text);
   SELECT count(*) INTO n FROM salaries WHERE id = s3;
-  PERFORM _sc_eq('... taking the salary with it', n, 0::bigint);
+  PERFORM _sc_eq('... so the salary is still there', n, 1::bigint);
   SELECT count(*) INTO n FROM salary_cash_receipts WHERE id = r_s3.id;
-  PERFORM _sc_eq('... and the receipt', n, 0::bigint);
+  PERFORM _sc_eq('... and the receipt', n, 1::bigint);
   SELECT count(*) INTO n FROM salary_payments WHERE id = r_s3.salary_payment_id;
-  PERFORM _sc_eq('... and the receipt''s payment', n, 0::bigint);
+  PERFORM _sc_eq('... and the receipt''s payment', n, 1::bigint);
   SELECT count(*) INTO n FROM cash_movements WHERE id = r_s3.cash_movement_id;
-  PERFORM _sc_eq('... while the cash it paid out stays in the ledger', n, 1::bigint);
+  PERFORM _sc_eq('... and the cash it paid out stays in the ledger', n, 1::bigint);
 
   -- ── the rule as a rule, over every receipt this file issued ─────────────
   -- Stated once as an invariant rather than receipt by receipt, so a receipt
@@ -538,7 +543,7 @@ BEGIN
    WHERE substring(receipt_number from 4 for 4) IS DISTINCT FROM business_year::text;
   PERFORM _sc_eq('every number''s year is the salary''s business year', n, 0::bigint);
   SELECT count(*) INTO n FROM salary_cash_receipts;
-  PERFORM _sc_eq('... over every receipt this file issued', n, 9::bigint);
+  PERFORM _sc_eq('... over every receipt this file issued', n, 10::bigint);  -- 9 until 20261127130000: r_s3 is no longer deleted with its driver
 
   RAISE NOTICE '── salary cash assertions passed ──';
 END $$;

@@ -22,6 +22,7 @@ import { applayoutTables } from '../applayout/fixtures';
 import { r1Tables } from '../r1/fixtures';
 import { r2Tables } from '../r2/fixtures';
 import { r4Rpc, r4Tables } from '../r4/fixtures';
+import { driversReideyInvoke, driversReideyRpc, driversReideyTables } from '../drivers-reidey/fixtures';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
@@ -70,6 +71,8 @@ function seed(): Map<string, Row[]> {
     ...r2Tables(),
     // Design remake R4's tables, on its own screens only (r4/fixtures.ts).
     ...r4Tables(),
+    // The Reidey-layout lists, with `?reidey=1` only (drivers-reidey/fixtures.ts).
+    ...driversReideyTables(),
   ]);
 }
 
@@ -368,7 +371,7 @@ const unavailable = async () => ({ data: null, error: { message: 'Not available 
 function rpc(name: string, args?: Record<string, unknown>): PromiseLike<Result> {
   // Batch 3 records every call on its screens, so its flows can prove they sent none.
   recordBatch3Rpc(name);
-  const answer = batch2Rpc(scenario, store, name, args) ?? r4Rpc(name, args);
+  const answer = batch2Rpc(scenario, store, name, args) ?? r4Rpc(name, args) ?? driversReideyRpc(name, args);
   if (!answer) return unavailable();
   window.__harness.pending += 1;
   const neverAnswers = scenario.data === 'loading' && name === PRIMARY_TABLE;
@@ -394,7 +397,9 @@ export const supabase = {
   storage: {
     from: () => ({ createSignedUrl: unavailable, upload: unavailable, getPublicUrl: () => ({ data: { publicUrl: '' } }) }),
   },
-  functions: { invoke: unavailable },
+  functions: {
+    invoke: async (name: string, options?: { body?: { scope?: string } }) => driversReideyInvoke(name, options) ?? unavailable(),
+  },
   channel: () => ({ on() { return this; }, subscribe() { return this; } }),
   removeChannel: () => undefined,
 };
