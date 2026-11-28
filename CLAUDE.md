@@ -569,7 +569,7 @@ Rules that are easy to undo:
 - **The drivers lead.** Each driver's month comes from the Drivers page (`driverMonthPlan.ts`: the hours range of `monthlyPlan/hoursRange.ts`, weekdays, work window, note absences). There is no minimum shift length for everyone, and a full-time minimum the days cannot hold is reported (`capacity_below_minimum`), never met by inventing hours.
 - **The working-time law is in the constants, not in a setting** (owner's delegation, 28.11.2026; `driverMonthPlan.ts`). One duty per driver and operating day:
   - **at most 480 minutes of work** (§3 ArbZG). The extension to ten hours is not used, because it needs an eight-hour average over six months that one simulated month cannot show;
-  - **at most 2880 minutes in an ISO week**;
+  - **at most 2880 minutes in an ISO week**, counted over the month's own simulated duties: a week across the month boundary counts only its days inside the month, and imported trips' hours are not counted. Sheet 7 says so;
   - **a duty over 360 minutes is two `SimShift`s** ("parts", `dutyId`, `part` 1/2, `breakAfter` on part 1) on one vehicle, each at most 360, around **one unpaid 30-minute break at the base** (§4). Part 1 ends at the base whatever `returnToBase` says (`endsAtBase`), and part 2 starts there.
   
   **Keep the break between two shifts, never inside one.** A gap inside a run of rides would silently break the repositioning legs, the route chain, the idle windows (declined orders would land in the break) and the verifier's one-return-per-shift. A day's capacity is 480 for a free window of 510 minutes or more, the window less 30 from 390, else at most 360. The vehicle cap and the rest count a duty as one shift. `restBreak.test.ts` carries a mutation control per rule.

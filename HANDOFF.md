@@ -8,6 +8,7 @@ Last updated: **28.11.2026**
      - Closing sheet 2 gains `Dienst-ID` and `Teil` and writes the break in `Pausen`. Sheet 7 gains an `Arbeitszeit` rule. The Betriebsbericht's `H2` and `O` gain `Dienst` and `Teil`.
      - The read-back and `scripts/fleetbook-report-verify.py` check one duty per driver-day, the break, the 480 and the 2880. There are eight mutation controls in `restBreak.test.ts`. On two-part months built for the purpose, the verifier caught a 10-minute break, part 2 on another car and a split duty.
      - A full-time minimum the days still cannot hold stays `capacity_below_minimum`.
+     - **Limit, stated on sheet 7:** the 48-hour week is counted over the month's own simulated duties. A week across the month boundary counts only its days inside the month, and imported trips' hours are not counted. It is reachable only with about 8 h on seven days in a row; the review found no defect.
   3. **The DEMO seed as root.** This stays the steering session's step, because the delegation covers no host action.
      - `scripts/seed-demo-company.sql` now writes DEMO's `company_simulation_settings` row when given `-v demo_share_percent=30..33 [-v demo_return_to_base=on]`, and only when the company has none.
      - Since the table exists, the month script refuses `--share-percent` / `--return-to-base` (exit 2), so the old runbook command was stale.
