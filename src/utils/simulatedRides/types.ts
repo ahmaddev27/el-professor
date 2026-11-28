@@ -76,7 +76,22 @@ export interface SimShift {
    * his rest; the weeks generator leaves it out.
    */
   plannedEndMs?: number;
+  /**
+   * A duty over 360 minutes is two shifts, "parts", of one driver on one vehicle
+   * and one operating day, with the statutory break between them (Round 8,
+   * §4 ArbZG). The parts share `dutyId`; a single shift carries none of the
+   * three fields. Rides and legs stay keyed by the shift's own `id`.
+   */
+  dutyId?: string;
+  part?: 1 | 2;
+  /** The break after part 1, at the base; on part 1 only. */
+  breakAfter?: { startMs: number; endMs: number };
+  /** The car is back at the base by the planned end, whatever the company's setting (part 1). */
+  endsAtBase?: boolean;
 }
+
+/** One count per duty: a two-part duty counts at its first part only. */
+export const startsDuty = (shift: Pick<SimShift, 'part'>): boolean => shift.part !== 2;
 
 /**
  * What became of an order.

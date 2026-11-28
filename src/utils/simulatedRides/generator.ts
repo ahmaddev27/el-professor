@@ -62,7 +62,21 @@ const MIN_RIDE_BUDGET_SECONDS = 8 * 60;
 const CANCELLATION_FEES = [6, 7.2, 7.5] as const;
 const TIP_AMOUNTS = [1, 1.5, 2, 3, 5] as const;
 
-export interface PlannedShift { vehicle: SimVehicle; startMs: number; plannedEndMs: number; operatingDay: string }
+export interface PlannedShift {
+  vehicle: SimVehicle;
+  startMs: number;
+  plannedEndMs: number;
+  operatingDay: string;
+  /**
+   * The car must be back at the base by the planned end whatever the company's
+   * `returnToBase` setting says (Round 8: part 1 of a two-part duty, whose
+   * statutory break is taken at the Betriebssitz). Absent: today's behaviour.
+   */
+  endAtBase?: boolean;
+}
+
+/** The shift ends with the car at the base: the company's rule, or the part's own. */
+const mustReturn = (ctx: Context, plan: PlannedShift): boolean => ctx.returnToBase === true || plan.endAtBase === true;
 
 export interface Context {
   rng: Rng;
@@ -439,7 +453,7 @@ export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): S
         const budget = (plan.plannedEndMs - approach.startMs) / 1000;
         if (budget < MIN_RIDE_BUDGET_SECONDS) refusal = 'no_budget';
         else {
-          const fits = ctx.returnToBase ? homeInTime(ctx, approach.startMs, plan.plannedEndMs) : undefined;
+          const fits = mustReturn(ctx, plan) ? homeInTime(ctx, approach.startMs, plan.plannedEndMs) : undefined;
           const chosen = chooseDropoff(ctx, approach.pickup, budget, localHour(approach.startMs), fits);
           if (!chosen) refusal = 'no_dropoff';
           else step = { approach, chosen };
@@ -484,7 +498,7 @@ export function runShift(ctx: Context, plan: PlannedShift, owner: ShiftOwner): S
 /** The last ride's end, or with return to base the car's arrival there (the drop-off was chosen so it has a route). */
 function shiftEnd(ctx: Context, plan: PlannedShift, last: PrevRide | null): number {
   if (!last) return plan.startMs;
-  if (!ctx.returnToBase) return last.endMs;
+  if (!mustReturn(ctx, plan)) return last.endMs;
   const home = returnDrive(travelOf(ctx), ctx.base, last.dropoff, last.endMs);
   return home === null ? last.endMs : last.endMs + home.seconds * 1000;
 }
@@ -543,7 +557,9 @@ function overlaps(key: string, list: readonly SimShift[]): string[] {
 function checkVehicleDays(shifts: readonly SimShift[]): string[] {
   const out: string[] = [];
   for (const [key, list] of groupBy(shifts, s => `${s.vehicle.plate}|${s.operatingDay}`)) {
-    if (list.length > SHIFT_LIMITS.maxPerVehicleDay) out.push(`${key}: ${list.length} shifts in one operating day`);
+    // The two parts of one duty are one shift of the vehicle's day (Round 8).
+    const duties = new Set(list.map(s => s.dutyId ?? s.id)).size;
+    if (duties > SHIFT_LIMITS.maxPerVehicleDay) out.push(`${key}: ${duties} shifts in one operating day`);
   }
   for (const [key, list] of groupBy(shifts, s => s.vehicle.plate)) out.push(...overlaps(key, list));
   // By UUID where the shift carries one: two drivers who share a name are two drivers.
@@ -671,12 +687,14 @@ export function validateRides(
   /** The company requires the car back at the base (round 8, D8); the calendar month passes its setting. */
   returnToBase = false,
 ): string[] {
+  // A part 1 returns to the base for its break even when the company does not require it.
+  const closing = returnToBase ? month.shifts : month.shifts.filter(s => s.endsAtBase === true);
   return [
     ...checkWholeMilliseconds(month.rides),
     ...checkShiftLengths(month.shifts, limits),
     ...checkVehicleDays(month.shifts),
     ...checkOpeningLegs(month.shifts, month.rides, base, travel, margins),
     ...checkRideChain(month.rides, base, travel, margins),
-    ...(returnToBase ? checkClosingLegs(month.shifts, month.rides, base, travel, margins) : []),
+    ...(closing.length > 0 ? checkClosingLegs(closing, month.rides, base, travel, margins) : []),
   ];
 }

@@ -260,7 +260,7 @@ describe('the wait for the next order (owner, 27.11.2026)', () => {
   });
 
   it('is named in the generator version, so an older month never shares a run id with a newer one', () => {
-    expect(FULL_MONTH_GENERATOR_VERSION).toBe('full-month/4.1.0');
+    expect(FULL_MONTH_GENERATOR_VERSION).toBe('full-month/4.2.0');
     expect(CALENDAR_MAX_WAIT_SECONDS).toBe(1_800);
   });
 });

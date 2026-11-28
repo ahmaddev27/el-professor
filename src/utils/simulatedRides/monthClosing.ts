@@ -28,8 +28,9 @@ import { SHARE_MEANING_TEXT, type DriverDayNote, type DriverDayReconciliation, t
 import type { RepositioningLeg, RepositioningPurpose } from './repositioningLegs';
 import { cancellationFeeOf } from './revenue';
 import type { ShareSetting } from './monthlyRate';
+import { BREAK_MINUTES, MAX_DAY_WORK_MINUTES, MAX_WEEK_WORK_MINUTES } from './driverMonthPlan';
 import { formatStamp } from './time';
-import type { SimRide, SimShift } from './types';
+import { startsDuty, type SimRide, type SimShift } from './types';
 
 /**
  * The month's closing workbook (FleetBook round 8, section 10):
@@ -205,13 +206,29 @@ export function closingRidesSheetRows(result: FullMonthResult): Row[] {
 export const SHIFT_HEADERS: readonly string[] = [
   LABEL_HEADER, 'Fahrer-ID', 'Fahrer', 'Schicht-ID', 'Betriebstag', 'Schichtbeginn', 'Schichtende', 'Geplantes Ende',
   'Startbasis', 'Fahrzeug', 'Fahrten abgeschlossen', 'Fahrten storniert', 'Leerfahrzeit (Min)', 'Leerkilometer',
-  'Dienststunden (simuliert)', 'Pausen', 'Abweichung', 'Status',
+  'Dienststunden (simuliert)', 'Pausen', 'Abweichung', 'Status', 'Dienst-ID', 'Teil',
 ];
 
-/** §4 ArbZG: more than six hours of work need a break, which this planner does not place. */
+/**
+ * §4 ArbZG: more than six hours of work need a break. A duty over this is two
+ * parts with the break between them; one shift over it has no break and is
+ * marked "zu pruefen".
+ */
 export const BREAK_FREE_MINUTES = 360;
 
-function shiftRow(shift: SimShift, rides: readonly SimRide[], legs: readonly RepositioningLeg[], baseLabel: string): Row {
+const hoursText = (minutes: number): string => (Math.round(minutes / 60 * 100) / 100).toFixed(2).replace('.', ',');
+const clock = (ms: number): string => stamp(ms).slice(11, 16);
+
+/** What the Pausen cell says: a single shift's rule, or the part's place in a duty with its break (§ 3, § 4 ArbZG). */
+function breakText(shift: SimShift, dutyTotal: number, needsBreak: boolean): string {
+  if (shift.part === 1 && shift.breakAfter) {
+    return `Ruhepause ${clock(shift.breakAfter.startMs)}-${clock(shift.breakAfter.endMs)} am Betriebssitz (${BREAK_MINUTES} Min, § 4 ArbZG), danach Teil 2`;
+  }
+  if (shift.part === 2) return `Teil 2 nach der Ruhepause; Arbeitszeit des Dienstes ${hoursText(dutyTotal)} Std. (§ 3 ArbZG)`;
+  return needsBreak ? 'Pause erforderlich, nicht geplant (§ 4 ArbZG)' : 'keine Pause erforderlich (bis 6 Std., § 4 ArbZG)';
+}
+
+function shiftRow(shift: SimShift, rides: readonly SimRide[], legs: readonly RepositioningLeg[], baseLabel: string, dutyTotal: number): Row {
   const duty = dutyMinutes(shift);
   const planned = shift.plannedEndMs ?? shift.endMs;
   const overrun = Math.round((shift.endMs - planned) / 60_000);
@@ -225,9 +242,10 @@ function shiftRow(shift: SimShift, rides: readonly SimRide[], legs: readonly Rep
     stamp(shift.endMs), stamp(planned), baseLabel, shift.vehicle.plate,
     rides.filter(r => r.status === 'completed').length, rides.filter(r => r.status === 'cancelled').length,
     emptyMinutes, emptyKm === null ? 'nicht geroutet' : emptyKm / 100, hours(duty),
-    needsBreak ? 'Pause erforderlich, nicht geplant (§ 4 ArbZG)' : 'keine Pause erforderlich (bis 6 Std., § 4 ArbZG)',
+    breakText(shift, dutyTotal, needsBreak),
     deviation,
     needsBreak || deviation !== '' || !routed ? 'zu pruefen' : 'SIMULIERT - kein Arbeitszeitnachweis',
+    shift.dutyId ?? shift.id, shift.part ?? '',
   ];
 }
 
@@ -237,7 +255,10 @@ export function shiftsSheetRows(result: FullMonthResult): Row[] {
   const base = result.provenance.base.label;
   const shifts = [...result.month.shifts].sort((a, b) =>
     a.driver.name.localeCompare(b.driver.name) || (a.driver.id ?? '').localeCompare(b.driver.id ?? '') || a.startMs - b.startMs);
-  return [[...SHIFT_HEADERS], ...shifts.map(sh => shiftRow(sh, rides.get(sh.id) ?? [], legs.get(sh.id) ?? [], base))];
+  const dutyTotals = new Map<string, number>();
+  for (const sh of shifts) dutyTotals.set(sh.dutyId ?? sh.id, (dutyTotals.get(sh.dutyId ?? sh.id) ?? 0) + dutyMinutes(sh));
+  return [[...SHIFT_HEADERS], ...shifts.map(sh =>
+    shiftRow(sh, rides.get(sh.id) ?? [], legs.get(sh.id) ?? [], base, dutyTotals.get(sh.dutyId ?? sh.id) ?? 0))];
 }
 
 // ── Uber figures per driver (sheets 3, 4 and 6) ────────────────────────────
@@ -266,9 +287,18 @@ function monthUberRows(result: FullMonthResult): (DriverDayReconciliation | Peri
 
 // ── Sheet 3: Lohn und Arbeitszeit ──────────────────────────────────────────
 
+/**
+ * The hours range is salary divided by the hourly rate, with no premium for
+ * night, Sunday or holiday work (D1 point 2). A premium would lower the hours a
+ * salary buys, but its rate is the driver's contract's and no contract rate is
+ * stored anywhere, so none is assumed. The sheet says so, not only this code.
+ */
+export const HOURS_RULE_SHORT = 'Gehalt / Stundenlohn, ohne Zuschlaege';
+export const NO_PREMIUM = 'nicht beruecksichtigt: keine Zuschlagssaetze (Nacht, Sonntag, Feiertag) aus den Arbeitsvertraegen hinterlegt; kein Satz wird angenommen, die Stunden sind Gehalt / Stundenlohn';
+
 export const PAY_HEADERS: readonly string[] = [
   LABEL_HEADER, 'Fahrer-ID', 'Fahrer', 'Beschaeftigung', 'Provisionssatz (Konfiguration)', 'Stundenlohn (EUR, Konfiguration)',
-  'Gehaltsrahmen min (EUR, Konfiguration)', 'Gehaltsrahmen max (EUR, Konfiguration)', 'Stundenrahmen min', 'Stundenrahmen max', 'Geplante Stunden', 'Platzierte Stunden (simuliert)',
+  'Gehaltsrahmen min (EUR, Konfiguration)', 'Gehaltsrahmen max (EUR, Konfiguration)', `Stundenrahmen min (${HOURS_RULE_SHORT})`, `Stundenrahmen max (${HOURS_RULE_SHORT})`, 'Geplante Stunden', 'Platzierte Stunden (simuliert)',
   'Tatsaechliche Stunden', 'Umsatz importiert (EUR)', 'Aktionen importiert (EUR)', 'Trinkgeld importiert (EUR)',
   'Provision nach Regel (EUR, berechnet, nicht gebucht)', 'Stunden x Stundenlohn (EUR, simuliert)',
   'Differenz Provision - Stunden x Lohn (EUR, berechnet, nicht gebucht)', 'Gebuchtes Gehalt', 'Bruttolohn', 'Offene Punkte',
@@ -277,6 +307,7 @@ export const PAY_HEADERS: readonly string[] = [
 export const NOT_READ_SALARIES = 'nicht gelesen: der Simulator liest die Tabellen des Moduls Gehaelter nicht';
 export const NO_ACTUAL_HOURS = 'nicht verfuegbar: simulierte Schichten sind keine gearbeiteten Stunden';
 export const NO_GROSS_WAGE = 'nicht berechnet: kein Lohnmodell festgelegt (D4)';
+
 
 const POSITION_WORD: Record<string, string> = {
   below: 'unter dem Stundenrahmen', above_cap: 'ueber dem Stundenrahmen', no_range: 'kein Stundenrahmen',
@@ -582,7 +613,7 @@ export function calendarSheetRows(result: FullMonthResult): Row[] {
   for (const shift of result.month.shifts) {
     const f = at(shift.operatingDay);
     if (!f) continue;
-    f.shifts += 1;
+    if (startsDuty(shift)) f.shifts += 1;
     f.dutyMinutes += dutyMinutes(shift);
     const km = legKmHundredths(legs.get(shift.id) ?? []);
     if (km === null) f.emptyUnrouted = true; else f.emptyKm += km;
@@ -714,6 +745,8 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Anteil', 'Umsatz (importiert) x Satz, je Fahrer und Betriebstag; berechnet und angezeigt, nicht gebucht'],
       ['Anteil: Bedeutung', `${SHARE_MEANING_TEXT[f.share.meaning]} (D1, Entscheidung des Inhabers vom 27.11.2026); ein Prozentsatz des Umsatzes, kein Faktor auf die Fahrpreise`],
       ['Differenz Umsatz - Fahrpreise', 'Umsatz (importiert) minus simulierte und echte Fahrpreise, je Fahrer und Betriebstag; angezeigt, nicht ausgeglichen: kein Fahrpreis wird an den Uber-Wert angepasst (D1, 27.11.2026)'],
+      ['Arbeitszeit', `hoechstens ${MAX_DAY_WORK_MINUTES / 60} Std. am Tag (§ 3 ArbZG); die Verlaengerung auf 10 Std. wird nicht genutzt, weil sie einen Durchschnitt von 8 Std. ueber 6 Monate voraussetzt, den ein simulierter Monat nicht zeigen kann; ueber 6 Std. als zwei Teile mit ${BREAK_MINUTES} Minuten Ruhepause am Betriebssitz (§ 4 ArbZG), die Pause ist keine Arbeitszeit; hoechstens ${MAX_WEEK_WORK_MINUTES / 60} Std. je Woche (§ 3 ArbZG), gezaehlt ueber die simulierten Dienste dieses Monats: eine Woche ueber die Monatsgrenze nur mit ihren Tagen im Monat, Stunden aus importierten Fahrten nicht eingerechnet`],
+      ['Stundenrahmen', `Mindest- und Hoechstgehalt / Stundenlohn (D5), ohne Zuschlaege: ${NO_PREMIUM}`],
       ['Lohnberechnung nach Regel', '(Umsatz + Aktionen) x Provisionssatz + Trinkgeld, je Uber-Zeile auf Cent gerundet; keine Gehaltsbuchung'],
       ['Trinkgeld', 'nur aus Uber-Zahlen, centgenau auf simulierte Fahrten verteilt; nie erzeugt'],
       ['Stornogebuehr', 'nur wenn die Firma sie eingestellt hat'],
@@ -745,6 +778,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Gebuchte Gehaelter', NOT_READ_SALARIES],
       ['Tatsaechliche Arbeitsstunden', NO_ACTUAL_HOURS],
       ['Bruttolohn', NO_GROSS_WAGE],
+      ['Zuschlaege in den Stunden', NO_PREMIUM],
       ['Kilometer echter Fahrten', 'nicht gespeichert'],
       ['Abgelehnte echte Auftraege (nicht im Fahrtenbuch)', read ? declined : 'nicht gelesen'],
       ['Echte Fahrten ohne eindeutigen Fahrer', read ? read.unattributed.length : 'nicht gelesen'],

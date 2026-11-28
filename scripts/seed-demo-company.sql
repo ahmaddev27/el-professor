@@ -54,9 +54,17 @@
 -- and writes a Betriebssitz only when the caller names one:
 --
 --   ... psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
---     [-v demo_base_lat=<lat> -v demo_base_lon=<lon>] < scripts/seed-demo-company.sql
+--     [-v demo_base_lat=<lat> -v demo_base_lon=<lon>] \
+--     [-v demo_share_percent=30..33 [-v demo_return_to_base=on]] < scripts/seed-demo-company.sql
 --
--- The read-only report at the very end lists what the round 8 months will read.
+-- `demo_share_percent` writes the company's simulation settings row (D1, the
+-- table of 20261127200000) when it has none, because since that migration the
+-- month script reads the company's row and refuses --share-percent and
+-- --return-to-base beside it. A row that exists is never changed.
+--
+-- `scripts/seed-demo-company-check.sql` is the read-only half: run it before
+-- this file to see what is there, and after it to see what the round 8 months
+-- will read.
 
 \set ON_ERROR_STOP on
 
@@ -523,6 +531,23 @@ UPDATE trip_analysis_settings t
  WHERE t.company_id = ctx.company_id AND t.base_latitude IS NULL AND t.base_longitude IS NULL;
 \endif
 
+-- The simulation settings (D1). A fixed company share and the return-to-base
+-- switch, written only when the person running this names a share and only when
+-- the company has no row, so a setting an administrator chose on the screen is
+-- never overwritten. `demo_return_to_base` alone writes nothing: a row with the
+-- switch and no share is a setting nobody asked for. psql's `\if` reads `on`,
+-- `true`, `1` and `yes` as true; an unset variable is false.
+\if :{?demo_share_percent}
+\if :{?demo_return_to_base}
+\else
+\set demo_return_to_base off
+\endif
+INSERT INTO company_simulation_settings (company_id, share_mode, share_percent, return_to_base)
+SELECT ctx.company_id, 'fixed', :'demo_share_percent'::integer, :'demo_return_to_base'::boolean
+  FROM ctx
+ WHERE NOT EXISTS (SELECT 1 FROM company_simulation_settings s WHERE s.company_id = ctx.company_id);
+\endif
+
 -- `row_count` is printed beside the file name on step 1 ("· 22 Fahrten"), so
 -- adding rides without it would make the screen state a number that contradicts
 -- the rows under it. It is **derived from the rows themselves**, not written as a
@@ -554,34 +579,5 @@ UNION ALL SELECT 'receipts',  count(*) FROM receipts  x, (SELECT id FROM compani
 UNION ALL SELECT 'salaries',  count(*) FROM salaries  x, (SELECT id FROM companies WHERE name='DEMO Monatsplanung GmbH') c WHERE x.company_id=c.id
 ORDER BY 1;
 
--- ═════════════════════════════════════════════════════════════════════════════
--- What the round 8 months will read (read-only; the inventory of PLAN.md W1)
--- ═════════════════════════════════════════════════════════════════════════════
-\pset footer off
-SELECT 'uber rows' AS what, to_char(i.date, 'YYYY-MM') AS month, i.type, count(*) AS rows, sum(i.amount) AS euro,
-       count(*) FILTER (WHERE i.amount < 0) AS negative
-  FROM income i JOIN companies c ON c.id = i.company_id
- WHERE c.name = 'DEMO Monatsplanung GmbH' AND i.source = 'uber' AND i.date BETWEEN DATE '2026-08-25' AND DATE '2026-11-06'
- GROUP BY 2, 3 ORDER BY 2, 3;
-SELECT l.external_driver_id, d.name, l.status
-  FROM partner_driver_links l JOIN companies c ON c.id = l.company_id LEFT JOIN drivers d ON d.id = l.driver_id
- WHERE c.name = 'DEMO Monatsplanung GmbH' AND l.partner = 'reidey' ORDER BY 1;
-SELECT d.name, d.status, d.employment_type, d.salary_ratio, d.allowed_weekdays,
-       d.planning_min_salary, d.planning_max_salary, d.planning_hourly_rate, d.work_window_start, d.work_window_end
-  FROM drivers d JOIN companies c ON c.id = d.company_id
- WHERE c.name = 'DEMO Monatsplanung GmbH' ORDER BY d.name;
-SELECT x.kennzeichen, x.status FROM cars x JOIN companies c ON c.id = x.company_id
- WHERE c.name = 'DEMO Monatsplanung GmbH' ORDER BY 1;
-SELECT 'saved base' AS what, t.base_latitude, t.base_longitude, t.base_radius_km
-  FROM trip_analysis_settings t JOIN companies c ON c.id = t.company_id
- WHERE c.name = 'DEMO Monatsplanung GmbH';
-SELECT 'address' AS what, s.street IS NOT NULL AND s.house_number IS NOT NULL AS has_street_and_number,
-       s.postal_code, s.city
-  FROM company_settings s JOIN companies c ON c.id = s.company_id
- WHERE c.name = 'DEMO Monatsplanung GmbH';
-SELECT 'real trips' AS what, to_char(t.trip_date, 'YYYY-MM') AS month, t.is_simulated, count(*) AS trips,
-       count(t.original_driver_id) AS with_driver
-  FROM fahrtenbuch_trips t JOIN companies c ON c.id = t.company_id
- WHERE c.name = 'DEMO Monatsplanung GmbH' AND t.trip_date BETWEEN DATE '2026-08-25' AND DATE '2026-11-05'
- GROUP BY 2, 3 ORDER BY 2, 3;
-SELECT 'company_simulation_settings exists' AS what, to_regclass('public.company_simulation_settings') IS NOT NULL AS answer;
+-- What the round 8 months will read is `scripts/seed-demo-company-check.sql`,
+-- read-only, so it can run before this file as well as after it.

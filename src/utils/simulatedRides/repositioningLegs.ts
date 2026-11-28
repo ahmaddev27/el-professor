@@ -214,7 +214,7 @@ export function buildRepositioningLegs(
     }
     const last = list[list.length - 1];
     const home = placeOf(ctx.base, ctx.baseLabel);
-    if (ctx.returnToBase) {
+    if (ctx.returnToBase || shift.endsAtBase) {
       const lastEnd = last.endMs as number;
       specs.push({
         purpose: 'to_base', shift, previous: last, next: null,

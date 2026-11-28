@@ -88,6 +88,9 @@ export function vehicleVerdict(vehicle: VehicleFacts, day: string): VehicleVerdi
 /** One decision about one shift: placed, placed with something to review, or kept off with the reason. */
 export interface ShiftDecision {
   day: string;
+  /** The duty and part of an accepted shift of a day over 360 minutes (Round 8); absent for a single shift. */
+  dutyId?: string;
+  part?: 1 | 2;
   plate: string;
   /** `cars.id`, when the caller knew it. */
   vehicleId: string | null;

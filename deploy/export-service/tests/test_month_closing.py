@@ -123,3 +123,26 @@ def test_the_financial_status_is_its_own_and_the_crossing_week_keeps_it_open(boo
     assert checks["Finanzabgleich mit Uber (getrennt vom Exportstatus)"] == "INCOMPLETE"
     assert checks["Rueckkehr zum Betriebssitz am Schichtende"] == "Ja"
     assert expected["verdict"] in expected["fileName"]
+
+
+def test_shift_rows_carry_a_duty_id_and_a_part_and_a_duty_is_one_or_two_parts(book):
+    """Round 8: one Dienst per driver and day, of one part or of parts 1 and 2 (§ 3, § 4 ArbZG).
+
+    The fixture's drivers need no more than 360 minutes a day, so every duty here
+    is one part; the assertions hold for a two-part duty as well (a break of at
+    least 30 minutes, at most 480 minutes of work, one vehicle). This test was
+    written without a Python runtime to run it; the CI job `export-service` is its first run.
+    """
+    header, rows = table(book, "Fahrerschichten")
+    assert header[-2:] == ["Dienst-ID", "Teil"]
+    duties = defaultdict(list)
+    for r in rows:
+        duties[r["Dienst-ID"]].append(r)
+    assert all(d for d in duties)
+    for did, parts in duties.items():
+        numbers = sorted(p["Teil"] or 0 for p in parts)
+        assert numbers in ([0], [1, 2]), did
+    per_day = defaultdict(set)
+    for did, parts in duties.items():
+        per_day[(parts[0]["Fahrer-ID"], str(parts[0]["Betriebstag"]))].add(did)
+    assert all(len(ids) == 1 for ids in per_day.values())
