@@ -9,10 +9,11 @@
  * key and income, receipts and the Abrechnung join on it, so a second row for
  * the same person splits their money across two names.
  *
- * The driver import is read from 20261127120000, which restated it on the rule
- * "link only when certain" (the vehicle import is still 20261015110000's). The
- * rule itself lives in app_private.partner_driver_certain_match and is pinned
- * from that migration below.
+ * The driver import is read from 20261128120000, its live definition: that
+ * migration restated 20261127120000's body (the rule "link only when certain")
+ * with one change, a row a person unlinked is skipped before the rule is asked.
+ * The vehicle import is still 20261015110000's. The rule itself lives in
+ * app_private.partner_driver_certain_match and is pinned from 20261127120000.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -28,6 +29,11 @@ const CERTAIN_SQL = readFileSync(
   'utf8',
 );
 
+const UNLINK_SQL = readFileSync(
+  path.resolve(__dirname, '../../supabase/migrations/20261128120000_partner_driver_unlink.sql'),
+  'utf8',
+);
+
 /** The body of one function, from its CREATE to the closing dollar quote. */
 function bodyIn(sql: string, schema: string, name: string): string {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${schema}.${name}(`);
@@ -38,7 +44,7 @@ function bodyIn(sql: string, schema: string, name: string): string {
 const body = (name: string): string => bodyIn(SQL, 'public', name);
 
 describe('partner_drivers_import', () => {
-  const drivers = bodyIn(CERTAIN_SQL, 'public', 'partner_drivers_import');
+  const drivers = bodyIn(UNLINK_SQL, 'public', 'partner_drivers_import');
   const rule = bodyIn(CERTAIN_SQL, 'app_private', 'partner_driver_certain_match');
 
   it('asks the one rule and compares no name itself', () => {
@@ -70,6 +76,13 @@ describe('partner_drivers_import', () => {
   it('never writes an existing driver and never names a ruled-out column', () => {
     expect(drivers).not.toMatch(/UPDATE\s+(public\.)?drivers/i);
     expect(drivers).not.toMatch(/employment_type|salary_ratio|personalnummer/i);
+  });
+
+  it('never offers a row a person unlinked to the rule, and says why it skipped it', () => {
+    const skip = drivers.indexOf('IF v_link.unlinked_at IS NOT NULL THEN');
+    expect(skip).toBeGreaterThan(-1);
+    expect(skip).toBeLessThan(drivers.indexOf('app_private.partner_driver_certain_match('));
+    expect(drivers.slice(skip, drivers.indexOf('ELSE', skip))).toContain("v_reason := 'unlinked'");
   });
 
   it('reports the limit instead of raising it', () => {

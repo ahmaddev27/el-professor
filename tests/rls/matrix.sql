@@ -4186,6 +4186,15 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('partner_driver_link_reject(pending link of A)',
      $q$SELECT partner_driver_link_reject({ref:partner_driver_links}) ->> 'ok'$q$,
      'PTYYYTT', NULL),
+    -- The owner's answer of 28.11.2026 (20261128120000): a person takes a link
+    -- apart. The gate of the two above, probed on company A's CONFIRMED link so
+    -- an authorised caller succeeds and the cell measures the gate; company B's
+    -- admin finds no such link (link_not_found) and a platform account outside
+    -- a context has no company (not_authorized). Each probe is rolled back, so
+    -- partner_submission_claim_driver above still finds the link linked.
+    ('partner_driver_link_unlink(confirmed link of A)',
+     $q$SELECT partner_driver_link_unlink({ref:rpc_partner_link}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
 
     -- M1.2's reader (20261008110000). The one function in this schema that
     -- hands back a REPLAYABLE secret, so it is service_role's alone and every
@@ -4450,6 +4459,7 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- the gate before the tenant tables' statement trigger is reached.
     ('partner_driver_link_confirm(pending link of A)',               'TY'),
     ('partner_driver_link_reject(pending link of A)',                'TY'),
+    ('partner_driver_link_unlink(confirmed link of A)',              'TY'),
     -- The till and the Gehaltsquittung: refused in BOTH context modes, by the
     -- functions themselves and with their own sentence. A cash movement and a
     -- receipt attest to a physical handover that no platform agent witnessed,
@@ -4511,6 +4521,7 @@ BEGIN
       ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
       ('partner_driver_link_confirm(pending link of A)'),
       ('partner_driver_link_reject(pending link of A)'),
+      ('partner_driver_link_unlink(confirmed link of A)'),
       ('record_cash_movement(company A)'),
       ('issue_salary_cash_receipt(no payment)'),
       ('abrechnung_schedule_preview(a week)'),
