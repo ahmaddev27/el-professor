@@ -266,9 +266,18 @@ function monthUberRows(result: FullMonthResult): (DriverDayReconciliation | Peri
 
 // ── Sheet 3: Lohn und Arbeitszeit ──────────────────────────────────────────
 
+/**
+ * The hours range is salary divided by the hourly rate, with no premium for
+ * night, Sunday or holiday work (D1 point 2). A premium would lower the hours a
+ * salary buys, but its rate is the driver's contract's and no contract rate is
+ * stored anywhere, so none is assumed. The sheet says so, not only this code.
+ */
+export const HOURS_RULE_SHORT = 'Gehalt / Stundenlohn, ohne Zuschlaege';
+export const NO_PREMIUM = 'nicht beruecksichtigt: keine Zuschlagssaetze (Nacht, Sonntag, Feiertag) aus den Arbeitsvertraegen hinterlegt; kein Satz wird angenommen, die Stunden sind Gehalt / Stundenlohn';
+
 export const PAY_HEADERS: readonly string[] = [
   LABEL_HEADER, 'Fahrer-ID', 'Fahrer', 'Beschaeftigung', 'Provisionssatz (Konfiguration)', 'Stundenlohn (EUR, Konfiguration)',
-  'Gehaltsrahmen min (EUR, Konfiguration)', 'Gehaltsrahmen max (EUR, Konfiguration)', 'Stundenrahmen min', 'Stundenrahmen max', 'Geplante Stunden', 'Platzierte Stunden (simuliert)',
+  'Gehaltsrahmen min (EUR, Konfiguration)', 'Gehaltsrahmen max (EUR, Konfiguration)', `Stundenrahmen min (${HOURS_RULE_SHORT})`, `Stundenrahmen max (${HOURS_RULE_SHORT})`, 'Geplante Stunden', 'Platzierte Stunden (simuliert)',
   'Tatsaechliche Stunden', 'Umsatz importiert (EUR)', 'Aktionen importiert (EUR)', 'Trinkgeld importiert (EUR)',
   'Provision nach Regel (EUR, berechnet, nicht gebucht)', 'Stunden x Stundenlohn (EUR, simuliert)',
   'Differenz Provision - Stunden x Lohn (EUR, berechnet, nicht gebucht)', 'Gebuchtes Gehalt', 'Bruttolohn', 'Offene Punkte',
@@ -277,6 +286,7 @@ export const PAY_HEADERS: readonly string[] = [
 export const NOT_READ_SALARIES = 'nicht gelesen: der Simulator liest die Tabellen des Moduls Gehaelter nicht';
 export const NO_ACTUAL_HOURS = 'nicht verfuegbar: simulierte Schichten sind keine gearbeiteten Stunden';
 export const NO_GROSS_WAGE = 'nicht berechnet: kein Lohnmodell festgelegt (D4)';
+
 
 const POSITION_WORD: Record<string, string> = {
   below: 'unter dem Stundenrahmen', above_cap: 'ueber dem Stundenrahmen', no_range: 'kein Stundenrahmen',
@@ -714,6 +724,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Anteil', 'Umsatz (importiert) x Satz, je Fahrer und Betriebstag; berechnet und angezeigt, nicht gebucht'],
       ['Anteil: Bedeutung', `${SHARE_MEANING_TEXT[f.share.meaning]} (D1, Entscheidung des Inhabers vom 27.11.2026); ein Prozentsatz des Umsatzes, kein Faktor auf die Fahrpreise`],
       ['Differenz Umsatz - Fahrpreise', 'Umsatz (importiert) minus simulierte und echte Fahrpreise, je Fahrer und Betriebstag; angezeigt, nicht ausgeglichen: kein Fahrpreis wird an den Uber-Wert angepasst (D1, 27.11.2026)'],
+      ['Stundenrahmen', `Mindest- und Hoechstgehalt / Stundenlohn (D5), ohne Zuschlaege: ${NO_PREMIUM}`],
       ['Lohnberechnung nach Regel', '(Umsatz + Aktionen) x Provisionssatz + Trinkgeld, je Uber-Zeile auf Cent gerundet; keine Gehaltsbuchung'],
       ['Trinkgeld', 'nur aus Uber-Zahlen, centgenau auf simulierte Fahrten verteilt; nie erzeugt'],
       ['Stornogebuehr', 'nur wenn die Firma sie eingestellt hat'],
@@ -745,6 +756,7 @@ export function checksSheetRows(result: FullMonthResult, verification: MonthVeri
       ['Gebuchte Gehaelter', NOT_READ_SALARIES],
       ['Tatsaechliche Arbeitsstunden', NO_ACTUAL_HOURS],
       ['Bruttolohn', NO_GROSS_WAGE],
+      ['Zuschlaege in den Stunden', NO_PREMIUM],
       ['Kilometer echter Fahrten', 'nicht gespeichert'],
       ['Abgelehnte echte Auftraege (nicht im Fahrtenbuch)', read ? declined : 'nicht gelesen'],
       ['Echte Fahrten ohne eindeutigen Fahrer', read ? read.unattributed.length : 'nicht gelesen'],
