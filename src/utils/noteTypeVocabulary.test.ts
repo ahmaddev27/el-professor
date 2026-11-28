@@ -165,8 +165,11 @@ describe('the demo company\'s seed writes only notes the database admits', () =>
   const rows = [...block.matchAll(/\('([^']+)',\s+'([^']+)',\s+'(\w+)',\s+'(\w+)',\s+DATE/g)]
     .map(m => ({ text: m[2], type: m[3], effect: m[4] }));
 
-  it('finds its three notes', () => {
-    expect(rows).toHaveLength(3);
+  // One per effect, plus Anna's approved leave on 08.10.2026, the round 8 case
+  // of Uber activity on a day of leave (section 6).
+  it('finds its four notes', () => {
+    expect(rows).toHaveLength(4);
+    expect(rows.find(row => row.text === 'Urlaub genehmigt')).toEqual({ text: 'Urlaub genehmigt', type: 'vacation', effect: 'exclude_from_plan' });
   });
 
   it('each type and effect is a pairing the CHECKs admit', () => {

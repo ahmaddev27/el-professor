@@ -81,6 +81,44 @@ SELECT 'address' AS what, s.street IS NOT NULL AND s.house_number IS NOT NULL AS
        s.postal_code, s.city
   FROM company_settings s JOIN companies c ON c.id = s.company_id
  WHERE c.name = 'DEMO Monatsplanung GmbH';
+-- What the month refuses without (CONFIGURATION_REQUIRED): a city for the
+-- address pool, and a base, which is a saved point or a full address geocoded
+-- at house level. `false` on either line means the month will not run; the
+-- seed fills them with -v demo_city / -v demo_base_lat and -v demo_base_lon.
+SELECT 'month needs: a city for the address pool' AS what,
+       EXISTS (SELECT 1 FROM company_settings s JOIN companies c ON c.id = s.company_id
+                WHERE c.name = 'DEMO Monatsplanung GmbH' AND nullif(btrim(s.city), '') IS NOT NULL) AS answer
+UNION ALL
+SELECT 'month needs: a base (saved point, or street, number, postal code and city)',
+       EXISTS (SELECT 1 FROM trip_analysis_settings t JOIN companies c ON c.id = t.company_id
+                WHERE c.name = 'DEMO Monatsplanung GmbH' AND t.base_latitude IS NOT NULL AND t.base_longitude IS NOT NULL)
+       OR EXISTS (SELECT 1 FROM company_settings s JOIN companies c ON c.id = s.company_id
+                   WHERE c.name = 'DEMO Monatsplanung GmbH' AND s.street IS NOT NULL AND s.house_number IS NOT NULL
+                     AND s.postal_code IS NOT NULL AND s.city IS NOT NULL);
+
+-- The deliberate cases of section 6, one line each: the refund (a negative
+-- umsatz), Uber activity on a day of leave, and on a weekday the driver may
+-- not work (absent while the driver's weekdays leave none out).
+SELECT 'case: refund (negative umsatz)' AS what, i.driver_name, i.date, i.amount
+  FROM income i JOIN companies c ON c.id = i.company_id
+ WHERE c.name = 'DEMO Monatsplanung GmbH' AND i.source = 'uber' AND i.type = 'umsatz' AND i.amount < 0
+UNION ALL
+SELECT 'case: Uber activity on a day of leave', i.driver_name, i.date, i.amount
+  FROM income i JOIN companies c ON c.id = i.company_id
+  JOIN drivers d ON d.company_id = c.id AND d.name = i.driver_name
+  JOIN driver_notes n ON n.company_id = c.id AND n.driver_id = d.id AND n.note_planning_behavior = 'exclude_from_plan'
+                     AND i.date BETWEEN n.start_date AND coalesce(n.end_date, n.start_date)
+ WHERE c.name = 'DEMO Monatsplanung GmbH' AND i.source = 'uber' AND i.type = 'umsatz'
+   AND i.date BETWEEN DATE '2026-09-01' AND DATE '2026-10-31'
+UNION ALL
+SELECT 'case: Uber activity on a weekday the driver may not work', i.driver_name, i.date, i.amount
+  FROM income i JOIN companies c ON c.id = i.company_id
+  JOIN drivers d ON d.company_id = c.id AND d.name = i.driver_name
+ WHERE c.name = 'DEMO Monatsplanung GmbH' AND i.source = 'uber' AND i.type = 'umsatz'
+   AND i.date BETWEEN DATE '2026-09-01' AND DATE '2026-10-31'
+   AND cardinality(coalesce(d.allowed_weekdays, ARRAY[]::integer[])) > 0
+   AND NOT (extract(isodow FROM i.date)::int = ANY (d.allowed_weekdays))
+ ORDER BY 1, 3;
 SELECT 'real trips' AS what, to_char(t.trip_date, 'YYYY-MM') AS month, t.is_simulated, count(*) AS trips,
        count(t.original_driver_id) AS with_driver
   FROM fahrtenbuch_trips t JOIN companies c ON c.id = t.company_id
