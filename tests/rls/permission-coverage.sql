@@ -546,11 +546,20 @@ BEGIN
     ) AS w(tbl, page) ON w.tbl = p.tablename
    WHERE p.schemaname = 'public'
      AND p.cmd IN ('INSERT', 'UPDATE', 'DELETE')
+     -- drivers DELETE left this list on 27.11.2026 (20261127130000): it asks the
+     -- administrator now, and the next pin says so instead of letting it go
+     -- unchecked.
+     AND NOT (p.tablename = 'drivers' AND p.cmd = 'DELETE')
      AND (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, ''))
          !~ ('current_role_permits\(''' || w.page || '''');
   PERFORM _pk_ok(format('shape: the ten tables gated by 20260910120000 are still gated [%s]',
                         coalesce(v_wrong, 'none')),
     v_wrong IS NULL);
+
+  PERFORM _pk_ok('shape: deleting a driver asks for an administrator and no page (20261127130000)',
+    EXISTS (SELECT 1 FROM pg_policies
+             WHERE schemaname = 'public' AND tablename = 'drivers' AND cmd = 'DELETE'
+               AND qual ~ 'is_company_admin\(\)' AND qual !~ 'current_role_permits'));
 
   SELECT count(*) INTO v_n FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'

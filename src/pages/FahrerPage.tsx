@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { pageWriteRights } from '../lib/pageWriteRights';
 import { useToast } from '../contexts/ToastContext';
@@ -10,19 +9,25 @@ import DriversManagement from '../components/DriversManagement';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { useTranslation } from '../contexts/LanguageContext';
-import { Alert, Button, DataTable, KpiCard, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
+import { Alert, Button, DataTable, KpiCard, PageHeader } from '../components/ui';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
-import { PartnerLinkProposals } from '../components/partner/PartnerLinkProposals';
+import { PendingLinksNotice } from '../components/partner/PendingLinksNotice';
 import { FleetImportShortcut } from '../components/partner/FleetImportShortcut';
+import { FleetUpdateButton, FleetUpdateOutcome } from '../components/partner/FleetUpdate';
+import { useFleetUpdate } from '../components/partner/useFleetUpdate';
+import { supabase } from '../lib/supabase';
+import { fetchLinkRows, summariseLinks, type LinkSummary } from '../lib/partnerDriverLinks';
+
+const NO_LINKS: LinkSummary = { byDriver: new Map(), pending: 0 };
 
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
-  const { user } = useAuth();
   // The rights of the company the session is in — see BelegePage.
   const scope = useCompanyScope();
   // The page the database asks (drivers), so the browser asks the same question.
-  // The delete right is not asked for: deleting a driver was replaced by
-  // deactivating one, so there is nothing of that kind left to gate here.
+  // Deleting a driver is not a page right: since 27.11.2026 it is the
+  // administrator's alone and only when nothing refers to the driver, and
+  // DriversManagement asks that (`mayDeleteDriver`), not this page.
   const { canEdit, canCreate } = pageWriteRights('drivers', scope);
   const { success, error: showError } = useToast();
   const { drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
@@ -30,11 +35,18 @@ const FahrerPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   // The company whose rows a screen must query, not the membership — the rule
   // every tenant query in this codebase follows. `useDatabase` already resolves
-  // it internally; the proposals tab queries directly, so it needs the value.
+  // it internally; the Reidey links are read directly, so this needs the value.
   const { effectiveCompanyId: companyId } = useSuperAdmin();
-  // Which half of the screen is showing. The only thing this slice adds to this
-  // file besides the wrapper below.
-  const [tab, setTab] = useState<'own' | 'links'>('own');
+  // The Reidey links, read once per load: they decide the badge on each row and
+  // the notice about proposals waiting for a decision. A failed read keeps the
+  // list, but says so: an absent notice would claim nothing waits, and an empty
+  // Reidey column that no driver is linked.
+  const [links, setLinks] = useState<LinkSummary>(NO_LINKS);
+  const [linksFailed, setLinksFailed] = useState(false);
+  // Only the newest read may install its answer, so a company switched while a
+  // read is in flight never shows the previous company's links.
+  const linksRequest = useRef(0);
+  const linksCompany = useRef<string | null>(null);
 
   const canEditDriver = (driver: Driver): boolean => {
     return canEdit(driver.createdBy);
@@ -45,6 +57,29 @@ const FahrerPage: React.FC = () => {
       loadData();
     }
   }, [dbLoading]);
+
+  const loadLinks = useCallback(async () => {
+    const request = ++linksRequest.current;
+    if (linksCompany.current !== companyId) {
+      linksCompany.current = companyId;
+      setLinks(NO_LINKS);
+      setLinksFailed(false);
+    }
+    if (!companyId) return;
+    try {
+      const summary = summariseLinks(await fetchLinkRows(supabase, companyId));
+      if (request !== linksRequest.current) return;
+      setLinks(summary);
+      setLinksFailed(false);
+    } catch (error) {
+      if (request !== linksRequest.current) return;
+      console.error('Error loading partner links:', error);
+      setLinks(NO_LINKS);
+      setLinksFailed(true);
+    }
+  }, [companyId]);
+
+  useEffect(() => { void loadLinks(); }, [loadLinks]);
 
   const loadData = async () => {
     setLoading(true);
@@ -84,6 +119,11 @@ const FahrerPage: React.FC = () => {
       showError(t('common.errorUpdate'), handleDatabaseError(err));
     }
   };
+
+  // The update button pulls Reidey's roster and imports it; afterwards the list
+  // and the links are read again, because the import may have added drivers.
+  const reloadAll = () => { void loadData(); void loadLinks(); };
+  const update = useFleetUpdate('drivers', reloadAll);
 
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is the screen's logic and is unchanged, but for one line:
@@ -137,29 +177,33 @@ const FahrerPage: React.FC = () => {
     );
   }
 
+  const empty = drivers.length === 0;
+
   return (
-    <Tabs value={tab} onValueChange={value => setTab(value as 'own' | 'links')} className="space-y-6">
-      <TabsList aria-label={t('nav.fahrer')}>
-        <TabsTrigger value="own">{t('drivers.tab.own')}</TabsTrigger>
-        <TabsTrigger value="links">{t('drivers.tab.links')}</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="own">
-    <FleetImportShortcut empty={drivers.length === 0} scope="drivers" onImported={() => void loadData()} />
-    <DriversManagement
-      drivers={drivers}
-      onAddDriver={handleAddDriver}
-      onEditDriver={handleUpdateDriver}
-      canEdit={canEditDriver}
-    />
-      </TabsContent>
-
-      {/* The drivers come from this page rather than a second query, so the
-          picker and the list beside it cannot disagree. */}
-      <TabsContent value="links">
-        <PartnerLinkProposals companyId={companyId} drivers={drivers} />
-      </TabsContent>
-    </Tabs>
+    <>
+      {empty ? <FleetImportShortcut /> : null}
+      <DriversManagement
+        drivers={drivers}
+        onAddDriver={handleAddDriver}
+        onEditDriver={handleUpdateDriver}
+        canEdit={canEditDriver}
+        partnerLinks={links.byDriver}
+        onDriverDeleted={reloadAll}
+        headerActions={empty ? null : <FleetUpdateButton update={update} />}
+        headerNotice={(
+          <>
+            <FleetUpdateOutcome update={update} />
+            {linksFailed ? <Alert tone="caution" role="note">{t('drivers.links.loadFailed')}</Alert> : null}
+            <PendingLinksNotice
+              count={links.pending}
+              companyId={companyId}
+              drivers={drivers}
+              onDecided={reloadAll}
+            />
+          </>
+        )}
+      />
+    </>
   );
 };
 

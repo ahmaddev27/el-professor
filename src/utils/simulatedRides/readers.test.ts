@@ -38,6 +38,7 @@ const INVENTORY: Record<string, Disposition> = {
   'components/MonatsplanungStundennachweisPreview.tsx': 'marks',
   'components/MonthlyPlanDocumentsStep.tsx': 'counts', // renders builder output; every builder is wrapped by markSimulated
   'hooks/useFahrtenbuch.ts': 'marks',
+  'lib/driverDelete.ts': 'counts', // deletion preview: labels a reference count, reads no trip
   'lib/platformCompanyDeletion.ts': 'counts',
   'lib/tripAnalysisClient.ts': 'marks',
   'pages/AbnahmeDiagnosticPage.tsx': 'counts',

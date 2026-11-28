@@ -1,14 +1,26 @@
 /**
- * M2's screen: proposals from a partner that a person turns into a link.
+ * Proposals from a partner that a person turns into a link: the doubtful ones.
  *
- * ## The name is shown, never matched
+ * ## A match is linked on its own only when it is certain (27.11.2026)
  *
- * `proposed_name` is rendered for a human to read and the driver is chosen from
- * a list. Nothing here compares the two, and the dialog says so in words,
- * because the operator has to know the choice is theirs rather than a
- * suggestion they are confirming. The owner decided it on 06.10.2026 and this
- * codebase has the scar: fuzzy matching once gave a month's salary to a driver
- * nobody had chosen.
+ * This reverses the owner's rule of 06.10.2026, "the name is shown, never
+ * matched", which stood in this header until today. The update button on the
+ * Fahrer page now pulls Reidey's roster and the database links a driver by
+ * itself when the match cannot be anything else: the name is the same after
+ * normalisation, exactly ONE active driver of the company has it, no inactive
+ * driver has it, and that driver is not already linked to another Reidey id.
+ * A name nobody has creates the driver and links it. Nothing is fuzzy, ever:
+ * fuzzy matching once gave a month's salary to a driver nobody had chosen, and
+ * that is why the rule is this narrow and lives in the database, not here.
+ *
+ * Everything else is left pending with the reason in `decision_reason`
+ * (`name_missing`, `name_ambiguous`, `name_inactive`, `name_taken`), and this
+ * screen is the human decision for it: the proposed name is shown for a person
+ * to read and the driver is chosen from a list. Nothing here compares the two,
+ * and the dialog says so in words, because the operator has to know the choice
+ * is theirs rather than a suggestion they are confirming. The page no longer
+ * has a tab for it: a notice above the list opens this table in a dialog, and
+ * the page reloads its links after each decision.
  *
  * ## The drivers come from the page, not from a second query
  *
@@ -32,7 +44,7 @@
  * `current_role_permits('drivers', true)` asks inside both RPCs.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Link2, RefreshCw, X } from 'lucide-react';
+import { Check, Link2, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -40,6 +52,7 @@ import { useCompanyScope } from '../../hooks/useCompanyScope';
 import type { Driver } from '../../types/receipt';
 import type { TranslationKey } from '../../i18n';
 import { selectableDrivers } from '../../utils/driverStatus';
+import { decisionReasonKey } from '../../lib/partnerDriverLinks';
 import {
   Alert,
   Badge,
@@ -71,6 +84,7 @@ interface Proposal {
   status: LinkStatus;
   driver_id: string | null;
   partner_removed_at: string | null;
+  decision_reason: string | null;
   created_at: string;
   drivers: { name: string } | null;
 }
@@ -84,26 +98,8 @@ const REASON_KEYS: Record<string, TranslationKey> = {
   not_authorized: 'partner.links.error.notAuthorized',
 };
 
-/** The pull function's reasons. Separate from the decisions' above: the
- *  repairs are different — most of these send the operator to Settings. */
-const PULL_REASON_KEYS: Record<string, TranslationKey> = {
-  not_connected: 'partner.pull.error.notConnected',
-  seal_unreadable: 'partner.pull.error.sealUnreadable',
-  token_rejected: 'partner.pull.error.tokenRejected',
-  partner_unavailable: 'partner.pull.error.partnerUnavailable',
-  not_authorized: 'partner.pull.error.notAuthorized',
-  seal_key_missing: 'partner.pull.error.notConfigured',
-  endpoint_missing: 'partner.pull.error.notConfigured',
-  endpoint_unparsable: 'partner.pull.error.notConfigured',
-  endpoint_not_https: 'partner.pull.error.notConfigured',
-  endpoint_has_credentials: 'partner.pull.error.notConfigured',
-  endpoint_private_host: 'partner.pull.error.notConfigured',
-  endpoint_unexpected_port: 'partner.pull.error.notConfigured',
-  endpoint_has_path: 'partner.pull.error.notConfigured',
-};
-
 const COLUMNS = 'id, partner, external_driver_id, proposed_name, proposed_email, '
-  + 'proposed_phone, status, driver_id, partner_removed_at, created_at, drivers(name)';
+  + 'proposed_phone, status, driver_id, partner_removed_at, decision_reason, created_at, drivers(name)';
 
 /** Past this the waiting count is reported as a bound, not a number. */
 const WAITING_SCAN_LIMIT = 1000;
@@ -111,9 +107,11 @@ const WAITING_SCAN_LIMIT = 1000;
 interface PartnerLinkProposalsProps {
   companyId: string | null;
   drivers: Driver[];
+  /** Called after a confirm or a reject went through, so the page reads its links again. */
+  onDecided?: () => void;
 }
 
-export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposalsProps) {
+export function PartnerLinkProposals({ companyId, drivers, onDecided }: PartnerLinkProposalsProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { canEdit } = useCompanyScope();
@@ -129,7 +127,6 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
   const [rejecting, setRejecting] = useState<Proposal | null>(null);
   const [chosenDriver, setChosenDriver] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pulling, setPulling] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -190,44 +187,6 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
 
   useEffect(() => { void load(); }, [load]);
 
-  // By a button and not a schedule — the owner's decision of 06.10.2026. The
-  // function needs a session for exactly that reason.
-  const pull = async () => {
-    setPulling(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('partner-pull', { body: {} });
-      if (error) throw error;
-      const answer = data as {
-        ok?: boolean; reason?: string;
-        seen?: number; new?: number; departed?: number; truncated?: boolean;
-      };
-      if (!answer?.ok) {
-        const key = answer?.reason ? PULL_REASON_KEYS[answer.reason] : undefined;
-        showToast('error', key ? t(key) : t('partner.pull.error.generic'));
-        return;
-      }
-      const departed = answer.departed ?? 0;
-      showToast('success', departed > 0
-        ? t('partner.pull.doneWithDepartures', {
-            seen: String(answer.seen ?? 0),
-            created: String(answer.new ?? 0),
-            departed: String(departed),
-          })
-        : t('partner.pull.done', {
-            seen: String(answer.seen ?? 0),
-            created: String(answer.new ?? 0),
-          }));
-      // A roster longer than one walk is said out loud rather than left as a
-      // short list the operator would read as complete.
-      if (answer.truncated) showToast('error', t('partner.pull.truncated'));
-      await load();
-    } catch {
-      showToast('error', t('partner.pull.error.generic'));
-    } finally {
-      setPulling(false);
-    }
-  };
-
   const reasonMessage = (hint: unknown): string => {
     const key = typeof hint === 'string' ? REASON_KEYS[hint] : undefined;
     return key ? t(key) : t('partner.links.error.generic');
@@ -249,6 +208,7 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
         : t('partner.links.confirmed'));
       setConfirming(null);
       setChosenDriver('');
+      onDecided?.();
       await load();
     } catch (error) {
       showToast('error', reasonMessage((error as { hint?: unknown })?.hint));
@@ -270,6 +230,7 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
         ? t('partner.links.rejectedWithStranded', { count: String(stranded) })
         : t('partner.links.rejected'));
       setRejecting(null);
+      onDecided?.();
       await load();
     } catch (error) {
       showToast('error', reasonMessage((error as { hint?: unknown })?.hint));
@@ -294,7 +255,17 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
       header: t('partner.links.col.proposed'),
       value: row => row.proposed_name ?? '',
       sortable: true,
-      cell: row => <span>{row.proposed_name || '—'}</span>,
+      cell: row => {
+        const reason = row.status === 'pending' ? decisionReasonKey(row.decision_reason) : null;
+        return (
+          <span className="grid gap-0.5">
+            <span>{row.proposed_name || '—'}</span>
+            {/* Why it was not linked on its own, so the operator knows what
+                kind of decision this is before opening it. */}
+            {reason ? <span className="text-[13px] text-fg-muted">{t(reason)}</span> : null}
+          </span>
+        );
+      },
     },
     {
       id: 'contact',
@@ -370,18 +341,6 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
             <TabsTrigger value="rejected">{t('partner.links.status.rejected')}</TabsTrigger>
           </TabsList>
         </Tabs>
-        {mayDecide ? (
-          <Button
-            variant="secondary"
-            onClick={() => void pull()}
-            loading={pulling}
-            disabled={pulling || busy}
-            title={t('partner.pull.hint')}
-          >
-            <RefreshCw className="size-4" aria-hidden />
-            {t('partner.pull.action')}
-          </Button>
-        ) : null}
       </div>
 
       <DataTable

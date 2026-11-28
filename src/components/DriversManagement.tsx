@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
-import { Download, Pencil, Plus, Power, PowerOff, UserCheck, UserX, Users } from 'lucide-react';
+import React, { useState, type ReactNode } from 'react';
+import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
 import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { useColumnPickerExport } from '../contexts/ExportPickerContext';
 import { useUserDisplayNames } from '../hooks/useUserDisplayNames';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
+import { mayDeleteDriver } from '../lib/driverDelete';
+import type { DriverLinkState } from '../lib/partnerDriverLinks';
+import { DriverDeleteDialog } from './drivers/DriverDeleteDialog';
 import { pageWriteRights } from '../lib/pageWriteRights';
 import {
   ACTIVE_DRIVER_STATUS,
@@ -33,15 +37,30 @@ interface DriversManagementProps {
   // arguments and must not rewrite an address nobody touched.
   onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
   canEdit: (driver: Driver) => boolean;
+  /**
+   * Which drivers hold a Reidey link, and whether the partner dropped them
+   * since. Absent, or with nobody linked, the column is not drawn at all.
+   */
+  partnerLinks?: ReadonlyMap<string, DriverLinkState>;
+  /** The page reads its list again once a driver is gone. */
+  onDriverDeleted?: () => void;
+  /** Slots the page fills (the update button, the outcome and notices) so this screen keeps no partner state. */
+  headerActions?: ReactNode;
+  headerNotice?: ReactNode;
 }
 
 const DriversManagement: React.FC<DriversManagementProps> = ({
   drivers,
   onAddDriver,
   onEditDriver,
-  canEdit
+  canEdit,
+  partnerLinks,
+  onDriverDeleted,
+  headerActions,
+  headerNotice,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState<Driver | null>(null);
   const [editingDriver, setEditingDriver] = useState<Driver | undefined>();
 
   // The partition is total: `selectableDrivers` keeps everything not known to
@@ -187,11 +206,15 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   // state, which only painted a row. Everything below only draws. It asks
   // useCompanyScope() for `canCreate` so the add button is not offered where no
   // write is (a read context, a role without the right, plan 3.4b); FahrerPage's
-  // handleAddDriver refuses such a caller as before. There is no confirmation in
-  // front of the bin: it deletes at once, as it always has.
+  // handleAddDriver refuses such a caller as before. The bin (27.11.2026) asks
+  // the database first and then confirms; see DriverDeleteDialog.
 
   const scope = useCompanyScope();
+  const { isAdmin } = useAuth();
   const { canCreate } = pageWriteRights('drivers', scope);
+  // The database asks is_company_admin() for DELETE, stricter than the page right.
+  const mayDelete = mayDeleteDriver(isAdmin, scope);
+  const showReidey = (partnerLinks?.size ?? 0) > 0;
 
   const addButton = (size?: 'sm') =>
     canCreate ? (
@@ -217,6 +240,24 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       </Badge>
     );
 
+  // Linked, or linked and dropped by the partner since (the owner's decision of
+  // 08.10.2026: a departed driver is badged and the link stays). Nothing for a
+  // driver with no link.
+  const reideyColumn: DataTableColumn<Driver> = {
+    id: 'reidey',
+    header: t('drivers.col.reidey'),
+    value: driver => partnerLinks?.get(driver.id) ?? '',
+    sortable: true,
+    cell: driver => {
+      const state = partnerLinks?.get(driver.id);
+      if (state === 'departed') {
+        return <Badge tone="neutral" title={t('partner.links.departedHint')}>{t('partner.links.departedBadge')}</Badge>;
+      }
+      return state === 'linked' ? <Badge tone="brand">{t('partner.links.status.linked')}</Badge> : null;
+    },
+    hideBelow: 'sm',
+  };
+
   const columns: DataTableColumn<Driver>[] = [
     {
       id: 'name',
@@ -234,6 +275,9 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
               </Badge>
             )}
           </span>
+          {driver.email ? (
+            <span className="truncate text-[13px] text-fg-muted" title={driver.email}>{driver.email}</span>
+          ) : null}
           <span className="text-[13px] tabular-nums text-fg-subtle">
             {driver.personalnummer ? t('fleet.persNr', { number: driver.personalnummer }) : t('fleet.noPersonalnummer')}
           </span>
@@ -245,6 +289,18 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       className: 'ps-3 pe-1 sm:min-w-[9rem] sm:px-4',
     },
     {
+      id: 'phone',
+      header: t('fleet.phone'),
+      value: driver => driver.phone ?? '',
+      sortable: true,
+      // Nothing is drawn for a driver without a number: a dash would read as a
+      // value. The word is for a screen reader only.
+      cell: driver => driver.phone
+        ? <span className="whitespace-nowrap tabular-nums text-fg-muted">{driver.phone}</span>
+        : <span className="sr-only">{t('fleet.noPhone')}</span>,
+      hideBelow: 'md',
+    },
+    {
       id: 'status',
       header: t('common.status'),
       value: driver => driver.status,
@@ -252,6 +308,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
       cell: statusBadge,
       hideBelow: 'sm',
     },
+    ...(showReidey ? [reideyColumn] : []),
     {
       id: 'mailLanguage',
       header: t('fleet.mailLanguage'),
@@ -309,6 +366,19 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           </Button>
         </Tooltip>
       ) : null}
+      {mayDelete ? (
+        <Tooltip content={t('common.delete')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hover:text-critical"
+            aria-label={t('fahrer.delete.aria', { name: driver.name })}
+            onClick={() => setDeleting(driver)}
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        </Tooltip>
+      ) : null}
     </>
   );
 
@@ -327,6 +397,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         }
         actions={
           <>
+            {headerActions}
             <Button variant="secondary" onClick={handleExport}>
               <Download aria-hidden />
               {t('common.exportExcelShort')}
@@ -340,6 +411,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
           widest child's content, and the table alone would push the page past
           375 px. */}
       <div className="grid grid-cols-1 gap-4">
+        {headerNotice}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <KpiCard label={t('fleet.activeDrivers')} value={activeDrivers.length} icon={UserCheck} />
           <KpiCard label={t('fleet.inactiveDrivers')} value={inactiveDrivers.length} icon={UserX} />
@@ -356,21 +428,22 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
             columns={columns}
             rows={drivers}
             getRowId={driver => driver.id}
-            rowActions={anyRowWritable ? rowActions : undefined}
+            rowActions={anyRowWritable || mayDelete ? rowActions : undefined}
             rowActionsLabel={t('fleet.actions')}
           />
         )}
 
-        {/* Where "delete" used to be, and this is the permanent answer (owner,
-            25.10.2026), so the sentence says both halves: what survives, and
-            what deactivating actually does. The first half is not a
-            reassurance — eight foreign keys CASCADE off `drivers`, one of them
-            `salary_cash_receipts`, whose GQ-YYYY-NNNN numbers are gapless per
-            company and year and go to a Steuerberater. The second half is new
-            behaviour a user has to be told about: a deactivated driver leaves
-            every selection list, the monthly plan and the Fahrtenbuch among
-            them. */}
-        <p className="text-sm text-fg-muted">{t('fleet.deactivateNotDelete')}</p>
+        {/* The rule in words (owner, 27.11.2026; it replaced "drivers are
+            deactivated, never deleted" of 25.10.2026). The reason the old rule
+            existed has not gone: eight foreign keys CASCADE off `drivers`, one
+            of them `salary_cash_receipts`, whose GQ-YYYY-NNNN numbers are
+            gapless per company and year and go to a Steuerberater. So the
+            database refuses the delete while any row of any kind refers to the
+            driver, for every path and not only this button, and an
+            administrator may delete only a driver nothing refers to. Everyone
+            else, and every driver with history, is deactivated, which hides
+            them from every selection list and leaves the records alone. */}
+        <p className="text-sm text-fg-muted">{t('fleet.deleteRule')}</p>
         <p className="text-sm text-fg-muted">{t('fleet.deactivateHidesFromLists')}</p>
       </div>
 
@@ -383,6 +456,13 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         onSave={handleSave}
         driver={editingDriver}
         title={editingDriver ? t('fleet.editDriver') : t('fleet.newDriver')}
+      />
+
+      <DriverDeleteDialog
+        driver={deleting}
+        onClose={() => setDeleting(null)}
+        onChanged={() => onDriverDeleted?.()}
+        onDeactivate={deleting && canEdit(deleting) ? driver => { void handleToggleStatus(driver); } : undefined}
       />
     </div>
   );

@@ -1,65 +1,55 @@
 /*
-  Deleting a driver: what it destroys, and what refuses to let it happen.
+  Deleting a driver: what refuses it, and what is no longer destroyed by it.
 
-  M0 of the Reidey integration needs an erasure rule, and the rule cannot be
-  written on readings. Four of the five facts below were inferences that had
-  never been executed, and this file is what executes them.
+  REWRITTEN 27.11.2026 for `20261127130000_driver_delete_guard.sql`. Until then
+  this file RECORDED TODAY'S CASCADE, and said in its first paragraph that the
+  recording was the defect: the Fahrer screen's trash button was a bare delete,
+  the foreign keys carried it into `salaries`, `salary_payments`,
+  `salary_cash_receipts` and `saved_stundennachweise` (the Gehaltsquittungen and
+  the stored Stundennachweise, the records a German fleet is least able to
+  lose), and the names on Belege, income rows and trips survived it, so nothing
+  was erased and a great deal was destroyed. Probes 1 to 4 asserted exactly
+  that, as characterisation, so that whoever changed it had to say so.
 
-  WHY IT MATTERS, and it is not the Reidey integration's problem alone. The
-  Fahrer screen's trash button is a bare `supabase.from('drivers').delete()`
-  with no confirmation step (`src/hooks/useDatabase.ts`), and the foreign keys
-  carry that delete into `salaries`, `salary_payments`, `salary_cash_receipts`
-  and `saved_stundennachweise` -- the Gehaltsquittungen and the stored
-  Stundennachweise, which are the records a German fleet is least able to lose.
-  Section 1 records that, so a migration that changes it has to say so.
+  The owner changed it on 27.11.2026, reversing "Fahrer werden deaktiviert,
+  nicht gelöscht" of 25.10.2026: a driver is deleted only when no row of any
+  kind refers to him, and a BEFORE DELETE trigger on `drivers` enforces that on
+  every path (the screen, the API, the service role, the table owner), standing
+  aside only once the company's own row is gone. So every probe that read
+  "the delete succeeded and took the rows with it" now reads "the delete is
+  refused with SQLSTATE 23503, hint `driver_has_references`, and every row is
+  still there", and every probe that read "refused by a constraint two hops
+  away" now reads the same guard's refusal, because the guard is the first
+  thing to speak.
 
-  AND IT DOES NOT ERASE. Driver names survive in `receipts.driver_name`,
-  `income.driver_name`, `fahrtenbuch_trips.assigned_driver_name`, the planning
-  JSON and every storage object, because those carry no foreign key. Section 1
-  records that too: an erasure rule built on the cascade alone would leave the
-  name behind in six places.
-
-  THE FOUR READINGS. Each was a column with `ON DELETE SET NULL` expected to sit
-  under a constraint or a trigger that refuses the resulting UPDATE, so the
-  delete would fail rather than the row being orphaned. Three were right, one
-  was right only once a migration fixed the schema it had assumed:
+  WHERE THE REST WENT. `tests/rls/driver-delete-guard.sql` is the guard's own
+  file: the catalogue pinned as an exact set, one probe per kind of reference,
+  the gate, the check RPC, the company's own delete and the mutation controls.
+  This file keeps what it was always for, the three readings that were
+  inferences until executed, and records that each of them now ends in the guard
+  rather than in the constraint it was written to find:
 
     2. `fahrtenbuch_trips.original_driver_id` -- SET NULL against
-       `protect_fahrtenbuch_immutable_fields`, which lists that column. On
-       staging 13,959 of 13,981 trips carry it, so this is the normal case and
-       not an edge: a real driver is probably undeletable today.
+       `protect_fahrtenbuch_immutable_fields`. It refused with P0001 until the
+       guard; it is refused by the guard with 23503 now and the immutability
+       trigger never runs.
     3. `partner_driver_links.driver_id` -- SET NULL against
-       `partner_driver_links_linked_has_driver`.
-    4. `partner_note_submissions.driver_note_id` -- CASCADE since
-       `20261023160000`, and this cell has moved twice. It did NOT refuse when
-       this file was written, because the column carried no foreign key at
-       all: the reading was right about the mechanism and wrong about the
-       schema, and wrong in the dangerous direction, the delete succeeding and
-       leaving the accepted submission pointing at a deleted note.
-       `20261007100000` added the missing key with `ON DELETE SET NULL`, so it
-       refused like its sibling and probes 9 to 12 and 14 moved with it. That
-       refusal then turned out to make every such note -- and its driver --
-       permanently undeletable, three of them on production, so the owner
-       chose the cascade on 23.10.2026 and probes 9 to 12 moved again. All
-       three states are in section 4, because a cell that moves silently is
-       how a gate stops gating.
-    5. `partner_receipt_submissions.receipt_id` -- CASCADE since
-       `20261023150000`. This one is about deleting the BELEG rather than the
-       driver, and it was not in the list I set out to test; the constraint
-       names turned it up while reading. It was SET NULL against
-       `partner_receipt_submissions_accepted_has_receipt`, which refused the
-       delete outright and so made every Beleg that came from an accepted
-       submission undeletable; probes 13 and 16 moved with the owner's
-       decision of 23.10.2026, and section 5 carries the reason. The note
-       sibling in 4 above took the same action in `20261023160000`, so the two
-       agree again -- and that symmetry is now PINNED by that migration's
-       self-check 7 rather than left to a comment.
+       `partner_driver_links_linked_has_driver` (23514 until the guard). A
+       LINKED partner link counts as a reference by the owner's decision of
+       27.11.2026.
+    4. `partner_note_submissions.driver_note_id` -- the cell moved twice before
+       (no key, SET NULL, then CASCADE on 23.10.2026), and the notes' own
+       history is in `note-submission-delete.sql`. The driver chain it used to
+       delete through (driver, note, submission) is refused at the first step.
+    5. `partner_receipt_submissions.receipt_id` -- about deleting the BELEG, not
+       the driver, so the guard does not touch it: probes 13 and 16 and the
+       two foreign-key counts are unchanged.
 
   HOW IT REPORTS. Every probe writes its outcome to a temp table and the
-  assertions run at the end, together, so one run answers all five questions
-  even when several are wrong. The kit aborts at the first failing file, so a
-  file that asserted five readings one at a time would hide four of them and
-  stop every file sorting after it.
+  assertions run at the end, together, so one run answers every question even
+  when several are wrong. The kit aborts at the first failing file, so a file
+  that asserted readings one at a time would hide the rest and stop every file
+  sorting after it.
 
   Each probe uses a driver of its own, so no probe needs the previous one's
   state rolled back. Runs inside BEGIN ... ROLLBACK, so the files after it see
@@ -115,10 +105,10 @@ INSERT INTO drivers (id, company_id, name) VALUES
   ('dd000000-0000-4000-8000-000000000003', 'c0000000-0000-4000-8000-00000000000a', 'Linked Driver'),
   ('dd000000-0000-4000-8000-000000000004', 'c0000000-0000-4000-8000-00000000000a', 'Note Driver');
 
--- ─── 1. what the cascade destroys, and what it leaves behind ────────────────
--- Recorded, not endorsed: this is today's behaviour and it is the defect M0
--- names. A migration that changes it must change this section in the same
--- commit and say why.
+-- ─── 1. what used to be destroyed is kept ───────────────────────────────────
+-- WAS: "a driver with only a salary and a note deletes", and the salary and the
+-- note went with him while the name on a Beleg stayed. Now the salary, the note
+-- and the Beleg's name each refer to him, and the delete is refused whole.
 
 INSERT INTO salaries (id, driver_id, period_start, period_end, created_by, company_id)
 VALUES ('dd100000-0000-4000-8000-000000000001', 'dd000000-0000-4000-8000-000000000001',
@@ -129,7 +119,6 @@ INSERT INTO driver_notes (id, created_by, driver_id, note_text, company_id)
 VALUES ('dd200000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001',
         'dd000000-0000-4000-8000-000000000001', 'dd cascade', 'c0000000-0000-4000-8000-00000000000a');
 
--- A name with no foreign key behind it: the thing the cascade cannot reach.
 INSERT INTO receipts (id, receipt_number, date, description, driver_name, company_id)
 VALUES ('dd300000-0000-4000-8000-000000000001', 'BEL-DD-1', current_date, 'dd',
         'Cascade Driver', 'c0000000-0000-4000-8000-00000000000a');
@@ -138,28 +127,23 @@ DO $$
 DECLARE v_res text;
 BEGIN
   v_res := _dd_try($q$DELETE FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000001'$q$);
-  PERFORM _dd_rec(1, 'a driver with only a salary and a note deletes', v_res, 'ok');
-
-  IF v_res = 'ok' THEN
-    PERFORM _dd_rec(2, 'and its salary is gone with it (CASCADE)',
-      (SELECT count(*)::text FROM salaries WHERE id = 'dd100000-0000-4000-8000-000000000001'), '0');
-    PERFORM _dd_rec(3, 'and its note is gone with it (CASCADE)',
-      (SELECT count(*)::text FROM driver_notes WHERE id = 'dd200000-0000-4000-8000-000000000001'), '0');
-    PERFORM _dd_rec(4, 'but the name on a Beleg stays: no foreign key, so no erasure',
-      (SELECT driver_name FROM receipts WHERE id = 'dd300000-0000-4000-8000-000000000001'),
-      'Cascade Driver');
-  ELSE
-    PERFORM _dd_rec(2, 'cascade probe skipped: the delete itself failed', v_res, 'ok');
-  END IF;
+  PERFORM _dd_rec(1, 'a driver with a salary, a note and his name on a Beleg is refused by the guard', v_res,
+    'ERR 23503 Der Fahrer wird noch verwendet%', true);
+  PERFORM _dd_rec(2, 'and his salary is still there (it used to cascade)',
+    (SELECT count(*)::text FROM salaries WHERE id = 'dd100000-0000-4000-8000-000000000001'), '1');
+  PERFORM _dd_rec(3, 'and his note is still there (it used to cascade)',
+    (SELECT count(*)::text FROM driver_notes WHERE id = 'dd200000-0000-4000-8000-000000000001'), '1');
+  PERFORM _dd_rec(4, 'and the name on the Beleg is now a reason in itself, not the thing the cascade left behind',
+    (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000001'), '1');
 END
 $$;
 
--- ─── 2. a trip's original_driver_id refuses the delete ──────────────────────
+-- ─── 2. a trip's original_driver_id is refused by the guard, first ──────────
 -- The FK is ON DELETE SET NULL, and `protect_fahrtenbuch_immutable_fields`
--- lists `original_driver_id` among the columns it refuses to see change.
--- PostgreSQL performs SET NULL as an UPDATE, which fires that BEFORE UPDATE
--- trigger. The kit's only two existing driver deletions use drivers with no
--- trips, which is why this has never been exercised.
+-- lists `original_driver_id` among the columns it refuses to see change, so
+-- the delete used to fail with P0001 from the UPDATE the cascade performed.
+-- The guard is a BEFORE DELETE trigger on drivers and speaks before any
+-- cascade runs, so that UPDATE is never attempted: 23503 now.
 
 INSERT INTO fahrtenbuch_imports (id, company_id, month, year, file_name, imported_by, file_sha256)
 VALUES ('dd400000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a', 1, 2026,
@@ -173,9 +157,9 @@ VALUES ('dd500000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 
 DO $$
 BEGIN
-  PERFORM _dd_rec(5, 'a driver who is a trip''s original driver cannot be deleted',
+  PERFORM _dd_rec(5, 'a driver who is a trip''s original driver cannot be deleted (23503 from the guard, was P0001)',
     _dd_try($q$DELETE FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000002'$q$),
-    'ERR P0001 fahrtenbuch_trips: immutable fields cannot be modified after insert.%', true);
+    'ERR 23503 Der Fahrer wird noch verwendet%', true);
 
   PERFORM _dd_rec(6, 'and the driver is still there',
     (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000002'), '1');
@@ -183,6 +167,9 @@ END
 $$;
 
 -- ─── 3. a confirmed Reidey link refuses the delete ──────────────────────────
+-- WAS 23514 `partner_driver_links_linked_has_driver`, from the SET NULL the
+-- delete would have performed. A linked partner link counts as a reference
+-- (owner, 27.11.2026), so the guard now says so before the constraint is asked.
 
 INSERT INTO partner_driver_links (id, company_id, partner, external_driver_id, driver_id, status)
 VALUES ('dd600000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a',
@@ -190,9 +177,9 @@ VALUES ('dd600000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 
 DO $$
 BEGIN
-  PERFORM _dd_rec(7, 'a driver behind a confirmed partner link cannot be deleted',
+  PERFORM _dd_rec(7, 'a driver behind a confirmed partner link cannot be deleted (23503 from the guard, was 23514)',
     _dd_try($q$DELETE FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000003'$q$),
-    'ERR 23514 %partner_driver_links_linked_has_driver%', true);
+    'ERR 23503 Der Fahrer wird noch verwendet%', true);
 
   PERFORM _dd_rec(8, 'and the link still names its driver',
     (SELECT driver_id::text FROM partner_driver_links WHERE id = 'dd600000-0000-4000-8000-000000000001'),
@@ -200,42 +187,12 @@ BEGIN
 END
 $$;
 
--- ───────── 4. an accepted note submission no longer pins the driver
--- THE CELL HAS MOVED TWICE, and this file records all three states of it.
---
--- MEASURED 06.10.2026, when this file was written: the delete SUCCEEDED. I
--- had expected a refusal and asserted it; the kit refused the expectation.
--- `partner_note_submissions.driver_note_id` carried NO FOREIGN KEY while its
--- sibling `partner_receipt_submissions.receipt_id` carried one, so nothing
--- fired: the note cascaded away and the submission was left `accepted`
--- pointing at a row that no longer existed. The CHECK cannot catch that,
--- because a dangling uuid is still non-null.
---
--- `20261007100000` added the missing key with the same `ON DELETE SET NULL`,
--- and from then until today the delete was REFUSED: the chain is one step
--- longer than the others, so deleting the driver deleted the note
--- (`driver_notes.driver_id` is CASCADE), which SET NULLed the submission's
--- `driver_note_id` while its status was still 'accepted', and
--- `partner_note_submissions_accepted_has_note` then refused the whole
--- statement. Probes 9 to 12 asserted that refusal as correct behaviour.
---
--- MOVED AGAIN 23.10.2026 by `20261023160000`, for the reason its sibling
--- moved a migration earlier: nobody had asked what an operator does with a
--- mistaken note afterwards, and the answer was nothing. A refusal raised by a
--- constraint on a table two hops from the statement made every driver note
--- produced by an accepted submission undeletable, AND its driver with it —
--- three such notes on production, all Y&A Mobility. The owner chose `ON
--- DELETE CASCADE`, the same answer he gave for the Beleg the same day, and he
--- accepted that the record of the driver's report goes with the note.
---
--- So the four probes below flip together: the driver deletes, the note goes
--- with it, and the submission goes with the note. The old refusal is not
--- lost — `tests/rls/note-submission-delete.sql` section 1 reproduces it by
--- swapping the action back, which is where a before-and-after belongs.
---
--- Both siblings are CASCADE again, so the asymmetry recorded here on 23.10 is
--- closed; `20261023160000`'s self-check 7 pins both, and probe 14 below is
--- unaffected because it counts foreign KEYS and not their actions.
+-- ─── 4. an accepted note submission: the chain is refused at its first step ─
+-- The cell moved three times (no key; SET NULL, refusing; CASCADE since
+-- 20261023160000, deleting driver, note and submission together). The cascade
+-- is still how a NOTE deletes its submission (note-submission-delete.sql), but
+-- a driver with a note and a submission is a driver rows refer to, so the
+-- delete never starts and all three rows stay.
 
 INSERT INTO driver_notes (id, created_by, driver_id, note_text, company_id)
 VALUES ('dd200000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001',
@@ -251,24 +208,19 @@ VALUES ('dd700000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 
 DO $$
 BEGIN
-  PERFORM _dd_rec(9, 'a driver whose note backs an accepted submission now deletes',
+  PERFORM _dd_rec(9, 'a driver whose note backs an accepted submission is refused by the guard',
     _dd_try($q$DELETE FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'$q$),
-    'ok');
+    'ERR 23503 Der Fahrer wird noch verwendet%', true);
 
-  PERFORM _dd_rec(10, 'so the driver is gone',
-    (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'), '0');
+  PERFORM _dd_rec(10, 'so the driver is still there',
+    (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'), '1');
 
-  PERFORM _dd_rec(11, 'and its note went with it, driver_notes.driver_id being CASCADE',
-    (SELECT count(*)::text FROM driver_notes WHERE id = 'dd200000-0000-4000-8000-000000000002'),
-    '0');
+  PERFORM _dd_rec(11, 'and so is his note',
+    (SELECT count(*)::text FROM driver_notes WHERE id = 'dd200000-0000-4000-8000-000000000002'), '1');
 
-  -- Counted rather than read back as a column: the row is GONE, so reading
-  -- `driver_note_id` would answer NULL both for a cascaded row and for one left
-  -- behind with its reference nulled — the two states this change is between.
-  PERFORM _dd_rec(12, 'and the submission is gone too, rather than left accepted naming nothing',
+  PERFORM _dd_rec(12, 'and the submission, accepted and naming its note',
     (SELECT count(*)::text FROM partner_note_submissions
-      WHERE id = 'dd700000-0000-4000-8000-000000000001'),
-    '0');
+      WHERE id = 'dd700000-0000-4000-8000-000000000001' AND driver_note_id IS NOT NULL), '1');
 END
 $$;
 

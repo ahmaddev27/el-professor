@@ -1119,24 +1119,25 @@ DECLARE
   v_rows  bigint;
   v_n     bigint;
 BEGIN
-  -- A driver with a note and a salary, written as the database owner, so none
-  -- of it is audited.
-  INSERT INTO drivers (id, company_id, name) VALUES (_sw_id('driver:cascade'), co_x, 'SW cascade');
-  INSERT INTO driver_notes (id, created_by, driver_id, note_text, company_id)
-  VALUES (_sw_id('note:cascade'), u_adm, _sw_id('driver:cascade'), 'sw', co_x);
-  INSERT INTO salaries (id, company_id, driver_id, period_start, period_end, created_by)
-  VALUES (_sw_id('salary:cascade'), co_x, _sw_id('driver:cascade'), '2026-02-01', '2026-02-28', u_adm);
+  -- MOVED 27.11.2026 by 20261127130000. This probe deleted a driver with a note
+  -- and a salary and counted the three audit rows; a driver with either is a
+  -- driver rows refer to, and the guard now refuses that delete. The property
+  -- under test is the audit of a cascade, not the driver, so the parent is a
+  -- car with an assignment: the one cascade left that a support session can
+  -- start. Written as the database owner, so none of it is audited.
+  INSERT INTO cars (id, company_id, kennzeichen, created_by) VALUES (_sw_id('car:cascade'), co_x, 'SW-CAS 1', u_adm);
+  INSERT INTO car_driver_assignments (id, company_id, car_id, driver_id, created_by)
+  VALUES (_sw_id('cda:cascade'), co_x, _sw_id('car:cascade'), _sw_id('driver:x1'), u_adm);
 
   v_mark := _sw_mark();
   PERFORM _sw_as(u_o, s_o);
-  DELETE FROM drivers WHERE id = _sw_id('driver:cascade');
+  DELETE FROM cars WHERE id = _sw_id('car:cascade');
   PERFORM _sw_reset();
 
-  PERFORM _sw_ok('cascade: deleting a driver records the driver and each row the delete cascaded into',
-    _sw_rows(v_mark) = 3
-    AND _sw_rows(v_mark, 'support_write.drivers.delete') = 1
-    AND _sw_rows(v_mark, 'support_write.driver_notes.delete') = 1
-    AND _sw_rows(v_mark, 'support_write.salaries.delete') = 1);
+  PERFORM _sw_ok('cascade: deleting a car records the car and each row the delete cascaded into',
+    _sw_rows(v_mark) = 2
+    AND _sw_rows(v_mark, 'support_write.cars.delete') = 1
+    AND _sw_rows(v_mark, 'support_write.car_driver_assignments.delete') = 1);
   PERFORM _sw_ok('cascade: …all of them in the company the session is on, under the session',
     NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log l
                  WHERE l.id > v_mark
