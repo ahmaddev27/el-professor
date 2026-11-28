@@ -15,7 +15,7 @@ import { HARNESS_COMPANY_ID, HARNESS_USER_ID, isPlatformReader, scenario } from 
 export * from '../../src/contexts/AuthContext';
 
 /** Design remake R4: the platform panel, signed in as a platform account of its own. */
-const isPlatformOwner = (new URLSearchParams(window.location.search).get('screen') ?? '').startsWith('r4-');
+const isPlatformOwner = (new URLSearchParams(window.location.search).get('screen') ?? '').match(/^(r4-|r3-konto-plattform$)/) !== null;
 const mayEdit = scenario.role !== 'viewer';
 const email = isPlatformReader || isPlatformOwner ? 'jana.brenner@elprofessor.example' : 'katrin.lindner@example.com';
 const companyId = isPlatformReader || isPlatformOwner ? null : HARNESS_COMPANY_ID;

@@ -34,7 +34,7 @@ const companyScope = isPlatformReader
     };
 
 /** Design remake R4: the platform panel, as an `owner` holding every capability (r4/fixtures.ts answers its data). */
-const isPlatformOwner = (new URLSearchParams(window.location.search).get('screen') ?? '').startsWith('r4-');
+const isPlatformOwner = (new URLSearchParams(window.location.search).get('screen') ?? '').match(/^(r4-|r3-konto-plattform$)/) !== null;
 const OWNER_CAPABILITIES = [
   'companies.read', 'business.read', 'support.session', 'company_users.manage', 'companies.lifecycle',
   'companies.hard_delete', 'billing.manage', 'pricing.manage', 'codes.manage', 'settings.read',
