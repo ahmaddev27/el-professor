@@ -47,6 +47,7 @@ const UNLINKED_REASON_KEY: Record<PlacementBlockReason, TranslationKey> = {
   name_inactive: 'settings.uberPull.runs.unlinkedReason.name_inactive',
   name_missing: 'settings.uberPull.runs.unlinkedReason.name_missing',
   rejected: 'settings.uberPull.runs.unlinkedReason.rejected',
+  unlinked: 'settings.uberPull.runs.unlinkedReason.unlinked',
   limit_reached: 'settings.uberPull.runs.unlinkedReason.limit_reached',
   company_blocked: 'settings.uberPull.runs.unlinkedReason.company_blocked',
   run_not_open: 'settings.uberPull.runs.unlinkedReason.run_not_open',

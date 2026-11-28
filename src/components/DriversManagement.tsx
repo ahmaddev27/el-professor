@@ -1,5 +1,5 @@
 import React, { useState, type ReactNode } from 'react';
-import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
+import { Download, Pencil, Plus, Power, PowerOff, Trash2, Unlink, UserCheck, UserX, Users } from 'lucide-react';
 import { Driver, DriverContact } from '../types/receipt';
 import { DRIVER_LANGUAGE_NAMES, toDriverLanguage } from '../lib/driverLanguage';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
@@ -11,6 +11,7 @@ import { useCompanyScope } from '../hooks/useCompanyScope';
 import { mayDeleteDriver } from '../lib/driverDelete';
 import type { DriverLinkState } from '../lib/partnerDriverLinks';
 import { DriverDeleteDialog } from './drivers/DriverDeleteDialog';
+import { UnlinkDriverDialog, type UnlinkTarget } from './partner/UnlinkDriverDialog';
 import { pageWriteRights } from '../lib/pageWriteRights';
 import {
   ACTIVE_DRIVER_STATUS,
@@ -42,6 +43,10 @@ interface DriversManagementProps {
    * since. Absent, or with nobody linked, the column is not drawn at all.
    */
   partnerLinks?: ReadonlyMap<string, DriverLinkState>;
+  /** The link row of each linked driver; without one a driver has no unlink button. */
+  partnerLinkIds?: ReadonlyMap<string, string>;
+  /** The page reads its links again once one is taken apart. Absent: no unlink button. */
+  onPartnerUnlinked?: () => void;
   /** The page reads its list again once a driver is gone. */
   onDriverDeleted?: () => void;
   /** Slots the page fills (the update button, the outcome and notices) so this screen keeps no partner state. */
@@ -55,12 +60,15 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   onEditDriver,
   canEdit,
   partnerLinks,
+  partnerLinkIds,
+  onPartnerUnlinked,
   onDriverDeleted,
   headerActions,
   headerNotice,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [deleting, setDeleting] = useState<Driver | null>(null);
+  const [unlinking, setUnlinking] = useState<UnlinkTarget | null>(null);
   const [editingDriver, setEditingDriver] = useState<Driver | undefined>();
 
   // The partition is total: `selectableDrivers` keeps everything not known to
@@ -211,9 +219,13 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
 
   const scope = useCompanyScope();
   const { isAdmin } = useAuth();
-  const { canCreate } = pageWriteRights('drivers', scope);
+  const driverRights = pageWriteRights('drivers', scope);
+  const { canCreate } = driverRights;
   // The database asks is_company_admin() for DELETE, stricter than the page right.
   const mayDelete = mayDeleteDriver(isAdmin, scope);
+  // Unlinking asks what confirming and rejecting a link ask,
+  // current_role_permits('drivers', true), so the button follows the page right.
+  const mayUnlink = onPartnerUnlinked !== undefined && driverRights.canEdit();
   const showReidey = (partnerLinks?.size ?? 0) > 0;
 
   const addButton = (size?: 'sm') =>
@@ -242,7 +254,7 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
 
   // Linked, or linked and dropped by the partner since (the owner's decision of
   // 08.10.2026: a departed driver is badged and the link stays). Nothing for a
-  // driver with no link.
+  // driver with no link. Beside either badge, the unlink button (28.11.2026).
   const reideyColumn: DataTableColumn<Driver> = {
     id: 'reidey',
     header: t('drivers.col.reidey'),
@@ -250,10 +262,27 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
     sortable: true,
     cell: driver => {
       const state = partnerLinks?.get(driver.id);
-      if (state === 'departed') {
-        return <Badge tone="neutral" title={t('partner.links.departedHint')}>{t('partner.links.departedBadge')}</Badge>;
-      }
-      return state === 'linked' ? <Badge tone="brand">{t('partner.links.status.linked')}</Badge> : null;
+      if (!state) return null;
+      const badge = state === 'departed'
+        ? <Badge tone="neutral" title={t('partner.links.departedHint')}>{t('partner.links.departedBadge')}</Badge>
+        : <Badge tone="brand">{t('partner.links.status.linked')}</Badge>;
+      const linkId = partnerLinkIds?.get(driver.id);
+      if (!mayUnlink || !linkId) return badge;
+      return (
+        <span className="inline-flex items-center gap-1">
+          {badge}
+          <Tooltip content={t('partner.links.unlink.action')}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('partner.links.unlink.aria', { name: driver.name })}
+              onClick={() => setUnlinking({ driver, linkId })}
+            >
+              <Unlink aria-hidden />
+            </Button>
+          </Tooltip>
+        </span>
+      );
     },
     hideBelow: 'sm',
   };
@@ -463,6 +492,12 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         onClose={() => setDeleting(null)}
         onChanged={() => onDriverDeleted?.()}
         onDeactivate={deleting && canEdit(deleting) ? driver => { void handleToggleStatus(driver); } : undefined}
+      />
+
+      <UnlinkDriverDialog
+        target={unlinking}
+        onClose={() => setUnlinking(null)}
+        onUnlinked={() => onPartnerUnlinked?.()}
       />
     </div>
   );

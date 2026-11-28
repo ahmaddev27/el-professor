@@ -7632,4 +7632,20 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'drivers.links.loadFailed': 'Die Reidey-Verknüpfungen konnten nicht geladen werden. Die Reidey-Spalte und die offenen Entscheidungen fehlen deshalb; laden Sie die Seite neu.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.skip.unlinked':                  'Von Hand getrennt — bitte selbst zuordnen',
+  'partner.links.reason.unlinked':         'Von Hand getrennt. Das System verknüpft diesen Reidey-Fahrer nicht mehr von selbst.',
+  'partner.links.unlink.action':           'Verknüpfung trennen',
+  'partner.links.unlink.aria':             'Reidey-Verknüpfung von {name} trennen',
+  'partner.links.unlink.body':             '{name} ist dann nicht mehr mit diesem Reidey-Fahrer verknüpft. Neue Belege und Notizen aus Reidey kommen nicht mehr bei {name} an.',
+  'partner.links.unlink.confirm':          'Trennen',
+  'partner.links.unlink.done':             'Die Reidey-Verknüpfung von {name} ist getrennt.',
+  'partner.links.unlink.failed':           'Die Verknüpfung konnte nicht getrennt werden.',
+  'partner.links.unlink.noAutoRelink':     'Das System verknüpft diesen Reidey-Fahrer danach nicht mehr von selbst, weder nachts noch über „Fahrer aus Reidey aktualisieren“.',
+  'partner.links.unlink.notLinked':        'Diese Verknüpfung war schon getrennt. Die Liste wurde neu geladen.',
+  'partner.links.unlink.recordsStay':      'Belege, Notizen und Umsätze, die schon bei {name} sind, bleiben bei {name}. Nichts davon wird gelöscht, verschoben oder umdatiert.',
+  'partner.links.unlink.relinkByHand':     'Er steht danach unter „Entscheiden“. Dort können Sie ihn jederzeit von Hand wieder zuordnen oder ablehnen.',
+  'partner.links.unlink.title':            'Reidey-Verknüpfung von {name} trennen?',
+  'settings.uberPull.runs.unlinkedReason.unlinked': 'Dieser Uber-Fahrer wurde von Hand von seinem Fahrer getrennt, deshalb wird er nachts nicht wieder verknüpft. Auf der Fahrer-Seite unter „Entscheiden“ zuordnen, dann den Tag über die Umsätze-Seite nachholen.',
 } as const;

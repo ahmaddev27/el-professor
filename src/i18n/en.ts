@@ -7558,4 +7558,20 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'drivers.links.loadFailed': 'The Reidey links could not be loaded, so the Reidey column and the open decisions are missing; reload the page.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'import.skip.unlinked':                  'Unlinked by hand — please assign yourself',
+  'partner.links.reason.unlinked':         'Unlinked by hand. The system will not link this Reidey driver again by itself.',
+  'partner.links.unlink.action':           'Unlink',
+  'partner.links.unlink.aria':             'Unlink {name} from Reidey',
+  'partner.links.unlink.body':             '{name} will no longer be linked to this Reidey driver. New receipts and notes from Reidey will no longer reach {name}.',
+  'partner.links.unlink.confirm':          'Unlink',
+  'partner.links.unlink.done':             '{name} is no longer linked to Reidey.',
+  'partner.links.unlink.failed':           'The link could not be removed.',
+  'partner.links.unlink.noAutoRelink':     'The system will not link this Reidey driver again by itself, neither at night nor through “Update drivers from Reidey”.',
+  'partner.links.unlink.notLinked':        'This link was already removed. The list has been reloaded.',
+  'partner.links.unlink.recordsStay':      'Receipts, notes and earnings already with {name} stay with {name}. None of them is deleted, moved or re-dated.',
+  'partner.links.unlink.relinkByHand':     'Afterwards they are listed under “Decide”, where you can assign them again by hand at any time, or reject them.',
+  'partner.links.unlink.title':            'Unlink {name} from Reidey?',
+  'settings.uberPull.runs.unlinkedReason.unlinked': 'This Uber driver was unlinked from their driver by hand, so they are not linked again at night. Assign them under “Decide” on the Drivers page, then catch up the day on the Earnings page.',
 };

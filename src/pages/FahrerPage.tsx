@@ -18,7 +18,7 @@ import { useFleetUpdate } from '../components/partner/useFleetUpdate';
 import { supabase } from '../lib/supabase';
 import { fetchLinkRows, summariseLinks, type LinkSummary } from '../lib/partnerDriverLinks';
 
-const NO_LINKS: LinkSummary = { byDriver: new Map(), pending: 0 };
+const NO_LINKS: LinkSummary = { byDriver: new Map(), linkIdByDriver: new Map(), pending: 0 };
 
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
@@ -188,6 +188,8 @@ const FahrerPage: React.FC = () => {
         onEditDriver={handleUpdateDriver}
         canEdit={canEditDriver}
         partnerLinks={links.byDriver}
+        partnerLinkIds={links.linkIdByDriver}
+        onPartnerUnlinked={() => { void loadLinks(); }}
         onDriverDeleted={reloadAll}
         headerActions={empty ? null : <FleetUpdateButton update={update} />}
         headerNotice={(

@@ -34,7 +34,7 @@ export type ImportScope = 'drivers' | 'vehicles';
  * as one, rather than left to be rediscovered.
  */
 export type SkipReason =
-  | 'name_missing' | 'name_taken' | 'name_ambiguous' | 'name_inactive' | 'limit_reached'
+  | 'name_missing' | 'name_taken' | 'name_ambiguous' | 'name_inactive' | 'unlinked' | 'limit_reached'
   | 'plate_missing' | 'plate_duplicate' | 'plate_unavailable';
 
 export interface SkippedRow {
@@ -61,6 +61,7 @@ const SKIP_KEYS: Record<SkipReason, TranslationKey> = {
   name_taken: 'import.skip.nameTaken',
   name_ambiguous: 'import.skip.nameAmbiguous',
   name_inactive: 'import.skip.nameInactive',
+  unlinked: 'import.skip.unlinked',
   limit_reached: 'import.skip.limitReached',
   plate_missing: 'import.skip.plateMissing',
   plate_duplicate: 'import.skip.plateDuplicate',
