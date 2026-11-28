@@ -1,7 +1,7 @@
 import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Sun, Moon, ShieldAlert, RefreshCw } from 'lucide-react';
-import AdminSidebar from './AdminSidebar';
+import AdminSidebar, { ADMIN_NAV_ITEMS } from './AdminSidebar';
 import SupportSessionBar from './SupportSessionBar';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -9,6 +9,14 @@ import LanguageSwitcher from './LanguageSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { TENANT_HOME, decideAdminGate } from '../lib/adminGate';
+import { navCrumbKey, type CrumbSource } from '../lib/navCrumb';
+import { Button } from './ui';
+
+/** Every panel destination the topbar can name; the account page sits in the sidebar's foot. */
+const CRUMB_SOURCES: CrumbSource[] = [
+  ...ADMIN_NAV_ITEMS,
+  { path: '/admin/konto', labelKey: 'admin.nav.account' },
+];
 
 /**
  * Shell for the platform administration area.
@@ -26,6 +34,7 @@ const AdminLayout: React.FC = () => {
   const { t } = useTranslation();
   const { isSuperAdmin, signOut } = useAuth();
   const { platformAccessStatus, isPlatformStaff, reloadPlatformAccess } = useSuperAdmin();
+  const crumbKey = navCrumbKey(useLocation().pathname, CRUMB_SOURCES);
 
   // One decision, taken in a pure function the tests cover: the panel opens
   // only for an account platform_whoami() reports an active role for, and an
@@ -36,12 +45,16 @@ const AdminLayout: React.FC = () => {
     return <Navigate to={TENANT_HOME} replace />;
   }
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Same frame as AppLayout: the canvas and its glow show through, a floating
+  // glass sidebar, a glass sheet under a sticky glass topbar. Inline styles and
+  // `var(--…)` colours are token classes now.
   if (gate === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
+      <div className="flex min-h-screen items-center justify-center font-ui">
         <div className="text-center">
-          <RefreshCw size={22} className="animate-spin mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
-          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.access.checking')}</p>
+          <RefreshCw size={22} className="mx-auto mb-3 text-fg-subtle motion-safe:animate-spin" />
+          <p className="text-sm text-fg-subtle">{t('admin.access.checking')}</p>
         </div>
       </div>
     );
@@ -50,32 +63,27 @@ const AdminLayout: React.FC = () => {
   if (gate === 'accessUnknown' || gate === 'noRole') {
     const failed = gate === 'accessUnknown';
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-base)' }}>
-        <div
-          className="w-full max-w-md rounded-2xl p-6 space-y-4 text-center"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-        >
-          <ShieldAlert size={28} className="mx-auto" style={{ color: 'var(--warning)' }} />
-          <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+      <div className="flex min-h-screen items-center justify-center p-4 font-ui">
+        <div className="glass-card w-full max-w-md space-y-4 rounded-surface p-6 text-center">
+          <ShieldAlert size={28} className="mx-auto text-caution" />
+          <h1 className="text-lg font-semibold text-fg">
             {t(failed ? 'admin.access.errorTitle' : 'admin.access.noneTitle')}
           </h1>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm text-fg-muted">
             {t(failed ? 'admin.access.errorBody' : 'admin.access.noneBody')}
           </p>
           <div className="flex justify-center gap-2">
             {failed && (
               <button
                 onClick={reloadPlatformAccess}
-                className="px-4 py-2 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
+                className="rounded-control bg-brand-gradient px-4 py-2 text-sm font-semibold text-brand-fg shadow-brand transition-colors hover:bg-brand-gradient-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               >
                 {t('admin.access.retry')}
               </button>
             )}
             <button
               onClick={() => { void signOut(); }}
-              className="px-4 py-2 rounded-xl text-sm font-medium"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+              className="rounded-control border border-line-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               {t('common.logout')}
             </button>
@@ -86,54 +94,43 @@ const AdminLayout: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+    <div className="min-h-dvh font-ui text-fg lg:flex">
       <AdminSidebar />
 
-      <div className="lg:pl-64">
+      <div className="min-w-0 flex-1 lg:py-[10px] lg:pe-[10px]">
+       <div className="glass-sheet min-h-dvh rounded-none border-0 lg:min-h-[calc(100dvh-20px)] lg:overflow-clip lg:rounded-pane lg:border">
         {/* A session opened from the panel stays visible in the panel: the
             sixty minutes run whether or not anyone is inside the company, and
             "Beenden" has to be reachable from where it was started. */}
         <SupportSessionBar />
-        <header
-          className="sticky top-0 z-20 border-b"
-          style={{
-            background: 'var(--bg-surface)',
-            borderColor: 'var(--border)',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <div className="px-6 py-3 flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <button
+        <header className="glass-topbar sticky top-0 z-20 h-[60px] lg:rounded-t-pane">
+          {/* Reidey's topbar, as in AppLayout: the section's name at the start,
+              the actions at the end. The panel's name is the sidebar's; the
+              amber "Administration" pill that repeated it here is gone. */}
+          <div className="flex h-full items-center justify-between gap-3 ps-16 pe-4 sm:pe-6 lg:ps-6 lg:pe-5">
+            <p className="min-w-0 truncate text-sm font-semibold text-fg">
+              {crumbKey ? t(crumbKey) : null}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <LanguageSwitcher variant="ui" />
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={toggleTheme}
-                className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                style={{
-                  background: 'var(--bg-subtle)',
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-secondary)',
-                }}
                 title={isDark ? t('shell.themeToLight') : t('shell.themeToDark')}
+                aria-label={isDark ? t('shell.themeToLight') : t('shell.themeToDark')}
+                className="border border-line bg-sunken"
               >
                 {isDark ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-              <span
-                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold"
-                style={{
-                  background: 'var(--warning-subtle)',
-                  border: '1px solid var(--warning)',
-                  color: 'var(--warning)',
-                }}
-              >
-                {t('admin.badge')}
-              </span>
+              </Button>
             </div>
-            <LanguageSwitcher />
           </div>
         </header>
 
-        <main className="p-5 lg:p-6">
+        <main className="page-settle mx-auto w-full max-w-[1440px] px-4 pb-12 pt-5 min-[960px]:px-8 min-[960px]:pb-14 min-[960px]:pt-7">
           <Outlet />
         </main>
+       </div>
       </div>
     </div>
   );

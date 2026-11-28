@@ -17,7 +17,6 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { format, getMonth, getYear } from 'date-fns';
-import ConfirmationModal from './ConfirmationModal';
 import SalaryDetailsModal from './SalaryDetailsModal';
 import SalaryPeriodsModal from './SalaryPeriodsModal';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -46,6 +45,7 @@ import {
   formatPercent,
   Input,
   KpiCard,
+  MessageDialog,
   PageHeader,
   Select,
   SelectContent,
@@ -468,7 +468,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       header: t('common.driver'),
       value: calc => calc.driver_name,
       sortable: true,
-      className: 'pr-2 sm:pr-4',
+      className: 'pe-2 sm:pe-4',
       cell: calc => {
         const { overlaps, overlapHint } = overlapFor(calc);
         return (
@@ -663,7 +663,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           // A figure to act on, not a carry-forward.
           <Alert tone="caution" title={t('sal.unrecovered.title')}>
             <p>{t('sal.unrecovered.body')}</p>
-            <ul className="mt-2 list-disc pl-5">
+            <ul className="mt-2 list-disc ps-5">
               {unrecoveredRows.map(calc => (
                 <li key={calc.driver_id}>
                   {t('sal.unrecovered.item', {
@@ -744,14 +744,15 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         />
       </div>
 
-      {/* Status Confirmation Modal — still the legacy dialog: nothing opens it
-          (openStatusModal has no caller), so there is no state of it to draw. */}
-      <ConfirmationModal
-        isOpen={statusModal.isOpen}
+      {/* Status dialog: nothing opens it (openStatusModal has no caller). Its
+          legacy type was 'success' or 'warning', neither of which drew a cancel
+          button, so it is a MessageDialog: OK calls onConfirm, then onClose. */}
+      <MessageDialog
+        open={statusModal.isOpen}
         onClose={() => setStatusModal({ isOpen: false, salary: null, newStatus: 'unpaid' })}
         onConfirm={handleStatusChange}
         title={statusModal.newStatus === 'paid' ? t('sal.confirm.markPaidTitle') : t('sal.confirm.markUnpaidTitle')}
-        message={
+        description={
           statusModal.salary
             ? t(
                 statusModal.newStatus === 'paid' ? 'sal.confirm.markPaidMessage' : 'sal.confirm.markUnpaidMessage',
@@ -759,7 +760,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               )
             : ''
         }
-        type={statusModal.newStatus === 'paid' ? 'success' : 'warning'}
+        tone={statusModal.newStatus === 'paid' ? 'positive' : 'brand'}
       />
 
       {/* Salary Details and Payments Modal */}

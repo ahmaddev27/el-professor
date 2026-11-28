@@ -338,7 +338,7 @@ export default function DashboardPreview() {
             <Button asChild variant="link" size="sm">
               <Link to={`${DESIGN_PREVIEW_PATH}/gehaelter`}>
                 {t('preview.salaries.viewAll')}
-                <ArrowRight aria-hidden />
+                <ArrowRight aria-hidden className="rtl:-scale-x-100" />
               </Link>
             </Button>
           </CardHeader>
@@ -385,7 +385,7 @@ export default function DashboardPreview() {
             <Button asChild variant="link" size="sm" className="mt-5">
               <Link to={`${DESIGN_PREVIEW_PATH}/fahrzeuge`}>
                 {t('preview.fleet.viewAll')}
-                <ArrowRight aria-hidden />
+                <ArrowRight aria-hidden className="rtl:-scale-x-100" />
               </Link>
             </Button>
           </CardContent>

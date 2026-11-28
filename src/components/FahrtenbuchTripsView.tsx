@@ -374,14 +374,14 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-3 font-ui">
         <div className="relative min-w-48 flex-1">
-          <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+          <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
           <Input
             type="text"
             aria-label={t('common.search')}
             placeholder={t('imp.trips.searchPlaceholder')}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="pl-9"
+            className="ps-9"
           />
         </div>
 
@@ -494,7 +494,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           </Field>
           {(filterDriver || filterPlate || filterStatus) && (
             <div className="sm:col-span-3">
-              <Button variant="ghost" size="sm" className="-ml-2" onClick={() => { setFilterDriver(''); setFilterPlate(''); setFilterStatus(''); }}>
+              <Button variant="ghost" size="sm" className="-ms-2" onClick={() => { setFilterDriver(''); setFilterPlate(''); setFilterStatus(''); }}>
                 <X aria-hidden /> {t('imp.trips.reset')}
               </Button>
             </div>
@@ -521,7 +521,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 pl-7 sm:pl-0">
+              <div className="flex items-center gap-2 ps-7 sm:ps-0">
                 <Button variant="secondary" size="sm" onClick={() => handleAnzeigen(imp)}>
                   <Eye aria-hidden /> {t('imp.trips.view')}
                   <span className="sr-only"> – {importLabel(imp)}</span>
@@ -642,7 +642,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   onClick={() => setPage(p => Math.max(0, p - 1))}
                   disabled={safePage === 0}
                 >
-                  <ChevronLeft aria-hidden /> {t('common.back')}
+                  <ChevronLeft aria-hidden className="rtl:-scale-x-100" /> {t('common.back')}
                 </Button>
                 <span className="px-3 text-xs font-medium tabular-nums text-fg">
                   {safePage + 1} / {totalPages}
@@ -653,7 +653,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                   disabled={safePage >= totalPages - 1}
                 >
-                  {t('imp.next')} <ChevronRight aria-hidden />
+                  {t('imp.next')} <ChevronRight aria-hidden className="rtl:-scale-x-100" />
                 </Button>
               </div>
             </div>

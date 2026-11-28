@@ -53,9 +53,13 @@ if (set !== 'before' && set !== 'after') {
 
 /** The design preview's PREVIEW_TODAY, mid-morning in Berlin. */
 const FIXED_NOW = new Date('2026-09-14T10:00:00+02:00');
-const WIDTHS = [375, 768, 1280];
+/** `--widths 1440,375` replaces the default three and every shot's own list (the remake's before/after sets use two). */
+const WIDTHS = arg('widths')?.split(',').map(Number).filter(Boolean) ?? [375, 768, 1280];
 const THEMES = ['light', 'dark'];
-const outDir = join(ownRoot, 'Docs', 'design', 'phase5', batch, set);
+/** `--out <dir>` (relative to this checkout) replaces Docs/design/phase5; the batch and set are appended. */
+const outDir = join(ownRoot, arg('out') ?? join('Docs', 'design', 'phase5'), batch, set);
+/** `--screens-only` keeps the shots that open a screen as it loads: no action, no dialog. */
+const screensOnly = args.includes('--screens-only');
 
 const openAdd = page => page.getByRole('button', { name: /^(Neues Fahrzeug|Fahrzeug hinzufügen)$/ }).first().click();
 const openFirstDelete = page => page.getByRole('button', { name: /löschen$/i }).first().click();
@@ -169,18 +173,23 @@ const server = await createServer({
 await server.listen();
 const origin = new URL(server.resolvedUrls.local[0]).origin;
 
-const { chromium } = e2eRequire('@playwright/test');
+// HARNESS_PLAYWRIGHT names another Playwright module, and an empty HARNESS_CHANNEL
+// drives that module's own Chromium: a box without an installed Chrome (the VPS).
+const { chromium } = process.env.HARNESS_PLAYWRIGHT
+  ? createRequire(import.meta.url)(process.env.HARNESS_PLAYWRIGHT)
+  : e2eRequire('@playwright/test');
+const channel = process.env.HARNESS_CHANNEL ?? 'chrome';
 // A date field formats by the browser's own UI language, not the page's
 // locale: without --lang an English Chrome shows mm/dd/yyyy on a German screen.
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--lang=de-DE'] });
+const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: true, args: ['--lang=de-DE'] });
 const encoder = await browser.newPage();
 
 mkdirSync(outDir, { recursive: true });
 let taken = 0;
 const problems = [];
 
-const queue = SHOTS.flatMap(shot =>
-  (shot.variants ?? allVariants)
+const queue = SHOTS.filter(shot => !screensOnly || (!shot.act && !shot.dialog)).flatMap(shot =>
+  (arg('widths') ? allVariants : shot.variants ?? allVariants)
     .map(({ width, theme }) => ({ shot, width, theme, file: `${width}-${theme}-${shot.name}.webp` }))
     .filter(({ file }) => !only || only.some(part => file.includes(part))),
 );

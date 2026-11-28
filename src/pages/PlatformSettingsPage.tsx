@@ -12,7 +12,10 @@ import type { TranslationKey } from '../i18n';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess } from '../lib/platformAccess';
 import { calcPricing, fmt, type PriceBook } from '../utils/pricing';
-import { Alert, Field as UiField, Input as UiInput } from '../components/ui';
+import {
+  Alert, Button, Card, Field as UiField, Input as UiInput,
+  PageHeader, Tabs, TabsList, TabsTrigger,
+} from '../components/ui';
 import type { PlanFeatureMap } from '../utils/planFeatures';
 import {
   canReadAnnouncements,
@@ -42,8 +45,6 @@ import {
 } from '../lib/platformSettings';
 import { getSetting, putSetting } from '../lib/platformSettingsClient';
 import {
-  cardStyle,
-  controlStyle,
   EditorShell,
   Field,
   Note,
@@ -139,11 +140,11 @@ const PlatformSettingsPage: React.FC = () => {
 
   if (tabs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center" style={cardStyle}>
-        <ShieldAlert size={40} className="mb-3" style={{ color: 'var(--warning)' }} />
-        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('admin.read.denied')}</p>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.noAccessBody')}</p>
-      </div>
+      <Card className="flex flex-col items-center justify-center py-20 text-center font-ui">
+        <ShieldAlert size={40} className="mb-3 text-caution" />
+        <p className="font-medium text-fg">{t('admin.read.denied')}</p>
+        <p className="mt-1 text-sm text-fg-subtle">{t('admin.settings.noAccessBody')}</p>
+      </Card>
     );
   }
 
@@ -151,29 +152,19 @@ const PlatformSettingsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.title')}</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.settings.subtitle')}</p>
-      </div>
+      <PageHeader title={t('admin.settings.title')} description={t('admin.settings.subtitle')} className="pb-0" />
 
       {/* Ten tabs do not fit one row, on a phone or on a laptop, so the strip
-          wraps rather than scrolling the page sideways. */}
-      <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
-        {tabs.map(({ id, icon: Icon, labelKey }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className="grow basis-28 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
-            style={{
-              background: active === id ? 'var(--bg-surface)' : 'transparent',
-              color: active === id ? 'var(--text-primary)' : 'var(--text-tertiary)',
-              boxShadow: active === id ? 'var(--shadow-sm)' : 'none',
-            }}
-          >
-            <Icon size={15} />{t(labelKey)}
-          </button>
-        ))}
-      </div>
+          scrolls inside its own frame rather than scrolling the page sideways. */}
+      <Tabs value={active} onValueChange={id => setTab(id as SettingsTab)}>
+        <TabsList>
+          {tabs.map(({ id, icon: Icon, labelKey }) => (
+            <TabsTrigger key={id} value={id}>
+              <Icon size={15} />{t(labelKey)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {active === 'price_book'    ? <PriceBookEditor /> :
        active === 'plan_features' ? <PlanFeaturesEditor /> :
@@ -298,36 +289,31 @@ const PriceBookEditor: React.FC = () => {
             <Note textKey="admin.settings.readOnly" />
           )}
 
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.pricePerCar')}</h2>
+          <Card className="space-y-4 p-5 font-ui">
+            <h2 className="font-semibold text-fg">{t('admin.settings.pricePerCar')}</h2>
             {/* The per-car prices are projected from the plan catalogue; the
                 stored values are a shadow nothing reads, so they are shown, not
                 edited. The save still sends them unchanged. */}
             <PlansPageNote />
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {PLANS.map(plan => (
-                <label key={plan} className="block">
-                  <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    {t(PLAN_LABELS[plan])}
-                  </span>
-                  <input
+                <UiField key={plan} label={t(PLAN_LABELS[plan])}>
+                  <UiInput
                     value={form.pricePerCar[plan]}
                     disabled
                     readOnly
                     /* German decimal comma in both languages — src/i18n/index.ts. */
                     placeholder="0,00"
-                    style={{ ...controlStyle, width: '100%', opacity: 0.6 }}
                   />
-                </label>
+                </UiField>
               ))}
             </div>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.perMonth')}</p>
-          </div>
+            <p className="text-xs text-fg-subtle">{t('admin.settings.perMonth')}</p>
+          </Card>
 
           {/* The owner's first-month price (15.10.2026): one flat figure for a
-              company's first invoice. Drawn with the design system's classes so
-              the file's inline-style count does not move. */}
-          <div className="space-y-4 rounded-2xl border border-line bg-raised p-5 font-ui">
+              company's first invoice. */}
+          <Card className="space-y-4 p-5 font-ui">
             <UiField label={t('admin.settings.firstMonth')} hint={t('admin.settings.firstMonthHint')} className="max-w-xs">
               <UiInput
                 value={form.firstMonth}
@@ -338,32 +324,29 @@ const PriceBookEditor: React.FC = () => {
                 inputMode="decimal"
               />
             </UiField>
-          </div>
+          </Card>
 
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.tiers')}</h2>
+          <Card className="space-y-4 p-5 font-ui">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-semibold text-fg">{t('admin.settings.tiers')}</h2>
               {maySave && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setForm({ ...form, tiers: [...form.tiers, { minCars: '', percent: '' }] })}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                  style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}
                 >
                   <Plus size={13} />{t('admin.settings.tier.add')}
-                </button>
+                </Button>
               )}
             </div>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.tiersHint')}</p>
+            <p className="text-xs text-fg-subtle">{t('admin.settings.tiersHint')}</p>
 
             {form.tiers.length === 0 ? (
-              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.noTiers')}</p>
+              <p className="text-sm text-fg-subtle">{t('admin.settings.noTiers')}</p>
             ) : form.tiers.map((tier, index) => (
               <div key={index} className="flex flex-wrap items-end gap-3">
-                <label className="block">
-                  <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    {t('admin.settings.tier.minCars')}
-                  </span>
-                  <input
+                <UiField label={t('admin.settings.tier.minCars')} className="w-32">
+                  <UiInput
                     value={tier.minCars}
                     disabled={!maySave}
                     onChange={e => {
@@ -371,14 +354,10 @@ const PriceBookEditor: React.FC = () => {
                       tiers[index] = { ...tiers[index], minCars: e.target.value };
                       setForm({ ...form, tiers });
                     }}
-                    style={{ ...controlStyle, width: '8rem', opacity: maySave ? 1 : 0.6 }}
                   />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    {t('admin.settings.tier.percent')}
-                  </span>
-                  <input
+                </UiField>
+                <UiField label={t('admin.settings.tier.percent')} className="w-32">
+                  <UiInput
                     value={tier.percent}
                     disabled={!maySave}
                     onChange={e => {
@@ -386,45 +365,43 @@ const PriceBookEditor: React.FC = () => {
                       tiers[index] = { ...tiers[index], percent: e.target.value };
                       setForm({ ...form, tiers });
                     }}
-                    style={{ ...controlStyle, width: '8rem', opacity: maySave ? 1 : 0.6 }}
                   />
-                </label>
+                </UiField>
                 {maySave && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => setForm({ ...form, tiers: form.tiers.filter((_, i) => i !== index) })}
-                    className="p-2 rounded-lg mb-0.5"
-                    style={{ color: 'var(--danger)' }}
+                    className="mb-0.5 text-critical hover:text-critical"
                     title={t('admin.settings.tier.remove')}
+                    aria-label={t('admin.settings.tier.remove')}
                   >
                     <Trash2 size={15} />
-                  </button>
+                  </Button>
                 )}
               </div>
             ))}
-          </div>
+          </Card>
 
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.yearlyDiscount')}</h2>
-            <input
+          <Card className="space-y-4 p-5 font-ui">
+            <h2 className="font-semibold text-fg">{t('admin.settings.yearlyDiscount')}</h2>
+            <UiInput
               value={form.yearlyDiscountPercent}
               disabled={!maySave}
               onChange={e => setForm({ ...form, yearlyDiscountPercent: e.target.value })}
-              style={{ ...controlStyle, width: '8rem', opacity: maySave ? 1 : 0.6 }}
+              className="w-32"
+              aria-label={t('admin.settings.yearlyDiscount')}
             />
-          </div>
+          </Card>
 
           {/* The same arithmetic compute_plan_price runs, on the typed book. */}
-          <div className="rounded-2xl p-5 space-y-3" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.example')}</h2>
-            <label className="block">
-              <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                {t('admin.settings.exampleCars')}
-              </span>
-              <input value={exampleCars} onChange={e => setExampleCars(e.target.value)}
-                style={{ ...controlStyle, width: '8rem' }} />
-            </label>
+          <Card className="space-y-3 p-5 font-ui">
+            <h2 className="font-semibold text-fg">{t('admin.settings.example')}</h2>
+            <UiField label={t('admin.settings.exampleCars')} className="w-32">
+              <UiInput value={exampleCars} onChange={e => setExampleCars(e.target.value)} />
+            </UiField>
             {preview ? (
-              <div className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
+              <div className="space-y-1 text-sm text-fg-muted tabular-nums">
                 <p>{t('admin.settings.exampleMonthly', { amount: fmt(preview.monthlyAfterFleet), percent: String(preview.fleetDiscountPct) })}</p>
                 <p>{t('admin.settings.exampleYearly', { amount: fmt(preview.yearlyTotal) })}</p>
                 {firstMonthPreview && (
@@ -432,20 +409,15 @@ const PriceBookEditor: React.FC = () => {
                 )}
               </div>
             ) : (
-              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
+              <p className="text-sm text-fg-subtle">{t('admin.settings.exampleUnavailable')}</p>
             )}
-          </div>
+          </Card>
 
           {maySave && (
             <div className="flex justify-end">
-              <button
-                onClick={() => void save()}
-                disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-                style={{ background: 'var(--accent)', opacity: saving ? 0.6 : 1 }}
-              >
+              <Button onClick={() => void save()} disabled={saving}>
                 <Save size={16} />{saving ? t('admin.common.saving') : t('admin.settings.save')}
-              </button>
+              </Button>
             </div>
           )}
         </>
@@ -508,30 +480,27 @@ const PlanFeaturesEditor: React.FC = () => {
         <>
           <PlansPageNote />
 
-          <div className="rounded-2xl overflow-hidden" style={cardStyle}>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {(['admin.settings.col.feature', 'admin.settings.col.minPlan'] as const).map(key => (
-                      <th key={key} className="px-5 py-3.5 text-left"
-                        style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
-                        {t(key)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {features.map(feature => (
-                    <tr key={feature} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td className="px-5 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>{feature}</td>
-                      <td className="px-5 py-3" style={{ color: 'var(--text-secondary)' }}>{t(PLAN_LABELS[loaded.value[feature]])}</td>
-                    </tr>
+          <Card className="relative overflow-x-auto font-ui">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line">
+                  {(['admin.settings.col.feature', 'admin.settings.col.minPlan'] as const).map(key => (
+                    <th key={key} className="px-5 py-3.5 text-start text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-fg-subtle">
+                      {t(key)}
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </tr>
+              </thead>
+              <tbody>
+                {features.map(feature => (
+                  <tr key={feature} className="border-b border-line">
+                    <td className="px-5 py-3 font-medium text-fg">{feature}</td>
+                    <td className="px-5 py-3 text-fg-muted">{t(PLAN_LABELS[loaded.value[feature]])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
         </>
       )}
     </EditorShell>
@@ -610,9 +579,9 @@ const SellerEditor: React.FC = () => {
           {notConfigured && <Note textKey="admin.settings.seller.notConfigured" />}
           {!maySave && <Note textKey="admin.settings.readOnly" />}
 
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.seller.title')}</h2>
-            <div className="grid gap-4 sm:grid-cols-2">
+          <Card className="space-y-4 p-5 font-ui">
+            <h2 className="font-semibold text-fg">{t('admin.settings.seller.title')}</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {SELLER_FIELDS.map(field => (
                 <Field
                   key={field}
@@ -623,18 +592,18 @@ const SellerEditor: React.FC = () => {
                 />
               ))}
             </div>
-          </div>
+          </Card>
 
-          <div className="rounded-2xl p-5 space-y-3" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.seller.preview')}</h2>
+          <Card className="space-y-3 p-5 font-ui">
+            <h2 className="font-semibold text-fg">{t('admin.settings.seller.preview')}</h2>
             {preview ? (
-              <div className="text-sm space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
+              <div className="space-y-0.5 text-sm text-fg-muted">
                 {preview.map((line, index) => <p key={index}>{line}</p>)}
               </div>
             ) : (
-              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
+              <p className="text-sm text-fg-subtle">{t('admin.settings.exampleUnavailable')}</p>
             )}
-          </div>
+          </Card>
 
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
         </>
@@ -679,9 +648,9 @@ const InvoiceEditor: React.FC = () => {
           <Note textKey="admin.settings.notAppliedYet" />
           {!maySave && <Note textKey="admin.settings.readOnly" />}
 
-          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.invoice.title')}</h2>
-            <div className="grid gap-4 sm:grid-cols-3">
+          <Card className="space-y-4 p-5 font-ui">
+            <h2 className="font-semibold text-fg">{t('admin.settings.invoice.title')}</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field
                 labelKey="admin.settings.invoice.numberPrefix"
                 value={form.numberPrefix}
@@ -701,12 +670,12 @@ const InvoiceEditor: React.FC = () => {
                 onChange={defaultPaymentMethod => setForm({ ...form, defaultPaymentMethod })}
               />
             </div>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <p className="text-sm text-fg-muted">
               {example
                 ? t('admin.settings.invoice.example', { number: example })
                 : t('admin.settings.exampleUnavailable')}
             </p>
-          </div>
+          </Card>
 
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
         </>
@@ -714,5 +683,7 @@ const InvoiceEditor: React.FC = () => {
     </EditorShell>
   );
 };
+
+// ── Presentation (phase 5): the markup above only draws; its logic is unchanged ──
 
 export default PlatformSettingsPage;

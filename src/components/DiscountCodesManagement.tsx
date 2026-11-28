@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, CreditCard as Edit2, Trash2, ToggleLeft, ToggleRight, Tag, ChevronDown, ChevronUp, Users, Building2, Calendar, Hash, Percent, Euro, Check, X, AlertTriangle } from 'lucide-react';
-import ConfirmationModal from './ConfirmationModal';
+import { Plus, Pencil as Edit2, Trash2, ToggleLeft, ToggleRight, Tag, ChevronDown, ChevronUp, Users, Building2, Calendar, Hash, Percent, Euro, Check, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { fmt as fmtPrice } from '../utils/pricing';
-import { Alert } from './ui';
+import {
+  Alert, Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  EmptyState, Field, Input, NativeSelect, PageHeader, cn,
+} from './ui';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
@@ -157,159 +159,137 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
     onClose();
   };
 
-  const inputCls = 'w-full px-3 py-2 rounded-lg border text-sm transition-all outline-none focus:ring-2';
-  const fieldStyle = { background: 'var(--bg-input)', borderColor: 'var(--border)', color: 'var(--text-primary)' };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
-      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
-            {dc ? t('codes.discount.edit') : t('codes.discount.new')}
-          </h2>
-          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg hover:opacity-70 transition-opacity" style={{ color: 'var(--text-secondary)' }}>
-            <X size={18} />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
+    <Dialog open onOpenChange={open => { if (!open && !saving) onClose(); }}>
+      <DialogContent
+        className="max-w-xl max-h-[90dvh] overflow-y-auto"
+        onPointerDownOutside={e => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{dc ? t('codes.discount.edit') : t('codes.discount.new')}</DialogTitle>
+          <DialogDescription className="sr-only">{dc ? t('codes.discount.edit') : t('codes.discount.new')}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
           {/* Code + Description */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.codeRequired')}</label>
-              <input className={inputCls} style={fieldStyle} value={form.code} onChange={e => set('code', e.target.value.toUpperCase())} placeholder="WELCOME10" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('common.description')}</label>
-              <input className={inputCls} style={fieldStyle} value={form.description ?? ''} onChange={e => set('description', e.target.value)} placeholder={t('codes.discount.descPlaceholder')} />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={t('codes.discount.codeRequired')}>
+              <Input value={form.code} onChange={e => set('code', e.target.value.toUpperCase())} placeholder="WELCOME10" />
+            </Field>
+            <Field label={t('common.description')}>
+              <Input value={form.description ?? ''} onChange={e => set('description', e.target.value)} placeholder={t('codes.discount.descPlaceholder')} />
+            </Field>
           </div>
 
           {/* Discount type + value */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.type')}</label>
-              <select className={inputCls} style={fieldStyle} value={form.discount_type} onChange={e => set('discount_type', e.target.value)}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={t('codes.discount.type')}>
+              <NativeSelect value={form.discount_type} onChange={e => set('discount_type', e.target.value)}>
                 <option value="percentage">{t('codes.discount.percentOption')}</option>
                 <option value="fixed">{t('codes.discount.fixedOption')}</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                {t('codes.discount.value')} {form.discount_type === 'percentage' ? '(%)' : '(€)'}
-              </label>
-              <input type="number" min={0} max={form.discount_type === 'percentage' ? 100 : undefined} step="0.01"
-                className={inputCls} style={fieldStyle}
+              </NativeSelect>
+            </Field>
+            <Field label={<>{t('codes.discount.value')} {form.discount_type === 'percentage' ? '(%)' : '(€)'}</>}>
+              <Input type="number" min={0} max={form.discount_type === 'percentage' ? 100 : undefined} step="0.01"
                 value={form.discount_value}
                 onChange={e => set('discount_value', parseFloat(e.target.value) || 0)} />
-            </div>
+            </Field>
           </div>
 
           {/* Usage mode + Audience type */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.usage')}</label>
-              <select className={inputCls} style={fieldStyle} value={form.usage_mode} onChange={e => set('usage_mode', e.target.value)}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={t('codes.discount.usage')}>
+              <NativeSelect value={form.usage_mode} onChange={e => set('usage_mode', e.target.value)}>
                 <option value="once">{t('codes.discount.once')}</option>
                 <option value="monthly">{t('codes.discount.monthlyRecurring')}</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.audience')}</label>
-              <select className={inputCls} style={fieldStyle} value={form.audience_type} onChange={e => set('audience_type', e.target.value)}>
+              </NativeSelect>
+            </Field>
+            <Field label={t('codes.discount.audience')}>
+              <NativeSelect value={form.audience_type} onChange={e => set('audience_type', e.target.value)}>
                 <option value="multiple">{t('codes.discount.multipleCompanies')}</option>
                 <option value="single">{t('codes.discount.singleCompany')}</option>
-              </select>
-            </div>
+              </NativeSelect>
+            </Field>
           </div>
 
           {/* Assigned company (single) + max redemptions (multiple) */}
           {form.audience_type === 'single' && (
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.assignedCompany')}</label>
-              <select className={inputCls} style={fieldStyle} value={form.assigned_company_id ?? ''} onChange={e => set('assigned_company_id', e.target.value)}>
+            <Field label={t('codes.discount.assignedCompany')}>
+              <NativeSelect value={form.assigned_company_id ?? ''} onChange={e => set('assigned_company_id', e.target.value)}>
                 <option value="">{t('codes.discount.firstRedeemer')}</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
+              </NativeSelect>
+            </Field>
           )}
           {form.audience_type === 'multiple' && (
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.maxRedemptions')}</label>
-              <input type="number" min={1} className={inputCls} style={fieldStyle}
+            <Field label={t('codes.discount.maxRedemptions')}>
+              <Input type="number" min={1}
                 value={form.max_redemptions} onChange={e => set('max_redemptions', e.target.value)} placeholder={t('codes.discount.maxPlaceholder')} />
-            </div>
+            </Field>
           )}
 
           {/* Validity dates */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.validFrom')}</label>
-              <input type="date" className={inputCls} style={fieldStyle} value={form.valid_from ?? ''} onChange={e => set('valid_from', e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.col.validUntil')}</label>
-              <input type="date" className={inputCls} style={fieldStyle} value={form.valid_until ?? ''} onChange={e => set('valid_until', e.target.value)} />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={t('codes.discount.validFrom')}>
+              <Input type="date" value={form.valid_from ?? ''} onChange={e => set('valid_from', e.target.value)} />
+            </Field>
+            <Field label={t('codes.col.validUntil')}>
+              <Input type="date" value={form.valid_until ?? ''} onChange={e => set('valid_until', e.target.value)} />
+            </Field>
           </div>
 
           {/* Plan + billing cycle filters */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.validForPlan')}</label>
-              <select className={inputCls} style={fieldStyle} value={form.applies_to_plan} onChange={e => set('applies_to_plan', e.target.value)}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={t('codes.discount.validForPlan')}>
+              <NativeSelect value={form.applies_to_plan} onChange={e => set('applies_to_plan', e.target.value)}>
                 <option value="all">{t('codes.discount.allPlans')}</option>
                 {/* Plan tier names are product names, identical in both languages. */}
                 <option value="basic">Basic</option>
                 <option value="advanced">Advanced</option>
                 <option value="premium">Premium</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.validForCycle')}</label>
-              <select className={inputCls} style={fieldStyle} value={form.applies_to_billing_cycle} onChange={e => set('applies_to_billing_cycle', e.target.value)}>
+              </NativeSelect>
+            </Field>
+            <Field label={t('codes.discount.validForCycle')}>
+              <NativeSelect value={form.applies_to_billing_cycle} onChange={e => set('applies_to_billing_cycle', e.target.value)}>
                 <option value="all">{t('codes.discount.monthlyAndYearly')}</option>
                 <option value="monthly">{t('codes.discount.monthlyOnly')}</option>
                 <option value="yearly">{t('codes.discount.yearlyOnly')}</option>
-              </select>
-            </div>
+              </NativeSelect>
+            </Field>
           </div>
 
           {/* Car limits */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.minCars')}</label>
-              <input type="number" min={1} className={inputCls} style={fieldStyle}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={t('codes.discount.minCars')}>
+              <Input type="number" min={1}
                 value={form.min_cars} onChange={e => set('min_cars', e.target.value)} placeholder="—" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.maxCars')}</label>
-              <input type="number" min={1} className={inputCls} style={fieldStyle}
+            </Field>
+            <Field label={t('codes.discount.maxCars')}>
+              <Input type="number" min={1}
                 value={form.max_cars} onChange={e => set('max_cars', e.target.value)} placeholder="—" />
-            </div>
+            </Field>
           </div>
 
           {/* Active toggle */}
           <label className="flex items-center gap-3 cursor-pointer select-none">
             <div
-              className="relative w-11 h-6 rounded-full transition-colors"
-              style={{ background: form.active ? 'var(--success-solid)' : 'var(--bg-muted)' }}
+              className={cn('relative h-6 w-11 rounded-full transition-colors', form.active ? 'bg-positive-dot' : 'bg-sunken')}
               onClick={() => set('active', !form.active)}
             >
-              <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform" style={{ transform: form.active ? 'translateX(20px)' : 'translateX(0)' }} />
+              <div className={cn('absolute start-0.5 top-0.5 size-5 rounded-full bg-solid shadow-elev-xs motion-safe:transition-transform', form.active ? 'translate-x-5 rtl:-translate-x-5' : 'translate-x-0')} />
             </div>
-            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('codes.status.active')}</span>
+            <span className="text-sm font-medium text-fg">{t('codes.status.active')}</span>
           </label>
         </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-70" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
             {t('common.cancel')}
-          </button>
-          <button onClick={handleSave} disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50" style={{ background: 'var(--accent)' }}>
+          </Button>
+          <Button onClick={handleSave} disabled={saving}>
             {saving ? t('common.saving') : t('common.save')}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -348,40 +328,38 @@ const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
     })();
   }, [codeId]);
 
-  if (loading) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</p>;
+  if (loading) return <p className="text-xs text-center py-3 text-fg-subtle">{t('common.loading')}</p>;
   /*
     One paragraph, two sentences, and the sentence is the signal — not the
-    colour. It keeps the panel's existing muted tone on purpose: `text-critical`
-    on this legacy card background would be a contrast pair nothing measures yet
-    (tokens.contrast.test.ts, ON_LEGACY_SURFACE), and the wording already says
-    which of the two happened.
+    colour: the wording already says which of the two happened, so a failed
+    read keeps the panel's muted tone rather than painting itself red.
   */
   if (loadFailed || !rows.length) return (
-    <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>
+    <p className="text-xs text-center py-3 text-fg-subtle">
       {loadFailed ? t('admin.read.failed') : t('codes.discount.noRedemptions')}
     </p>
   );
 
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
-          <tr style={{ color: 'var(--text-tertiary)' }}>
-            <th className="text-left py-1.5 pr-3 font-semibold">{t('codes.col.firm')}</th>
-            <th className="text-left py-1.5 pr-3 font-semibold">{t('codes.col.plan')}</th>
-            <th className="text-right py-1.5 pr-3 font-semibold">{t('codes.col.original')}</th>
-            <th className="text-right py-1.5 pr-3 font-semibold">{t('codes.col.discount')}</th>
-            <th className="text-right py-1.5 font-semibold">{t('codes.col.finalPrice')}</th>
+          <tr className="text-fg-subtle">
+            <th className="text-start py-1.5 pe-3 font-semibold">{t('codes.col.firm')}</th>
+            <th className="text-start py-1.5 pe-3 font-semibold">{t('codes.col.plan')}</th>
+            <th className="text-end py-1.5 pe-3 font-semibold">{t('codes.col.original')}</th>
+            <th className="text-end py-1.5 pe-3 font-semibold">{t('codes.col.discount')}</th>
+            <th className="text-end py-1.5 font-semibold">{t('codes.col.finalPrice')}</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(r => (
-            <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-              <td className="py-1.5 pr-3" style={{ color: 'var(--text-primary)' }}>{r.company_name ?? r.company_id.slice(0, 8)}</td>
-              <td className="py-1.5 pr-3 capitalize" style={{ color: 'var(--text-secondary)' }}>{r.plan}</td>
-              <td className="py-1.5 pr-3 text-right" style={{ color: 'var(--text-secondary)' }}>{fmtPrice(r.original_price)} €</td>
-              <td className="py-1.5 pr-3 text-right" style={{ color: 'var(--success)' }}>-{fmtPrice(r.discount_amount)} €</td>
-              <td className="py-1.5 text-right font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtPrice(r.final_price)} €</td>
+            <tr key={r.id} className="border-t border-line">
+              <td className="py-1.5 pe-3 text-fg">{r.company_name ?? r.company_id.slice(0, 8)}</td>
+              <td className="py-1.5 pe-3 capitalize text-fg-muted">{r.plan}</td>
+              <td className="py-1.5 pe-3 text-end whitespace-nowrap tabular-nums text-fg-muted">{fmtPrice(r.original_price)} €</td>
+              <td className="py-1.5 pe-3 text-end whitespace-nowrap tabular-nums text-positive">-{fmtPrice(r.discount_amount)} €</td>
+              <td className="py-1.5 text-end whitespace-nowrap tabular-nums font-semibold text-fg">{fmtPrice(r.final_price)} €</td>
             </tr>
           ))}
           {/*
@@ -393,7 +371,7 @@ const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
           */}
           {total !== null && total > rows.length && (
             <tr>
-              <td colSpan={5} className="pt-2 text-[11px]">
+              <td colSpan={5} className="pt-2 text-[11px] text-fg-subtle">
                 {t('admin.read.partial', { shown: rows.length, total })}
               </td>
             </tr>
@@ -517,41 +495,39 @@ const DiscountCodesManagement: React.FC = () => {
     return labels[v] ?? v;
   };
 
+
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-ui">
       {/* Header */}
-      <div className="rounded-xl p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-        style={{ background: 'linear-gradient(135deg, #0f2640 0%, #071524 100%)', boxShadow: 'var(--shadow-lg)' }}>
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg p-2.5" style={{ background: 'rgba(6,182,212,0.15)' }}>
-            <Tag className="text-cyan-400" size={28} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">{t('codes.discount.title')}</h1>
-            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              {/* Two counts over a list that was not read are not counts of zero. */}
-              {loadFailed ? t('admin.read.failedTitle') : (<>
-                {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, codes.length)}
-                {' · '}
-                {t('codes.activeCount', { count: codes.filter(c => c.active).length })}
-              </>)}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => setModalDc('new')}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:shadow-lg hover:-translate-y-0.5"
-          style={{ background: 'var(--accent)' }}
-        >
-          <Plus size={16} />
-          {t('codes.discount.new')}
-        </button>
-      </div>
+      <PageHeader
+        className="pb-0"
+        title={
+          <span className="inline-flex items-center gap-3">
+            <Tag className="text-brand-text" size={26} />
+            {t('codes.discount.title')}
+          </span>
+        }
+        description={
+          /* Two counts over a list that was not read are not counts of zero. */
+          loadFailed ? t('admin.read.failedTitle') : (<>
+            {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, codes.length)}
+            {' · '}
+            {t('codes.activeCount', { count: codes.filter(c => c.active).length })}
+          </>)
+        }
+        actions={
+          <Button onClick={() => setModalDc('new')}>
+            <Plus size={16} />
+            {t('codes.discount.new')}
+          </Button>
+        }
+      />
 
       {/* Table */}
-      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
+      <div className="glass-card rounded-surface relative overflow-x-auto">
         {loading ? (
-          <div className="py-16 text-center" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
+          <div className="py-16 text-center text-fg-subtle">{t('common.loading')}</div>
         ) : loadFailed ? (
           /* Not "no discount codes exist" — the list was not read. */
           <div className="p-4">
@@ -560,64 +536,57 @@ const DiscountCodesManagement: React.FC = () => {
             </Alert>
           </div>
         ) : codes.length === 0 ? (
-          <div className="py-16 text-center">
-            <Tag size={40} className="mx-auto mb-3 opacity-20" style={{ color: 'var(--text-tertiary)' }} />
-            <p style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.none')}</p>
-          </div>
+          <EmptyState icon={Tag} title={t('codes.discount.none')} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead style={{ background: 'var(--bg-subtle)' }}>
+              <thead className="bg-wash">
                 <tr>
                   {TABLE_HEADER_KEYS.map(key => (
-                    <th key={key} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t(key)}</th>
+                    <th key={key} className="px-4 py-3 text-start text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-fg-muted">{t(key)}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {codes.map(dc => (
                   <React.Fragment key={dc.id}>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }} className="transition-colors hover:bg-[var(--bg-subtle)]">
+                    <tr className="border-b border-line transition-colors hover:bg-sunken">
                       <td className="px-4 py-3">
-                        <div className="font-mono font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{dc.code}</div>
-                        {dc.description && <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{dc.description}</div>}
+                        <div className="font-mono font-bold text-sm text-fg">{dc.code}</div>
+                        {dc.description && <div className="text-xs mt-0.5 text-fg-subtle">{dc.description}</div>}
                         <div className="flex gap-1 mt-1 flex-wrap">
                           {dc.applies_to_plan !== 'all' && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{planLabel(dc.applies_to_plan)}</span>
+                            <Badge tone="brand">{planLabel(dc.applies_to_plan)}</Badge>
                           )}
                           {dc.applies_to_billing_cycle !== 'all' && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>{cycleLabel(dc.applies_to_billing_cycle)}</span>
+                            <Badge tone="caution">{cycleLabel(dc.applies_to_billing_cycle)}</Badge>
                           )}
                           {(dc.min_cars || dc.max_cars) && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-muted)', color: 'var(--text-tertiary)' }}>
+                            <Badge tone="neutral">
                               {t('codes.discount.carsRange', { min: dc.min_cars ?? '1', max: dc.max_cars ?? '∞' })}
-                            </span>
+                            </Badge>
                           )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-full"
-                          style={dc.discount_type === 'percentage'
-                            ? { background: 'rgba(6,182,212,0.1)', color: '#22d3ee' }
-                            : { background: 'rgba(251,191,36,0.1)', color: '#fbbf24' }}>
-                          {dc.discount_type === 'percentage' ? <Percent size={10} /> : <Euro size={10} />}
+                        <Badge tone={dc.discount_type === 'percentage' ? 'info' : 'caution'}>
+                          {dc.discount_type === 'percentage' ? <Percent size={12} /> : <Euro size={12} />}
                           {dc.discount_type === 'percentage' ? t('codes.discount.percent') : t('codes.discount.fixed')}
-                        </span>
+                        </Badge>
                       </td>
-                      <td className="px-4 py-3 font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{discountLabel(dc)}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{usageModeLabel(dc.usage_mode)}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      <td className="px-4 py-3 font-bold text-sm whitespace-nowrap tabular-nums text-fg">{discountLabel(dc)}</td>
+                      <td className="px-4 py-3 text-xs text-fg-muted">{usageModeLabel(dc.usage_mode)}</td>
+                      <td className="px-4 py-3 text-xs text-fg-muted">
                         <div>{audienceLabel(dc.audience_type)}</div>
-                        {dc.max_redemptions && <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.maxShort', { count: dc.max_redemptions })}</div>}
+                        {dc.max_redemptions && <div className="text-[11px] text-fg-subtle">{t('codes.discount.maxShort', { count: dc.max_redemptions })}</div>}
                       </td>
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      <td className="px-4 py-3 text-xs whitespace-nowrap tabular-nums text-fg-muted">
                         <div>{formatDate(dc.valid_from)} – {formatDate(dc.valid_until)}</div>
                       </td>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => setExpanded(expanded === dc.id ? null : dc.id)}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-full transition-colors hover:opacity-80"
-                          style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2 py-1 text-xs font-semibold tabular-nums text-brand-text transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10"
                         >
                           <Hash size={10} />
                           {dc.used_count}
@@ -625,37 +594,42 @@ const DiscountCodesManagement: React.FC = () => {
                         </button>
                       </td>
                       <td className="px-4 py-3">
-                        <button onClick={() => toggleActive(dc)} className="transition-opacity hover:opacity-70">
+                        <button
+                          onClick={() => toggleActive(dc)}
+                          className="inline-flex items-center justify-center rounded-tight transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
+                        >
                           {dc.active
-                            ? <ToggleRight size={24} style={{ color: 'var(--success)' }} />
-                            : <ToggleLeft size={24} style={{ color: 'var(--text-tertiary)' }} />}
+                            ? <ToggleRight size={24} className="text-positive" />
+                            : <ToggleLeft size={24} className="text-fg-subtle" />}
                         </button>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => setModalDc(dc)}
-                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-opacity hover:opacity-70"
-                            style={{ color: 'var(--accent)' }}
+                            className="text-brand-text"
                             title={t('common.edit')}
                           >
                             <Edit2 size={15} />
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => handleDelete(dc)}
-                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-opacity hover:opacity-70"
-                            style={{ color: 'var(--danger)' }}
+                            className="text-critical hover:text-critical"
                             title={t('common.delete')}
                           >
                             <Trash2 size={15} />
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
                     {expanded === dc.id && (
                       <tr>
-                        <td colSpan={9} className="px-6 py-4" style={{ background: 'var(--bg-subtle)' }}>
-                          <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.redemptions')}</p>
+                        <td colSpan={9} className="px-6 py-4 bg-sunken">
+                          <p className="text-xs font-semibold uppercase tracking-wider mb-3 text-fg-muted">{t('codes.discount.redemptions')}</p>
                           <RedemptionsPanel codeId={dc.id} />
                         </td>
                       </tr>
@@ -677,15 +651,14 @@ const DiscountCodesManagement: React.FC = () => {
           onSaved={load}
         />
       )}
-      <ConfirmationModal
-        isOpen={deleteConfirm.open}
+      <ConfirmDialog
+        open={deleteConfirm.open}
         onClose={() => setDeleteConfirm({ open: false, dc: null })}
         onConfirm={confirmDelete}
         title={t('codes.discount.deleteTitle')}
-        message={t('codes.discount.deleteConfirm', { code: deleteConfirm.dc?.code ?? '' })}
-        type="confirm"
-        confirmText={t('common.delete')}
-        cancelText={t('common.cancel')}
+        description={t('codes.discount.deleteConfirm', { code: deleteConfirm.dc?.code ?? '' })}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
       />
     </div>
   );

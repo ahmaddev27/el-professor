@@ -7,7 +7,22 @@ import {
   type WerkstattCheckRow,
 } from '../constraintDecisionLog';
 import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, validateRides, type Context, type PlannedShift, type ShiftEnd } from './generator';
-import { buildPeriod, isoWeekdayOf, operatingDayIn, type PeriodDay } from './period';
+import { assessAgainstRange, type RangeAssessment } from '../monthlyPlan/hoursRange';
+import {
+  BREAK_MINUTES,
+  isoWeekStart,
+  MAX_DAY_WORK_MINUTES,
+  MAX_PART_MINUTES,
+  MAX_WEEK_WORK_MINUTES,
+  planDriverMonth,
+  splitDutyMinutes,
+  uberActivity,
+  type DriverDayPlan,
+  type DriverMonthPlan,
+  type DriverPlanConfig,
+} from './driverMonthPlan';
+import { buildPeriod, operatingDayIn, type PeriodDay } from './period';
+import { fnv1a } from './hash';
 import { createRng } from './rng';
 import { countRevenue, inExportScope, revenueBasis, type RevenueBasis, type RevenueBreakdown } from './revenue';
 import { marginProblem } from './repositioning';
@@ -17,7 +32,8 @@ import {
   type RepositioningLeg,
   type RepositioningSummary,
 } from './repositioningLegs';
-import { applyMonthlyShare, selectMonthlyShareRate, type MonthlyShareRate, type ShareResult } from './monthlyRate';
+import { applyMonthlyShare, selectMonthlyShareRate, type MonthlyShareRate, type ShareResult, type ShareSetting } from './monthlyRate';
+import { allocateImportedTips, reconcileMonth, type FinancialReconciliation, type ReconcileUber } from './reconciliation';
 import { resolveSettings, type SettingsProblem, type SimulationTenantSettings } from './tenantSettings';
 import { routeChecks, summariseRouteChecks, type RouteCheck, type RouteCheckSummary } from './routeCheck';
 import {
@@ -27,7 +43,10 @@ import {
   type ShiftDecision,
 } from './simulationConstraints';
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from './travelModel';
-import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, SimShift, SimVehicle } from './types';
+import { startsDuty, type GeneratedMonth, type GeneratorOptions, type GeoPoint, type PoolAddress, type SimRide, type SimShift, type SimVehicle } from './types';
+import type { BaseSource } from './baseSelection';
+import { unavailableDuring, type UnavailabilityWindow } from './vehicleAvailability';
+import { plateKey, type RealTrip, type RealTripsRead } from './realTrips';
 
 /**
  * A full calendar month of simulated rides (external audit round 3, section 2).
@@ -71,6 +90,21 @@ import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, 
  * vehicle produces no ride and is reported as such, and no ride is ever placed
  * inside a driver's blocking note. Both are checked by reading the output back
  * (`validateFullMonth`), not only by the code that built it.
+ *
+ * ## The drivers lead (Round 8, version 4)
+ *
+ * Until version 3 the vehicles led: every vehicle drew a shift of 4½ to 6
+ * hours on every day and took whichever driver was free, so every driver's
+ * month came out of the dice and none of the Drivers page reached it, and a
+ * shift that ended short of 240 minutes was thrown away. Now each driver's
+ * month is planned first (`planDriverMonth`): his days, his window, his
+ * minutes, from his salary range, his weekdays, his notes and what Uber
+ * reported. A vehicle is then found for each planned driver-day, one that has
+ * a valid TÜV, sits outside every `vehicle_unavailability` window and is free.
+ * A driver-day no vehicle can carry is a refusal; the planned length is never
+ * cut to fit a vehicle. The 360-minute ceiling and the 11 hours of rest stay;
+ * the universal 240-minute floor is gone, because a driver's own range decides
+ * how long his day is.
  */
 
 /** A driver as this generator needs him: a UUID, a name, and his own rules. */
@@ -82,9 +116,25 @@ export interface FullMonthDriver {
   allowed_weekdays?: readonly number[] | null;
   /** False keeps him out of the plan entirely. */
   planning_enabled?: boolean;
-  status?: 'active' | 'inactive' | null;
+  /**
+   * `drivers.status`. Null is the column's default, `active`; anything but
+   * `active` keeps him out (the CHECK admits only `inactive` beside it).
+   */
+  status?: string | null;
   /** The legacy free-text note. Read by the decision log, not by this generator. */
   notes?: string | null;
+  /** The Drivers page's planning columns, read into `planDriverMonth` (Round 8). */
+  employment_type?: string | null;
+  work_window_start?: string | null;
+  work_window_end?: string | null;
+  is_full_day_available?: boolean | null;
+  planning_min_salary?: number | null;
+  planning_max_salary?: number | null;
+  planning_hourly_rate?: number | null;
+  salary_ratio?: number | null;
+  planning_target_salary?: number | null;
+  target_monthly_hours?: number | null;
+  max_monthly_hours?: number | null;
 }
 
 /** A vehicle as this generator needs it. */
@@ -94,6 +144,9 @@ export interface FullMonthVehicle extends SimVehicle {
   /** `YYYY-MM-DD`, or null when not recorded. */
   tuev_gueltig_bis?: string | null;
 }
+
+/** Where a month's simulation settings came from (see `FullMonthInput.settingsSource`). */
+export type SettingsSource = 'company_settings' | 'script_arguments';
 
 export interface FullMonthInput {
   year: number;
@@ -109,7 +162,10 @@ export interface FullMonthInput {
   seed: number;
   settings?: Partial<SimulationTenantSettings>;
   options?: Partial<GeneratorOptions>;
-  /** Shifts a vehicle may run on one operating day. Capped by `SHIFT_LIMITS`. */
+  /**
+   * Shifts a vehicle may carry on one operating day, at most `SHIFT_LIMITS`'s
+   * 3 and that by default: the drivers decide how many shifts there are.
+   */
   shiftsPerVehicleDay?: number;
   /**
    * Where the drive times come from. Absent is the labelled estimate. A
@@ -123,6 +179,49 @@ export interface FullMonthInput {
   tenantId?: string;
   /** How the Betriebssitz is named on a repositioning record. */
   baseLabel?: string;
+  /**
+   * Where `base` came from (`resolveBase`): the saved point, or the company's
+   * address geocoded at house level. Absent, the month cannot say that its
+   * shifts start at the company's configured base, and its verdict says so.
+   */
+  baseSource?: BaseSource;
+  /**
+   * The company requires the car back at the base when a shift ends (D8, a
+   * company setting, off by default). The drive home is then routed, counted
+   * as working time inside the shift and recorded as a `to_base` leg.
+   */
+  returnToBase?: boolean;
+  /** The company's `vehicle_unavailability` rows, read as instants (`readUnavailability`). */
+  vehicleUnavailability?: readonly UnavailabilityWindow[];
+  /**
+   * What Uber reported for the month (`readUberMonth`). Absent: no Uber figure
+   * was read, and no ride carries a tip, because a tip is never drawn.
+   */
+  uber?: ReconcileUber;
+  /**
+   * The company's share setting (section 5). The share is taken of the
+   * imported `umsatz` and shown, never booked. Absent: no rate is applied, and
+   * the financial status says so.
+   */
+  shareSetting?: ShareSetting | null;
+  /**
+   * Where `shareSetting` and `returnToBase` were read: the company's stored
+   * settings (the screen, always), or the arguments of
+   * `scripts/fleetbook-round8-month.mts` on a stack whose settings table does
+   * not exist yet. Absent is the company's. Printed on the closing's sheet 7,
+   * because a month built on a typed-in rate must not read as the company's.
+   */
+  settingsSource?: SettingsSource;
+  /** Operating days that already hold real trips, by driver UUID: never simulated over. */
+  realTripDays?: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * The month's real trips (`readRealTrips`). Absent: nobody looked, and the
+   * month cannot say it simulated over no real driver-day, so it is
+   * VERIFICATION_INCOMPLETE. Present, they are carried unchanged, their
+   * driver-days are not simulated, their vehicles are held while they ran, and
+   * their drivers rest before and after them.
+   */
+  realTrips?: RealTripsRead;
 }
 
 /** What the caller measured before the month was built, printed on the source sheet. */
@@ -145,14 +244,19 @@ export type CapacityReason =
   | 'no_vehicle_in_fleet'
   | 'no_driver_in_pool'
   | 'operating_day_has_no_start_instant'
-  | 'no_driver_available'
   | 'no_vehicle_free'
   | 'driver_blocked_by_note'
   | 'driver_weekday_not_allowed'
   | 'driver_resting'
+  | 'driver_not_needed'
+  | 'driver_window_too_short'
+  | 'driver_window_unreadable'
+  | 'driver_no_uber_activity'
+  | 'driver_has_real_trips'
+  | 'driver_configuration_required'
   | 'shift_produced_no_ride'
-  | 'shift_too_short'
-  | 'vehicle_tuev_expired';
+  | 'vehicle_tuev_expired'
+  | 'vehicle_unavailable';
 
 /** One refusal, kept so the summary can say what was not generated and why. */
 export interface CapacityRefusal {
@@ -162,9 +266,9 @@ export interface CapacityRefusal {
   plate?: string;
   /** The driver's UUID, where the refusal names one. */
   driverId?: string;
-  /** The note that blocked him, for `driver_blocked_by_note`. */
+  /** The note that blocked him, for `driver_blocked_by_note`; the window's reason for `vehicle_unavailable`. */
   noteType?: string;
-  /** Its id, so the decision row names the note itself and not only its kind. */
+  /** Its id (`unavailability:<id>` for a vehicle window), so the decision row names the event itself. */
   noteId?: string;
 }
 
@@ -218,6 +322,13 @@ export interface Provenance {
     driversWithNotes: number;
     structuredNotes: number;
     werkstattChecks: number;
+    /** `vehicle_unavailability` windows read. */
+    vehicleUnavailability: number;
+    /** Drivers whose month could be planned from the Drivers page. */
+    driversPlanned: number;
+    /** Uber rows read: per-day rows and period totals. */
+    uberDays: number;
+    uberPeriods: number;
   };
   /** Always true. The month is simulated and says so in its own record. */
   simulated: true;
@@ -226,6 +337,14 @@ export interface Provenance {
   routing: RoutingProvenance | null;
   /** The company the month was simulated for, when the caller named it. */
   tenantId: string | null;
+  /** The point every shift leaves from, where it came from (null: not stated) and its name. */
+  base: { lat: number; lon: number; source: BaseSource | null; label: string };
+  /** Whether the company requires the car back at the base when a shift ends. */
+  returnToBase: boolean;
+  /** The real trips read for the month; null when none were read. */
+  realTrips: { trips: number; driverDays: number; unattributed: number; unreadableAmounts: number; digest: string } | null;
+  /** What the tips and the share were reconciled against: the Uber figures' digest and the share setting. */
+  financial: { uberDigest: string | null; shareSetting: ShareSetting | null; settingsSource: SettingsSource };
   /**
    * The run's identity: a hash of everything that built the month, so the same
    * inputs give the same id and a record can be traced to its month.
@@ -237,7 +356,25 @@ export interface Provenance {
  * Bumped whenever the generated month would differ for the same seed. A month
  * carries it so a figure can be traced to the code that made it.
  */
-export const FULL_MONTH_GENERATOR_VERSION = 'full-month/3.0.0';
+/**
+ * The shift lengths a calendar month is read back against: no floor, because a
+ * driver's own range decides how short his day is (Round 8), and the
+ * 360-minute ceiling of one shift or one part, because no stretch of work may
+ * be longer without a break (§4 ArbZG). A duty over 360 minutes is two parts
+ * with the break between them. The weeks generator keeps `SHIFT_LIMITS`' 240 to 360.
+ */
+export const CALENDAR_SHIFT_LIMITS = { minMinutes: 0, maxMinutes: MAX_PART_MINUTES } as const;
+
+// 4.1.0 (27.11.2026): the wait for the next order is capped at CALENDAR_MAX_WAIT_SECONDS.
+// 4.2.0 (28.11.2026): a day holds up to 480 minutes, as two parts around a 30-minute break at the base.
+export const FULL_MONTH_GENERATOR_VERSION = 'full-month/4.2.0';
+
+/**
+ * The longest wait for the next order after a ride, in a calendar month (owner,
+ * 27.11.2026): a shift is a block of rides, so the car is not left standing for
+ * the weeks generator's 100 minutes. The weeks mode keeps its own tail (D6).
+ */
+export const CALENDAR_MAX_WAIT_SECONDS = 30 * 60;
 
 export interface FullMonthResult {
   month: GeneratedMonth;
@@ -268,11 +405,45 @@ export interface FullMonthResult {
   internal: { declined: RevenueBreakdown };
   /** How each accepted shift was scheduled: what the ride loop refused before it stopped. */
   scheduling: SchedulingRecord[];
+  /** Every driver's month as planned from the Drivers page, before any vehicle was chosen. */
+  driverPlans: DriverMonthPlan[];
+  /** What became of each plan: the minutes actually placed, against his range. */
+  driverOutcomes: DriverMonthOutcome[];
+  /** The vehicle windows the month was built around. */
+  vehicleUnavailability: UnavailabilityWindow[];
+  /** The month's real trips exactly as read (`IMPORTIERT`); null when none were read. */
+  realTrips: RealTripsRead | null;
+  /**
+   * The money against Uber (section 5 and 6): the tips' allocation, the share
+   * per driver-day and the financial status. Separate from the export verdict
+   * (D10): an unconfigured share never blocks a valid Fahrtenbuch.
+   */
+  financial: FinancialReconciliation;
+}
+
+/** One driver's month as built, against what was planned for him. */
+export interface DriverMonthOutcome {
+  driverId: string;
+  driverName: string;
+  planned: boolean;
+  /** Minutes the plan asked for. */
+  plannedMinutes: number;
+  /** Minutes of the shifts placed, each from its start to its planned end. */
+  placedMinutes: number;
+  placedShifts: number;
+  /** Planned driver-days on which no shift could be placed, with the refusal that stopped it. */
+  missedDays: { date: string; reason: CapacityReason }[];
+  /** The placed minutes against his range: a shortfall is reported here, never filled in. */
+  assessment: RangeAssessment;
 }
 
 /** One accepted shift's scheduling record, for the operational report. */
 export interface SchedulingRecord {
   shiftId: string;
+  /** The duty this shift belongs to: its own id for a single shift, the shared id of two parts. */
+  dutyId: string;
+  /** 1 or 2 for the parts of a duty over 360 minutes; null for a single shift. */
+  part: 1 | 2 | null;
   day: string;
   plate: string;
   driverId: string | null;
@@ -299,6 +470,56 @@ interface Busy {
 const clash = (list: readonly Busy[] | undefined, s: number, e: number, buffer: number): boolean =>
   (list ?? []).some(b => s < b.end + buffer && e > b.start - buffer);
 
+/**
+ * The instants real trips occupy, by plate key and by driver. A trip without
+ * both instants holds nothing here; its driver-day is still excluded by day.
+ */
+function realTripWindows(trips: readonly RealTrip[]): { byPlate: Map<string, Busy[]>; byDriver: Map<string, Busy[]> } {
+  const byPlate = new Map<string, Busy[]>();
+  const byDriver = new Map<string, Busy[]>();
+  for (const t of trips) {
+    if (t.startMs === null || t.endMs === null || t.endMs < t.startMs) continue;
+    const held = { start: t.startMs, end: t.endMs };
+    if (t.plate) byPlate.set(plateKey(t.plate), [...(byPlate.get(plateKey(t.plate)) ?? []), held]);
+    if (t.driverId) byDriver.set(t.driverId, [...(byDriver.get(t.driverId) ?? []), held]);
+  }
+  return { byPlate, byDriver };
+}
+
+/**
+ * The read-back for §4: a simulated shift never lies on a real driver-day,
+ * never takes a vehicle while a real trip ran in it (with the vehicle gap),
+ * never cuts the driver's rest before or after a real trip, and no simulated
+ * ride carries a real trip's id. Returns one line per broken rule.
+ */
+export function checkRealTrips(month: GeneratedMonth, real: RealTripsRead | null, opts: GeneratorOptions): string[] {
+  if (!real || real.trips.length === 0) return [];
+  const out: string[] = [];
+  const held = realTripWindows(real.trips);
+  const gapMs = opts.minVehicleGapMinutes * 60_000;
+  const restMs = opts.minDriverRestMinutes * 60_000;
+  for (const s of month.shifts) {
+    const end = s.plannedEndMs ?? s.endMs;
+    const driverId = s.driver.id;
+    // Never produced in calendar mode; if it were, the rules below could not be checked, so it is reported, not passed.
+    if (driverId === undefined) out.push(`${s.id}: the shift names no driver id, so it cannot be checked against the real trips`);
+    else if (real.days.get(driverId)?.has(s.operatingDay)) {
+      out.push(`${s.id}: driver ${driverId} has real trips on ${s.operatingDay} and was simulated over`);
+    }
+    if (clash(held.byPlate.get(plateKey(s.vehicle.plate)), s.startMs, end, gapMs)) {
+      out.push(`${s.id}: vehicle ${s.vehicle.plate} is held by a real trip during the shift`);
+    }
+    if (driverId !== undefined && clash(held.byDriver.get(driverId), s.startMs, end, restMs)) {
+      out.push(`${s.id}: driver ${driverId} has a real trip within the rest before or after the shift`);
+    }
+  }
+  const realIds = new Set(real.trips.map(t => t.tripId));
+  for (const r of month.rides) {
+    if (r.tripId && realIds.has(r.tripId)) out.push(`${r.tripId}: a simulated ride carries a real trip's id`);
+  }
+  return out;
+}
+
 /** The address pool `generateFromFigures` requires, for the same reason: a smaller one repeats. */
 const MIN_POOL = 8;
 
@@ -318,7 +539,7 @@ export function generateFullMonth(
   if (optionsProblem) return { ok: false, failure: { kind: 'options', problem: optionsProblem } };
   const shiftsPerVehicleDay = Math.max(
     1,
-    Math.min(SHIFT_LIMITS.maxPerVehicleDay, input.shiftsPerVehicleDay ?? 1),
+    Math.min(SHIFT_LIMITS.maxPerVehicleDay, input.shiftsPerVehicleDay ?? SHIFT_LIMITS.maxPerVehicleDay),
   );
   const ctx: Context = {
     rng: createRng(input.seed),
@@ -327,8 +548,11 @@ export function generateFullMonth(
     pool: input.pool,
     usedTransmits: new Set(),
     travel: input.travel,
+    returnToBase: input.returnToBase === true,
+    maxWaitSeconds: CALENDAR_MAX_WAIT_SECONDS,
   };
   const travel = input.travel ?? ESTIMATE_TRAVEL_MODEL;
+  const baseLabel = input.baseLabel ?? 'Betriebssitz';
 
   const period = buildPeriod(input.year, input.month, settings);
   const accepted: ShiftDecision[] = [];
@@ -336,17 +560,42 @@ export function generateFullMonth(
   const month: GeneratedMonth = { shifts: [], rides: [], droppedShifts: 0 };
   const refusals: CapacityRefusal[] = [];
   const vehicleBusy = new Map<string, Busy[]>();
-  const driverBusy = new Map<string, Busy[]>();
   const driverLastEnd = new Map<string, number>();
   let nextShift = 1;
+  // A real trip holds its vehicle while it ran and is part of its driver's
+  // working time: a simulated shift keeps the vehicle gap and the driver's rest
+  // from both, exactly as from a simulated shift.
+  const realHeld = realTripWindows(input.realTrips?.trips ?? []);
+  for (const v of input.vehicles) {
+    const held = realHeld.byPlate.get(plateKey(v.plate));
+    if (held) vehicleBusy.set(v.plate, [...held]);
+  }
 
-  const pool = input.drivers.filter(d => d.planning_enabled !== false && d.status !== 'inactive');
+  const pool = input.drivers.filter(d => d.planning_enabled !== false && isActiveDriver(d));
   // A negative workshop check is reported, not confirmed, and names no window:
   // the shift on that vehicle that day runs and is marked for a person to review.
   const workshopOn = new Map<string, WerkstattCheckRow>();
   for (const check of input.werkstattChecks ?? []) {
     if (check.status === 'negative') workshopOn.set(`${check.car_id}|${check.check_date}`, check);
   }
+
+  // Every driver's month is planned before any vehicle is looked at.
+  const uber = input.uber
+    ? uberActivity(input.uber)
+    : { activeDays: new Map<string, Set<string>>(), weeklyOnly: new Set<string>() };
+  const driverPlans = input.drivers.map(d => planDriverMonth(planConfigOf(d), {
+    year: input.year,
+    month: input.month,
+    settings,
+    notes: input.driverNotesMap,
+    uberActiveDays: uber.activeDays,
+    uberWeeklyOnly: uber.weeklyOnly,
+    realTripDays: input.realTrips?.days ?? input.realTripDays,
+  }));
+  const planByDriver = new Map(driverPlans.map(p => [p.driverId, p]));
+  const dayPlanOf = new Map(driverPlans.flatMap(p => p.days.map(d => [`${p.driverId}|${d.date}`, d] as const)));
+  const unavailability = input.vehicleUnavailability ?? [];
+  const missed = new Map<string, { date: string; reason: CapacityReason }[]>();
 
   for (const day of period) {
     if (input.vehicles.length === 0) {
@@ -361,73 +610,113 @@ export function generateFullMonth(
       refusals.push({ day: day.day, reason: 'operating_day_has_no_start_instant' });
       continue;
     }
-
     const dayEndMs = day.startMs + day.hours * 3_600_000;
+
+    // The vehicles' own state for the day, recorded once per vehicle. An
+    // expired TÜV keeps a vehicle off the road all day; an unavailability
+    // window only for the shifts it overlaps, which `placeDriverShift` asks.
+    const usable: FullMonthVehicle[] = [];
+    const tuevOf = new Map<string, ReturnType<typeof vehicleVerdict>>();
     for (const vehicle of input.vehicles) {
-      // Read before any shift is drawn for the vehicle: an expired TÜV keeps it
-      // off the road for the whole day, whoever would drive it.
       const verdict = vehicleVerdict(vehicle, day.day);
       if (verdict.kind === 'blocked') {
         refusals.push({ day: day.day, reason: 'vehicle_tuev_expired', plate: vehicle.plate });
         continue;
       }
-      for (let slot = 0; slot < shiftsPerVehicleDay; slot++) {
-        const placed = placeShift({
-          ctx,
-          day,
-          dayStartMs: day.startMs,
-          dayEndMs,
-          vehicle,
-          pool,
-          notes: input.driverNotesMap,
-          vehicleBusy,
-          driverBusy,
-          driverLastEnd,
-          refusals,
-          shiftId: `S${nextShift}`,
-        });
-        if (!placed) {
-          month.droppedShifts += 1;
-          continue;
-        }
-        nextShift += 1;
-        month.shifts.push(placed.shift);
-        month.rides.push(...placed.rides);
-        scheduling.push({
-          shiftId: placed.shift.id,
-          day: day.day,
-          plate: vehicle.plate,
-          driverId: placed.shift.driver.id ?? null,
-          startMs: placed.shift.startMs,
-          plannedEndMs: placed.plannedEndMs,
-          endMs: placed.shift.endMs,
-          endedBy: placed.endedBy,
-          refusedSteps: placed.refusedSteps,
-        });
-        const workshop = workshopOn.get(`${vehicle.id}|${day.day}`) ?? null;
-        const reviews = [
-          ...placed.review.map(n => `Notiz ${n.note_type} ohne bestätigten Zeitraum - nicht sperrend, bitte prüfen`),
-          ...(verdict.kind === 'review' ? [verdict.reason] : []),
-          ...(workshop ? [`Werkstatt-Prüfung negativ am ${workshop.check_date} - kein Ausfallzeitraum erfasst, nicht sperrend, bitte prüfen`] : []),
-        ];
-        const review = reviewOf(placed.review, verdict, workshop);
-        accepted.push({
-          day: day.day,
-          plate: vehicle.plate,
-          vehicleId: vehicle.id,
-          driverId: placed.shift.driver.id ?? null,
-          outcome: reviews.length > 0 ? 'accepted_with_review' : 'accepted',
-          code: review?.code ?? 'accepted',
-          reason: reviews.length > 0 ? reviews.join('; ') : 'Keine bestätigte Einschränkung im Zeitraum',
-          eventRef: review?.eventRef ?? null,
-          certainty: review?.certainty ?? null,
-          startMs: placed.shift.startMs,
-          endMs: placed.shift.endMs,
-          count: 1,
+      const window = unavailableDuring(unavailability, vehicle.id, day.startMs, dayEndMs);
+      if (window) {
+        refusals.push({
+          day: day.day, reason: 'vehicle_unavailable', plate: vehicle.plate, noteType: window.reason, noteId: `unavailability:${window.id}`,
         });
       }
+      tuevOf.set(vehicle.plate, verdict);
+      usable.push(vehicle);
+    }
+
+    // The day's planned drivers, in an order drawn per day, so the first
+    // driver of the list is not always the first to choose a vehicle.
+    const planned: { driver: FullMonthDriver; plan: DriverDayPlan }[] = [];
+    for (const driver of pool) {
+      const dayPlan = dayPlanOf.get(`${driver.id}|${day.day}`);
+      if (!dayPlan) continue;
+      if (dayPlan.status === 'planned' && dayPlan.plannedMinutes > 0) {
+        planned.push({ driver, plan: dayPlan });
+        continue;
+      }
+      const refusal = dayRefusal(day.day, driver.id, dayPlan, planByDriver.get(driver.id));
+      if (refusal) refusals.push(refusal);
+    }
+    shuffleInPlace(planned, ctx.rng);
+
+    const shiftsOn = new Map<string, number>();
+    for (const { driver, plan } of planned) {
+      const placed = placeDriverShift({
+        ctx,
+        day,
+        driver,
+        plan,
+        vehicles: usable,
+        unavailability,
+        shiftsPerVehicleDay,
+        shiftsOn,
+        notes: input.driverNotesMap,
+        vehicleBusy,
+        driverLastEnd,
+        driverReal: realHeld.byDriver,
+        refusals,
+        shiftId: `S${nextShift}`,
+      });
+      if (!placed.ok) {
+        month.droppedShifts += 1;
+        missed.set(driver.id, [...(missed.get(driver.id) ?? []), { date: day.day, reason: placed.reason }]);
+        continue;
+      }
+      const vehicle = placed.vehicle;
+      nextShift += 1;
+      for (const part of placed.parts) {
+        month.shifts.push(part.shift);
+        month.rides.push(...part.rides);
+        scheduling.push({
+          shiftId: part.shift.id,
+          dutyId: part.shift.dutyId ?? part.shift.id,
+          part: part.shift.part ?? null,
+          day: day.day,
+          plate: vehicle.plate,
+          driverId: driver.id,
+          startMs: part.shift.startMs,
+          plannedEndMs: part.plannedEndMs,
+          endMs: part.shift.endMs,
+          endedBy: part.endedBy,
+          refusedSteps: part.refusedSteps,
+        });
+      }
+      const verdict = tuevOf.get(vehicle.plate) ?? vehicleVerdict(vehicle, day.day);
+      const workshop = workshopOn.get(`${vehicle.id}|${day.day}`) ?? null;
+      const reviews = [
+        ...placed.review.map(n => `Notiz ${n.note_type} ohne bestätigten Zeitraum - nicht sperrend, bitte prüfen`),
+        ...(verdict.kind === 'review' ? [verdict.reason] : []),
+        ...(workshop ? [`Werkstatt-Prüfung negativ am ${workshop.check_date} - kein Ausfallzeitraum erfasst, nicht sperrend, bitte prüfen`] : []),
+      ];
+      const review = reviewOf(placed.review, verdict, workshop);
+      for (const { shift } of placed.parts) accepted.push({
+        day: day.day,
+        dutyId: shift.dutyId,
+        part: shift.part,
+        plate: vehicle.plate,
+        vehicleId: vehicle.id,
+        driverId: driver.id,
+        outcome: reviews.length > 0 ? 'accepted_with_review' : 'accepted',
+        code: review?.code ?? 'accepted',
+        reason: reviews.length > 0 ? reviews.join('; ') : 'Keine bestätigte Einschränkung im Zeitraum',
+        eventRef: review?.eventRef ?? null,
+        certainty: review?.certainty ?? null,
+        startMs: shift.startMs,
+        endMs: shift.endMs,
+        count: 1,
+      });
     }
   }
+  const driverOutcomes = driverPlans.map(plan => outcomeOf(plan, month.shifts, missed.get(plan.driverId) ?? []));
 
   // A cancellation earns nothing unless the tenant says so (decision 3 of
   // 29.10.2026), and that fee is `declineFeeOf`'s, a field of its own. The
@@ -453,6 +742,19 @@ export function generateFullMonth(
       ? `F${String(++rideNo).padStart(5, '0')}`
       : `AB${String(++declinedNo).padStart(5, '0')}`;
   }
+
+  // Section 6: no tip is drawn. The generator's draw stays drawn, so the
+  // shared random stream and every ride are what they were; every tip is then
+  // discarded and the imported Trinkgeld is spread over the driver's own
+  // completed rides of its day (or week), exactly, to the cent.
+  const tipAllocations = allocateImportedTips({ uber: input.uber ?? null, rides: month.rides, shifts: month.shifts, seed: input.seed });
+  const financial = reconcileMonth({
+    uber: input.uber ?? null,
+    rides: month.rides,
+    shifts: month.shifts,
+    allocations: tipAllocations,
+    shareSetting: input.shareSetting ?? null,
+  });
 
   // The Fahrtenbuch report's money is counted over its own rides only. A
   // declined order's fee is counted apart and reaches none of it.
@@ -489,11 +791,25 @@ export function generateFullMonth(
       driversWithNotes: [...input.driverNotesMap.values()].filter(list => list.length > 0).length,
       structuredNotes: [...input.driverNotesMap.values()].reduce((n, list) => n + list.length, 0),
       werkstattChecks: input.werkstattChecks?.length ?? 0,
+      vehicleUnavailability: unavailability.length,
+      driversPlanned: driverPlans.filter(p => p.planned).length,
+      uberDays: input.uber?.days.length ?? 0,
+      uberPeriods: input.uber?.periods.length ?? 0,
     },
     simulated: true,
     travel: { source: travel.source, measured: travel.measured },
     routing: input.routing ?? null,
     tenantId: input.tenantId ?? null,
+    base: { lat: input.base.lat, lon: input.base.lon, source: input.baseSource ?? null, label: baseLabel },
+    returnToBase: ctx.returnToBase === true,
+    realTrips: input.realTrips ? {
+      trips: input.realTrips.trips.length,
+      driverDays: [...input.realTrips.days.values()].reduce((n, days) => n + days.size, 0),
+      unattributed: input.realTrips.unattributed.length,
+      unreadableAmounts: input.realTrips.unreadableAmounts.length,
+      digest: fnv1a(input.realTrips.trips.map(t => `${t.tripId}|${t.operatingDay}|${t.driverId ?? ''}|${t.plate ?? ''}|${t.startMs ?? ''}|${t.endMs ?? ''}`).join('\n')),
+    } : null,
+    financial: { uberDigest: uberDigestOf(input.uber), shareSetting: input.shareSetting ?? null, settingsSource: input.settingsSource ?? 'company_settings' },
     runId: '',
   };
   provenance.runId = runIdOf(provenance);
@@ -501,13 +817,14 @@ export function generateFullMonth(
   const checks = routeChecks(month.rides, travel, opts);
   const repositioning = buildRepositioningLegs(month.shifts, month.rides, {
     base: input.base,
-    baseLabel: input.baseLabel ?? 'Betriebssitz',
+    baseLabel,
     travel,
     margins: opts,
     tenantId: provenance.tenantId,
     vehicleIdByPlate: new Map(input.vehicles.map(v => [v.plate, v.id])),
     seed: provenance.seed,
     runId: provenance.runId,
+    returnToBase: provenance.returnToBase,
   });
   const decisions = [...accepted, ...collapseDecisions(refusals.map(refusalDecision(input.vehicles)))];
 
@@ -526,7 +843,10 @@ export function generateFullMonth(
       provenance,
       violations: [
         ...validateFullMonth(month, period, input.driverNotesMap, settings, input.vehicles),
-        ...validateRides(month, input.base, travel, opts),
+        ...checkDriverShifts(month.shifts, driverPlans, unavailability, opts.minDriverRestMinutes),
+        ...validateRides(month, input.base, travel, opts, CALENDAR_SHIFT_LIMITS, provenance.returnToBase),
+        ...checkRealTrips(month, input.realTrips ?? null, opts),
+        ...financial.violations,
       ],
       decisions,
       routeChecks: checks,
@@ -535,8 +855,25 @@ export function generateFullMonth(
       repositioningSummary: summariseRepositioning(repositioning),
       internal: { declined },
       scheduling,
+      driverPlans,
+      driverOutcomes,
+      vehicleUnavailability: [...unavailability],
+      realTrips: input.realTrips ?? null,
+      financial,
     },
   };
+}
+
+/** The imported figures a run reconciled against, as one hash; null when none were read. */
+function uberDigestOf(uber: ReconcileUber | undefined): string | null {
+  if (!uber) return null;
+  const f = (x: { umsatzCents: number; aktionenCents: number; trinkgeldCents: number; bargeldCents: number }) =>
+    `${x.umsatzCents}|${x.aktionenCents}|${x.trinkgeldCents}|${x.bargeldCents}`;
+  return fnv1a([
+    ...uber.days.map(d => `D|${d.driverId}|${d.date}|${f(d.figures)}|${d.overlapsPeriod}`),
+    ...uber.periods.map(p => `P|${p.driverId}|${p.periodStart}|${p.periodEnd}|${p.placement}|${f(p.figures)}|${p.overlappingDailyDates.join(',')}`),
+    `H|${uber.handRows?.length ?? 0}|I|${uber.issues?.length ?? 0}`,
+  ].join('\n'));
 }
 
 /** The review a shift is accepted with, most specific first: a note, the TÜV, a workshop check. */
@@ -551,21 +888,11 @@ function reviewOf(
   return null;
 }
 
-/** FNV-1a, so a run id is stable across machines and runs. */
-function fnv1a(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
-}
-
 /** The run's id: the period, the seed and a hash of everything else that built it. */
 function runIdOf(p: Provenance): string {
   const mm = String(p.month).padStart(2, '0');
   const basis = JSON.stringify([p.generatorVersion, p.tenantId, p.seed, p.year, p.month, p.settings, p.options,
-    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null]);
+    p.shiftsPerVehicleDay, p.inputs, p.travel, p.routing?.computedAt ?? null, p.base, p.returnToBase, p.realTrips, p.financial]);
   return `SIM-${p.year}-${mm}-${p.seed}-${fnv1a(basis)}`;
 }
 
@@ -573,15 +900,23 @@ const REFUSAL_TEXT: Record<CapacityReason, string> = {
   no_vehicle_in_fleet: 'Kein Fahrzeug im Bestand',
   no_driver_in_pool: 'Kein Fahrer im Pool',
   operating_day_has_no_start_instant: 'Betriebstag hat keinen eindeutigen Startzeitpunkt (Zeitumstellung)',
-  no_driver_available: 'Kein Fahrer für das Zeitfenster verfügbar',
-  no_vehicle_free: 'Fahrzeug in keinem Zeitfenster frei',
+  no_vehicle_free: 'Kein Fahrzeug im Fenster des Fahrers frei',
   driver_blocked_by_note: 'Bestätigte sperrende Notiz im Zeitfenster',
   driver_weekday_not_allowed: 'Wochentag für den Fahrer nicht erlaubt',
-  driver_resting: 'Fahrer in Ruhezeit oder bereits eingesetzt',
+  driver_resting: 'Ruhezeit nach der letzten Schicht lässt im Fenster keinen Platz',
+  driver_not_needed: 'Fahrer an diesem Tag nicht eingeplant - Monatsziel mit weniger Tagen erreicht',
+  driver_window_too_short: 'Arbeitsfenster des Fahrers an diesem Tag zu kurz',
+  driver_window_unreadable: 'Arbeitsfenster fällt in die Zeitumstellung und ist nicht eindeutig',
+  driver_no_uber_activity: 'Uber meldet für den Fahrer an diesem Tag keine Fahrt',
+  driver_has_real_trips: 'Fahrer hat an diesem Tag echte Fahrten - nicht simuliert',
+  driver_configuration_required: 'Stundenrahmen oder Arbeitsfenster des Fahrers fehlt (CONFIGURATION_REQUIRED)',
   shift_produced_no_ride: 'Schicht ergab keine Fahrt (keine berechnete Route oder keine Zeit)',
-  shift_too_short: `Schicht endete vor der Mindestdauer von ${SHIFT_LIMITS.minMinutes} Minuten und wurde verworfen`,
   vehicle_tuev_expired: 'TÜV abgelaufen - Fahrzeug nicht eingesetzt',
+  vehicle_unavailable: 'Fahrzeug laut Ausfallzeitraum nicht verfügbar',
 };
+
+/** Refusals that rest on a recorded event with its own window, not on a drawn moment. */
+const CONFIRMED_REFUSALS: ReadonlySet<CapacityReason> = new Set(['driver_blocked_by_note', 'vehicle_tuev_expired', 'vehicle_unavailable']);
 
 function refusalDecision(vehicles: readonly FullMonthVehicle[]) {
   const idByPlate = new Map(vehicles.map(v => [v.plate, v.id]));
@@ -594,7 +929,7 @@ function refusalDecision(vehicles: readonly FullMonthVehicle[]) {
     code: r.reason,
     reason: r.noteType ? `${REFUSAL_TEXT[r.reason]} (${r.noteType})` : REFUSAL_TEXT[r.reason],
     eventRef: r.noteId ?? (r.reason === 'vehicle_tuev_expired' ? 'tuev' : null),
-    certainty: r.reason === 'driver_blocked_by_note' || r.reason === 'vehicle_tuev_expired' ? 'confirmed' : null,
+    certainty: CONFIRMED_REFUSALS.has(r.reason) ? 'confirmed' : null,
     startMs: null,
     endMs: null,
     count: 1,
@@ -607,125 +942,318 @@ function computeShare(basis: RevenueBasis, input: FullMonthInput): { rate: Month
   return applied.ok ? { rate, result: applied.result } : null;
 }
 
-interface PlaceArgs {
+const isActiveDriver = (d: FullMonthDriver): boolean => d.status == null || d.status === 'active';
+
+/** A driver as `planDriverMonth` reads him. A null status is the column's default, `active`. */
+function planConfigOf(d: FullMonthDriver): DriverPlanConfig {
+  return {
+    id: d.id,
+    name: d.name,
+    status: isActiveDriver(d) ? 'active' : 'inactive',
+    employmentType: d.employment_type ?? null,
+    planningEnabled: d.planning_enabled ?? null,
+    allowedWeekdays: d.allowed_weekdays ?? null,
+    workWindowStart: d.work_window_start ?? null,
+    workWindowEnd: d.work_window_end ?? null,
+    isFullDayAvailable: d.is_full_day_available ?? null,
+    minSalary: d.planning_min_salary ?? null,
+    maxSalary: d.planning_max_salary ?? null,
+    hourlyRate: d.planning_hourly_rate ?? null,
+    salaryRatio: d.salary_ratio ?? null,
+    targetSalary: d.planning_target_salary ?? null,
+    targetMonthlyHours: d.target_monthly_hours ?? null,
+    maxMonthlyHours: d.max_monthly_hours ?? null,
+  };
+}
+
+/** Why a driver has no shift on a day his plan did not give him, or null when nothing needs saying. */
+function dayRefusal(day: string, driverId: string, d: DriverDayPlan, plan: DriverMonthPlan | undefined): CapacityRefusal | null {
+  const note = d.blockingNote ? { noteType: d.blockingNote.type, noteId: d.blockingNote.id } : {};
+  switch (d.status) {
+    case 'weekday_not_allowed': return { day, reason: 'driver_weekday_not_allowed', driverId };
+    case 'absent': return { day, reason: 'driver_blocked_by_note', driverId, ...note };
+    case 'window_too_short': return { day, reason: 'driver_window_too_short', driverId, ...note };
+    case 'clock_unreadable': return { day, reason: 'driver_window_unreadable', driverId };
+    case 'no_uber_activity': return { day, reason: 'driver_no_uber_activity', driverId };
+    case 'real_trips': return { day, reason: 'driver_has_real_trips', driverId };
+    case 'not_needed': return { day, reason: 'driver_not_needed', driverId };
+    case 'driver_not_planned':
+      return plan?.notPlannedReason === 'configuration_required' ? { day, reason: 'driver_configuration_required', driverId } : null;
+    default: return null;
+  }
+}
+
+/** Fisher–Yates on the month's own stream, so the order is the seed's. */
+function shuffleInPlace<T>(items: T[], rng: Context['rng']): void {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+}
+
+const QUARTER_MS = 15 * 60_000;
+
+interface DriverShiftArgs {
   ctx: Context;
   day: PeriodDay;
-  dayStartMs: number;
-  dayEndMs: number;
-  vehicle: FullMonthVehicle;
-  pool: readonly FullMonthDriver[];
+  driver: FullMonthDriver;
+  plan: DriverDayPlan;
+  /** The day's vehicles with a valid TÜV. */
+  vehicles: readonly FullMonthVehicle[];
+  unavailability: readonly UnavailabilityWindow[];
+  shiftsPerVehicleDay: number;
+  /** Shifts already placed today, by plate. */
+  shiftsOn: Map<string, number>;
   notes: Map<string, StructuredNote[]>;
   vehicleBusy: Map<string, Busy[]>;
-  driverBusy: Map<string, Busy[]>;
   driverLastEnd: Map<string, number>;
+  /** The driver's real trips, as instants: rest is kept from them as from a shift. */
+  driverReal: ReadonlyMap<string, readonly Busy[]>;
   refusals: CapacityRefusal[];
   shiftId: string;
 }
 
-/**
- * One shift of one vehicle on one day, or null with the reason recorded.
- *
- * The driver is chosen **after** the window is drawn, because availability is a
- * property of a driver *and* a window: a note that blocks the morning leaves
- * the same driver free in the evening. Only a CONFIRMED window blocks
- * (`simulationConstraints.ts`, the owner's decision 5 of 29.10.2026); a window
- * taken from the notice date lets the shift run and is carried into the
- * shift's decision row for a person to check. The window itself is the
- * planner's `noteExclusionIntervals`, so a confirmed block is exactly the
- * planner's block.
- */
-interface Placed {
+/** One placed shift of a duty, with what the scheduling record and the read-back need of it. */
+interface PlacedPart {
   shift: SimShift;
-  rides: SimRide[];
-  review: StructuredNote[];
   plannedEndMs: number;
   endedBy: ShiftEnd;
   refusedSteps: Partial<Record<ShiftEnd, number>>;
+  rides: SimRide[];
 }
 
-function placeShift(args: PlaceArgs): Placed | null {
-  const { ctx, day, dayStartMs, dayEndMs, vehicle, pool, notes, refusals } = args;
+type DriverShift =
+  | {
+      ok: true;
+      /** One part for a duty up to 360 minutes, two with the break between them. */
+      parts: PlacedPart[];
+      vehicle: FullMonthVehicle;
+      review: StructuredNote[];
+    }
+  | { ok: false; reason: CapacityReason };
+
+/**
+ * The planned driver-day's duty, or the reason there is none.
+ *
+ * The length is the plan's, exactly; only the start is drawn, on a quarter-hour
+ * grid inside the driver's window and after his rest. The vehicle is chosen
+ * for that window: a valid TÜV (the caller passes only those), outside every
+ * unavailability window, free with the gap between two shifts, and under the
+ * day's shift cap. The vehicle is held, and the driver's rest counts, to the
+ * planned end — he is on duty until then whether or not an order came.
+ *
+ * A day over 360 minutes is one duty of two parts (§4 ArbZG): part 1 ends with
+ * the car at the base, the break of 30 minutes follows there, part 2 starts
+ * from the base. The duty is placed whole or not at all: a part that produces
+ * no ride fails the attempt and the next draw starts afresh.
+ */
+function placeDriverShift(args: DriverShiftArgs): DriverShift {
+  const { ctx, day, driver, plan, refusals } = args;
   const { rng, opts } = ctx;
-  const vehicleGap = opts.minVehicleGapMinutes * 60_000;
+  const refuse = (reason: CapacityReason, extra: Partial<CapacityRefusal> = {}): DriverShift => {
+    refusals.push({ day: day.day, reason, driverId: driver.id, ...extra });
+    return { ok: false, reason };
+  };
+  if (plan.windowStartMs === null || plan.windowEndMs === null) return refuse('driver_window_unreadable');
+  const twoParts = plan.plannedMinutes > MAX_PART_MINUTES;
+  const workMs = plan.plannedMinutes * 60_000;
+  const breakMs = twoParts ? BREAK_MINUTES * 60_000 : 0;
+  const lengthMs = workMs + breakMs;
   const restMs = opts.minDriverRestMinutes * 60_000;
+  const { windowStartMs, windowEndMs } = plan;
+  const real = args.driverReal.get(driver.id) ?? [];
+  const earliest = Math.max(windowStartMs, (args.driverLastEnd.get(driver.id) ?? -Infinity) + restMs,
+    ...real.filter(b => b.end <= windowEndMs).map(b => b.end + restMs));
+  const latestEnd = Math.min(windowEndMs, ...real.filter(b => b.start >= windowStartMs).map(b => b.start - restMs));
+  const latestStart = latestEnd - lengthMs;
+  if (earliest > latestStart) return refuse('driver_resting');
+  const slots = Math.floor((latestStart - earliest) / QUARTER_MS);
+  const vehicleGap = opts.minVehicleGapMinutes * 60_000;
 
+  let lastProblem: CapacityReason = 'no_vehicle_free';
   for (let attempt = 0; attempt < 12; attempt++) {
-    const lengthMinutes = rng.int(opts.minShiftMinutes / 15, opts.maxShiftMinutes / 15) * 15;
-    const lengthMs = lengthMinutes * 60_000;
-    const latestStart = dayEndMs - lengthMs;
-    if (latestStart <= dayStartMs) continue;
-    const slots = Math.floor((latestStart - dayStartMs) / (15 * 60_000));
-    const startMs = dayStartMs + rng.int(0, Math.max(0, slots)) * 15 * 60_000;
+    const startMs = earliest + rng.int(0, slots) * QUARTER_MS;
     const endMs = startMs + lengthMs;
-
-    if (clash(args.vehicleBusy.get(vehicle.plate), startMs, endMs, vehicleGap)) continue;
-
-    const candidates: FullMonthDriver[] = [];
-    const reviewOf = new Map<string, StructuredNote[]>();
-    for (const driver of pool) {
-      const allowed = driver.allowed_weekdays;
-      if (allowed && allowed.length > 0 && !allowed.includes(isoWeekdayOf(day.day))) {
-        refusals.push({ day: day.day, reason: 'driver_weekday_not_allowed', driverId: driver.id, plate: vehicle.plate });
-        continue;
-      }
-      if (startMs < (args.driverLastEnd.get(driver.id) ?? -Infinity) + restMs) {
-        refusals.push({ day: day.day, reason: 'driver_resting', driverId: driver.id, plate: vehicle.plate });
-        continue;
-      }
-      if (clash(args.driverBusy.get(driver.id), startMs, endMs, 0)) {
-        refusals.push({ day: day.day, reason: 'driver_resting', driverId: driver.id, plate: vehicle.plate });
-        continue;
-      }
-      const verdict = noteVerdict(driver.id, startMs, endMs, notes);
-      if (verdict.blocking) {
-        refusals.push({
-          day: day.day,
-          reason: 'driver_blocked_by_note',
-          driverId: driver.id,
-          plate: vehicle.plate,
-          noteType: verdict.blocking.note_type,
-          noteId: verdict.blocking.id,
-        });
-        continue;
-      }
-      reviewOf.set(driver.id, verdict.review);
-      candidates.push(driver);
-    }
-    if (candidates.length === 0) {
-      refusals.push({ day: day.day, reason: 'no_driver_available', plate: vehicle.plate });
+    // The plan cut the window around every confirmed note already; asked again
+    // so a note the plan missed blocks here rather than in the read-back.
+    const verdict = noteVerdict(driver.id, startMs, endMs, args.notes);
+    if (verdict.blocking) {
+      refusals.push({
+        day: day.day, reason: 'driver_blocked_by_note', driverId: driver.id, noteType: verdict.blocking.note_type, noteId: verdict.blocking.id,
+      });
+      lastProblem = 'driver_blocked_by_note';
       continue;
     }
-
-    const driver = rng.pick(candidates);
-    const plan: PlannedShift = { vehicle, startMs, plannedEndMs: endMs, operatingDay: day.day };
-    const run = runShift(ctx, plan, { shiftId: args.shiftId, vehicle, driver });
-    if (!run) {
+    const free = args.vehicles.filter(v => (args.shiftsOn.get(v.plate) ?? 0) < args.shiftsPerVehicleDay
+      && !clash(args.vehicleBusy.get(v.plate), startMs, endMs, vehicleGap)
+      && !unavailableDuring(args.unavailability, v.id, startMs, endMs));
+    if (free.length === 0) {
+      lastProblem = 'no_vehicle_free';
+      continue;
+    }
+    const vehicle = rng.pick(free);
+    const parts = runDuty(args, vehicle, startMs, plan.plannedMinutes);
+    if (!parts) {
       refusals.push({ day: day.day, reason: 'shift_produced_no_ride', plate: vehicle.plate, driverId: driver.id });
+      lastProblem = 'shift_produced_no_ride';
       continue;
     }
-    // Refused here, before the shift is accepted, and not only reported by the
-    // read-back: a shift that ended short of the minimum is not a shift this
-    // month may contain (round 6, "S38").
-    if (run.endMs - startMs < SHIFT_LIMITS.minMinutes * 60_000) {
-      refusals.push({ day: day.day, reason: 'shift_too_short', plate: vehicle.plate, driverId: driver.id });
-      continue;
-    }
-
-    const rides = run.rides;
-    args.vehicleBusy.set(vehicle.plate, [...(args.vehicleBusy.get(vehicle.plate) ?? []), { start: startMs, end: run.endMs }]);
-    args.driverBusy.set(driver.id, [...(args.driverBusy.get(driver.id) ?? []), { start: startMs, end: run.endMs }]);
-    args.driverLastEnd.set(driver.id, run.endMs);
-    return {
-      shift: { id: args.shiftId, vehicle, driver, operatingDay: day.day, startMs, endMs: run.endMs },
-      rides,
-      review: reviewOf.get(driver.id) ?? [],
-      plannedEndMs: endMs,
-      endedBy: run.endedBy,
-      refusedSteps: run.refusedSteps,
-    };
+    args.vehicleBusy.set(vehicle.plate, [...(args.vehicleBusy.get(vehicle.plate) ?? []), { start: startMs, end: endMs }]);
+    args.shiftsOn.set(vehicle.plate, (args.shiftsOn.get(vehicle.plate) ?? 0) + 1);
+    args.driverLastEnd.set(driver.id, endMs);
+    return { ok: true, parts, vehicle, review: verdict.review };
   }
-  refusals.push({ day: day.day, reason: 'no_vehicle_free', plate: vehicle.plate });
-  return null;
+  return lastProblem === 'no_vehicle_free' ? refuse('no_vehicle_free') : { ok: false, reason: lastProblem };
+}
+
+/** Runs the one shift, or both parts of a duty; null when any of them produced no ride. */
+function runDuty(
+  args: DriverShiftArgs,
+  vehicle: FullMonthVehicle,
+  startMs: number,
+  minutes: number,
+): PlacedPart[] | null {
+  const { ctx, day, driver } = args;
+  const place = (shiftId: string, from: number, until: number, extra: Partial<PlannedShift>, shiftExtra: Partial<SimShift>): PlacedPart | null => {
+    const planned: PlannedShift = { vehicle, startMs: from, plannedEndMs: until, operatingDay: day.day, ...extra };
+    const run = runShift(ctx, planned, { shiftId, vehicle, driver });
+    if (!run) return null;
+    const shift: SimShift = { id: shiftId, vehicle, driver, operatingDay: day.day, startMs: from, endMs: run.endMs, plannedEndMs: until, ...shiftExtra };
+    return { shift, plannedEndMs: until, endedBy: run.endedBy, refusedSteps: run.refusedSteps, rides: run.rides };
+  };
+  if (minutes <= MAX_PART_MINUTES) {
+    const one = place(args.shiftId, startMs, startMs + minutes * 60_000, {}, {});
+    return one && [one];
+  }
+  const { part1, part2 } = splitDutyMinutes(minutes);
+  const end1 = startMs + part1 * 60_000;
+  const breakEnd = end1 + BREAK_MINUTES * 60_000;
+  const first = place(`${args.shiftId}.1`, startMs, end1, { endAtBase: true },
+    { dutyId: args.shiftId, part: 1, breakAfter: { startMs: end1, endMs: breakEnd }, endsAtBase: true });
+  if (!first) return null;
+  const second = place(`${args.shiftId}.2`, breakEnd, breakEnd + part2 * 60_000, {}, { dutyId: args.shiftId, part: 2 });
+  if (!second) return null;
+  return [first, second];
+}
+
+/** The minutes of a shift the driver is on duty: start to planned end. */
+const dutyMinutes = (s: SimShift): number => ((s.plannedEndMs ?? s.endMs) - s.startMs) / 60_000;
+
+function outcomeOf(plan: DriverMonthPlan, shifts: readonly SimShift[], missed: { date: string; reason: CapacityReason }[]): DriverMonthOutcome {
+  const own = shifts.filter(s => s.driver.id === plan.driverId);
+  const placedMinutes = own.reduce((n, s) => n + dutyMinutes(s), 0);
+  return {
+    driverId: plan.driverId,
+    driverName: plan.driverName,
+    planned: plan.planned,
+    plannedMinutes: plan.plannedMinutes,
+    placedMinutes,
+    placedShifts: new Set(own.map(s => s.dutyId ?? s.id)).size,
+    missedDays: missed,
+    assessment: assessAgainstRange(placedMinutes, plan.range, plan.isOwner),
+  };
+}
+
+/**
+ * The driver-led rules, read back from the shifts (Round 8). Each shift names
+ * its driver by UUID, lies on a day his plan gave him and inside that day's
+ * window, is at most 360 minutes from start to planned end, ends its last
+ * ride by the planned end and does not touch its vehicle's unavailability
+ * window. Per driver: one duty per operating day, the rest between two duties,
+ * the week's 48 hours and (but for the owner) no more minutes than his range's
+ * maximum. A duty is one shift, or exactly two parts on one vehicle with at
+ * least 30 minutes between them, the first ending at the base, 480 minutes of
+ * work at most (§3, §4 ArbZG).
+ */
+export function checkDriverShifts(
+  shifts: readonly SimShift[],
+  plans: readonly DriverMonthPlan[],
+  unavailability: readonly UnavailabilityWindow[],
+  restMinutes: number,
+): string[] {
+  const out: string[] = [];
+  const dayPlan = new Map(plans.flatMap(p => p.days.map(d => [`${p.driverId}|${d.date}`, d] as const)));
+  const planOf = new Map(plans.map(p => [p.driverId, p]));
+  const byDriver = new Map<string, SimShift[]>();
+
+  for (const s of shifts) {
+    const id = s.driver.id;
+    if (typeof id !== 'string' || id === '') {
+      out.push(`${s.id}: the shift names no driver id`);
+      continue;
+    }
+    byDriver.set(id, [...(byDriver.get(id) ?? []), s]);
+    const end = s.plannedEndMs ?? s.endMs;
+    const minutes = (end - s.startMs) / 60_000;
+    if (minutes > MAX_PART_MINUTES) out.push(`${s.id}: a shift of ${minutes} minutes is longer than ${MAX_PART_MINUTES}`);
+    if (s.endMs > end) out.push(`${s.id}: the last ride ends after the shift's planned end`);
+    const d = dayPlan.get(`${id}|${s.operatingDay}`);
+    if (!d || d.status !== 'planned') {
+      out.push(`${s.id}: driver ${id} is not planned on ${s.operatingDay}`);
+    } else if (d.windowStartMs === null || d.windowEndMs === null || s.startMs < d.windowStartMs || end > d.windowEndMs) {
+      out.push(`${s.id}: the shift lies outside driver ${id}'s window on ${s.operatingDay}`);
+    }
+    if (!s.vehicle.id) out.push(`${s.id}: the shift names no vehicle id`);
+    const window = s.vehicle.id ? unavailableDuring(unavailability, s.vehicle.id, s.startMs, end) : null;
+    if (window) out.push(`${s.id}: runs on ${s.vehicle.plate} inside its unavailability window ${window.id} (${window.reason})`);
+  }
+
+  for (const [id, list] of byDriver) {
+    const duties = groupDuties(list, out);
+    const days = new Set<string>();
+    for (const [i, duty] of duties.entries()) {
+      if (days.has(duty.day)) out.push(`driver ${id}: two duties on ${duty.day}`);
+      days.add(duty.day);
+      const prev = duties[i - 1];
+      if (prev && duty.startMs < prev.endMs + restMinutes * 60_000) {
+        out.push(`driver ${id}: ${prev.label} and ${duty.label} leave less than ${restMinutes} minutes of rest`);
+      }
+    }
+    const weeks = new Map<string, number>();
+    for (const duty of duties) weeks.set(isoWeekStart(duty.day), (weeks.get(isoWeekStart(duty.day)) ?? 0) + duty.workMinutes);
+    for (const [week, minutes] of weeks) {
+      if (minutes > MAX_WEEK_WORK_MINUTES) out.push(`driver ${id}: ${minutes} minutes of work in the week of ${week} exceed ${MAX_WEEK_WORK_MINUTES}`);
+    }
+    const plan = planOf.get(id);
+    const total = list.reduce((n, s) => n + dutyMinutes(s), 0);
+    const max = plan && !plan.isOwner ? plan.range.effectiveMaxHours : null;
+    if (max !== null && total > max * 60 + 1e-6) {
+      out.push(`driver ${id}: ${total} minutes in the month exceed the maximum of ${Math.floor(max * 60)}`);
+    }
+  }
+  return out;
+}
+
+interface Duty { label: string; day: string; startMs: number; endMs: number; workMinutes: number }
+
+/** One driver's shifts as duties, in start order, each checked against §3 and §4 ArbZG. */
+function groupDuties(list: readonly SimShift[], out: string[]): Duty[] {
+  const byDuty = new Map<string, SimShift[]>();
+  for (const s of list) byDuty.set(s.dutyId ?? s.id, [...(byDuty.get(s.dutyId ?? s.id) ?? []), s]);
+  const duties: Duty[] = [];
+  for (const [label, parts] of byDuty) {
+    const sorted = [...parts].sort((a, b) => a.startMs - b.startMs);
+    const work = sorted.reduce((n, s) => n + dutyMinutes(s), 0);
+    checkDutyShape(label, sorted, work, out);
+    const last = sorted[sorted.length - 1];
+    duties.push({ label, day: sorted[0].operatingDay, startMs: sorted[0].startMs, endMs: last.plannedEndMs ?? last.endMs, workMinutes: work });
+  }
+  return duties.sort((a, b) => a.startMs - b.startMs);
+}
+
+function checkDutyShape(label: string, parts: readonly SimShift[], work: number, out: string[]): void {
+  if (parts.length === 1 && parts[0].dutyId === undefined && parts[0].part === undefined) return;
+  const [one, two] = parts;
+  if (parts.length !== 2 || one.part !== 1 || two.part !== 2) {
+    out.push(`${label}: a duty is one shift or exactly parts 1 and 2`);
+    return;
+  }
+  if (one.operatingDay !== two.operatingDay) out.push(`${label}: the parts lie on two operating days`);
+  if (one.vehicle.plate !== two.vehicle.plate) out.push(`${label}: the parts run on two vehicles`);
+  const gap = (two.startMs - (one.plannedEndMs ?? one.endMs)) / 60_000;
+  if (gap < BREAK_MINUTES) out.push(`${label}: the break between the parts is ${gap} minutes, less than ${BREAK_MINUTES}`);
+  if (work > MAX_DAY_WORK_MINUTES) out.push(`${label}: ${work} minutes of work in one day exceed ${MAX_DAY_WORK_MINUTES}`);
+  if (one.endsAtBase !== true) out.push(`${label}: part 1 does not end at the base`);
 }
 
 /**
@@ -875,7 +1403,7 @@ function summariseDays(
     ridesByDay.set(key, [...(ridesByDay.get(key) ?? []), ride]);
   }
   const shiftsByDay = new Map<string, number>();
-  for (const shift of month.shifts) shiftsByDay.set(shift.operatingDay, (shiftsByDay.get(shift.operatingDay) ?? 0) + 1);
+  for (const shift of month.shifts.filter(startsDuty)) shiftsByDay.set(shift.operatingDay, (shiftsByDay.get(shift.operatingDay) ?? 0) + 1);
 
   return period.map(day => {
     const all = ridesByDay.get(day.day) ?? [];
@@ -939,7 +1467,7 @@ export function validateFullMonth(
 
   // 2. No driver holds two overlapping rides, and no vehicle does. Section 5
   //    asks for both, and the check is on absolute instants.
-  out.push(...overlaps(month.rides, r => r.driver.name, 'driver'));
+  out.push(...overlaps(month.rides, r => r.driver.id ?? `name:${r.driver.name}`, 'driver'));
   out.push(...overlaps(month.rides, r => r.vehicle.plate, 'vehicle'));
 
   // 3. No shift sits inside a CONFIRMED blocking note of its driver. The same

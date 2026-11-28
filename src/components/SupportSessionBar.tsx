@@ -114,8 +114,8 @@ const SupportSessionBar: React.FC = () => {
   // colours it picks moved, to the design system's `caution` for a live session
   // and `brand` for a read-only view. The bar stays deliberately loud.
   const tone = support
-    ? 'border-caution bg-caution-soft text-caution'
-    : 'border-brand bg-brand-soft text-brand-text';
+    ? 'border-caution/30 bg-caution-soft text-caution shadow-hi'
+    : 'border-brand/30 bg-brand-soft text-brand-text shadow-hi';
 
   return (
     <>
@@ -167,7 +167,7 @@ const SupportSessionBar: React.FC = () => {
               onClick={() => navigate(TENANT_HOME)}
               className="inline-flex items-center gap-1 underline underline-offset-2 disabled:opacity-50"
             >
-              <ArrowRight size={14} />
+              <ArrowRight size={14} className="rtl:-scale-x-100" />
               {t('support.bar.openCompanyView')}
             </button>
           </>

@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
  * Every read of `public.drivers` in the browser, classified — and the guard that
  * makes the nineteenth one declare itself.
  *
- * A driver is deactivated, never deleted (see `driverStatus.ts` for the eight
- * cascades that settle it). The owner's instruction is that a deactivated driver
+ * A driver with history is deactivated, never deleted (see `driverStatus.ts` for
+ * the eight cascades that settle it; since 27.11.2026 only a driver nothing
+ * refers to may be deleted, and the database refuses every other delete). The owner's instruction is that a deactivated driver
  * appears in **no other list** — not the plan generator, not the Fahrtenbuch, not
  * anywhere a driver is offered for future work. The counter-rule is just as
  * load-bearing: a **record** of what happened must still show them, or a past
@@ -204,9 +205,23 @@ const DRIVER_READS: Record<string, readonly DeclaredRead[]> = {
   ],
   'lib/simulationInputsClient.ts': [
     {
-      statement: "select('id, allowed_weekdays, planning_enabled')",
+      statement: 'select(DRIVER_PLANNING_COLUMNS)',
       kind: 'record',
-      why: "Two planning columns the chooser's reader does not carry, consulted only as `facts.get(d.id)` for drivers `SimulatedRidesPage` has already filtered with `selectableDrivers`. The chooser is the boundary; a second filter here would be a second place the rule lives, and a driver absent from the chooser is never looked up.",
+      why: "The planning columns the chooser's reader does not carry (weekdays, window, hours range; Round 8), consulted only as `facts.get(d.id)` for drivers `SimulatedRidesPage` has already filtered with `selectableDrivers`. The chooser is the boundary; a second filter here would be a second place the rule lives, and a driver absent from the chooser is never looked up. `status` is read too, and a driver it says is not active is still not planned.",
+    },
+  ],
+  'utils/simulatedRides/uberImportLoader.ts': [
+    {
+      statement: "select('id, name')",
+      kind: 'record',
+      why: "Resolves the imported Uber figures of one calendar month to the driver they belong to (Round 8, S2). A record of money already earned: a driver deactivated since still earned that month's figures, and dropping him would leave his rows unattributed. It offers nobody for future work; who is planned is decided by the chooser and the drivers' own planning columns.",
+    },
+  ],
+  'utils/simulatedRides/realTripsLoader.ts': [
+    {
+      statement: "select('id, name')",
+      kind: 'record',
+      why: "Attributes the month's real (imported) trips to the driver who drove them (Round 8, S6), so that driver-day is never simulated over. A record of work already done: a driver deactivated since still drove those trips, and dropping him would leave them unattributed. It offers nobody for future work.",
     },
   ],
   'lib/tripAnalysisClient.ts': [

@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Trash2 } from 'lucide-react';
 import { Salary } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
-import ConfirmationModal from './ConfirmationModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { findOverlappingSalaryPeriods } from '../utils/salaryPeriodOverlap';
@@ -15,6 +14,17 @@ import {
   type SalaryDeletionBlock,
   type SalaryRowWriteRefusal,
 } from '../utils/salaryRowEdit';
+import {
+  Alert,
+  Badge,
+  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  cn,
+} from './ui';
 
 /**
  * Merging a driver's overlapping salary rows: remove the row that should not
@@ -348,75 +358,49 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
 
   if (!isOpen) return null;
 
+  // ── Presentation (phase 5)
+
   return (
     <>
-      <div
-        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('sal.periods.title', { name: driverName })}
+      <Dialog
+        open
+        onOpenChange={next => {
+          if (!next && !deletingId) onClose();
+        }}
       >
-        <div
-          className="rounded-xl shadow-xl w-full max-w-3xl my-8"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-        >
-          <div
-            className="flex items-center justify-between px-6 py-4"
-            style={{ borderBottom: '1px solid var(--border)' }}
-          >
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {t('sal.periods.title', { name: driverName })}
-            </h2>
-            <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={onClose} style={{ color: 'var(--text-secondary)' }} title={t('common.close')}>
-              <X size={20} />
-            </button>
-          </div>
+        <DialogContent className="max-w-3xl gap-0 p-0" aria-label={t('sal.periods.title', { name: driverName })}>
+          <DialogHeader className="border-b border-line px-6 py-4">
+            <DialogTitle>{t('sal.periods.title', { name: driverName })}</DialogTitle>
+            <DialogDescription>{t('sal.periods.intro')}</DialogDescription>
+          </DialogHeader>
 
-          <div className="px-6 py-4 space-y-3">
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              {t('sal.periods.intro')}
-            </p>
+          <div className="space-y-3 px-6 py-4">
             {writeRefusal && (
-              <p
-                className="text-sm rounded-lg px-3 py-2"
-                style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}
-              >
+              <Alert tone="critical">
                 {t(`sal.periods.refusal.${writeRefusal}` as 'sal.periods.refusal.not_authorized')}
-              </p>
+              </Alert>
             )}
           </div>
 
-          <div className="px-6 pb-6 overflow-x-auto">
+          <div className="relative overflow-x-auto px-6 pb-6">
             {driverRows.length === 0 ? (
-              <p className="py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <p className="py-8 text-center text-sm text-fg-muted">
                 {t('sal.periods.none')}
               </p>
             ) : (
               <table className="w-full min-w-[38rem]">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    <th
-                      className="px-3 py-2 text-left text-xs font-medium uppercase"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
+                  <tr className="border-b border-line">
+                    <th className="px-3 py-2 text-start text-xs font-medium uppercase text-fg-muted">
                       {t('sal.periods.col.period')}
                     </th>
-                    <th
-                      className="px-3 py-2 text-right text-xs font-medium uppercase"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
+                    <th className="px-3 py-2 text-end text-xs font-medium uppercase text-fg-muted">
                       {t('sal.periods.col.amount')}
                     </th>
-                    <th
-                      className="px-3 py-2 text-left text-xs font-medium uppercase"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
+                    <th className="px-3 py-2 text-start text-xs font-medium uppercase text-fg-muted">
                       {t('sal.periods.col.attached')}
                     </th>
-                    <th
-                      className="px-3 py-2 text-right text-xs font-medium uppercase"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
+                    <th className="px-3 py-2 text-end text-xs font-medium uppercase text-fg-muted">
                       {t('sal.periods.col.actions')}
                     </th>
                   </tr>
@@ -428,29 +412,25 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
                     const deleteBlocked = deleteBlockedBecause(row);
 
                     return (
-                      <tr key={row.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="px-3 py-3 text-sm" style={{ color: 'var(--text-primary)' }}>
-                          <div className="flex items-center gap-2 flex-wrap">
+                      <tr key={row.id} className="border-b border-line">
+                        <td className="px-3 py-3 text-sm text-fg">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="whitespace-nowrap">{formatStoredPeriod(row)}</span>
                             {overlaps.length > 0 && (
-                              <span
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
-                                style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}
+                              <Badge
+                                tone="caution"
                                 title={overlaps.map(formatStoredPeriod).join('\n')}
                               >
                                 <AlertTriangle size={12} aria-hidden />
                                 {t('sal.overlap.badge')}
-                              </span>
+                              </Badge>
                             )}
                           </div>
                         </td>
-                        <td
-                          className="px-3 py-3 text-sm text-right whitespace-nowrap"
-                          style={{ color: 'var(--text-primary)' }}
-                        >
+                        <td className="whitespace-nowrap px-3 py-3 text-end text-sm tabular-nums text-fg">
                           {formatSalaryDue(row)} €
                         </td>
-                        <td className="px-3 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        <td className="px-3 py-3 text-xs text-fg-muted">
                           {factsLoading
                             ? t('sal.periods.checking')
                             : block
@@ -459,16 +439,17 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
                                 ? t('sal.periods.attached.none')
                                 : t('sal.periods.checkFailed')}
                         </td>
-                        <td className="px-3 py-3 text-right text-sm">
+                        <td className="px-3 py-3 text-end text-sm">
                           <div className="flex justify-end gap-2">
+                            {/* Not the design-system Button: a disabled one drops pointer
+                                events, and the title is the reason the delete is off. */}
                             <button
-                              className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-tight focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10',
+                                deleteBlocked ? 'cursor-not-allowed text-fg-subtle' : 'cursor-pointer text-critical',
+                              )}
                               onClick={() => setDeleteTarget(row)}
                               disabled={!!deleteBlocked}
-                              style={{
-                                color: deleteBlocked ? 'var(--text-tertiary)' : 'var(--danger)',
-                                cursor: deleteBlocked ? 'not-allowed' : 'pointer',
-                              }}
                               title={deleteBlocked ?? t('sal.periods.delete')}
                             >
                               <Trash2 size={18} />
@@ -483,26 +464,25 @@ const SalaryPeriodsModal: React.FC<SalaryPeriodsModalProps> = ({
             )}
           </div>
 
-          <div className="px-6 py-4" style={{ borderTop: '1px solid var(--border)' }}>
-            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          <div className="border-t border-line px-6 py-4">
+            <p className="text-xs text-fg-muted">
               {t('sal.periods.mergeHint')}
             </p>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
 
-      {/* ConfirmationModal calls onConfirm and then onClose, both synchronously
+      {/* ConfirmDialog calls onConfirm and then onClose, both synchronously
           and neither awaited, so the dialog is already closing while the delete
           is in flight. The outcome is reported by a toast, as it is wherever
           else this component is used with an async handler. */}
-      <ConfirmationModal
-        isOpen={deleteTarget !== null}
+      <ConfirmDialog
+        open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         title={t('sal.periods.confirmDelete.title')}
-        message={deleteTarget ? deleteMessage(deleteTarget) : ''}
-        type="confirm"
-        confirmText={t('common.delete')}
+        description={deleteTarget ? deleteMessage(deleteTarget) : ''}
+        confirmLabel={t('common.delete')}
       />
     </>
   );

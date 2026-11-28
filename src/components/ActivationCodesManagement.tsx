@@ -10,7 +10,10 @@ import {
 } from 'lucide-react';
 import { format, addDays, addMonths, addYears } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { Alert } from './ui';
+import {
+  Alert, Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  EmptyState, Field, Input, NativeSelect, cn, type BadgeProps,
+} from './ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,47 +58,6 @@ interface CompanyOption {
   subscription_expires_at: string | null;
 }
 
-// ─── Confirmation Dialog ──────────────────────────────────────────────────────
-
-interface ConfirmDialogProps {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  confirmColor?: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  extra?: React.ReactNode;
-}
-
-function ConfirmDialog({ title, body, confirmLabel, confirmColor = '#ef4444', onConfirm, onCancel, extra }: ConfirmDialogProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
-      <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{body}</p>
-        {extra}
-        <div className="flex gap-2 justify-end pt-1">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 rounded-xl text-sm font-semibold"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 rounded-xl text-sm font-semibold"
-            style={{ background: confirmColor, color: '#fff' }}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // `label` holds a TranslationKey throughout this section: these maps are
@@ -109,11 +71,13 @@ const DURATION_LABELS: Record<DurationType, TranslationKey> = {
   'benutzerdefiniert': 'activation.custom',
 };
 
-const STATUS_CFG: Record<CodeStatus, { label: TranslationKey; color: string; bg: string; Icon: React.ElementType }> = {
-  active:  { label: 'codes.status.active',    color: '#10b981', bg: 'rgba(16,185,129,0.1)',  Icon: CheckCircle },
-  used:    { label: 'codes.status.used',      color: '#06b6d4', bg: 'rgba(6,182,212,0.1)',   Icon: Check },
-  expired: { label: 'activation.expiredShort', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  Icon: Clock },
-  revoked: { label: 'codes.status.revoked',   color: '#ef4444', bg: 'rgba(239,68,68,0.1)',   Icon: Ban },
+type StatusTone = NonNullable<BadgeProps['tone']>;
+
+const STATUS_CFG: Record<CodeStatus, { label: TranslationKey; tone: StatusTone; text: string; Icon: React.ElementType }> = {
+  active:  { label: 'codes.status.active',    tone: 'positive', text: 'text-positive', Icon: CheckCircle },
+  used:    { label: 'codes.status.used',      tone: 'info',     text: 'text-info',     Icon: Check },
+  expired: { label: 'activation.expiredShort', tone: 'caution',  text: 'text-caution',  Icon: Clock },
+  revoked: { label: 'codes.status.revoked',   tone: 'critical', text: 'text-critical', Icon: Ban },
 };
 
 const FILTER_TABS: { id: FilterTab; label: TranslationKey }[] = [
@@ -163,7 +127,7 @@ function CodeCountdown({ expiresAt }: { expiresAt: string }) {
   const end = new Date(expiresAt).getTime();
   const isUrgent = end - Date.now() < 30_000;
   return (
-    <span className="font-mono text-xs tabular-nums" style={{ color: isUrgent ? '#ef4444' : '#f59e0b' }}>
+    <span className={cn('font-mono text-xs tabular-nums', isUrgent ? 'text-critical' : 'text-caution')}>
       {display}
     </span>
   );
@@ -177,149 +141,6 @@ interface GeneratedCodeMail {
   recipientCount: number;
   /** Whether the form named a target address or a company. */
   hadRecipient: boolean;
-}
-
-function GeneratedCodeModal({
-  code,
-  expiresAt,
-  mail,
-  onClose,
-}: {
-  code: string;
-  expiresAt: string;
-  mail: GeneratedCodeMail | null;
-  onClose: () => void;
-}) {
-  const { t, tPlural } = useTranslation();
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
-      <div className="w-full max-w-sm rounded-2xl p-7 space-y-5 text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center mx-auto">
-          <KeyRound className="text-emerald-400" size={24} />
-        </div>
-
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-tertiary)' }}>
-            {t('codes.generated.label')}
-          </p>
-          <div
-            className="text-5xl font-mono font-bold tracking-[0.25em] py-4 px-6 rounded-2xl select-all"
-            style={{ background: 'rgba(16,185,129,0.08)', border: '2px solid rgba(16,185,129,0.25)', color: '#10b981', letterSpacing: '0.35em' }}
-          >
-            {code}
-          </div>
-        </div>
-
-        <div className="p-3 rounded-xl" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            {t('codes.generated.validityBefore')}{' '}
-            <strong style={{ color: '#f59e0b' }}>{t('codes.generated.validityStrong')}</strong>{' '}
-            {t('codes.generated.validityAfter')}
-          </p>
-          <div className="mt-1.5 flex items-center justify-center gap-1.5">
-            <Clock size={11} style={{ color: '#f59e0b' }} />
-            <CodeCountdown expiresAt={expiresAt} />
-          </div>
-        </div>
-
-        {mail && (
-          <p
-            className="text-xs"
-            style={{ color: mail.sent ? 'var(--success)' : mail.hadRecipient ? 'var(--warning)' : 'var(--text-tertiary)' }}
-          >
-            {mail.sent
-              ? tPlural({ one: 'codes.generated.mailSent.one', other: 'codes.generated.mailSent.other' }, mail.recipientCount)
-              : mail.hadRecipient
-                ? t('codes.generated.mailFailed')
-                : t('codes.generated.mailNoRecipient')}
-          </p>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleCopy}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
-            style={{ background: copied ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981' }}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-            {copied ? t('codes.copied') : t('common.copy')}
-          </button>
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          >
-            {t('common.close')}
-          </button>
-        </div>
-
-        <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-          {t('codes.generated.hiddenAfterClose')}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Details Modal ────────────────────────────────────────────────────────────
-
-function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => void }) {
-  const { t } = useTranslation();
-  const st = STATUS_CFG[code.status] ?? STATUS_CFG.expired;
-  // Timestamps keep the German DD.MM.YYYY format in both languages — see src/i18n/index.ts.
-  const rows: [string, React.ReactNode][] = [
-    [t('codes.details.codeMasked'), <span className="font-mono">••{code.code_last4 ?? '????'}</span>],
-    [t('common.status'), <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: st.bg, color: st.color }}><st.Icon size={10} />{t(st.label)}</span>],
-    [t('codes.details.duration'), DURATION_LABELS[code.duration_type] ? t(DURATION_LABELS[code.duration_type]) : code.duration_type],
-    [t('codes.details.created'), format(new Date(code.created_at), 'dd.MM.yyyy HH:mm', { locale: de })],
-    [t('codes.details.validUntilCode'), format(new Date(code.expires_at), 'dd.MM.yyyy HH:mm', { locale: de })],
-    [t('codes.details.targetCompany'), code.company_name ?? '—'],
-    [t('codes.details.targetEmail'), code.target_email ?? '—'],
-    [t('codes.details.usedAt'), code.used_at ? format(new Date(code.used_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-    [t('codes.details.usedBy'), code.used_company_name ?? '—'],
-    [t('codes.details.revokedAt'), code.revoked_at ? format(new Date(code.revoked_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-    [t('codes.details.hiddenAt'), code.hidden_at ? format(new Date(code.hidden_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-    [t('codes.details.hideReason'), code.hidden_reason ?? '—'],
-    [t('codes.details.deletedAt'), code.deleted_at ? format(new Date(code.deleted_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-  ];
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
-      <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('codes.details.title')}</h3>
-          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
-            <X size={16} />
-          </button>
-        </div>
-        <div className="space-y-2">
-          {rows.map(([label, value]) => (
-            <div key={label} className="flex justify-between gap-3 py-1.5 text-sm" style={{ borderBottom: '1px solid var(--border)' }}>
-              <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
-              <span className="text-right font-medium" style={{ color: 'var(--text-primary)' }}>{value}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-end pt-1">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-sm font-semibold"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          >
-            {t('common.close')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -365,12 +186,6 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
   // Generated code modal
   const [generatedCode, setGeneratedCode] = useState<{ code: string; expiresAt: string; mail: GeneratedCodeMail | null } | null>(null);
-
-  const cardStyle: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '1rem',
-  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -571,84 +386,63 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
   const canGenerate = fDuration !== 'benutzerdefiniert' ||
     (fCustomMode === 'days' ? !!fCustomDays && parseInt(fCustomDays) > 0 : !!fCustomDate);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 font-ui">
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
-          <KeyRound size={18} style={{ color: 'var(--accent)' }} />
-          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.title')}</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
-            {t('codes.activeCount', { count: tabCounts.active })}
-          </span>
+          <KeyRound size={18} className="text-brand-text" />
+          <h2 className="text-base font-semibold text-fg">{t('codes.title')}</h2>
+          <Badge tone="brand">{t('codes.activeCount', { count: tabCounts.active })}</Badge>
         </div>
-        <button
-          onClick={() => setShowForm(v => !v)}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-        >
+        <Button onClick={() => setShowForm(v => !v)}>
           {showForm ? <X size={14} /> : <Plus size={14} />}
           {showForm ? t('common.cancel') : t('codes.create')}
-        </button>
+        </Button>
       </div>
 
       {/* Generate form */}
       {showForm && (
-        <div className="p-6 space-y-5" style={cardStyle}>
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.generateNew')}</h3>
+        <div className="glass-card rounded-surface p-6 space-y-5">
+          <h3 className="text-sm font-semibold text-fg">{t('codes.generateNew')}</h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                <Building2 size={10} className="inline mr-1" />{t('codes.field.companyOptional')}
-              </label>
-              <select
+            <Field label={<span className="inline-flex items-center gap-1"><Building2 size={11} />{t('codes.field.companyOptional')}</span>}>
+              <NativeSelect
                 value={fCompanyId}
                 onChange={e => setFCompanyId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               >
                 <option value="">{t('codes.genericCode')}</option>
                 {companies.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
-              </select>
-            </div>
+              </NativeSelect>
+            </Field>
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                <Mail size={10} className="inline mr-1" />{t('codes.field.emailOptional')}
-              </label>
-              <input
+            <Field label={<span className="inline-flex items-center gap-1"><Mail size={11} />{t('codes.field.emailOptional')}</span>}>
+              <Input
                 type="email"
                 value={fEmail}
                 onChange={e => setFEmail(e.target.value)}
                 placeholder={t('codes.emailPlaceholder')}
-                className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />
-            </div>
+            </Field>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>{t('codes.field.duration')}</label>
+            <p className="mb-2 text-[13px] font-[550] text-fg-muted">{t('codes.field.duration')}</p>
             <div className="flex gap-2 flex-wrap">
               {(['1_monat', '3_monate', '1_jahr', 'benutzerdefiniert'] as DurationType[]).map(d => (
-                <button
+                <Button
                   key={d}
                   type="button"
+                  variant={fDuration === d ? 'primary' : 'secondary'}
                   onClick={() => setFDuration(d)}
-                  className="px-3 py-2 rounded-xl text-sm font-semibold transition-all"
-                  style={fDuration === d
-                    ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                    : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
-                  }
                 >
                   {t(DURATION_LABELS[d])}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -657,140 +451,107 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
             <div className="space-y-3">
               <div className="flex gap-2">
                 {(['days', 'date'] as const).map(m => (
-                  <button
+                  <Button
                     key={m}
                     type="button"
+                    size="sm"
+                    variant={fCustomMode === m ? 'primary' : 'secondary'}
                     onClick={() => setFCustomMode(m)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                    style={fCustomMode === m
-                      ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                      : { border: '1px solid var(--border)', color: 'var(--text-secondary)' }
-                    }
                   >
                     {m === 'days' ? t('codes.mode.days') : t('codes.mode.expiryDate')}
-                  </button>
+                  </Button>
                 ))}
               </div>
               {fCustomMode === 'days' ? (
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.field.numberOfDays')}</label>
-                  <input
+                <Field label={t('codes.field.numberOfDays')} className="w-40">
+                  <Input
                     type="number" min={1} max={3650}
                     value={fCustomDays}
                     onChange={e => setFCustomDays(e.target.value)}
                     placeholder={t('codes.daysPlaceholder')}
-                    className="w-32 px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                    style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                   />
-                </div>
+                </Field>
               ) : (
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.mode.expiryDate')}</label>
-                  <input
+                <Field label={t('codes.mode.expiryDate')} className="w-fit">
+                  <Input
                     type="date"
                     value={fCustomDate}
                     min={format(addDays(new Date(), 1), 'yyyy-MM-dd')}
                     onChange={e => setFCustomDate(e.target.value)}
-                    className="px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                    style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                   />
-                </div>
+                </Field>
               )}
             </div>
           )}
 
           {durationPreview() && (
-            <div className="flex items-center gap-1.5 text-xs" style={{ color: '#10b981' }}>
+            <div className="flex items-center gap-1.5 text-xs text-positive">
               <CalendarCheck size={12} />
               {durationPreview()}
             </div>
           )}
 
           <div className="flex gap-2 justify-end pt-1">
-            <button
-              onClick={() => setShowForm(false)}
-              className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            >
+            <Button variant="secondary" onClick={() => setShowForm(false)}>
               {t('common.cancel')}
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={generating || !canGenerate}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-            >
-              {generating ? <RefreshCw size={13} className="animate-spin" /> : <KeyRound size={13} />}
+            </Button>
+            <Button onClick={handleGenerate} disabled={generating || !canGenerate}>
+              {generating ? <RefreshCw size={13} className="motion-safe:animate-spin" /> : <KeyRound size={13} />}
               {generating ? t('codes.creating') : t('codes.create')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       {/* Codes table */}
-      <div style={cardStyle} className="overflow-hidden">
-        <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+      <div className="glass-card rounded-surface relative overflow-x-auto">
+        <div className="px-5 py-4 border-b border-line">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
-              <KeyRound size={15} style={{ color: 'var(--text-tertiary)' }} />
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              <KeyRound size={15} className="text-fg-subtle" />
+              <h3 className="text-sm font-semibold text-fg">
                 {t('codes.history', { count: filteredCodes.length })}
               </h3>
-              {/*
-                A page, not a list. Said beside the heading, and only when the
-                database reported more codes than this page holds — the line
-                inherits the header's colour, so it adds no inline style and no
-                Phase-2 token pair on a legacy surface.
-              */}
+              {/* A page, not a list: said only when the database reported more codes than this page holds. */}
               {codeTotal !== null && codeTotal > codes.length && (
-                <span className="text-[11px]">
+                <span className="text-[11px] text-fg-subtle">
                   {t('admin.read.partial', { shown: codes.length, total: codeTotal })}
                 </span>
               )}
             </div>
-            <button
-              onClick={() => load()}
-              className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-              style={{ color: 'var(--text-tertiary)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            </button>
+            <Button variant="ghost" size="icon-sm" onClick={() => load()}>
+              <RefreshCw size={13} className={loading ? 'motion-safe:animate-spin' : ''} />
+            </Button>
           </div>
 
           {/* Filter tabs */}
           <div className="flex gap-1.5 mt-3 flex-wrap">
             {FILTER_TABS.map(tab => (
-              <button
+              <Button
                 key={tab.id}
+                size="sm"
+                variant={activeFilter === tab.id ? 'primary' : 'secondary'}
                 onClick={() => setActiveFilter(tab.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                style={activeFilter === tab.id
-                  ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                  : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
-                }
               >
                 {t(tab.label)}
                 {tabCounts[tab.id] > 0 && (
                   <span
-                    className="px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none"
-                    style={activeFilter === tab.id
-                      ? { background: 'rgba(255,255,255,0.25)', color: '#fff' }
-                      : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)' }
-                    }
+                    className={cn(
+                      'px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none tabular-nums',
+                      activeFilter === tab.id ? 'bg-brand-fg/25 text-brand-fg' : 'bg-sunken text-fg-subtle',
+                    )}
                   >
                     {tabCounts[tab.id]}
                   </span>
                 )}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-10">
-            <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+            <RefreshCw size={20} className="motion-safe:animate-spin text-fg-subtle" />
           </div>
         ) : loadFailed ? (
           /* Not "no entries for this filter" — the codes were not read. */
@@ -800,17 +561,14 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
             </Alert>
           </div>
         ) : filteredCodes.length === 0 ? (
-          <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
-            <KeyRound size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">{t('codes.noneForFilter')}</p>
-          </div>
+          <EmptyState icon={KeyRound} title={t('codes.noneForFilter')} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                <tr className="bg-wash border-b border-line">
                   {TABLE_HEADER_KEYS.map(key => (
-                    <th key={key} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{t(key)}</th>
+                    <th key={key} className="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap text-fg-subtle">{t(key)}</th>
                   ))}
                 </tr>
               </thead>
@@ -826,81 +584,78 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                   return (
                     <tr
                       key={c.id}
-                      style={{ borderBottom: '1px solid var(--border)', opacity: isHidden || isDeleted ? 0.6 : 1 }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      className={cn('border-b border-line transition-colors hover:bg-sunken', (isHidden || isDeleted) && 'opacity-60')}
                     >
                       {/* Code (masked) */}
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-sm font-bold" style={{ color: st.color }}>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={cn('font-mono text-sm font-bold', st.text)}>
                           ••{c.code_last4 ?? '????'}
                         </span>
                         {isHidden && (
-                          <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: 'rgba(148,163,184,0.15)', color: 'var(--text-tertiary)' }}>
+                          <Badge tone="neutral" className="ms-1">
                             {t('codes.badge.hidden')}
-                          </span>
+                          </Badge>
                         )}
                         {isDeleted && (
-                          <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
+                          <Badge tone="critical" className="ms-1">
                             {t('codes.badge.deleted')}
-                          </span>
+                          </Badge>
                         )}
                       </td>
 
                       {/* Company */}
                       <td className="px-4 py-3">
                         {c.company_name ? (
-                          <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{c.company_name}</span>
+                          <span className="text-xs font-medium text-fg">{c.company_name}</span>
                         ) : c.used_company_name ? (
-                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{c.used_company_name}</span>
+                          <span className="text-xs text-fg-subtle">{c.used_company_name}</span>
                         ) : (
-                          <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+                          <span className="text-fg-subtle">—</span>
                         )}
                       </td>
 
                       {/* Email */}
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                        {c.target_email ?? <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
+                      <td className="px-4 py-3 text-xs text-fg-muted">
+                        {c.target_email ?? <span className="text-fg-subtle">—</span>}
                       </td>
 
                       {/* Duration */}
                       <td className="px-4 py-3">
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        <span className="text-xs text-fg-muted">
                           {t(DURATION_LABELS[c.duration_type])}
-                          {c.custom_days && <span style={{ color: 'var(--text-tertiary)' }}> {t('codes.customDaysSuffix', { count: c.custom_days })}</span>}
+                          {c.custom_days && <span className="text-fg-subtle"> {t('codes.customDaysSuffix', { count: c.custom_days })}</span>}
                         </span>
                       </td>
 
                       {/* Status */}
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
-                          style={{ background: st.bg, color: st.color }}>
-                          <st.Icon size={10} />
+                        <Badge tone={st.tone}>
+                          <st.Icon size={12} />
                           {t(st.label)}
-                        </span>
+                        </Badge>
                       </td>
 
                       {/* Gültig bis */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap tabular-nums">
                         {c.status === 'active' && !isExpiredNow ? (
                           <CodeCountdown expiresAt={c.expires_at} />
                         ) : (
-                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                          <span className="text-xs text-fg-subtle">
                             {format(new Date(c.expires_at), 'dd.MM.yy HH:mm', { locale: de })}
                           </span>
                         )}
                       </td>
 
                       {/* Used at */}
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      <td className="px-4 py-3 text-xs text-fg-muted whitespace-nowrap tabular-nums">
                         {c.used_at
                           ? format(new Date(c.used_at), 'dd.MM.yy HH:mm', { locale: de })
-                          : <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+                          : <span className="text-fg-subtle">—</span>
                         }
                       </td>
 
                       {/* Created */}
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                      <td className="px-4 py-3 text-xs text-fg-subtle whitespace-nowrap tabular-nums">
                         {format(new Date(c.created_at), 'dd.MM.yy HH:mm', { locale: de })}
                       </td>
 
@@ -909,57 +664,53 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                         <div className="flex items-center gap-1 flex-wrap">
                           {/* Revoke — only for active, unused codes */}
                           {effectiveStatus === 'active' && isUnused && !isDeleted && !isHidden && (
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="sm"
                               onClick={() => setConfirmAction({ type: 'revoke', code: c })}
                               title={t('codes.action.revoke')}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
-                              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                              onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
-                              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                              className="hover:border-critical hover:text-critical"
                             >
                               <Ban size={11} />{t('codes.action.revoke')}
-                            </button>
+                            </Button>
                           )}
 
                           {/* Delete — only for unused codes */}
                           {isUnused && !isDeleted && (
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="sm"
                               onClick={() => setConfirmAction({ type: 'delete', code: c })}
                               title={t('common.delete')}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
-                              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                              onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
-                              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                              className="hover:border-critical hover:text-critical"
                             >
                               <Trash2 size={11} />{t('common.delete')}
-                            </button>
+                            </Button>
                           )}
 
                           {/* Hide — always available if not already hidden */}
                           {!isHidden && (
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="sm"
                               onClick={() => { setHideReason(''); setConfirmAction({ type: 'hide', code: c }); }}
                               title={t('codes.action.hide')}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
-                              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--warning)'; e.currentTarget.style.color = 'var(--warning)'; }}
-                              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                              className="hover:border-caution hover:text-caution"
                             >
                               <EyeOff size={11} />{t('codes.action.hide')}
-                            </button>
+                            </Button>
                           )}
 
                           {/* Details — always shown */}
-                          <button
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={() => setDetailsCode(c)}
                             title={t('codes.action.details')}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
-                            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                            className="hover:border-brand hover:text-brand-text"
                           >
                             <Info size={11} />{t('codes.action.details')}
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -992,9 +743,10 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
           title={t('codes.confirm.revokeTitle')}
           body={t('codes.confirm.revokeBody')}
           confirmLabel={actionInFlight ? t('codes.revoking') : t('codes.action.revoke')}
-          confirmColor="#ef4444"
+          destructive
           onConfirm={executeAction}
           onCancel={() => setConfirmAction(null)}
+          busy={actionInFlight}
         />
       )}
 
@@ -1003,9 +755,10 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
           title={t('codes.confirm.deleteTitle')}
           body={t('codes.confirm.deleteBody')}
           confirmLabel={actionInFlight ? t('codes.deleting') : t('common.delete')}
-          confirmColor="#ef4444"
+          destructive
           onConfirm={executeAction}
           onCancel={() => setConfirmAction(null)}
+          busy={actionInFlight}
         />
       )}
 
@@ -1014,26 +767,196 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
           title={t('codes.confirm.hideTitle')}
           body={t('codes.confirm.hideBody')}
           confirmLabel={actionInFlight ? t('codes.hiding') : t('codes.action.hide')}
-          confirmColor="#f59e0b"
           onConfirm={executeAction}
           onCancel={() => setConfirmAction(null)}
+          busy={actionInFlight}
           extra={
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                {t('codes.field.reasonOptional')}
-              </label>
-              <input
+            <Field label={t('codes.field.reasonOptional')}>
+              <Input
                 type="text"
                 value={hideReason}
                 onChange={e => setHideReason(e.target.value)}
                 placeholder={t('codes.reasonPlaceholder')}
-                className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
-                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />
-            </div>
+            </Field>
           }
         />
       )}
     </div>
+  );
+}
+
+// ─── Confirmation Dialog ──────────────────────────────────────────────────────
+
+interface ConfirmDialogProps {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy?: boolean;
+  extra?: React.ReactNode;
+}
+
+// A Dialog, not the ui ConfirmDialog: it stays open while the RPC runs and the
+// caller closes it by clearing confirmAction.
+function ConfirmDialog({ title, body, confirmLabel, destructive = false, onConfirm, onCancel, busy = false, extra }: ConfirmDialogProps) {
+  const { t } = useTranslation();
+  return (
+    <Dialog open onOpenChange={open => { if (!open && !busy) onCancel(); }}>
+      <DialogContent className="max-w-sm" onInteractOutside={event => event.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription className="text-fg-muted">{body}</DialogDescription>
+        </DialogHeader>
+        {extra}
+        <DialogFooter>
+          <Button variant="secondary" onClick={onCancel}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant={destructive ? 'danger' : 'primary'} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Generated Code Modal ─────────────────────────────────────────────────────
+
+function GeneratedCodeModal({
+  code,
+  expiresAt,
+  mail,
+  onClose,
+}: {
+  code: string;
+  expiresAt: string;
+  mail: GeneratedCodeMail | null;
+  onClose: () => void;
+}) {
+  const { t, tPlural } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    // The code is shown once, so a stray click or Escape must not discard it:
+    // only the two buttons close this, as before.
+    <Dialog open onOpenChange={() => {}}>
+      <DialogContent
+        hideClose
+        className="max-w-sm text-center"
+        onPointerDownOutside={e => e.preventDefault()}
+        onEscapeKeyDown={e => e.preventDefault()}
+      >
+        <DialogHeader className="items-center pe-0">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-brand/25 bg-brand-soft">
+            <KeyRound className="text-brand-text" size={24} />
+          </div>
+          <DialogTitle className="sr-only">{t('codes.generated.label')}</DialogTitle>
+          <DialogDescription className="sr-only">{t('codes.generated.hiddenAfterClose')}</DialogDescription>
+        </DialogHeader>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-3 text-fg-subtle">
+            {t('codes.generated.label')}
+          </p>
+          <div className="select-all rounded-tile border-2 border-brand/25 bg-brand-soft px-4 py-4 font-mono text-4xl font-bold tracking-[0.35em] text-brand-text sm:text-5xl">
+            {code}
+          </div>
+        </div>
+
+        <Alert tone="caution" icon={Clock} className="text-start">
+          <p className="text-xs">
+            {t('codes.generated.validityBefore')}{' '}
+            <strong className="text-caution">{t('codes.generated.validityStrong')}</strong>{' '}
+            {t('codes.generated.validityAfter')}
+          </p>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <CodeCountdown expiresAt={expiresAt} />
+          </div>
+        </Alert>
+
+        {mail && (
+          <p
+            className={cn('text-xs', mail.sent ? 'text-positive' : mail.hadRecipient ? 'text-caution' : 'text-fg-subtle')}
+          >
+            {mail.sent
+              ? tPlural({ one: 'codes.generated.mailSent.one', other: 'codes.generated.mailSent.other' }, mail.recipientCount)
+              : mail.hadRecipient
+                ? t('codes.generated.mailFailed')
+                : t('codes.generated.mailNoRecipient')}
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={handleCopy}>
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? t('codes.copied') : t('common.copy')}
+          </Button>
+          <Button variant="secondary" className="flex-1" onClick={onClose}>
+            {t('common.close')}
+          </Button>
+        </div>
+
+        <p className="text-[11px] text-fg-subtle">
+          {t('codes.generated.hiddenAfterClose')}
+        </p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Details Modal ────────────────────────────────────────────────────────────
+
+function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => void }) {
+  const { t } = useTranslation();
+  const st = STATUS_CFG[code.status] ?? STATUS_CFG.expired;
+  // Timestamps keep the German DD.MM.YYYY format in both languages — see src/i18n/index.ts.
+  const rows: [string, React.ReactNode][] = [
+    [t('codes.details.codeMasked'), <span className="font-mono">••{code.code_last4 ?? '????'}</span>],
+    [t('common.status'), <Badge tone={st.tone}><st.Icon size={12} />{t(st.label)}</Badge>],
+    [t('codes.details.duration'), DURATION_LABELS[code.duration_type] ? t(DURATION_LABELS[code.duration_type]) : code.duration_type],
+    [t('codes.details.created'), format(new Date(code.created_at), 'dd.MM.yyyy HH:mm', { locale: de })],
+    [t('codes.details.validUntilCode'), format(new Date(code.expires_at), 'dd.MM.yyyy HH:mm', { locale: de })],
+    [t('codes.details.targetCompany'), code.company_name ?? '—'],
+    [t('codes.details.targetEmail'), code.target_email ?? '—'],
+    [t('codes.details.usedAt'), code.used_at ? format(new Date(code.used_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.usedBy'), code.used_company_name ?? '—'],
+    [t('codes.details.revokedAt'), code.revoked_at ? format(new Date(code.revoked_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.hiddenAt'), code.hidden_at ? format(new Date(code.hidden_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.hideReason'), code.hidden_reason ?? '—'],
+    [t('codes.details.deletedAt'), code.deleted_at ? format(new Date(code.deleted_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+  ];
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('codes.details.title')}</DialogTitle>
+          <DialogDescription className="sr-only">{t('codes.details.title')}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          {rows.map(([label, value]) => (
+            <div key={label} className="flex justify-between gap-3 py-1.5 text-sm border-b border-line">
+              <span className="text-fg-subtle">{label}</span>
+              <span className="text-end font-medium text-fg">{value}</span>
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.close')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

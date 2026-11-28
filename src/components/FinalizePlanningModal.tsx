@@ -45,6 +45,7 @@ import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisP
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
+import { Alert, Button } from './ui';
 import { localHourMs, localMidnightMs, nextLocalMidnightMs, splitAtLocalMidnight } from '../utils/localDayWindow';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -1067,79 +1068,79 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
   const criticalFails = checks.filter(c => !c.ok);
   const coverageFailed = criticalFails.some(f => f.id === 'stundennachweisCoverage');
 
+  // ── Presentation (phase 5)
+
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      style={{ background: 'rgba(15,23,42,0.75)' }}
+      className="glass-scrim fixed inset-0 z-[70] flex items-center justify-center p-4 font-ui"
       onClick={step === 'finalizing' || step === 'done' ? undefined : onClose}
     >
       <div
-        className="rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="glass-strong flex max-h-[90vh] w-full max-w-2xl flex-col rounded-pane"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex shrink-0 items-start justify-between border-b border-line px-5 py-4">
           <div>
-            <h3 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <Sparkles size={16} style={{ color: '#f59e0b' }} />
+            <h3 className="flex items-center gap-2 text-base font-bold text-fg">
+              <Sparkles size={16} className="text-caution" />
               {t('fin.title')}
             </h3>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            <p className="mt-1 text-xs text-fg-subtle">
               {t(MONTH_KEYS[run.month - 1])} {run.year} · {run.file_name || run.id.slice(0, 8)}
             </p>
           </div>
           <button
             onClick={onClose}
             disabled={step === 'finalizing'}
-            className="p-1 rounded disabled:opacity-40"
-            style={{ color: 'var(--text-tertiary)' }}
+            className="inline-flex size-8 items-center justify-center rounded-tight text-fg-subtle hover:bg-sunken hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40 [@media(pointer:coarse)]:size-10"
+            aria-label={t('common.close')}
           >
             <X size={16} />
           </button>
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
 
           {/* Checks */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-fg-subtle">
                 {t('fin.checksHeading')}
               </span>
-              {step === 'checking' && <Loader2 size={12} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />}
+              {step === 'checking' && <Loader2 size={12} className="text-fg-subtle motion-safe:animate-spin" />}
             </div>
             <div className="space-y-1.5">
               {step === 'checking' && checks.length === 0 && (
-                <div className="text-sm py-2" style={{ color: 'var(--text-tertiary)' }}>{t('fin.checksRunning')}</div>
+                <div className="py-2 text-sm text-fg-subtle">{t('fin.checksRunning')}</div>
               )}
               {checks.map((c, i) => {
                 const suggestions = CHECK_SUGGESTIONS[c.id];
                 return (
                 <div key={c.id} className="flex items-start gap-2.5 text-sm">
                   {c.ok
-                    ? <CheckCircle2 size={15} className="shrink-0 mt-0.5" style={{ color: '#22c55e' }} />
-                    : <AlertTriangle size={15} className="shrink-0 mt-0.5" style={{ color: '#dc2626' }} />
+                    ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-positive" />
+                    : <AlertTriangle size={15} className="mt-0.5 shrink-0 text-critical" />
                   }
                   <div className="min-w-0 flex-1">
-                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(CHECK_LABEL_KEYS[c.id])}</span>
+                    <span className="sr-only">{c.ok ? t('common.ok') : t('common.error')}: </span>
+                    <span className="font-medium text-fg">{t(CHECK_LABEL_KEYS[c.id])}</span>
                     {!c.ok && (
                       <div className="mt-0.5 space-y-0.5">
                         {c.detail.split('\n').map((line, li) => (
-                          <div key={li} className="text-xs" style={{ color: '#dc2626' }}>{line}</div>
+                          <div key={li} className="text-xs text-critical">{line}</div>
                         ))}
                       </div>
                     )}
                     {c.ok && c.detail !== DETAIL_OK && (
-                      <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{c.detail}</span>
+                      <span className="ms-2 text-xs text-fg-subtle">{c.detail}</span>
                     )}
                     {/* Suggestions for failed checks */}
                     {!c.ok && suggestions && (
                       <div className="mt-1.5">
                         <button
-                          className="inline-flex items-center gap-1 text-xs font-semibold transition-colors hover:opacity-80"
-                          style={{ color: '#2563eb' }}
+                          className="inline-flex items-center gap-1 rounded-chip text-xs font-semibold text-brand-text transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                           onClick={() => toggleSuggestions(i)}
                         >
                           {expandedSuggestions.has(i)
@@ -1148,10 +1149,10 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                           }
                         </button>
                         {expandedSuggestions.has(i) && (
-                          <ul className="mt-1.5 space-y-1 pl-3 border-l-2" style={{ borderColor: 'rgba(37,99,235,0.3)' }}>
+                          <ul className="mt-1.5 space-y-1 border-s-2 border-brand/30 ps-3">
                             {suggestions.map((suggestionKey, si) => (
-                              <li key={suggestionKey} className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                <span className="font-semibold" style={{ color: '#2563eb' }}>
+                              <li key={suggestionKey} className="text-xs text-fg-muted">
+                                <span className="font-semibold text-brand-text">
                                   {t('fin.suggestionNumber', { index: si + 1 })}
                                 </span>{' '}{t(suggestionKey)}
                               </li>
@@ -1169,52 +1170,52 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
           {/* Blocked banner */}
           {step === 'blocked' && criticalFails.length > 0 && (
-            <div className="px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.35)', color: '#991b1b' }}>
-              <div className="font-bold flex items-center gap-2 mb-1">
-                <Lock size={14} />
-                {coverageFailed ? t('fin.blockedCoverageTitle') : t('fin.blockedTitle')}
-              </div>
+            <Alert
+              tone="critical"
+              icon={Lock}
+              title={coverageFailed ? t('fin.blockedCoverageTitle') : t('fin.blockedTitle')}
+            >
               <p className="text-xs">
                 {tPlural({ one: 'fin.blockedCount.one', other: 'fin.blockedCount.other' }, criticalFails.length)}
               </p>
               {coverageFailed && (
-                <p className="text-xs mt-1" style={{ color: '#991b1b', fontWeight: 600 }}>
+                <p className="mt-1 text-xs font-semibold">
                   {t('fin.blockedCoverageBody')}
                 </p>
               )}
-              <p className="text-xs mt-1.5" style={{ color: '#7f1d1d' }}>
+              <p className="mt-1.5 text-xs">
                 {coverageFailed ? t('fin.blockedCoverageHint') : t('fin.blockedGenericHint')}
               </p>
-            </div>
+            </Alert>
           )}
 
           {/* Snapshot summary */}
           {snapshot && (step === 'ready' || step === 'finalizing' || step === 'done') && (
-            <div className="rounded-lg px-4 py-3 space-y-2" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-              <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="glass-card space-y-2 rounded-tile px-4 py-3">
+              <div className="mb-1 text-xs font-bold uppercase tracking-wider text-fg-subtle">
                 {t('fin.snapshotHeading')}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                 <div>
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('fin.totalTrips')}: </span>
-                  <strong style={{ color: 'var(--text-primary)' }}>{snapshot.totalTrips}</strong>
+                  <span className="text-fg-subtle">{t('fin.totalTrips')}: </span>
+                  <strong className="tabular-nums text-fg">{snapshot.totalTrips}</strong>
                 </div>
                 <div>
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}: </span>
-                  <strong style={{ color: 'var(--text-primary)' }}>{snapshot.driverCount}</strong>
+                  <span className="text-fg-subtle">{t('common.driver')}: </span>
+                  <strong className="tabular-nums text-fg">{snapshot.driverCount}</strong>
                 </div>
               </div>
-              <div className="space-y-1 mt-1">
+              <div className="mt-1 space-y-1">
                 {snapshot.drivers.map(d => (
-                  <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                    <div className="flex items-center gap-2">
-                      <Users size={11} style={{ color: 'var(--text-tertiary)' }} />
-                      <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{d.name}</span>
+                  <div key={d.name} className="flex items-center justify-between gap-2 border-b border-line py-1 text-xs last:border-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Users size={11} className="shrink-0 text-fg-subtle" />
+                      <span className="truncate font-medium text-fg">{d.name}</span>
                     </div>
-                    <div className="flex gap-3" style={{ color: 'var(--text-secondary)' }}>
+                    <div className="flex flex-wrap justify-end gap-x-3 text-fg-muted tabular-nums">
                       <span>{tPlural({ one: 'fin.tripsCount.one', other: 'fin.tripsCount.other' }, d.trips)}</span>
                       <span>{tPlural({ one: 'fin.blocksCount.one', other: 'fin.blocksCount.other' }, d.blocks)}</span>
-                      <span>{minsToHHMM(d.workMinutes)} h</span>
+                      <span className="whitespace-nowrap">{minsToHHMM(d.workMinutes)} h</span>
                     </div>
                   </div>
                 ))}
@@ -1224,61 +1225,59 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
           {/* Done state */}
           {step === 'done' && (
-            <div className="rounded-lg px-4 py-4 space-y-3" style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)' }}>
-              <div className="flex items-center gap-2 font-bold" style={{ color: '#15803d' }}>
+            <div className="space-y-3 rounded-tile border border-positive/20 bg-positive-soft px-4 py-4">
+              <div className="flex items-center gap-2 font-bold text-positive">
                 <CheckCircle2 size={16} />
                 {t('fin.doneTitle')}
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                <div>{t('fin.labelFahrtenbuch')}: <strong style={{ color: 'var(--text-primary)' }}>{t('fin.ready')}</strong></div>
-                <div>{t('fin.labelStundennachweise')}: <strong style={{ color: 'var(--text-primary)' }}>{t('fin.driverCount', { count: snapshot?.driverCount ?? 0 })}</strong></div>
-                <div>{t('fin.labelTrips')}: <strong style={{ color: 'var(--text-primary)' }}>{snapshot?.totalTrips ?? 0}</strong></div>
-                <div>{t('fin.finalizedAt')}: <strong style={{ color: 'var(--text-primary)' }}>{fmtDateTime(finalizedAt)}</strong></div>
+              <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-fg-muted sm:grid-cols-2">
+                <div>{t('fin.labelFahrtenbuch')}: <strong className="text-fg">{t('fin.ready')}</strong></div>
+                <div>{t('fin.labelStundennachweise')}: <strong className="text-fg">{t('fin.driverCount', { count: snapshot?.driverCount ?? 0 })}</strong></div>
+                <div>{t('fin.labelTrips')}: <strong className="tabular-nums text-fg">{snapshot?.totalTrips ?? 0}</strong></div>
+                <div>{t('fin.finalizedAt')}: <strong className="tabular-nums text-fg">{fmtDateTime(finalizedAt)}</strong></div>
               </div>
               {/* Fahrtenbuch download */}
               <div className="flex flex-wrap gap-2 pt-1">
-                <button
+                <Button
                   onClick={handleRedownload}
                   disabled={xlsxDownloading}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-all"
-                  style={{ background: 'rgba(34,197,94,0.15)', color: '#15803d', border: '1px solid rgba(34,197,94,0.4)' }}
+                  variant="secondary"
                 >
-                  {xlsxDownloading ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+                  {xlsxDownloading ? <Loader2 size={14} className="motion-safe:animate-spin" /> : <FileSpreadsheet size={14} />}
                   {t('fin.downloadFahrtenbuch')}
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => setShowStundenPreview(true)}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all"
-                  style={{ background: 'rgba(6,182,212,0.12)', color: '#0e7490', border: '1px solid rgba(6,182,212,0.35)' }}
+                  variant="secondary"
                 >
                   <FileText size={14} />
                   {t('fin.showStundennachweisPreview')}
-                </button>
+                </Button>
               </div>
               {/* Per-driver Stundennachweis downloads (from the same finalized snapshot) */}
               {snapshot && snapshot.drivers.some(d => d.pdfData) && (
                 <div className="space-y-1.5 pt-1">
-                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                     {t('fin.downloadStundennachweise')}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {snapshot.drivers.map(d => d.pdfData ? (
-                      <button
+                      <Button
                         key={d.id}
                         onClick={() => handleDownloadStunden(d)}
                         disabled={downloadingStundenDriverId === d.id}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-all"
-                        style={{ background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }}
+                        variant="secondary"
+                        size="sm"
                       >
                         {downloadingStundenDriverId === d.id
-                          ? <Loader2 size={11} className="animate-spin" />
+                          ? <Loader2 size={11} className="motion-safe:animate-spin" />
                           : <FileText size={11} />
                         }
                         {d.name}
-                      </button>
+                      </Button>
                     ) : null)}
                   </div>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <p className="text-xs text-fg-subtle">
                     {t('fin.snapshotNote')}
                   </p>
                 </div>
@@ -1288,55 +1287,49 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
           {/* Note about what finalization does */}
           {(step === 'ready') && (
-            <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.2)', color: 'var(--text-secondary)' }}>
+            <Alert tone="brand" role="note" className="text-xs">
               {t('fin.readyNote')}
-            </div>
+            </Alert>
           )}
 
           {error && (
-            <div className="px-3 py-2 rounded-lg text-sm whitespace-pre-wrap" style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', fontFamily: error.includes('\n') ? 'monospace' : 'inherit', fontSize: 12 }}>
-              {error}
-            </div>
+            <Alert tone="critical">
+              <div className={error.includes('\n') ? 'whitespace-pre-wrap font-mono text-xs' : 'whitespace-pre-wrap text-xs'}>
+                {error}
+              </div>
+            </Alert>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t shrink-0" style={{ borderColor: 'var(--border)' }}>
-          <button
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-5 py-3">
+          <Button
             onClick={onClose}
             disabled={step === 'finalizing'}
-            className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-            style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            variant="secondary"
           >
             {step === 'done' ? t('common.close') : t('common.cancel')}
-          </button>
+          </Button>
 
           {step !== 'done' && (
             <div className="flex items-center gap-2">
               {step === 'blocked' && (
-                <button
+                <Button
                   onClick={runChecks}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold"
-                  style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                  variant="secondary"
                 >
                   {t('fin.recheck')}
-                </button>
+                </Button>
               )}
-              <button
+              <Button
                 onClick={handleFinalize}
                 disabled={step !== 'ready' || !allChecksOk}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40 transition-all"
-                style={{
-                  background: step === 'ready' && allChecksOk ? '#f59e0b' : 'var(--bg-muted)',
-                  color: step === 'ready' && allChecksOk ? '#fff' : 'var(--text-tertiary)',
-                  border: 'none',
-                }}
               >
                 {step === 'finalizing'
-                  ? <><Loader2 size={14} className="animate-spin" /> {t('fin.creating')}</>
+                  ? <><Loader2 size={14} className="motion-safe:animate-spin" /> {t('fin.creating')}</>
                   : <><Sparkles size={14} /> {t('fin.title')}</>
                 }
-              </button>
+              </Button>
             </div>
           )}
         </div>

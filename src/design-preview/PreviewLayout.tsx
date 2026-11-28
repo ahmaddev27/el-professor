@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { LANGUAGES } from '../i18n';
 import { AppShell, Badge, Button, Tooltip, type AppShellNavGroup } from '../components/ui';
 import { DESIGN_PREVIEW_PATH } from './gate';
 import { PREVIEW_COMPANY, PREVIEW_PLAN, PREVIEW_USER } from './sampleData';
@@ -105,7 +106,7 @@ export default function PreviewLayout() {
   );
 
   const themeLabel = isDark ? t('shell.themeToLight') : t('shell.themeToDark');
-  const nextLanguage = language === 'de' ? 'en' : 'de';
+  const nextLanguage = LANGUAGES[(LANGUAGES.findIndex(l => l.code === language) + 1) % LANGUAGES.length]!.code;
 
   return (
     <div data-design-preview="">
@@ -139,7 +140,7 @@ export default function PreviewLayout() {
                 {isDark ? <Sun aria-hidden /> : <Moon aria-hidden />}
               </Button>
             </Tooltip>
-            <div className="ml-1 flex items-center gap-2.5">
+            <div className="ms-1 flex items-center gap-2.5">
               <span
                 aria-hidden
                 className="flex size-8 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-text"

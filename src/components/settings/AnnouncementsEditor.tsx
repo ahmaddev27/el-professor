@@ -27,7 +27,8 @@ import {
 import { deleteAnnouncement, listAnnouncements, saveAnnouncement } from '../../lib/announcementsClient';
 import { deDateTimeMinute } from '../../lib/platformFormat';
 import { AnnouncementItem } from '../AnnouncementBanner';
-import { cardStyle, controlStyle, EditorShell, Note } from './settingsEditorKit';
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Field as UiField, Input, NativeSelect, cn } from '../ui';
+import { controlClass, EditorShell, Note } from './settingsEditorKit';
 
 /**
  * Ankündigungen (plan 3.11): what the platform shows the companies it is meant
@@ -44,10 +45,10 @@ import { cardStyle, controlStyle, EditorShell, Note } from './settingsEditorKit'
  * zone is ever guessed.
  */
 
-const STATE_STYLE: Record<AnnouncementState, { bg: string; color: string; labelKey: TranslationKey }> = {
-  showing:   { bg: 'var(--success-subtle)', color: 'var(--success)',       labelKey: 'admin.announcements.state.showing' },
-  scheduled: { bg: 'var(--accent-subtle)',  color: 'var(--accent)',        labelKey: 'admin.announcements.state.scheduled' },
-  ended:     { bg: 'var(--bg-subtle)',      color: 'var(--text-tertiary)', labelKey: 'admin.announcements.state.ended' },
+const STATE_STYLE: Record<AnnouncementState, { tone: 'positive' | 'brand' | 'neutral'; labelKey: TranslationKey }> = {
+  showing:   { tone: 'positive', labelKey: 'admin.announcements.state.showing' },
+  scheduled: { tone: 'brand',    labelKey: 'admin.announcements.state.scheduled' },
+  ended:     { tone: 'neutral',  labelKey: 'admin.announcements.state.ended' },
 };
 
 const PLAN_LABELS: Record<Plan, TranslationKey> = {
@@ -212,13 +213,9 @@ const AnnouncementsEditor: React.FC = () => {
 
       {mayWrite && !editing && (
         <div className="flex justify-end">
-          <button
-            onClick={() => setEditing({ id: null, version: null, form: emptyAnnouncementForm() })}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-          >
+          <Button onClick={() => setEditing({ id: null, version: null, form: emptyAnnouncementForm() })}>
             <Plus size={15} />{t('admin.announcements.new')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -234,31 +231,27 @@ const AnnouncementsEditor: React.FC = () => {
       )}
 
       {items.length === 0 ? (
-        <div className="rounded-2xl px-5 py-8 text-center text-sm" style={{ ...cardStyle, color: 'var(--text-tertiary)' }}>
+        <Card className="px-5 py-8 text-center font-ui text-sm text-fg-subtle">
           {t('admin.announcements.none')}
-        </div>
+        </Card>
       ) : (
         <div className="space-y-3">
           {items.map(a => {
             const state = STATE_STYLE[announcementState(a, now)];
             const ToneIcon = a.tone === 'warning' ? AlertTriangle : Info;
             return (
-              <div key={a.id} className="rounded-2xl p-4 space-y-2" style={cardStyle}>
+              <Card key={a.id} className="space-y-2 p-4 font-ui">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex items-start gap-2 min-w-0">
-                    <ToneIcon size={16} className="flex-shrink-0 mt-0.5"
-                      style={{ color: a.tone === 'warning' ? 'var(--warning)' : 'var(--accent)' }} />
+                    <ToneIcon size={16} className={cn('mt-0.5 shrink-0', a.tone === 'warning' ? 'text-caution' : 'text-brand-text')} />
                     <div className="min-w-0">
-                      <p className="font-semibold break-words" style={{ color: 'var(--text-primary)' }}>{a.titleDe}</p>
-                      <p className="text-sm break-words" style={{ color: 'var(--text-secondary)' }}>{a.bodyDe}</p>
+                      <p className="break-words font-semibold text-fg">{a.titleDe}</p>
+                      <p className="break-words text-sm text-fg-muted">{a.bodyDe}</p>
                     </div>
                   </div>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{ background: state.bg, color: state.color }}>
-                    {t(state.labelKey)}
-                  </span>
+                  <Badge tone={state.tone}>{t(state.labelKey)}</Badge>
                 </div>
-                <div className="text-xs space-y-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                <div className="space-y-0.5 text-xs text-fg-subtle">
                   <p>{a.endsAt
                     ? t('admin.announcements.window', { from: deDateTimeMinute(a.startsAt), to: deDateTimeMinute(a.endsAt) })
                     : t('admin.announcements.windowOpen', { from: deDateTimeMinute(a.startsAt) })}</p>
@@ -269,37 +262,31 @@ const AnnouncementsEditor: React.FC = () => {
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {confirmDelete === a.id ? (
                       <>
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('admin.announcements.confirmDelete')}</span>
-                        <button onClick={() => void remove(a)} disabled={busy}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          // A -solid fill takes a white label in both themes (accentLabel.contrast.test.ts).
-                          style={{ background: 'var(--danger-solid)', color: 'white' }}>
+                        <span className="text-xs text-fg-muted">{t('admin.announcements.confirmDelete')}</span>
+                        <Button variant="danger" size="sm" onClick={() => void remove(a)} disabled={busy}>
                           {t('admin.announcements.delete')}
-                        </button>
-                        <button onClick={() => setConfirmDelete(null)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>
                           {t('admin.announcements.cancel')}
-                        </button>
+                        </Button>
                       </>
                     ) : (
                       <>
-                        <button
-                          onClick={() => setEditing({ id: a.id, version: a.version, form: announcementToForm(a) })}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setEditing({ id: a.id, version: a.version, form: announcementToForm(a) })}>
                           <Pencil size={13} />{t('admin.announcements.edit')}
-                        </button>
-                        <button onClick={() => setConfirmDelete(a.id)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          style={{ color: 'var(--danger)' }}>
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(a.id)}
+                          className="text-critical hover:text-critical">
                           <Trash2 size={13} />{t('admin.announcements.delete')}
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
@@ -322,7 +309,6 @@ const AnnouncementFormCard: React.FC<{
   const { form } = editing;
   const [search, setSearch] = useState('');
   const set = <K extends keyof AnnouncementForm>(key: K, value: AnnouncementForm[K]) => onChange({ ...form, [key]: value });
-  const input = { ...controlStyle, width: '100%' };
 
   // What a tenant would see, in both languages, from what is typed.
   const startsAt = toIsoInstant(form.startsLocal) ?? new Date().toISOString();
@@ -342,59 +328,54 @@ const AnnouncementFormCard: React.FC<{
   const shown = needle ? companies.filter(c => c.name.toLowerCase().includes(needle)) : companies;
 
   const label = (key: TranslationKey, extra?: string) => (
-    <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-      {t(key)}{extra ? <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}> {extra}</span> : null}
-    </span>
+    <>{t(key)}{extra ? <span className="font-normal text-fg-subtle"> {extra}</span> : null}</>
   );
 
   return (
-    <div className="rounded-2xl p-5 space-y-4" style={{ ...cardStyle, borderColor: 'var(--accent)' }}>
-      <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>
-        {t(editing.id ? 'admin.announcements.editTitle' : 'admin.announcements.newTitle')}
-      </h2>
-
-      <label className="block sm:w-64">
-        {label('admin.announcements.field.tone')}
-        <select value={form.tone} onChange={e => set('tone', e.target.value as AnnouncementForm['tone'])} style={input}>
+    <Card className="border-brand font-ui">
+      <CardHeader>
+        <CardTitle>
+          {t(editing.id ? 'admin.announcements.editTitle' : 'admin.announcements.newTitle')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+      <UiField label={label('admin.announcements.field.tone')} className="sm:w-64">
+        <NativeSelect value={form.tone} onChange={e => set('tone', e.target.value as AnnouncementForm['tone'])}>
           <option value="info">{t('admin.announcements.tone.info')}</option>
           <option value="warning">{t('admin.announcements.tone.warning')}</option>
-        </select>
-      </label>
+        </NativeSelect>
+      </UiField>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="space-y-3">
-          <label className="block">
-            {label('admin.announcements.field.titleDe')}
-            <input value={form.titleDe} maxLength={ANNOUNCEMENT_TITLE_MAX} onChange={e => set('titleDe', e.target.value)} style={input} />
-          </label>
-          <label className="block">
-            {label('admin.announcements.field.bodyDe')}
-            <textarea value={form.bodyDe} maxLength={ANNOUNCEMENT_BODY_MAX} rows={3}
-              onChange={e => set('bodyDe', e.target.value)} style={{ ...input, resize: 'vertical' }} />
-          </label>
+          <UiField label={label('admin.announcements.field.titleDe')}>
+            <Input value={form.titleDe} maxLength={ANNOUNCEMENT_TITLE_MAX} onChange={e => set('titleDe', e.target.value)} />
+          </UiField>
+          <UiField label={label('admin.announcements.field.bodyDe')} id="announcement-body-de">
+            <textarea id="announcement-body-de" value={form.bodyDe} maxLength={ANNOUNCEMENT_BODY_MAX} rows={3}
+              onChange={e => set('bodyDe', e.target.value)} className={cn(controlClass, 'resize-y')} />
+          </UiField>
         </div>
         <div className="space-y-3">
-          <label className="block">
-            {label('admin.announcements.field.titleEn', t('admin.announcements.optional'))}
-            <input value={form.titleEn} maxLength={ANNOUNCEMENT_TITLE_MAX} onChange={e => set('titleEn', e.target.value)} style={input} />
-          </label>
-          <label className="block">
-            {label('admin.announcements.field.bodyEn', t('admin.announcements.optional'))}
-            <textarea value={form.bodyEn} maxLength={ANNOUNCEMENT_BODY_MAX} rows={3}
-              onChange={e => set('bodyEn', e.target.value)} style={{ ...input, resize: 'vertical' }} />
-          </label>
+          <UiField label={label('admin.announcements.field.titleEn', t('admin.announcements.optional'))}>
+            <Input value={form.titleEn} maxLength={ANNOUNCEMENT_TITLE_MAX} onChange={e => set('titleEn', e.target.value)} />
+          </UiField>
+          <UiField label={label('admin.announcements.field.bodyEn', t('admin.announcements.optional'))} id="announcement-body-en">
+            <textarea id="announcement-body-en" value={form.bodyEn} maxLength={ANNOUNCEMENT_BODY_MAX} rows={3}
+              onChange={e => set('bodyEn', e.target.value)} className={cn(controlClass, 'resize-y')} />
+          </UiField>
         </div>
       </div>
-      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.announcements.englishHint')}</p>
+      <p className="text-xs text-fg-subtle">{t('admin.announcements.englishHint')}</p>
 
       <fieldset className="space-y-2">
-        <legend className="text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+        <legend className="mb-1.5 text-[13px] font-[550] text-fg-muted">
           {t('admin.announcements.field.audience')}
         </legend>
         <div className="flex flex-wrap gap-4">
           {(['all', 'plans', 'companies'] as AnnouncementAudience[]).map(audience => (
-            <label key={audience} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
-              <input type="radio" name="audience" checked={form.audience === audience}
+            <label key={audience} className="flex items-center gap-2 text-sm text-fg">
+              <input type="radio" name="audience" className="size-4 cursor-pointer accent-brand" checked={form.audience === audience}
                 onChange={() => set('audience', audience)} />
               {t(`admin.announcements.audience.${audience}` as TranslationKey)}
             </label>
@@ -402,10 +383,10 @@ const AnnouncementFormCard: React.FC<{
         </div>
 
         {form.audience === 'plans' && (
-          <div className="flex flex-wrap gap-4 pl-1">
+          <div className="flex flex-wrap gap-4 ps-1">
             {ANNOUNCEMENT_PLANS.map(plan => (
-              <label key={plan} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                <input type="checkbox" checked={form.plans.includes(plan)}
+              <label key={plan} className="flex items-center gap-2 text-sm text-fg-muted">
+                <input type="checkbox" className="size-4 cursor-pointer accent-brand" checked={form.plans.includes(plan)}
                   onChange={e => set('plans', e.target.checked
                     ? [...form.plans, plan]
                     : form.plans.filter(p => p !== plan))} />
@@ -417,14 +398,14 @@ const AnnouncementFormCard: React.FC<{
 
         {form.audience === 'companies' && (
           <div className="space-y-2">
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder={t('admin.announcements.searchCompanies')} style={input} />
-            <div className="max-h-48 overflow-y-auto rounded-xl p-2 space-y-1" style={{ border: '1px solid var(--border)' }}>
+            <Input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder={t('admin.announcements.searchCompanies')} />
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-tile border border-line p-2">
               {shown.length === 0 ? (
-                <p className="text-xs px-1 py-2" style={{ color: 'var(--text-tertiary)' }}>{t('admin.announcements.noCompanies')}</p>
+                <p className="px-1 py-2 text-xs text-fg-subtle">{t('admin.announcements.noCompanies')}</p>
               ) : shown.map(c => (
-                <label key={c.id} className="flex items-center gap-2 text-sm px-1" style={{ color: 'var(--text-primary)' }}>
-                  <input type="checkbox" checked={form.companyIds.includes(c.id)}
+                <label key={c.id} className="flex items-center gap-2 px-1 text-sm text-fg">
+                  <input type="checkbox" className="size-4 cursor-pointer accent-brand" checked={form.companyIds.includes(c.id)}
                     onChange={e => set('companyIds', e.target.checked
                       ? [...form.companyIds, c.id]
                       : form.companyIds.filter(id => id !== c.id))} />
@@ -432,45 +413,45 @@ const AnnouncementFormCard: React.FC<{
                 </label>
               ))}
             </div>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+            <p className="text-xs text-fg-subtle">
               {t('admin.announcements.companiesChosen', { count: form.companyIds.length })}
             </p>
           </div>
         )}
       </fieldset>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          {label('admin.announcements.field.startsAt')}
-          <input type="datetime-local" value={form.startsLocal} onChange={e => set('startsLocal', e.target.value)} style={input} />
-        </label>
-        <label className="block">
-          {label('admin.announcements.field.endsAt', t('admin.announcements.optional'))}
-          <input type="datetime-local" value={form.endsLocal} onChange={e => set('endsLocal', e.target.value)} style={input} />
-        </label>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <UiField label={label('admin.announcements.field.startsAt')}>
+          <Input type="datetime-local" value={form.startsLocal} onChange={e => set('startsLocal', e.target.value)} />
+        </UiField>
+        <UiField label={label('admin.announcements.field.endsAt', t('admin.announcements.optional'))}>
+          <Input type="datetime-local" value={form.endsLocal} onChange={e => set('endsLocal', e.target.value)} />
+        </UiField>
       </div>
-      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('admin.announcements.windowHint')}</p>
+      <p className="text-xs text-fg-subtle">{t('admin.announcements.windowHint')}</p>
 
       <div className="space-y-2">
-        <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('admin.announcements.preview')}</p>
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <p className="text-[13px] font-[550] text-fg-muted">{t('admin.announcements.preview')}</p>
+        {/* The banner draws its own look (AnnouncementItem); only its frame is ours. */}
+        <div className="overflow-hidden rounded-tile border border-line">
           <AnnouncementItem announcement={preview} language="de" dismissLabel={t('announcement.dismiss')} />
           <AnnouncementItem announcement={preview} language="en" dismissLabel={t('announcement.dismiss')} />
         </div>
       </div>
 
       <div className="flex justify-end gap-2">
-        <button onClick={onCancel} className="px-4 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+        <Button variant="ghost" onClick={onCancel}>
           {t('admin.announcements.cancel')}
-        </button>
-        <button onClick={onSave} disabled={busy} className="px-5 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: busy ? 0.6 : 1 }}>
+        </Button>
+        <Button onClick={onSave} disabled={busy}>
           {busy ? t('admin.common.saving') : t('admin.settings.save')}
-        </button>
+        </Button>
       </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
+
+// ── Presentation (phase 5): the markup above only draws; its logic is unchanged ──
 
 export default AnnouncementsEditor;

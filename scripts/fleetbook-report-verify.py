@@ -1,6 +1,7 @@
-"""Read both files of a simulated month back and check them, from their own bytes.
+"""Read the files of a simulated month back and check them, from their own bytes.
 
     python scripts/fleetbook-report-verify.py <SIMULIERT_Monatsbericht_….xlsx> <SIMULIERT_Betriebsbericht_….xlsx>
+    python scripts/fleetbook-report-verify.py <SIMULIERT_Monatsabschluss_….xlsx>
 
 External audit round 6. The month comes as two files: the Fahrtenbuch report
 (passenger rides and cancellations) and the internal operational report (empty
@@ -17,7 +18,12 @@ zoneinfo):
     company setting in I; the basis, amount, remainder and rate of F;
   - the calendar: every day of the month a row of B, 24 h or 23/25;
   - overlaps: no vehicle and no driver (by id) holds two rides at once;
-  - shift lengths 240 to 360 minutes, from H2 and from O;
+  - shifts (parts) at most 360 minutes (no universal floor since Round 8: a
+    shift is as long as its driver's plan), the last ride by the planned end;
+    at most one Dienst (duty) per driver id and day, of one part or of exactly
+    two parts with at least 30 minutes between them and at most 480 minutes of
+    work in all (§ 3, § 4 ArbZG); at most 2880 minutes of work per ISO week; and
+    the rest between Dienste, not between the two parts of one; from H2, O, I;
   - TÜV and confirmed full-day blocks, read from H and H2;
   - the route sheet G: one row per consecutive completed pair, its gap
     recomputed from A, and for a verified pair road + 45 s + margin <= gap;
@@ -25,7 +31,21 @@ zoneinfo):
     vehicle, driver and shift, its margin is recomputed from the options in I,
     and a verified one fits its window;
   - the verdict in F is not VALIDATED while a pair is estimated, unverifiable
-    or in conflict.
+    or in conflict;
+  - round 8, the return to the base: when I says "Ja", every shift with a
+    completed ride ends with exactly one drive from its last ride's Zielort to
+    the base coordinates of I, and when "Nein", only a part 1 has one (it ends
+    at the base for the break of a two-part Dienst). A last
+    drop-off at the base itself is recorded too, as a drive of nothing, so the
+    rule has no exception a reader could not see.
+
+The Monatsabschluss (round 8, section 10) is checked on its own: the seven
+sheets and the notice, a label of SIMULIERT, IMPORTIERT or ABGELEITET on every
+row, no declined order in its Fahrtenbuch, the fares and Uber's turnover
+re-summed against the calendar total, every shift's empty kilometres against
+its drives, the return drives against the base of sheet 7, every pay header
+saying it is configuration, simulated or not booked, and the verdict in the
+file name equal to sheet 7's.
 
 One line per check; a check it cannot make says so and is never counted as
 passed. Exit 1 when any check fails.
@@ -36,6 +56,7 @@ import math
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from openpyxl import load_workbook
@@ -53,6 +74,13 @@ OPERATIONAL_SHEETS = [
 ]
 STATUSES = {"ROUTE_VERIFIED", "ROUTE_CONFLICT", "UNVERIFIABLE", "ESTIMATE_ONLY"}
 HANDLING = 45
+RETURN_PURPOSE = "letzter Zielort zurueck zum Betriebssitz"
+CLOSING_SHEETS = [
+    "Fahrtenbuch", "Fahrerschichten", "Lohn und Arbeitszeit", "Uber Tagesabgleich",
+    "Fahrzeuge und Leerfahrten", "Kalendermonat", "Pruefung und Herkunft", "SIMULIERT",
+]
+CLOSING_LABELS = {"SIMULIERT", "IMPORTIERT", "ABGELEITET"}
+VERDICTS = ("VALIDATED_FOR_EXPORT", "VERIFICATION_INCOMPLETE", "NOT_VALIDATED")
 
 
 def cents(x):
@@ -176,8 +204,8 @@ def verify(report_path, ops_path):
         rate = float(posten["Satz (%)"])
         bp = round(rate * 100)
         check(amount + rest == basis, "F: amount + remainder = basis", f"{amount / 100:.2f} + {rest / 100:.2f}")
-        check(30.0 <= rate <= 33.0 and amount == (basis * bp + 5000) // 10000, "F: rate in [30 %, 33 %] and amount = basis x rate",
-              f"{rate} %")
+        check(bp in (3000, 3100, 3200, 3300) and amount == (basis * bp + 5000) // 10000,
+              "F: rate is 30, 31, 32 or 33 % and amount = basis x rate", f"{rate} %")
     else:
         check(False, "F: the monthly share is in the file", "no 'Satz (%)' line")
     verdict = verify_rows.get("Exportstatus", {}).get("Wert / Summe der Teile")
@@ -213,15 +241,65 @@ def verify(report_path, ops_path):
     _, decisions = table(book, "H2 Schichtentscheidungen")
     accepted = [d for d in decisions if str(d["Ergebnis"]).startswith("eingeplant")]
     lengths = [(instant(d["Schichtende"] + ".000") - instant(d["Schichtbeginn"] + ".000")).total_seconds() / 60 for d in accepted]
-    outside = [round(m) for m in lengths if m < 240 or m > 360]
-    check(accepted and not outside, "H2: every accepted shift is 240 to 360 minutes",
+    outside = [round(m) for m in lengths if m <= 0 or m > 360]
+    check(accepted and not outside, "H2: every accepted shift is longer than 0 and at most 360 minutes",
           f"{len(accepted)} shifts, min {round(min(lengths))} max {round(max(lengths))}" if lengths else "no shift")
     _, planning = table(ops, "O Schichtplanung")
     planned = [r for r in planning if r["Art"] == "Schicht eingeplant"]
-    check(len(planned) == len(accepted) and all(240 <= r["Dauer (min)"] <= 360 for r in planned),
-          "O: the same shifts, all within their limits", f"{len(planned)} shifts")
-    short = sum(r["Anzahl"] for r in planning if r["Art"] == "Versuch verworfen" and "Mindestdauer" in str(r["Grund"]))
-    check.info(f"{short} shift attempts refused at scheduling time for ending short of 240 minutes")
+    spans = [(r, instant(r["Beginn"]), instant(r["Geplantes Ende"]), instant(r["Ende"])) for r in planned]
+    unreadable = [r["Schicht"] for r, b, p, e in spans if not (b and p and e)]
+    too_long = [r["Schicht"] for r, b, p, e in spans if b and p and (p - b).total_seconds() / 60 > 360]
+    late = [r["Schicht"] for r, b, p, e in spans if p and e and e > p]
+    check(len(planned) == len(accepted) and not unreadable and not too_long and not late,
+          "O: the same shifts, each planned for at most 360 minutes, the last ride by its planned end",
+          f"{len(planned)} shifts; {len(unreadable)} unreadable, {len(too_long)} over 360, {len(late)} ending late")
+    duties = defaultdict(list)
+    for r, b, p, e in spans:
+        duties[r["Dienst"] or r["Schicht"]].append((r, b, p))
+    per_day = defaultdict(set)
+    for did, parts in duties.items():
+        per_day[(parts[0][0]["Fahrer-ID"], str(parts[0][0]["Tag"]))].add(did)
+    twice = sorted(k for k, ids in per_day.items() if len(ids) > 1)
+    check(all(r["Fahrer-ID"] for r in planned) and not twice, "O: every shift names its driver id, at most one Dienst per driver and day",
+          f"{len(per_day)} driver-days" + (f"; twice: {twice[:3]}" if twice else ""))
+    bad_duty = []
+    for did, parts in duties.items():
+        parts.sort(key=lambda x: x[1] or datetime.min.replace(tzinfo=UTC))
+        nums = [x[0]["Teil"] for x in parts]
+        if len(parts) == 1:
+            if nums[0] not in ("", None):
+                bad_duty.append(did)
+            continue
+        if len(parts) != 2 or nums != [1, 2] or not all(x[1] and x[2] for x in parts):
+            bad_duty.append(did)
+            continue
+        gap = (parts[1][1] - parts[0][2]).total_seconds() / 60
+        work = sum((x[2] - x[1]).total_seconds() / 60 for x in parts)
+        if gap < 30 or work > 480 or parts[0][0]["Kennzeichen"] != parts[1][0]["Kennzeichen"]:
+            bad_duty.append(did)
+    check(not bad_duty, "O: a Dienst is one part, or parts 1 and 2 on one vehicle with a break of at least 30 minutes and at most 480 minutes of work",
+          f"{len(duties)} Dienste, {len(bad_duty)} wrong")
+    weeks = defaultdict(float)
+    for parts in duties.values():
+        day = datetime.strptime(str(parts[0][0]["Tag"]), "%Y-%m-%d").date()
+        monday = day - timedelta(days=day.weekday())
+        weeks[(parts[0][0]["Fahrer-ID"], monday)] += sum((x[2] - x[1]).total_seconds() / 60 for x in parts if x[1] and x[2])
+    over = sorted(k for k, m in weeks.items() if m > 2880)
+    check(not over, "O: at most 2880 minutes (48 h) of work per driver and ISO week", f"{len(weeks)} driver-weeks, {len(over)} over")
+    rest = settings_of(book).get("Option minDriverRestMinutes")
+    if isinstance(rest, (int, float)):
+        by_driver = defaultdict(list)
+        for parts in duties.values():
+            starts = [x[1] for x in parts if x[1]]
+            ends = [x[2] for x in parts if x[2]]
+            if starts and ends:
+                by_driver[parts[0][0]["Fahrer-ID"]].append((min(starts), max(ends)))
+        short_rest = sum(1 for v in by_driver.values() for a, b in zip(sorted(v), sorted(v)[1:])
+                         if (b[0] - a[1]).total_seconds() / 60 < rest)
+        check(short_rest == 0, f"O: at least {rest} minutes of rest between two Dienste of one driver",
+              f"{short_rest} pairs short")
+    else:
+        check(False, "O: rest between two shifts of one driver", "cannot be checked: I names no Option minDriverRestMinutes")
 
     blocked_days = {(r["Kennzeichen"], str(r["Tag"])) for r in decisions if r.get("Code") == "vehicle_tuev_expired"}
     on_blocked = [r["Fahrt-ID"] for r in done if (r["Kennzeichen"], str(r["Datum der Fahrt"])) in blocked_days]
@@ -301,7 +379,45 @@ def verify(report_path, ops_path):
           "L: every record is a simulated REPOSITIONING / LEERFAHRT", f"{len(legs)} legs")
     check({r["Lauf-ID"] for r in legs} == {source.get("Lauf-ID")}, "L: one run id, the source sheet's")
     orphan, owner_wrong, leg_bad = [], [], []
+    returns_home = source.get("Rueckkehr zum Betriebssitz am Schichtende")
+    base_point = (source.get("Betriebssitz Breite"), source.get("Betriebssitz Laenge"))
+    home_legs = [leg for leg in legs if leg["Zweck"] == RETURN_PURPOSE]
+    for leg in home_legs:
+        prev = by_id.get(leg["Fahrt-ID vorher"]) if leg["Fahrt-ID vorher"] else None
+        if not prev or prev["Status"] != "abgeschlossen":
+            orphan.append(leg["Leerfahrt-ID"])
+            continue
+        if (prev["Kennzeichen"], prev["Fahrer-ID"], prev["Schicht"]) != (leg["Kennzeichen"], leg["Fahrer-ID"], leg["Schicht"]):
+            owner_wrong.append(leg["Leerfahrt-ID"])
+        if leg["Von"] != prev["Zielort"] or (leg["Nach Breite"], leg["Nach Laenge"]) != base_point or leg["Fahrt-ID nachher"]:
+            leg_bad.append(leg["Leerfahrt-ID"])
+        if leg["Pruefstatus"] == "ROUTE_VERIFIED":
+            road = leg["Fahrzeit Strasse (s)"]
+            need = road + margin(road)
+            arrive, depart = instant(leg["Ankunft"]), instant(leg["Abfahrt"])
+            if need != leg["Benoetigt (s)"] or leg["Verfuegbar (s)"] < need or not (arrive and depart) \
+                    or round((arrive - depart).total_seconds()) != road or depart != instant(prev["Fahrtende"]):
+                leg_bad.append(leg["Leerfahrt-ID"])
+    check(returns_home in ("Ja", "Nein"), "I: says whether shifts return to the base", str(returns_home))
+    last_ride = {}
+    for r in done:
+        if r["Schicht"] not in last_ride or instant(r["Fahrtbeginn"]) > instant(last_ride[r["Schicht"]]["Fahrtbeginn"]):
+            last_ride[r["Schicht"]] = r
+    home_by_shift = Counter(leg["Schicht"] for leg in home_legs)
+    part_one = {r["Schicht"] for r in planned if r["Teil"] == 1}
+    if returns_home == "Ja":
+        missing = [s for s in last_ride if home_by_shift.get(s, 0) != 1]
+        wrong_start = [leg["Leerfahrt-ID"] for leg in home_legs if leg["Fahrt-ID vorher"] != last_ride.get(leg["Schicht"], {}).get("Fahrt-ID")]
+        check(not missing, "L: every shift with a completed ride returns to the base exactly once", f"{len(missing)} of {len(last_ride)} do not")
+        check(not wrong_start, "L: every return starts at its shift's last completed ride", f"{len(wrong_start)} do not")
+    else:
+        extra = [leg for leg in home_legs if leg["Schicht"] not in part_one]
+        check(not extra and all(home_by_shift.get(s, 0) <= 1 for s in part_one),
+              "L: in a month that does not return, only a part 1 returns to the base (for its break), once",
+              f"{len(home_legs)} returns, {len(extra)} outside a part 1")
     for leg in legs:
+        if leg["Zweck"] == RETURN_PURPOSE:
+            continue
         nxt = by_id.get(leg["Fahrt-ID nachher"])
         if not nxt or nxt["Status"] != "abgeschlossen":
             orphan.append(leg["Leerfahrt-ID"])
@@ -350,14 +466,141 @@ def verify(report_path, ops_path):
     return check, summary
 
 
+def verify_closing(path):
+    check = Checks()
+    book = load_workbook(path, read_only=False)
+    check(book.sheetnames == CLOSING_SHEETS, "closing: sheets and their order", " | ".join(book.sheetnames))
+    for name in CLOSING_SHEETS[:-1]:
+        rows = list(book[name].iter_rows(values_only=True))
+        bad = [i + 2 for i, r in enumerate(rows[1:]) if r[0] not in CLOSING_LABELS]
+        check(rows[0][0] == "Kennzeichnung" and not bad, f"closing: a source label on every row of {name}",
+              f"{len(rows) - 1} rows, {json.dumps(Counter(r[0] for r in rows[1:]))}")
+    formulas = sum(1 for ws in book.worksheets for row in ws.iter_rows() for c in row if c.data_type == "f")
+    check(formulas == 0, "closing: no formula anywhere", f"{formulas} formula cells")
+    _, info = table(book, "Pruefung und Herkunft")
+    facts = {r["Angabe"]: r["Wert"] for r in info}
+
+    _, rides = table(book, "Fahrtenbuch")
+    statuses = Counter(r["Status"] for r in rides)
+    check(set(statuses) <= {"abgeschlossen", "storniert"}, "1: only completed and cancelled rides, no declined order", json.dumps(statuses))
+    real = [r for r in rides if r["Kennzeichnung"] == "IMPORTIERT"]
+    check(all(r["Finanzstatus"] == "wie importiert, unveraendert" for r in real), "1: every real trip as imported", f"{len(real)} real trips")
+    ids = [r["Fahrt-ID"] for r in rides]
+    check(len(set(ids)) == len(ids), "1: every Fahrt-ID unique", f"{len(ids)} rides")
+    real_days = {(r["Fahrer-ID"], r["Betriebstag"]) for r in real}
+    over = [r["Fahrt-ID"] for r in rides if r["Kennzeichnung"] == "SIMULIERT" and (r["Fahrer-ID"], r["Betriebstag"]) in real_days]
+    check(not over, "1: no simulated ride on a driver-day that holds real trips", f"{len(over)} rides")
+
+    _, days = table(book, "Kalendermonat")
+    total = days[-1] if days else {}
+    check(total.get("Datum") == "Summe", "6: the last row is the total")
+    month_days = [r for r in days if isinstance(r.get("Datum"), str) and r["Datum"][:4].isdigit()]
+    if month_days:
+        y, m = int(month_days[0]["Datum"][:4]), int(month_days[0]["Datum"][5:7])
+        check([r["Datum"] for r in month_days] == [f"{y}-{m:02d}-{d:02d}" for d in range(1, calendar.monthrange(y, m)[1] + 1)],
+              "6: one row per calendar day, none missing", f"{len(month_days)} days")
+    sim = sum(cents(r["Fahrpreis (EUR)"]) for r in rides if r["Kennzeichnung"] == "SIMULIERT" and r["Status"] == "abgeschlossen")
+    check(sim == cents(total.get("Fahrpreise simuliert (EUR)")), "1 = 6: simulated fares", f"{sim / 100:.2f} EUR")
+    if all(isinstance(r["Fahrpreis (EUR)"], (int, float)) for r in real):
+        actual = sum(cents(r["Fahrpreis (EUR)"]) for r in real if r["Status"] == "abgeschlossen")
+        check(actual == cents(total.get("Fahrpreise echt (EUR, importiert)")), "1 = 6: real fares", f"{actual / 100:.2f} EUR")
+    else:
+        check.info("1 = 6: a real fare is unreadable, the real total is not compared")
+    for col in [c for c in total if c and c not in ("Kennzeichnung", "Datum", "Wochentag", "Tag ohne Aktivitaet") and isinstance(total[c], (int, float))]:
+        parts = [r[col] for r in days[:-1] if isinstance(r.get(col), (int, float))]
+        step = 1 if "(EUR" not in col else 100
+        check(round(sum(parts) * step) == round(total[col] * step), f"6: the total of {col} is the sum of its rows")
+
+    _, uber = table(book, "Uber Tagesabgleich")
+    read = facts.get("Pruefsumme Uber-Zahlen") != "nicht gelesen"
+    counted_rows = [r for r in uber if r["Zeilenart"] in ("Tag", "Woche im Monat")]
+    if read:
+        umsatz = sum(cents(r["Umsatz (EUR, importiert)"]) for r in counted_rows if isinstance(r["Umsatz (EUR, importiert)"], (int, float)))
+        check(umsatz == cents(total.get("Umsatz importiert (EUR)")), "4 = 6: Uber turnover inside the month", f"{umsatz / 100:.2f} EUR")
+    else:
+        check(all(r["Umsatz (EUR, importiert)"] == "nicht gelesen" for r in counted_rows),
+              "4: Uber not read, and no row pretends a figure")
+    # The gap (D1, 27.11.2026) is shown, never closed: Umsatz minus simulated and real fares, on every day with figures.
+    gap_header = "Differenz Umsatz - Fahrpreise (EUR, angezeigt, nicht ausgeglichen)"
+    gap_rows = [r for r in uber if r["Zeilenart"] == "Tag" and isinstance(r.get(gap_header), (int, float))]
+    wrong_gap = [r for r in gap_rows if cents(r[gap_header]) != cents(r["Umsatz (EUR, importiert)"])
+                 - cents(r["Simulierte Fahrpreise (EUR, nicht tatsaechlich)"])
+                 - (0 if r["Echte Fahrpreise (EUR, importiert)"] in ("", None) else cents(r["Echte Fahrpreise (EUR, importiert)"]))]
+    check(gap_header in (uber[0] if uber else {}) and not wrong_gap, "4: the gap is Umsatz minus simulated and real fares",
+          f"{len(gap_rows)} days, {len(wrong_gap)} wrong")
+    across = [r for r in uber if str(r["Zeilenart"]).startswith("Woche ueber die Monatsgrenze")]
+    check(all(r["Status"] == "INCOMPLETE" for r in across), "4: a week across the month boundary stays INCOMPLETE", f"{len(across)} weeks")
+    failed = [r for r in uber if r["Status"] == "FAILED"]
+    open_rows = [r for r in uber if r["Status"] in ("FAILED", "INCOMPLETE")]
+    status = facts.get("Finanzabgleich mit Uber (getrennt vom Exportstatus)")
+    check(not open_rows or status in ("INCOMPLETE", "FAILED"), "7: the financial status is not settled while a row of 4 is open",
+          f"{len(open_rows)} open rows, status {status}")
+    check(not failed or status == "FAILED", "7: a FAILED row of 4 fails the financial status", f"{len(failed)}")
+    # RECONCILED exists since D1 (27.11.2026): the month may read it only when every row of 4 does.
+    statuses = ("RECONCILED", "CONFIGURATION_REQUIRED", "INCOMPLETE", "FAILED")
+    check(status in statuses and all(r["Status"] in statuses for r in uber), "7: every status is one of the four", str(status))
+    unsettled = [r for r in uber if r["Status"] != "RECONCILED"]
+    check(status != "RECONCILED" or not unsettled, "7: RECONCILED only when every row of 4 is",
+          f"{len(unsettled)} rows not reconciled, status {status}")
+
+    _, vehicles = table(book, "Fahrzeuge und Leerfahrten")
+    legs = defaultdict(list)
+    for r in vehicles:
+        if r["Zeilenart"] == "Leerfahrt":
+            legs[r["Schicht-ID"]].append(r)
+    shifts = [r for r in vehicles if r["Zeilenart"] == "Schicht"]
+    km_wrong = [s["Schicht-ID"] for s in shifts if isinstance(s["Leer-km"], (int, float))
+                and cents(s["Leer-km"]) != sum(cents(r["Leer-km"]) for r in legs[s["Schicht-ID"]])]
+    check(not km_wrong, "5: every shift's empty km is the sum of its drives", f"{len(km_wrong)} of {len(shifts)} differ")
+    _, shift_rows = table(book, "Fahrerschichten")
+    check(len(shift_rows) == len(shifts), "2 = 5: one row per shift in both", f"{len(shift_rows)} / {len(shifts)}")
+    returns_home = facts.get("Rueckkehr zum Betriebssitz am Schichtende")
+    base = (facts.get("Betriebssitz Breite"), facts.get("Betriebssitz Laenge"))
+    home = [r for r in vehicles if r["Zweck"] == "Rueckkehr zum Betriebssitz"]
+    check(returns_home in ("Ja", "Nein"), "7: says whether shifts return to the base", str(returns_home))
+    with_rides = {r["Schicht"] for r in rides if r["Kennzeichnung"] == "SIMULIERT" and r["Status"] == "abgeschlossen"}
+    if returns_home == "Ja":
+        per_shift = Counter(r["Schicht-ID"] for r in home)
+        missing = [s for s in with_rides if per_shift.get(s, 0) != 1]
+        check(not missing, "5: every shift with a completed ride returns to the base exactly once", f"{len(missing)} of {len(with_rides)} do not")
+        off_base = [r["Leerfahrt-ID"] for r in home if (r["Ziel Breite"], r["Ziel Laenge"]) != base]
+        check(not off_base, "5: every return ends at the base of sheet 7", f"{len(off_base)} do not")
+        last = {s: max(rs, key=lambda r: instant(r["Abfahrt"]) or instant("1970-01-01 00:00:00")) for s, rs in legs.items()}
+        not_last = [r["Leerfahrt-ID"] for r in home if last[r["Schicht-ID"]]["Leerfahrt-ID"] != r["Leerfahrt-ID"]]
+        check(not not_last, "5: the return is the shift's last drive", f"{len(not_last)} are not")
+    else:
+        part_one = {r["Schicht-ID"] for r in shift_rows if r.get("Teil") == 1}
+        extra = [r for r in home if r["Schicht-ID"] not in part_one]
+        check(not extra, "5: in a month that does not return, only a part 1 returns to the base", f"{len(home)} returns, {len(extra)} outside a part 1")
+
+    header, _ = table(book, "Lohn und Arbeitszeit")
+    loose = [h for h in header if h and any(w in h for w in ("Lohn", "Gehalt", "Provision")) and "EUR" in h
+             and not any(w in h for w in ("Konfiguration", "simuliert", "nicht gebucht"))]
+    check(not loose, "3: every pay figure says configuration, simulated, or computed and not booked", "; ".join(loose))
+
+    verdict = str(facts.get("Exportstatus") or "").split(" - ")[0]
+    named = next((v for v in VERDICTS if v in Path(path).name), None)
+    check(verdict in VERDICTS and verdict == named, "7 = file name: the export verdict", f"{verdict} / {named}")
+    estimate = facts.get("Routing") == "nur Schaetzung"
+    check(estimate == ("ESTIMATE_ONLY" in Path(path).name), "7 = file name: an estimate says so in the name")
+    summary = {
+        "closing": path, "verdict": verdict, "financialStatus": status, "rides": len(rides), "realTrips": len(real),
+        "shifts": len(shifts), "returns": len(home), "days": len(month_days),
+    }
+    return check, summary
+
+
 def main(argv):
     # The console's code page is not UTF-8 everywhere (Windows: cp1252, cp1256); the report is German.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    if len(argv) != 3:
+    if len(argv) == 2 and "Monatsabschluss" in Path(argv[1]).name:
+        check, summary = verify_closing(argv[1])
+    elif len(argv) == 3:
+        check, summary = verify(argv[1], argv[2])
+    else:
         print(__doc__)
         return 2
-    check, summary = verify(argv[1], argv[2])
     print("\n".join(check.lines))
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print("VERIFY FAILED: " + "; ".join(check.failures) if check.failures else "VERIFY OK")

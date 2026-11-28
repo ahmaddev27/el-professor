@@ -79,8 +79,8 @@ describe('where a toast appears', () => {
   it('sits on a solid surface, so the page behind it does not show through', async () => {
     const tree = await mount();
     const toast = toastOf(tree);
-    expect(String(toast.props.className)).toContain('bg-overlay');
-    expect(toast.props.style.backgroundImage).toContain('linear-gradient');
-    expect(toast.props.style.background).toBeUndefined();
+    // Glass remake (R5): the overlay surface with its heavy blur, status by token classes, no inline style.
+    expect(String(toast.props.className)).toContain('glass-strong');
+    expect(toast.props.style).toBeUndefined();
   });
 });

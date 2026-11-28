@@ -306,7 +306,7 @@ const FixedCostsManagement: React.FC = () => {
       id: 'description',
       header: t('common.description'),
       value: cost => cost.description,
-      className: 'pr-2 sm:pr-4 md:min-w-[12rem]',
+      className: 'pe-2 sm:pe-4 md:min-w-[12rem]',
       cell: cost =>
         editingId === cost.id ? (
           <Input
@@ -326,7 +326,7 @@ const FixedCostsManagement: React.FC = () => {
       id: 'amount',
       header: t('common.amount'),
       kind: 'currency',
-      className: 'pl-2 pr-3 sm:px-4',
+      className: 'ps-2 pe-3 sm:px-4',
       value: cost => Number(cost.amount),
       cell: cost =>
         editingId === cost.id ? (
@@ -336,7 +336,7 @@ const FixedCostsManagement: React.FC = () => {
             value={formData.amount}
             onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
             aria-label={t('fleet.amountEuro')}
-            className="ml-auto w-[5.5rem] text-right sm:w-32"
+            className="ms-auto w-[5.5rem] text-end sm:w-32"
           />
         ) : (
           euro(Number(cost.amount))
@@ -475,7 +475,7 @@ const FixedCostsManagement: React.FC = () => {
             aria-expanded={isOpen}
             aria-controls={panelId}
             onClick={() => toggle(r.month, isOpen)}
-            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-11"
+            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-5 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-11"
           >
             <span className="flex flex-wrap items-center gap-2">
               <ChevronDown aria-hidden className={`size-4 shrink-0 text-fg-subtle transition-transform ${isOpen ? '' : '-rotate-90'}`} />
@@ -539,7 +539,7 @@ const FixedCostsManagement: React.FC = () => {
             {showMigrationSteps && (
               <div className="mt-2">
                 <p>{t('fleet.migrationSteps')}</p>
-                <ol className="ml-5 mt-2 list-decimal space-y-1">
+                <ol className="ms-5 mt-2 list-decimal space-y-1">
                   <li>{t('fleet.migrationStep1')}</li>
                   <li>{t('fleet.migrationStep2')}</li>
                   <li>{t('fleet.migrationStep3')}</li>

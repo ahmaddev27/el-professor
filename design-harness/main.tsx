@@ -17,6 +17,9 @@ import '../src/index.css';
 import { BATCH3_ROUTES, batch3InitialEntry } from './batch3/routes';
 import { ANALYSIS_ROUTES, analysisInitialEntry } from './analysis/routes';
 import { APPLAYOUT_ROUTES, applayoutInitialEntry } from './applayout/routes';
+import { R1_ROUTES, r1InitialEntry } from './r1/routes';
+import { R2_ROUTES, r2InitialEntry } from './r2/routes';
+import { R4_ROUTES, r4InitialEntry } from './r4/routes';
 import { applyStoredPreferences, scenario } from './scenario';
 
 /**
@@ -46,7 +49,7 @@ createRoot(document.getElementById('root')!).render(
     <LanguageProvider>
       <ThemeProvider>
         <ToastProvider>
-          <MemoryRouter initialEntries={[applayoutInitialEntry() ?? analysisInitialEntry() ?? batch3InitialEntry() ?? ROUTES[scenario.screen]]}>
+          <MemoryRouter initialEntries={[r4InitialEntry() ?? r2InitialEntry() ?? r1InitialEntry() ?? applayoutInitialEntry() ?? analysisInitialEntry() ?? batch3InitialEntry() ?? ROUTES[scenario.screen]]}>
             <Routes>
               <Route path="/" element={<AppLayout isSupportAdmin={false} />}>
                 <Route path="cars" element={<CarsPage />} />
@@ -64,7 +67,13 @@ createRoot(document.getElementById('root')!).render(
                 {ANALYSIS_ROUTES}
                 {/* Phase 5, the frame: the screens that were never converted. */}
                 {APPLAYOUT_ROUTES}
+                {/* Design remake R1: the locked page. */}
+                {R1_ROUTES}
+                {/* Design remake R2: Notizen (Werkstatt and Benachrichtigungen come from the frame batch). */}
+                {R2_ROUTES}
               </Route>
+              {/* Design remake R4: the platform panel, in its own frame (AdminLayout). */}
+              {R4_ROUTES}
             </Routes>
           </MemoryRouter>
         </ToastProvider>

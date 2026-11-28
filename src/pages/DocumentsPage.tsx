@@ -409,7 +409,7 @@ const DocumentsPage: React.FC = () => {
       header: t('common.driver'),
       // On a phone the name wraps and the paddings tighten, so a row's three
       // actions stay on screen; the month's gross is in its header there.
-      className: 'pl-3 pr-2 sm:min-w-[8.5rem] sm:px-4',
+      className: 'ps-3 pe-2 sm:min-w-[8.5rem] sm:px-4',
       cell: rec => (
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="font-medium">{rec.driver_name}</span>
@@ -564,7 +564,7 @@ const DocumentsPage: React.FC = () => {
                   onClick={() => toggleGroup(group.key)}
                   aria-expanded={isExpanded}
                   className={cn(
-                    'flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-control text-left [@media(pointer:coarse)]:min-h-11',
+                    'flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-control text-start [@media(pointer:coarse)]:min-h-11',
                     'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
                   )}
                 >
@@ -573,14 +573,14 @@ const DocumentsPage: React.FC = () => {
                   <Badge tone="brand">
                     {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, group.records.length)}
                   </Badge>
-                  <span className="w-full pl-6 text-[13px] tabular-nums text-fg-muted sm:w-auto sm:pl-0">
+                  <span className="w-full ps-6 text-[13px] tabular-nums text-fg-muted sm:w-auto sm:ps-0">
                     {t('doc.hoursTotal', { hours: fmtDec(minsToDecimal(group.totalMins)) })}
                     {group.totalGross != null && (
                       <> · {grossLabel(group.totalGross)} {t('doc.gross')}</>
                     )}
                   </span>
                 </button>
-                <div className="flex flex-wrap items-center gap-2 pl-6 md:pl-0">
+                <div className="flex flex-wrap items-center gap-2 ps-6 md:ps-0">
                   <Tooltip content={t('doc.downloadAllTitle', { label: group.label })}>
                     <Button variant="secondary" size="sm" onClick={() => handleDownloadGroup(group)}>
                       <Download aria-hidden />
@@ -804,7 +804,7 @@ function ToolCard({
       aria-labelledby={`${id}-title`}
       aria-describedby={`${id}-description`}
       className={cn(
-        'group flex h-full flex-col gap-3 rounded-surface border border-line bg-raised p-5 text-left font-ui text-fg shadow-raised transition-colors',
+        'group flex h-full flex-col gap-3 rounded-surface border border-line bg-raised p-5 text-start font-ui text-fg shadow-raised transition-colors',
         'hover:border-brand/60 hover:bg-sunken/40',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
       )}
@@ -813,7 +813,7 @@ function ToolCard({
         <span className="flex size-10 items-center justify-center rounded-control bg-brand-soft text-brand-text">
           <Icon aria-hidden className="size-5" />
         </span>
-        <ChevronRight aria-hidden className="mt-1 size-4 text-fg-subtle transition-transform motion-safe:group-hover:translate-x-0.5" />
+        <ChevronRight aria-hidden className="mt-1 size-4 text-fg-subtle transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:rtl:group-hover:-translate-x-0.5 rtl:-scale-x-100" />
       </span>
       <span className="grid gap-1">
         <span id={`${id}-title`} className="text-[15px] font-semibold leading-snug text-fg">

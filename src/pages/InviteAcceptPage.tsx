@@ -119,7 +119,7 @@ const InviteAcceptPage: React.FC = () => {
       <form onSubmit={confirmEmail} className="grid gap-4" noValidate>
         {draftInvalid && <NoticeBox tone="error" announce>{t('account.error.emailInvalid')}</NoticeBox>}
         <Field label={t('invite.accept.emailLabel')} id="invite-email">
-          <div className="relative">
+          <div className="relative" dir="ltr">
             <Mail aria-hidden className={authFieldIconClass} />
             <Input
               id="invite-email"
@@ -136,7 +136,7 @@ const InviteAcceptPage: React.FC = () => {
         </Field>
         <Button type="submit" size="lg" disabled={!draft.trim()} className="mt-1 w-full">
           <span>{t('common.confirm')}</span>
-          <ArrowRight aria-hidden />
+          <ArrowRight aria-hidden className="rtl:-scale-x-100" />
         </Button>
       </form>
     );

@@ -20,7 +20,7 @@
  *                    holds no business.read, so the cash ledger is out of scope
  *   ocr     ok | uncertain | fail                        (Belege: what a scanned image yields; default uncertain)
  *   theme   light | dark                                (written to the app's own storage key)
- *   lang    de | en                                     (likewise)
+ *   lang    de | en | ar                           (likewise)
  */
 
 export type HarnessScreen =
@@ -70,7 +70,7 @@ export function applyStoredPreferences(): void {
   const lang = params.get('lang');
   try {
     if (theme === 'light' || theme === 'dark') localStorage.setItem('ya-theme', theme);
-    if (lang === 'de' || lang === 'en') localStorage.setItem('ya-language', lang);
+    if (lang === 'de' || lang === 'en' || lang === 'ar') localStorage.setItem('ya-language', lang);
   } catch {
     // Storage blocked: the app's defaults (dark, German) apply.
   }

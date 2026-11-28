@@ -11,6 +11,8 @@ export interface PoolAddress extends GeoPoint {
 export interface SimVehicle {
   plate: string;
   type: string;
+  /** `cars.id`, when the caller knew it; the calendar month always does. */
+  id?: string;
 }
 
 export interface SimDriver {
@@ -63,9 +65,33 @@ export interface SimShift {
   /** The operating day (starts 04:00), YYYY-MM-DD. */
   operatingDay: string;
   startMs: number;
-  /** The last ride's end: the shift's real end. */
+  /**
+   * The shift's real end: the last ride's end or, when the company requires the
+   * car back at the base (round 8), its arrival there.
+   */
   endMs: number;
+  /**
+   * The end the shift was planned to, which the driver is on duty until. Set
+   * by the calendar month (Round 8), where it decides the driver's hours and
+   * his rest; the weeks generator leaves it out.
+   */
+  plannedEndMs?: number;
+  /**
+   * A duty over 360 minutes is two shifts, "parts", of one driver on one vehicle
+   * and one operating day, with the statutory break between them (Round 8,
+   * §4 ArbZG). The parts share `dutyId`; a single shift carries none of the
+   * three fields. Rides and legs stay keyed by the shift's own `id`.
+   */
+  dutyId?: string;
+  part?: 1 | 2;
+  /** The break after part 1, at the base; on part 1 only. */
+  breakAfter?: { startMs: number; endMs: number };
+  /** The car is back at the base by the planned end, whatever the company's setting (part 1). */
+  endsAtBase?: boolean;
 }
+
+/** One count per duty: a two-part duty counts at its first part only. */
+export const startsDuty = (shift: Pick<SimShift, 'part'>): boolean => shift.part !== 2;
 
 /**
  * What became of an order.

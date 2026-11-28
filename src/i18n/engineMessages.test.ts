@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { de } from './de';
 import { en } from './en';
+import { ar } from './ar';
 import { isTranslationKey } from './engineMessage';
 import { NOTE_TYPE_LABELS } from '../utils/driverNoteValidation';
 
@@ -120,9 +121,11 @@ describe('engine message keys', () => {
     const mismatched = deKeys
       .filter(key => {
         const german = (de as Record<string, string>)[key];
-        const english = (en as Record<string, string>)[key];
-        return english !== undefined
-          && slots(german).join(',') !== slots(english).join(',');
+        return [en, ar].some(dictionary => {
+          const translated = (dictionary as Record<string, string | undefined>)[key];
+          return translated !== undefined
+            && slots(german).join(',') !== slots(translated).join(',');
+        });
       });
     expect(mismatched).toEqual([]);
   });

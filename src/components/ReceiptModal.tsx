@@ -582,7 +582,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       <Button
                         variant="secondary"
                         size="icon-sm"
-                        className="absolute right-1.5 top-1.5 rounded-full"
+                        className="absolute end-1.5 top-1.5 rounded-full"
                         onClick={e => { e.stopPropagation(); clearImage(); }}
                         aria-label={t('rec.removeImage')}
                       >
@@ -651,7 +651,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       aria-expanded={showOcrDebug}
                       className="inline-flex items-center gap-1 rounded-sm text-xs text-fg-subtle transition-colors hover:text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
-                      <ChevronRight aria-hidden className={cn('size-3.5 transition-transform', showOcrDebug && 'rotate-90')} />
+                      <ChevronRight aria-hidden className={cn('size-3.5 transition-transform', showOcrDebug && 'rotate-90', !showOcrDebug && 'rtl:-scale-x-100')} />
                       {t('rec.ocr.showCandidates')}
                     </button>
                     {showOcrDebug && (
@@ -660,7 +660,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           <div>
                             <strong className="text-fg">{t('rec.ocr.amountCandidates')}</strong>
                             {ocrResult.amountCandidates.map((c, i) => (
-                              <div key={i} className={cn('pl-2', candidateTone(c.rejected, i))}>
+                              <div key={i} className={cn('ps-2', candidateTone(c.rejected, i))}>
                                 {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
                                 {c.value}
                                 {c.rejected
@@ -675,7 +675,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           <div>
                             <strong className="text-fg">{t('rec.ocr.dateCandidates')}</strong>
                             {ocrResult.dateCandidates.map((c, i) => (
-                              <div key={i} className={cn('pl-2', candidateTone(c.rejected, i))}>
+                              <div key={i} className={cn('ps-2', candidateTone(c.rejected, i))}>
                                 {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
                                 {c.value}{t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
                                 <span className="opacity-70"> [{c.sourceLine.slice(0, 40)}]</span>
@@ -686,10 +686,10 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                         <div>
                           <strong className="text-fg">{t('rec.ocr.plzCandidates')}</strong>
                           {(!ocrResult.plzCandidates || ocrResult.plzCandidates.length === 0) ? (
-                            <div className="pl-2 text-critical">{t('rec.ocr.noPlzCandidates')}</div>
+                            <div className="ps-2 text-critical">{t('rec.ocr.noPlzCandidates')}</div>
                           ) : (
                             ocrResult.plzCandidates.map((c, i) => (
-                              <div key={i} className={cn('pl-2', candidateTone(c.rejected, i))}>
+                              <div key={i} className={cn('ps-2', candidateTone(c.rejected, i))}>
                                 {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
                                 {c.postalCode} {c.city}
                                 {c.rejected

@@ -328,10 +328,10 @@ const CompanyAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }
 const AuthLoadingScreen: React.FC = () => {
   const { t } = useTranslation();
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
+    <div className="min-h-screen bg-canvas font-ui flex items-center justify-center">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
-        <p className="text-white/40 text-sm">{t('app.loading')}</p>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand mx-auto mb-4" />
+        <p className="text-fg-muted text-sm">{t('app.loading')}</p>
       </div>
     </div>
   );
@@ -452,23 +452,23 @@ const ProfileUnavailableScreen: React.FC<{ onRetry: () => void; onSignOut: () =>
   const { t } = useTranslation();
 
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm text-center bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7">
-        <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto mb-4">
-          <AlertCircle className="text-amber-400" size={22} aria-hidden="true" />
+    <div className="min-h-screen bg-canvas font-ui flex items-center justify-center p-4">
+      <div className="w-full max-w-sm text-center glass-card rounded-pane p-7">
+        <div className="w-12 h-12 rounded-full bg-caution-soft border border-caution/30 flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="text-caution" size={22} aria-hidden="true" />
         </div>
-        <h2 className="text-white font-semibold mb-2">{t('profile.unavailable.title')}</h2>
-        <p className="text-white/60 text-sm leading-relaxed mb-6">{t('profile.unavailable.body')}</p>
+        <h2 className="text-fg font-semibold mb-2">{t('profile.unavailable.title')}</h2>
+        <p className="text-fg-muted text-sm leading-relaxed mb-6">{t('profile.unavailable.body')}</p>
         <div className="flex flex-col gap-2">
           <button
             onClick={onRetry}
-            className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
+            className="w-full bg-brand-gradient text-brand-fg shadow-brand hover:bg-brand-gradient-hover py-3 px-4 rounded-tile font-semibold text-sm"
           >
             {t('profile.unavailable.retry')}
           </button>
           <button
             onClick={onSignOut}
-            className="w-full text-white/50 hover:text-white/80 text-sm py-2 transition-colors"
+            className="w-full text-fg-subtle hover:text-fg text-sm py-2 transition-colors"
           >
             {t('common.logout')}
           </button>

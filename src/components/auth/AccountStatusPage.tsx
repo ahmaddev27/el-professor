@@ -32,7 +32,7 @@ const TONE_CIRCLE: Record<AccountStatusTone, string> = {
  * stays in the page.
  */
 const AccountStatusPage: React.FC<AccountStatusPageProps> = ({ tone, icon: Icon, title, children, contactLead, action }) => (
-  <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center bg-canvas px-4 py-12 font-ui text-fg">
+  <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center px-4 py-12 font-ui text-fg">
     <div className="w-full max-w-md">
       <BrandMark size="sm" className="mb-8" />
       <Card className="p-6 text-center sm:p-8">
@@ -41,7 +41,7 @@ const AccountStatusPage: React.FC<AccountStatusPageProps> = ({ tone, icon: Icon,
         </div>
         <h1 className="mb-3 text-xl font-semibold tracking-tight">{title}</h1>
         <div className="grid gap-4 text-sm leading-relaxed text-fg-muted">{children}</div>
-        <div className="mt-6 flex items-start gap-3 rounded-control border border-line bg-sunken p-4 text-left text-sm text-fg-muted">
+        <div className="mt-6 flex items-start gap-3 rounded-control border border-line bg-sunken p-4 text-start text-sm text-fg-muted">
           <Mail aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
           <p>
             {contactLead}{' '}

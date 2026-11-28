@@ -66,7 +66,7 @@ export function LegalPageView({ page, state, onRetry }: {
   const { t, language } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col bg-canvas font-ui text-fg">
+    <div className="flex min-h-screen flex-col font-ui text-fg">
       <header className="border-b border-line bg-raised">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <a
@@ -79,15 +79,15 @@ export function LegalPageView({ page, state, onRetry }: {
             <img src="/brand/wordmark-on-light.png" alt="El-Professor" className="h-4 w-auto dark:hidden" />
             <img src="/brand/wordmark-on-dark.png" alt="El-Professor" className="hidden h-4 w-auto dark:block" />
           </a>
-          <LanguageSwitcher />
+          <LanguageSwitcher variant="ui" />
         </div>
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
-        <h1 lang="de" className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
+        <h1 lang="de" dir="ltr" className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
           {LEGAL_TITLES[page]}
         </h1>
-        {language === 'en' ? <p className="mt-2 text-sm text-fg-muted">{t('legal.germanOnly')}</p> : null}
+        {language !== 'de' ? <p className="mt-2 text-sm text-fg-muted">{t('legal.germanOnly')}</p> : null}
 
         <div className="mt-6 sm:mt-8">
           <LegalPageBody page={page} state={state} onRetry={onRetry} />

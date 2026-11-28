@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { de } from './de';
 import { en } from './en';
+import { ar } from './ar';
 
 /**
  * A sentence on a screen must not name a database column or a function. Fourteen
@@ -23,5 +24,9 @@ describe('the dictionaries', () => {
 
   it('name no code in English', () => {
     expect(offenders(en as Record<string, string | undefined>)).toEqual([]);
+  });
+
+  it('name no code in Arabic', () => {
+    expect(offenders(ar as Record<string, string | undefined>)).toEqual([]);
   });
 });

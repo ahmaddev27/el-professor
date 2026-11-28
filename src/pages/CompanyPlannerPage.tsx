@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Play, AlertTriangle, CheckCircle2, Car as CarIcon, Clock, FileSearch, Info, ChevronRight, ChevronDown, ArrowLeft, CalendarDays, History, Euro, ListChecks, type LucideIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Alert, Badge, Button, Card, CardContent, CardTitle, Field, Input, NativeSelect, PageHeader } from '../components/ui';
+import { Alert, Badge, Button, Card, CardContent, CardTitle, cn, Field, Input, NativeSelect, PageHeader } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { useFahrtenbuch, type FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 import {
@@ -299,8 +299,8 @@ export default function CompanyPlannerPage() {
       {planningMode === 'hist_mode_selection' && (
         <div className="mx-auto grid max-w-3xl grid-cols-1 gap-5 font-ui">
           <div>
-            <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setPlanningMode('selection')}>
-              <ArrowLeft aria-hidden />
+            <Button variant="ghost" size="sm" className="-ms-2" onClick={() => setPlanningMode('selection')}>
+              <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
               {t('mp.planner.backToSelection')}
             </Button>
           </div>
@@ -372,8 +372,8 @@ export default function CompanyPlannerPage() {
       {/* ── Normal planning workflow (new_month) ── */}
       {planningMode === 'new_month' && (
         <div>
-          <Button variant="ghost" size="sm" className="-ml-2 mb-3 font-ui" onClick={() => setPlanningMode('selection')}>
-            <ArrowLeft aria-hidden />
+          <Button variant="ghost" size="sm" className="-ms-2 mb-3 font-ui" onClick={() => setPlanningMode('selection')}>
+            <ArrowLeft aria-hidden className="rtl:-scale-x-100" />
             {t('mp.planner.backToSelection')}
           </Button>
 
@@ -434,7 +434,7 @@ export default function CompanyPlannerPage() {
                     const v = parseInt(e.target.value, 10);
                     setBlockSeparatorGap(Number.isFinite(v) && v > 0 ? v : VEHICLE_BLOCK_GAP_MINUTES);
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
               </div>
@@ -455,7 +455,7 @@ export default function CompanyPlannerPage() {
                       setMinBlockDuration(Math.max(0, Math.min(120, v)));
                     }
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">
                   {t('mp.minShort')}{minBlockDuration === 0 ? ` ${t('mp.planner.disabledSuffix')}` : ''}
@@ -478,7 +478,7 @@ export default function CompanyPlannerPage() {
                       setMaxBlockDuration(Math.max(MAX_BLOCK_DURATION_LOWER_BOUND, Math.min(MAX_BLOCK_DURATION_UPPER_BOUND, v)));
                     }
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
               </div>
@@ -495,7 +495,7 @@ export default function CompanyPlannerPage() {
                     const v = parseInt(e.target.value, 10);
                     setVehicleSwitchBuffer(Number.isFinite(v) && v >= 0 ? v : DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES);
                   }}
-                  className="w-24 text-right"
+                  className="w-24 text-end"
                 />
                 <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
               </div>
@@ -613,10 +613,9 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
     <div className="space-y-6">
       {/* Overall summary */}
       <div
-        className="rounded-xl p-5"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="glass-card rounded-surface p-5"
       >
-        <h2 className="text-base font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
+        <h2 className="mb-4 text-base font-semibold text-fg">
           {t('mp.planner.overview')}
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -649,13 +648,11 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
           />
           <div className="flex items-center">
             {validationOk ? (
-              <span className="inline-flex items-center gap-1.5 text-sm font-semibold"
-                style={{ color: 'var(--success, #15803d)' }}>
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-positive">
                 <CheckCircle2 size={16} /> {t('mp.validationOk')}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-sm font-semibold"
-                style={{ color: 'var(--danger, #b91c1c)' }}>
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-critical">
                 <AlertTriangle size={16} /> {t('mp.planner.problemsDetected')}
               </span>
             )}
@@ -664,10 +661,10 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
 
         {result.coverageIssues.length > 0 && (
           <details className="mt-4">
-            <summary className="text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+            <summary className="cursor-pointer text-sm text-fg-muted">
               {t('mp.planner.showCoverageIssues', { count: result.coverageIssues.length })}
             </summary>
-            <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+            <ul className="mt-2 space-y-1 text-xs text-fg-muted">
               {result.coverageIssues.slice(0, 50).map((c, i) => (
                 <li key={i}>• [{c.type}] {c.detail}</li>
               ))}
@@ -680,10 +677,10 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
 
         {result.skippedTrips.length > 0 && (
           <details className="mt-3">
-            <summary className="text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+            <summary className="cursor-pointer text-sm text-fg-muted">
               {t('mp.planner.skippedTrips', { count: result.skippedTrips.length })}
             </summary>
-            <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+            <ul className="mt-2 space-y-1 text-xs text-fg-muted">
               {result.skippedTrips.slice(0, 30).map((trip, i) => (
                 <li key={i}>• {trip.id}: {trip.reason}</li>
               ))}
@@ -694,18 +691,17 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
 
       {/* Per-vehicle summary */}
       <div
-        className="rounded-xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="glass-card overflow-hidden rounded-surface"
       >
-        <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-fg">
             <CarIcon size={16} /> {t('mp.planner.perVehicle')}
           </h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ background: 'var(--bg-subtle)' }}>
+              <tr className="bg-wash">
                 <Th>{t('mp.licensePlate')}</Th>
                 <Th align="right">{t('mp.planner.colBlocks')}</Th>
                 <Th align="right">{t('mp.trips')}</Th>
@@ -716,7 +712,7 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
             </thead>
             <tbody>
               {result.perVehicle.map(v => (
-                <tr key={v.vehicle_id} style={{ borderTop: '1px solid var(--border)' }}>
+                <tr key={v.vehicle_id} className="border-t border-line">
                   <Td><span className="font-mono">{v.vehicle_identifier}</span></Td>
                   <Td align="right">{v.blocks}</Td>
                   <Td align="right">{v.trips}</Td>
@@ -732,28 +728,26 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
 
       {/* Block table */}
       <div
-        className="rounded-xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="glass-card overflow-hidden rounded-surface"
       >
         <button
           type="button"
           onClick={() => setBlocksOpen(o => !o)}
-          className="w-full px-5 py-4 border-b flex items-center justify-between text-left transition-colors hover:bg-[color:var(--bg-subtle)]"
-          style={{ borderColor: 'var(--border)' }}
+          className="flex w-full items-center justify-between border-b border-line px-5 py-4 text-start transition-colors hover:bg-wash"
           aria-expanded={blocksOpen}
         >
-          <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            {blocksOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <h2 className="flex items-center gap-2 text-base font-semibold text-fg">
+            {blocksOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} className="rtl:-scale-x-100" />}
             <Clock size={16} /> {t('mp.vehicleBlocks')} ({result.blocks.length})
           </h2>
-          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          <span className="text-xs text-fg-subtle">
             {blocksOpen ? t('mp.collapse') : t('mp.expand')}
           </span>
         </button>
         {blocksOpen && (
         <div className="overflow-x-auto max-h-[600px]">
           <table className="w-full text-xs">
-            <thead className="sticky top-0" style={{ background: 'var(--bg-subtle)' }}>
+            <thead className="sticky top-0 bg-wash">
               <tr>
                 <Th>{t('mp.planner.colActualDate')}</Th>
                 <Th>{t('mp.licensePlate')}</Th>
@@ -772,13 +766,12 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                 const endDate = b.block_end_datetime.slice(0, 10);
                 const crossMidnight = endDate > b.service_date;
                 return (
-                <tr key={b.block_id} style={{ borderTop: '1px solid var(--border)' }}>
+                <tr key={b.block_id} className="border-t border-line">
                   <Td>
                     <span title={crossMidnight ? t('mp.planner.endsOn', { date: formatDate(endDate) }) : undefined}>
                       {formatDate(b.service_date)}
                       {crossMidnight && (
-                        <span className="ml-1 text-[9px] font-semibold px-1 rounded"
-                          style={{ background: 'rgba(234,88,12,0.12)', color: '#c2410c' }}>
+                        <span className="ms-1 rounded px-1 text-[9px] font-semibold bg-caution-soft text-caution">
                           →{formatDate(endDate)}
                         </span>
                       )}
@@ -791,21 +784,14 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                   <Td align="right">{b.trip_count}</Td>
                   <Td>
                     <span
-                      className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                      style={{
-                        background:
-                          b.split_reason === 'max_duration_4_5h'
-                            ? 'rgba(234, 88, 12, 0.12)'
-                            : b.split_reason === 'gap_gt_60'
-                            ? 'rgba(2, 132, 199, 0.12)'
-                            : 'var(--bg-muted)',
-                        color:
-                          b.split_reason === 'max_duration_4_5h'
-                            ? '#c2410c'
-                            : b.split_reason === 'gap_gt_60'
-                            ? '#0369a1'
-                            : 'var(--text-tertiary)',
-                      }}
+                      className={cn(
+                        'rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                        b.split_reason === 'max_duration_4_5h'
+                          ? 'bg-caution-soft text-caution'
+                          : b.split_reason === 'gap_gt_60'
+                          ? 'bg-info-soft text-info'
+                          : 'bg-wash text-fg-subtle',
+                      )}
                     >
                       {splitReasonLabel(b.split_reason, blockSeparatorMin, maxBlockMin, t)}
                     </span>
@@ -813,25 +799,23 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                   <Td>
                     {b.merge_status === 'merged_short' ? (
                       <span
-                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                        style={{ background: 'rgba(21, 128, 61, 0.12)', color: '#15803d' }}
+                        className="rounded bg-positive-soft px-1.5 py-0.5 text-[10px] font-semibold text-positive"
                       >
                         {t('mp.planner.shortMerged')}
                       </span>
                     ) : b.merge_status === 'short_warning' ? (
                       <span
-                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                        style={{ background: 'rgba(234, 88, 12, 0.12)', color: '#c2410c' }}
+                        className="rounded bg-caution-soft px-1.5 py-0.5 text-[10px] font-semibold text-caution"
                         title={t('mp.planner.shortBlockTitle', { minutes: result.summary.min_block_duration_minutes })}
                       >
                         {t('mp.planner.shortBelow', { minutes: result.summary.min_block_duration_minutes })}
                       </span>
                     ) : (
-                      <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>—</span>
+                      <span className="text-[10px] text-fg-subtle">—</span>
                     )}
                   </Td>
                   <Td>
-                    <span className="font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                    <span className="font-mono text-[10px] text-fg-subtle">
                       {b.first_excel_row != null && b.last_excel_row != null
                         ? t('mp.planner.rowsRange', { from: b.first_excel_row, to: b.last_excel_row })
                         : `${b.first_trip_id.slice(0, 8)}…${b.last_trip_id.slice(0, 8)}`}
@@ -861,18 +845,17 @@ function StatCard({
   tone?: 'ok' | 'danger' | 'warning';
 }) {
   const color =
-    tone === 'danger' ? 'var(--danger, #b91c1c)' :
-    tone === 'warning' ? '#c2410c' :
-    tone === 'ok' ? 'var(--success, #15803d)' :
-    highlight ? 'var(--primary)' :
-    'var(--text-primary)';
+    tone === 'danger' ? 'text-critical' :
+    tone === 'warning' ? 'text-caution' :
+    tone === 'ok' ? 'text-positive' :
+    highlight ? 'text-brand-text' :
+    'text-fg';
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider font-semibold mb-1"
-        style={{ color: 'var(--text-tertiary)' }}>
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
         {label}
       </div>
-      <div className="text-xl font-bold" style={{ color }}>
+      <div className={cn('text-xl font-bold tabular-nums', color)}>
         {value}
       </div>
     </div>
@@ -882,8 +865,10 @@ function StatCard({
 function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) {
   return (
     <th
-      className="px-3 py-2 text-[11px] uppercase tracking-wider font-semibold"
-      style={{ color: 'var(--text-tertiary)', textAlign: align ?? 'left' }}
+      className={cn(
+        'px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-fg-subtle',
+        align === 'right' ? 'text-end' : 'text-start',
+      )}
     >
       {children}
     </th>
@@ -892,7 +877,7 @@ function Th({ children, align }: { children: React.ReactNode; align?: 'left' | '
 
 function Td({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) {
   return (
-    <td className="px-3 py-2" style={{ color: 'var(--text-primary)', textAlign: align ?? 'left' }}>
+    <td className={cn('px-3 py-2 text-fg', align === 'right' ? 'text-end' : 'text-start')}>
       {children}
     </td>
   );

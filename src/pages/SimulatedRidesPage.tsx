@@ -5,6 +5,8 @@ import { CalendarResult } from '../components/simulatedRides/CalendarResult';
 import { CalendarSettings } from '../components/simulatedRides/CalendarSettings';
 import { RoutingSummary } from '../components/simulatedRides/RoutingSummary';
 import { SimulatedBadge } from '../components/simulatedRides/SimulatedBadge';
+import { SimulationSettingsPanel } from '../components/simulatedRides/SimulationSettingsPanel';
+import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -12,31 +14,37 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useFahrtenbuch } from '../hooks/useFahrtenbuch';
 import { createGeocodeClient } from '../lib/geocodeClient';
-import { loadDriverNotes, loadDriverPlanningFacts, loadWerkstattChecks } from '../lib/simulationInputsClient';
+import { loadDriverNotes, loadDriverPlanningFacts, loadVehicleUnavailability, loadWerkstattChecks } from '../lib/simulationInputsClient';
 import { prepareRouting, type RoutingFailureReason } from '../lib/simulationRouting';
 import { supabase } from '../lib/supabase';
+import { loadSimulationSettings, saveSimulationSettings, type CompanySimulationSettings } from '../lib/simulationSettingsClient';
 import { createTravelRouteClient } from '../lib/travelRouteClient';
 import { loadCompanyDrivers, loadSettings } from '../lib/tripAnalysisClient';
 import type { CompanyDriver } from '../lib/tripAnalysisView';
 import type { TranslationKey } from '../i18n';
 import type { WerkstattCheckRow } from '../utils/constraintDecisionLog';
 import { selectableDrivers } from '../utils/driverStatus';
-import type { StructuredNote } from '../utils/monatsplanungPhase3';
 import { PoolError, buildAddressPool, readCachedPool, writeCachedPool, type AddressPool } from '../utils/simulatedRides/addressPool';
 import {
   addDays, figuresOf, generateFromFigures, mondayOf, mondaysOfMonth, weekKey, type Finding, type FindingCode, type FiguresResult, type IncomeRow,
 } from '../utils/simulatedRides/figures';
+import { resolveBase, type BaseRefusal } from '../utils/simulatedRides/baseSelection';
+import { calendarMonthInput, savedBasePoint, type CalendarCar, type CalendarEvents, type CalendarSourcing } from '../utils/simulatedRides/calendarRun';
 import { DEFAULT_CALENDAR_FORM, parseCalendarForm, type CalendarForm, type CalendarFormField } from '../utils/simulatedRides/calendarForm';
 import { generateFullMonth, type FullMonthFailure, type FullMonthResult, type RoutingProvenance } from '../utils/simulatedRides/fullMonth';
+import { loadUberMonth } from '../utils/simulatedRides/uberImportLoader';
+import { loadRealTripRows } from '../utils/simulatedRides/realTripsLoader';
+import type { VehicleUnavailabilityRow } from '../utils/simulatedRides/vehicleAvailability';
 import { validateRides } from '../utils/simulatedRides/generator';
 import { prepareSimulatedImport, type PreparedSimulatedImport } from '../utils/simulatedRides/importPath';
+import { buildMonthClosing } from '../utils/simulatedRides/monthClosing';
 import { buildMonthReport } from '../utils/simulatedRides/monthWorkbook';
 import { buildOperationalReport } from '../utils/simulatedRides/operationalReport';
-import { selectMonthlyShareRate } from '../utils/simulatedRides/monthlyRate';
+import { selectMonthlyShareRate, type ShareSetting } from '../utils/simulatedRides/monthlyRate';
 import { routeChecks, summariseRouteChecks, type RouteCheckSummary } from '../utils/simulatedRides/routeCheck';
 import { rideDate, ridesToRows } from '../utils/simulatedRides/sheet';
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from '../utils/simulatedRides/travelModel';
-import type { GeoPoint, PoolAddress } from '../utils/simulatedRides/types';
+import type { GeoPoint } from '../utils/simulatedRides/types';
 import { deliverWorkbookPayload } from '../utils/serviceWorkbookDownload';
 
 /**
@@ -63,7 +71,7 @@ import { deliverWorkbookPayload } from '../utils/serviceWorkbookDownload';
 type Phase = 'idle' | 'events' | 'pool' | 'verify' | 'route' | 'generating' | 'ready' | 'importing' | 'done';
 type Mode = 'calendar' | 'weeks';
 
-interface CarOption { id: string; plate: string; tuev: string | null }
+type CarOption = CalendarCar;
 
 /** How the drive times of one run were obtained, for the summary under the result. */
 interface RunRouting {
@@ -82,19 +90,9 @@ interface Result {
 }
 
 /** Everything read before generation. */
-interface RunEvents {
-  notes: Map<string, StructuredNote[]>;
-  facts: Awaited<ReturnType<typeof loadDriverPlanningFacts>>;
-  checks: WerkstattCheckRow[];
-}
+type RunEvents = CalendarEvents;
 
-/** The pool a run draws from and the model that times it. `travel` absent is the labelled estimate. */
-interface Sourcing {
-  points: readonly PoolAddress[];
-  travel: TravelModel | undefined;
-  provenance: RoutingProvenance | null;
-  estimate: boolean;
-}
+type Sourcing = CalendarSourcing;
 
 const ROUTING_FAILURE_KEYS: Record<RoutingFailureReason, TranslationKey> = {
   verification_failed: 'simrides.error.routing.verification_failed',
@@ -102,6 +100,13 @@ const ROUTING_FAILURE_KEYS: Record<RoutingFailureReason, TranslationKey> = {
   routing_failed: 'simrides.error.routing.routing_failed',
   base_unroutable: 'simrides.error.routing.base_unroutable',
   too_few_routes: 'simrides.error.routing.too_few_routes',
+};
+
+const BASE_REFUSAL_KEYS: Record<BaseRefusal, TranslationKey> = {
+  no_base_configured: 'simrides.cal.error.base.noBase',
+  address_incomplete: 'simrides.cal.error.base.addressIncomplete',
+  address_not_located: 'simrides.cal.error.base.addressNotLocated',
+  geocoder_unavailable: 'simrides.cal.error.base.geocoderUnavailable',
 };
 
 const FULL_MONTH_FAILURE_KEY = (failure: FullMonthFailure): TranslationKey => {
@@ -156,12 +161,6 @@ function toggled(list: readonly string[], id: string): string[] {
   return list.includes(id) ? list.filter(x => x !== id) : [...list, id];
 }
 
-function savedBase(row: Awaited<ReturnType<typeof loadSettings>>): GeoPoint | null {
-  const lat = Number(row?.base_latitude);
-  const lon = Number(row?.base_longitude);
-  return row?.base_latitude != null && row?.base_longitude != null && Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
-}
-
 /** The books of the weeks that belong to the month, and the trips those weeks already hold. */
 async function readBooks(companyId: string, year: number, month: number): Promise<{ income: IncomeRow[]; occupied: Set<string> }> {
   const mondays = mondaysOfMonth(year, month);
@@ -197,8 +196,13 @@ export default function SimulatedRidesPage() {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { settings } = useCompanySettings();
   const scope = useCompanyScope();
+  const { isAdmin } = useAuth();
   const { createImport } = useFahrtenbuch();
   const canWrite = scope.can('documents', 'edit') && !scope.readOnly;
+  // The company's simulation settings are `is_company_admin()`'s to write: a
+  // company administrator, or a platform account in a support session. The
+  // database refuses everyone else; this only decides whether to offer Save.
+  const canEditSimulationSettings = !scope.readOnly && (isAdmin || scope.kind === 'support');
 
   const [mode, setMode] = useState<Mode>('calendar');
   const [monthKey, setMonthKey] = useState(defaultMonthKey);
@@ -218,6 +222,9 @@ export default function SimulatedRidesPage() {
   const [formError, setFormError] = useState<CalendarFormField | null>(null);
   const [routingFailed, setRoutingFailed] = useState(false);
   const [allowEstimate, setAllowEstimate] = useState(false);
+  const [simulationSettings, setSimulationSettings] = useState<CompanySimulationSettings | null>(null);
+  const [simulationSettingsFailed, setSimulationSettingsFailed] = useState(false);
+  const [savingSimulationSettings, setSavingSimulationSettings] = useState(false);
 
   useEffect(() => {
     if (settings?.city) setCity(current => current || settings.city || '');
@@ -246,7 +253,7 @@ export default function SimulatedRidesPage() {
         // it is a chooser and the deactivated are dropped — a simulated month
         // must not put a driver who has left back on the road.
         setDrivers(selectableDrivers(driverRows));
-        setBase(savedBase(settingsRow));
+        setBase(savedBasePoint(settingsRow));
       } catch (err) {
         console.error('Fahrten simulieren: loading the company failed', err);
         if (live) setLoadFailed(true);
@@ -254,6 +261,36 @@ export default function SimulatedRidesPage() {
     })();
     return () => { live = false; };
   }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    let live = true;
+    setSimulationSettings(null);
+    setSimulationSettingsFailed(false);
+    loadSimulationSettings(companyId, supabase)
+      .then(row => { if (live) setSimulationSettings(row); })
+      .catch(err => {
+        console.error('Fahrten simulieren: loading the simulation settings failed', err);
+        if (live) setSimulationSettingsFailed(true);
+      });
+    return () => { live = false; };
+  }, [companyId]);
+
+  const saveSettings = async (values: { shareSetting: ShareSetting | null; returnToBase: boolean }) => {
+    if (!companyId) return;
+    setSavingSimulationSettings(true);
+    try {
+      const saved = await saveSimulationSettings(companyId, values, supabase);
+      setSimulationSettings(saved);
+      setSimulationSettingsFailed(false);
+      showToast('success', t('simrides.settings.saved'));
+    } catch (err) {
+      console.error('Fahrten simulieren: saving the simulation settings failed', err);
+      showToast('error', t('simrides.settings.saveFailed', { message: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setSavingSimulationSettings(false);
+    }
+  };
 
   const period = useMemo(() => {
     const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
@@ -283,19 +320,30 @@ export default function SimulatedRidesPage() {
     return err instanceof Error ? err.message : t('simrides.error.generic');
   };
 
-  /** Notes, planning columns and (calendar mode) the month's workshop checks. A failed read throws. */
-  const readEvents = async (year: number, month: number, withChecks: boolean): Promise<RunEvents> => {
+  /**
+   * Notes, planning columns and, in calendar mode, the month's workshop checks,
+   * the cars' unavailability windows and the imported Uber figures. A failed
+   * read throws: a month planned without a window it did not hear about looks
+   * exactly like one that honoured it.
+   */
+  const readEvents = async (year: number, month: number, calendar: boolean): Promise<RunEvents> => {
     if (!companyId) throw new Error(t('simrides.error.generic'));
     const { first, last } = monthBounds(year, month);
     try {
-      const [notes, facts, checks] = await Promise.all([
+      const [notes, facts, checks, unavailability, uber, realTrips, simulation] = await Promise.all([
         loadDriverNotes(companyId, addDays(first, -7)),
         loadDriverPlanningFacts(companyId),
-        withChecks ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
+        calendar ? loadWerkstattChecks(companyId, first, last) : Promise.resolve([] as WerkstattCheckRow[]),
+        calendar ? loadVehicleUnavailability(companyId, addDays(first, -1), addDays(last, 2)) : Promise.resolve([] as VehicleUnavailabilityRow[]),
+        calendar ? loadUberMonth(companyId, year, month, supabase) : Promise.resolve(null),
+        calendar ? loadRealTripRows(companyId, year, month, supabase) : Promise.resolve(null),
+        // Read again for the run rather than taken from the panel: a month runs
+        // on what is stored now, never on an unsaved draft or a stale copy.
+        calendar ? loadSimulationSettings(companyId, supabase) : Promise.resolve(null),
       ]);
-      return { notes, facts, checks };
+      return { notes, facts, checks, unavailability, uber, realTrips, simulation };
     } catch (err) {
-      console.error('Fahrten simulieren: reading notes and vehicle facts failed', err);
+      console.error('Fahrten simulieren: reading notes, vehicle facts, Uber figures, real trips or the simulation settings failed', err);
       throw new Error(t('simrides.error.events'));
     }
   };
@@ -341,25 +389,29 @@ export default function SimulatedRidesPage() {
     if (!parsed.ok) { setFormError(parsed.field); return; }
     setPhase('events');
     try {
+      // Round 8 (§3, D7): every shift starts at the company's base, never at
+      // the middle of the address pool. No base, no month.
+      const located = await resolveBase({ saved: base, address: settings ?? null, geocoder: createGeocodeClient() });
+      if (!located.ok) {
+        console.warn('Fahrten simulieren: no Betriebssitz', located.reason, located.detail);
+        setError(t(BASE_REFUSAL_KEYS[located.reason]));
+        setPhase('idle');
+        return;
+      }
       const events = await readEvents(period.year, period.month, true);
+      if (events.simulation) setSimulationSettings(events.simulation);
       setPhase('pool');
       const { pool } = await ensurePool();
-      const origin = base ?? pool.center;
+      const origin = located.base;
       const sourcing = await sourcePoints(pool, origin);
       if (!sourcing) return;
       setPhase('generating');
       await nextTick();
-      const outcome = generateFullMonth({
-        ...period, base: origin, pool: sourcing.points, seed,
-        vehicles: cars.filter(c => carIds.includes(c.id)).map(c => ({ id: c.id, plate: c.plate, type: 'Mietwagen', tuev_gueltig_bis: c.tuev })),
-        drivers: drivers.map(d => ({
-          id: d.id, name: d.name,
-          allowed_weekdays: events.facts.get(d.id)?.allowed_weekdays ?? null, planning_enabled: events.facts.get(d.id)?.planning_enabled ?? true,
-        })),
-        driverNotesMap: events.notes, werkstattChecks: events.checks,
-        settings: parsed.settings, options: parsed.options, shiftsPerVehicleDay: parsed.shiftsPerVehicleDay,
-        travel: sourcing.travel, routing: sourcing.provenance ?? undefined, tenantId: companyId,
-      });
+      const outcome = generateFullMonth(calendarMonthInput({
+        ...period, seed, tenantId: companyId,
+        base: { point: origin, source: located.source, label: located.label },
+        cars, carIds, drivers, events, sourcing, form: parsed,
+      }));
       if (!outcome.ok) throw new Error(t(FULL_MONTH_FAILURE_KEY(outcome.failure)));
       setCalendarResult(outcome.result);
       setPhase('ready');
@@ -436,7 +488,7 @@ export default function SimulatedRidesPage() {
     }
   };
 
-  const downloadReport = (build: typeof buildMonthReport | typeof buildOperationalReport) => {
+  const downloadReport = (build: typeof buildMonthReport | typeof buildOperationalReport | typeof buildMonthClosing) => {
     if (!calendarResult) return;
     try {
       const { fileName, payload } = build(calendarResult);
@@ -479,7 +531,7 @@ export default function SimulatedRidesPage() {
             <Field label={t('simrides.field.month')} hint={t('simrides.field.monthHint')}>
               <Input type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} disabled={busy} />
             </Field>
-            <Field label={t('simrides.field.city')} hint={base ? t('simrides.field.cityHintBase') : t('simrides.field.cityHint')}>
+            <Field label={t('simrides.field.city')} hint={base ? t('simrides.field.cityHintBase') : mode === 'calendar' ? t('simrides.field.cityHintCalendar') : t('simrides.field.cityHint')}>
               <Input value={city} onChange={e => setCity(e.target.value)} disabled={busy} />
             </Field>
           </div>
@@ -524,9 +576,16 @@ export default function SimulatedRidesPage() {
         </CardContent>
       </Card>
 
+      {mode === 'calendar' ? (
+        <SimulationSettingsPanel settings={simulationSettings} loadFailed={simulationSettingsFailed}
+          canEdit={canEditSimulationSettings} saving={savingSimulationSettings} period={period}
+          suggestedSeed={seed} onSave={values => { void saveSettings(values); }} />
+      ) : null}
+
       {mode === 'calendar' && calendarResult ? (
         <CalendarResult result={calendarResult} onDownload={() => downloadReport(buildMonthReport)}
-          onDownloadOperational={() => downloadReport(buildOperationalReport)} />
+          onDownloadOperational={() => downloadReport(buildOperationalReport)}
+          onDownloadClosing={() => downloadReport(buildMonthClosing)} />
       ) : null}
       {mode === 'weeks' && result ? <ResultCard result={result} phase={phase} onImport={runImport} /> : null}
     </div>

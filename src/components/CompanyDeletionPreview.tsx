@@ -97,7 +97,7 @@ export function CompanyDeletionPreview({ state }: { state: PreviewState }) {
 
       <section aria-labelledby="cd-kept">
         <h3 id="cd-kept" className="mb-1 font-semibold text-fg">{t('sa.deletion.kept')}</h3>
-        <ul className="list-disc space-y-0.5 pl-5 text-fg-muted">
+        <ul className="list-disc space-y-0.5 ps-5 text-fg-muted">
           {keep.map(a => (
             <li key={a.userId} className="break-all">{t('sa.deletion.keptStaff', { email: a.email || a.userId })}</li>
           ))}

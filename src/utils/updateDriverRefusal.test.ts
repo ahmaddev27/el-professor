@@ -31,15 +31,20 @@ describe('deactivating a driver', () => {
     expect(updateDriver).toMatch(/outcome === 'gone'[\s\S]{0,80}common\.writeAlreadyGone/);
   });
 
-  it('has no delete path left: not in the hook, the page or the screen', () => {
+  it('keeps the delete out of the hook and behind the checked module', () => {
+    // Since 27.11.2026 a driver nothing refers to can be deleted by an
+    // administrator, reversing 25.10.2026's rule, but only through
+    // lib/driverDelete.ts: the question first, then the DELETE through
+    // deleteChecked. Neither the hook nor the two screens write it themselves.
     expect(hook).not.toMatch(/deleteDriver|\.from\('drivers'\)\s*\.delete\(/);
     const driversApi = hook.slice(hook.indexOf('drivers: {'), hook.indexOf('receipts: {'));
-    expect(driversApi).toContain('update: updateDriver');
     expect(driversApi).not.toContain('delete');
     const page = read('../pages/FahrerPage.tsx');
     const screen = read('../components/DriversManagement.tsx');
     for (const src of [page, screen]) {
-      expect(src).not.toMatch(/onDeleteDriver|handleDeleteDriver|canDelete|Trash2|driverActions\.delete/);
+      expect(src).not.toMatch(/driverActions\.delete|\.from\('drivers'\)\s*\.delete\(/);
     }
+    expect(read('../components/drivers/DriverDeleteDialog.tsx')).toContain('deleteDriver(');
+    expect(read('../lib/driverDelete.ts')).toContain("deleteChecked(client, 'drivers'");
   });
 });

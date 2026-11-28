@@ -1,5 +1,5 @@
 import React, { useState, useEffect, type FormEvent } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban, CalendarRange } from 'lucide-react';
+import { Plus, Pencil as Edit2, Trash2, DollarSign, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban, CalendarRange } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation, Income } from '../types/receipt';
 import { supabase } from '../lib/supabase';
@@ -12,7 +12,6 @@ import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
 import SalaryPaymentCashView, { type CashPaymentViewTarget } from './SalaryPaymentCashView';
-import ConfirmationModal from './ConfirmationModal';
 import {
   currentLoadState,
   loadReceiptForPreview,
@@ -45,7 +44,10 @@ import {
 import { ReceiptAlert, useRefusalMessage } from './GehaltsquittungParts';
 import { toCents } from '../utils/money';
 import {
+  Alert,
+  Badge,
   Button,
+  ConfirmDialog,
   Dialog,
   DialogClose,
   DialogContent,
@@ -55,6 +57,7 @@ import {
   DialogTitle,
   Field,
   Input,
+  cn,
   formatDate,
   formatEuroCents,
 } from './ui';
@@ -632,11 +635,11 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const getStatusBadge = (status?: string) => {
     switch (status) {
       case 'paid':
-        return <span style={{ background: 'var(--success-subtle)', color: 'var(--success)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>{t('sal.status.fullyPaid')}</span>;
+        return <Badge tone="positive">{t('sal.status.fullyPaid')}</Badge>;
       case 'partially_paid':
-        return <span style={{ background: 'var(--warning-subtle)', color: 'var(--warning)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>{t('sal.status.partiallyPaid')}</span>;
+        return <Badge tone="caution">{t('sal.status.partiallyPaid')}</Badge>;
       default:
-        return <span style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>{t('sal.status.unpaid')}</span>;
+        return <Badge tone="critical">{t('sal.status.unpaid')}</Badge>;
     }
   };
 
@@ -647,58 +650,40 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '0.375rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.875rem',
-    padding: '0.375rem 0.625rem',
-    outline: 'none',
-    width: '100%',
-  };
-
-  const readonlyRowStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '0.5rem 0',
-    borderBottom: '1px solid var(--border)',
-  };
+  // ── Presentation (phase 5)
 
   const fmtEur = (n: number) =>
     n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
   return (
     <>
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)' }} className="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <Dialog
+        open
+        onOpenChange={next => {
+          // Closing runs onUpdate() at once, so it waits for a save in flight.
+          if (!next && !savingPayroll && !loadingWeekly) void handleClose();
+        }}
+      >
+        <DialogContent
+          onPointerDownOutside={e => e.preventDefault()}
+          className="flex max-h-[90dvh] max-w-4xl flex-col gap-0 overflow-hidden p-0"
+        >
 
           {/* Header */}
-          <div style={{ borderBottom: '1px solid var(--border)' }} className="px-4 pt-4 pb-0 sm:px-6 sm:pt-6">
-            <div className="flex items-start justify-between gap-2 mb-4">
-              <div className="min-w-0">
-                <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold">
-                  {t('sal.details.title', { name: salary.driver_name })}
-                </h2>
-                <p style={{ color: 'var(--text-secondary)' }} className="text-sm mt-1">
-                  {salary.period_start && salary.period_end
-                    ? `${format(new Date(salary.period_start), 'dd.MM.yyyy')} – ${format(new Date(salary.period_end), 'dd.MM.yyyy')}`
-                    : format(new Date(salary.paid_at || new Date()), 'dd.MM.yyyy')}
-                </p>
-              </div>
-              <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-                onClick={handleClose}
-                style={{ color: 'var(--text-tertiary)', marginTop: '0.25rem' }}
-                onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-              >
-                <X size={24} />
-              </button>
-            </div>
+          <div className="border-b border-line px-4 pb-0 pt-4 sm:px-6 sm:pt-6">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-2xl font-bold">
+                {t('sal.details.title', { name: salary.driver_name })}
+              </DialogTitle>
+              <DialogDescription className="text-sm text-fg-muted">
+                {salary.period_start && salary.period_end
+                  ? `${format(new Date(salary.period_start), 'dd.MM.yyyy')} – ${format(new Date(salary.period_end), 'dd.MM.yyyy')}`
+                  : format(new Date(salary.paid_at || new Date()), 'dd.MM.yyyy')}
+              </DialogDescription>
+            </DialogHeader>
 
             {/* Tab bar */}
-            <div className="flex flex-wrap gap-1" style={{ marginBottom: '-1px' }}>
+            <div className="-mb-px flex flex-wrap gap-1">
               {([
                 { key: 'details', label: t('sal.tab.details'), icon: <DollarSign size={15} /> },
                 { key: 'summary', label: t('common.summary'), icon: <LayoutDashboard size={15} /> },
@@ -706,14 +691,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors [@media(pointer:coarse)]:min-h-10"
-                  style={{
-                    background: activeTab === tab.key ? 'var(--bg-surface)' : 'transparent',
-                    color: activeTab === tab.key ? 'var(--accent)' : 'var(--text-tertiary)',
-                    border: activeTab === tab.key ? '1px solid var(--border)' : '1px solid transparent',
-                    borderBottom: activeTab === tab.key ? '1px solid var(--bg-surface)' : '1px solid transparent',
-                    cursor: 'pointer',
-                  }}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-1.5 rounded-t-tight border px-4 py-2.5 text-sm font-medium transition-colors [@media(pointer:coarse)]:min-h-10',
+                    activeTab === tab.key
+                      ? 'border-line border-b-sheet bg-sheet text-brand-text'
+                      : 'border-transparent text-fg-subtle hover:text-fg',
+                  )}
                 >
                   {tab.icon}
                   {tab.label}
@@ -722,7 +705,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             </div>
           </div>
 
-          <div className="p-4 space-y-6 overflow-y-auto flex-1 sm:p-6">
+          <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
 
             {/* ── Summary tab ── */}
             {activeTab === 'summary' && (<>
@@ -768,58 +751,55 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             {activeTab === 'details' && (<>
 
             {/* KPI summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div style={{ background: 'var(--accent-subtle)', borderRadius: '0.5rem', padding: '1rem' }}>
-                <div style={{ color: 'var(--accent)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="rounded-tile bg-brand-soft p-4">
+                <div className="mb-1 text-sm font-medium text-brand-text">
                   {t('sal.calculatedDriverSalary')}
                   {salary.netto_salary && salary.netto_salary !== salary.amount_due && (
-                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}> {t('sal.adjustedSuffix')}</span>
+                    <span className="text-xs opacity-80"> {t('sal.adjustedSuffix')}</span>
                   )}
                 </div>
-                <div style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
+                <div className="text-2xl font-bold tabular-nums text-fg">
                   {fmtEur(calculatedSalaryTotal)}
                 </div>
               </div>
 
-              <div style={{ background: 'var(--success-subtle)', borderRadius: '0.5rem', padding: '1rem' }}>
-                <div style={{ color: 'var(--success)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>{t('sal.alreadyPaid')}</div>
-                <div style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
+              <div className="rounded-tile bg-positive-soft p-4">
+                <div className="mb-1 text-sm font-medium text-positive">{t('sal.alreadyPaid')}</div>
+                <div className="text-2xl font-bold tabular-nums text-fg">
                   {fmtEur(totalPaid)}
                 </div>
               </div>
 
-              <div style={{ background: remainingBalance > 0 ? 'var(--danger-subtle)' : 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem' }}>
-                <div style={{ color: remainingBalance > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+              <div className={cn('rounded-tile p-4', remainingBalance > 0 ? 'bg-critical-soft' : 'bg-sunken')}>
+                <div className={cn('mb-1 text-sm font-medium', remainingBalance > 0 ? 'text-critical' : 'text-fg-muted')}>
                   {t('sal.remaining')}
                 </div>
-                <div style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
+                <div className="text-2xl font-bold tabular-nums text-fg">
                   {fmtEur(remainingBalance)}
                 </div>
               </div>
             </div>
 
             {/* ——— Lohnabrechnung & Auszahlung ——— */}
-            <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflow: 'hidden' }}>
-              <div style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', padding: '0.875rem 1.25rem' }} className="flex items-center justify-between">
-                <h3 style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{t('sal.payroll.sectionTitle')}</h3>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{t('sal.payroll.internalOnly')}</span>
+            <div className="overflow-hidden rounded-tile border border-line">
+              <div className="flex items-center justify-between border-b border-line bg-sunken px-5 py-3.5">
+                <h3 className="font-semibold text-fg">{t('sal.payroll.sectionTitle')}</h3>
+                <span className="text-xs text-fg-subtle">{t('sal.payroll.internalOnly')}</span>
               </div>
 
-              <div className="p-5 space-y-5">
+              <div className="space-y-5 p-5">
 
                 {/* Read-only: system total */}
-                <div style={readonlyRowStyle}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{t('sal.calculatedDriverSalary')}</span>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtEur(calculatedSalaryTotal)}</span>
+                <div className="flex items-center justify-between border-b border-line py-2">
+                  <span className="text-sm text-fg-muted">{t('sal.calculatedDriverSalary')}</span>
+                  <span className="font-bold tabular-nums text-fg">{fmtEur(calculatedSalaryTotal)}</span>
                 </div>
 
                 {/* Editable inputs */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('sal.payroll.grossLabel')}
-                    </label>
-                    <input
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('sal.payroll.grossLabel')} hint={t('sal.payroll.grossHint')}>
+                    <Input
                       type="number"
                       min="0"
                       step="0.01"
@@ -829,18 +809,11 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         ...prev,
                         payroll_gross_amount: e.target.value === '' ? null : Number(e.target.value),
                       }))}
-                      style={inputStyle}
                     />
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
-                      {t('sal.payroll.grossHint')}
-                    </p>
-                  </div>
+                  </Field>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('sal.payroll.netLabel')}
-                    </label>
-                    <input
+                  <Field label={t('sal.payroll.netLabel')} hint={t('sal.payroll.netHint')}>
+                    <Input
                       type="number"
                       min="0"
                       step="0.01"
@@ -850,90 +823,66 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         ...prev,
                         payroll_net_amount: e.target.value === '' ? null : Number(e.target.value),
                       }))}
-                      style={inputStyle}
                     />
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
-                      {t('sal.payroll.netHint')}
-                    </p>
-                  </div>
+                  </Field>
                 </div>
 
                 {/* Warning: gross > calculated total */}
                 {split.grossExceedsTotal && (
-                  <div style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.375rem', padding: '0.625rem 0.875rem' }} className="flex items-center gap-2">
-                    <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
-                    <span style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>
-                      {t('sal.payroll.grossExceedsWarning')}
-                    </span>
-                  </div>
+                  <Alert tone="critical">
+                    {t('sal.payroll.grossExceedsWarning')}
+                  </Alert>
                 )}
 
                 {/* The Brutto is what the cash remainder is measured against, so
                     without it the payout is not computed at all. Saying so is the
                     whole change: the block used to show the full salary as cash. */}
                 {split.problem === 'gross_missing' && (
-                  <div
-                    style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', color: 'var(--warning)' }}
-                    className="flex items-center gap-2 rounded-md px-3.5 py-2.5"
-                  >
-                    {/* The colour is set once here and inherited: lucide draws in
-                        currentColor, so the icon and the sentence need none of
-                        their own. Three inline styles become one, which is what
-                        keeps this file under the style ratchet. */}
-                    <AlertCircle size={16} className="shrink-0" />
-                    <span className="text-sm">
-                      {t('sal.payroll.grossLabel')} — {t('sal.summary.grossNotEntered')}
-                    </span>
-                  </div>
+                  <Alert tone="caution">
+                    {t('sal.payroll.grossLabel')} — {t('sal.summary.grossNotEntered')}
+                  </Alert>
                 )}
 
                 {/* Computed breakdown — shown once the split is established */}
                 {split.established && (
-                  <div style={{ background: 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem', border: '1px solid var(--border)' }} className="space-y-0">
-                    <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '0.625rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div className="space-y-0 rounded-tile border border-line bg-sunken p-4">
+                    <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
                       {t('sal.payroll.computedPayout')}
                     </p>
 
                     {/* Bargehalt */}
-                    <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="flex items-center justify-between border-b border-line py-2">
                       <div className="flex items-center gap-2">
-                        <Banknote size={15} style={{ color: 'var(--success)' }} />
-                        <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.cashSalary')}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                        <Banknote size={15} className="text-positive" />
+                        <span className="text-sm text-fg-muted">{t('sal.payroll.cashSalary')}</span>
+                        <span className="text-xs text-fg-subtle">
                           ({fmtEur(calculatedSalaryTotal)} − {fmtEur(split.gross)})
                         </span>
                       </div>
-                      <span style={{
-                        fontWeight: 700,
-                        color: split.cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
-                      }}>
+                      <span className={cn('font-bold tabular-nums', split.cashIsNegative ? 'text-critical' : 'text-fg')}>
                         {fmtEur(split.cash)}
-                        {split.cashIsNegative && <span className="ml-1 text-xs">⚠</span>}
+                        {split.cashIsNegative && <span className="ms-1 text-xs">⚠</span>}
                       </span>
                     </div>
 
                     {/* Bankgehalt */}
-                    <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="flex items-center justify-between border-b border-line py-2">
                       <div className="flex items-center gap-2">
-                        <Building2 size={15} style={{ color: 'var(--accent)' }} />
-                        <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.bankSalary')}</span>
+                        <Building2 size={15} className="text-brand-text" />
+                        <span className="text-sm text-fg-muted">{t('sal.payroll.bankSalary')}</span>
                       </div>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtEur(split.bank)}</span>
+                      <span className="font-bold tabular-nums text-fg">{fmtEur(split.bank)}</span>
                     </div>
 
                     {/* Total net payout */}
                     <div className="flex items-center justify-between pt-2">
-                      <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      <span className="text-sm font-semibold text-fg">
                         {t('sal.payroll.totalNetPayout')}
                       </span>
-                      <span style={{
-                        fontSize: '1.125rem',
-                        fontWeight: 700,
-                        color: split.cashIsNegative ? 'var(--warning)' : 'var(--success)',
-                      }}>
+                      <span className={cn('text-lg font-bold tabular-nums', split.cashIsNegative ? 'text-caution' : 'text-positive')}>
                         {fmtEur(split.payout)}
                         {split.cashIsNegative && (
-                          <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginLeft: '0.5rem', fontWeight: 400 }}>
+                          <span className="ms-2 text-xs font-normal text-caution">
                             {t('sal.payroll.cashNegative')}
                           </span>
                         )}
@@ -947,37 +896,23 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPayrollData(prev => ({ ...prev, tax_review_confirmed: !prev.tax_review_confirmed }))}
-                    className="flex items-center gap-2 text-left text-sm [@media(pointer:coarse)]:min-h-10"
-                    style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                    className="flex cursor-pointer items-center gap-2 text-start text-sm text-fg-muted [@media(pointer:coarse)]:min-h-10"
                   >
                     {payrollData.tax_review_confirmed
-                      ? <CheckSquare size={16} style={{ color: 'var(--success)' }} />
-                      : <Square size={16} style={{ color: 'var(--text-tertiary)' }} />}
+                      ? <CheckSquare size={16} className="text-positive" />
+                      : <Square size={16} className="text-fg-subtle" />}
                     {t('sal.payroll.taxReviewed')}
                   </button>
                 </div>
 
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                <p className="text-xs italic text-fg-subtle">
                   {t('sal.payroll.taxDisclaimer')}
                 </p>
 
                 <div className="flex justify-end">
-                  <button
-                    onClick={savePayrollData}
-                    disabled={savingPayroll}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                    style={{
-                      background: 'var(--accent)',
-                      color: 'var(--text-inverse)',
-                      border: 'none',
-                      cursor: savingPayroll ? 'not-allowed' : 'pointer',
-                      opacity: savingPayroll ? 0.7 : 1,
-                    }}
-                    onMouseEnter={e => { if (!savingPayroll) e.currentTarget.style.background = 'var(--accent-hover)'; }}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-                  >
+                  <Button onClick={savePayrollData} disabled={savingPayroll}>
                     {savingPayroll ? t('common.saving') : t('sal.payroll.save')}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -985,61 +920,49 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             {/* Payment status + add buttons */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold">{t('sal.paymentStatus')}</h3>
+                <h3 className="text-lg font-semibold text-fg">{t('sal.paymentStatus')}</h3>
                 <div className="mt-2">{getStatusBadge(paymentStatus)}</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button
+                <Button
+                  variant="secondary"
                   onClick={handleWeeklyCashPayment}
                   disabled={loadingWeekly}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium"
-                  style={{
-                    background: 'var(--success-subtle)',
-                    color: 'var(--success)',
-                    border: '1px solid var(--success)',
-                    cursor: loadingWeekly ? 'not-allowed' : 'pointer',
-                    opacity: loadingWeekly ? 0.7 : 1,
-                  }}
-                  onMouseEnter={e => { if (!loadingWeekly) { e.currentTarget.style.background = 'var(--success-solid)'; e.currentTarget.style.color = '#fff'; } }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--success-subtle)'; e.currentTarget.style.color = 'var(--success)'; }}
+                  className="text-positive"
                   title={t('sal.weekly.buttonTitle')}
                 >
-                  <Zap size={16} />
+                  <Zap aria-hidden />
                   <span>{t('sal.weekly.button')}</span>
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={() => { setSelectedPayment(undefined); setIsPaymentModalOpen(true); }}
                   disabled={remainingBalance <= 0}
-                  style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
-                  onMouseEnter={e => { if (remainingBalance > 0) e.currentTarget.style.background = 'var(--accent-hover)'; }}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-                  className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed [@media(pointer:coarse)]:min-h-10"
                 >
-                  <Plus size={20} />
+                  <Plus aria-hidden />
                   <span>{t('sal.payment.add')}</span>
-                </button>
+                </Button>
               </div>
             </div>
 
             {/* Payment history */}
             <div>
-              <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold mb-4">{t('sal.paymentHistory')}</h3>
+              <h3 className="mb-4 text-lg font-semibold text-fg">{t('sal.paymentHistory')}</h3>
               {loading ? (
                 <div className="flex items-center justify-center py-8">
-                  <div style={{ borderColor: 'var(--accent)' }} className="animate-spin rounded-full h-8 w-8 border-b-2"></div>
+                  <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-brand"></div>
                 </div>
               ) : payments.length === 0 ? (
-                <div style={{ color: 'var(--text-tertiary)' }} className="text-center py-8">{t('sal.noPayments')}</div>
+                <div className="py-8 text-center text-fg-subtle">{t('sal.noPayments')}</div>
               ) : (
-                <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflowX: 'auto' }}>
+                <div className="relative overflow-x-auto rounded-tile border border-line">
                   <table className="w-full">
-                    <thead style={{ background: 'var(--bg-subtle)' }}>
+                    <thead className="bg-sunken">
                       <tr>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.date')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.payment.type')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.amount')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.description')}</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.col.actions')}</th>
+                        <th className="px-4 py-3 text-start text-sm font-semibold text-fg-muted">{t('common.date')}</th>
+                        <th className="px-4 py-3 text-start text-sm font-semibold text-fg-muted">{t('sal.payment.type')}</th>
+                        <th className="px-4 py-3 text-end text-sm font-semibold text-fg-muted">{t('common.amount')}</th>
+                        <th className="px-4 py-3 text-start text-sm font-semibold text-fg-muted">{t('common.description')}</th>
+                        <th className="px-4 py-3 text-end text-sm font-semibold text-fg-muted">{t('sal.col.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1090,7 +1013,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             aria-label={t('sal.payment.viewCashAria', {
                               date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
                             })}
-                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)] [@media(pointer:coarse)]:min-h-10"
+                            className="inline-flex items-center gap-1 rounded-tight px-1.5 py-1 text-[13px] font-medium text-brand-text hover:bg-brand-soft [@media(pointer:coarse)]:min-h-10"
                           >
                             <Eye size={14} />
                             {t('sal.payment.viewCash')}
@@ -1099,72 +1022,37 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         return (
                         <tr
                           key={payment.id}
-                          style={{ borderTop: idx > 0 ? '1px solid var(--border)' : undefined }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          className={cn('transition-colors hover:bg-sunken', idx > 0 && 'border-t border-line')}
                         >
-                          <td style={{ color: 'var(--text-primary)', padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                          <td className="px-4 py-3 text-sm text-fg">
                             {format(new Date(payment.payment_date), 'dd.MM.yyyy')}
                           </td>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                          <td className="px-4 py-3 text-sm">
                             <div className="flex flex-col gap-1">
-                              <span style={{
-                                background: payment.payment_type === 'cash' ? 'var(--success-subtle)' : 'var(--accent-subtle)',
-                                color: payment.payment_type === 'cash' ? 'var(--success)' : 'var(--accent)',
-                                borderRadius: '0.25rem',
-                                padding: '0.125rem 0.5rem',
-                                fontSize: '0.75rem',
-                                fontWeight: 500,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.25rem',
-                                width: 'fit-content',
-                              }}>
+                              <Badge tone={payment.payment_type === 'cash' ? 'positive' : 'brand'} className="w-fit">
                                 {payment.payment_type === 'cash'
                                   ? <><Banknote size={12} />{t('sal.payment.cashBadge')}</>
                                   : <><Building2 size={12} />{t('sal.payment.bankBadge')}</>}
-                              </span>
+                              </Badge>
                               {payment.source_type === 'weekly_cash_difference' && (
-                                <span style={{
-                                  background: 'var(--warning-subtle)',
-                                  color: 'var(--warning)',
-                                  borderRadius: '0.25rem',
-                                  padding: '0.125rem 0.375rem',
-                                  fontSize: '0.6875rem',
-                                  fontWeight: 500,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  width: 'fit-content',
-                                }}>
+                                <Badge tone="caution" className="w-fit">
                                   <Zap size={10} />{t('sal.weekly.badge')}
-                                </span>
+                                </Badge>
                               )}
                               {(payment.source_type === 'gehaltsquittung' || payment.issued_receipt_id) && (
-                                <span style={{
-                                  background: 'var(--bg-muted)',
-                                  color: 'var(--text-secondary)',
-                                  borderRadius: '0.25rem',
-                                  padding: '0.125rem 0.375rem',
-                                  fontSize: '0.6875rem',
-                                  fontWeight: 500,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  width: 'fit-content',
-                                }}>
+                                <Badge tone="neutral" className="w-fit">
                                   <Lock size={10} />{t('sal.payment.receiptBadge')}
-                                </span>
+                                </Badge>
                               )}
                             </div>
                           </td>
-                          <td style={{ color: 'var(--text-primary)', padding: '0.75rem 1rem', fontSize: '0.875rem', textAlign: 'right', fontWeight: 600 }}>
+                          <td className="px-4 py-3 text-end text-sm font-semibold tabular-nums text-fg">
                             {Number(payment.amount).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                           </td>
-                          <td style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                          <td className="px-4 py-3 text-sm text-fg-muted">
                             {payment.description || '-'}
                           </td>
-                          <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                          <td className="px-4 py-3 text-end">
                             {rowActions.kind === 'receipt' ? (
                               // Written by confirm_salary_cash_payment; a trigger refuses any edit or
                               // delete, so the row changes only by voiding its receipt. The preview
@@ -1176,20 +1064,18 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   role="img"
                                   aria-label={lockedLabel}
                                   title={lockedLabel}
-                                  style={{ color: 'var(--text-tertiary)', display: 'inline-flex' }}
+                                  className="inline-flex text-fg-subtle"
                                 >
                                   <Lock size={16} />
                                 </span>
                                 {rowActions.preview && (
-                                  <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
+                                  <button
                                     type="button"
                                     onClick={() => setReceiptPreviewId(rowActions.receiptId)}
                                     aria-label={t('sal.payment.previewReceiptAria', {
                                       date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
                                     })}
-                                    style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem 0.375rem', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
-                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                    className="inline-flex items-center gap-1 rounded-tight px-1.5 py-1 text-[13px] font-medium text-brand-text hover:bg-brand-soft [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                   >
                                     <Eye size={14} />
                                     {t('sal.payment.previewReceipt')}
@@ -1206,7 +1092,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                     aria-label={t('sal.payment.voidAria', {
                                       date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
                                     })}
-                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger-subtle)] [@media(pointer:coarse)]:min-h-10"
+                                    className="inline-flex items-center gap-1 rounded-tight px-1.5 py-1 text-[13px] font-medium text-critical hover:bg-critical-soft [@media(pointer:coarse)]:min-h-10"
                                   >
                                     <Ban size={14} />
                                     {t('gq.action.void')}
@@ -1214,22 +1100,16 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 )}
                               </div>
                             ) : (
-                            <div className="flex items-center justify-end space-x-2">
+                            <div className="flex items-center justify-end space-x-2 rtl:space-x-reverse">
                               {viewOffered && viewButton}
-                              <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
+                              <button className="inline-flex items-center justify-center rounded-tight p-1 text-brand-text hover:bg-brand-soft [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                 onClick={() => { setSelectedPayment(paymentRow); setIsPaymentModalOpen(true); }}
-                                style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem' }}
-                                onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
-                                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                                 title={t('common.edit')}
                               >
                                 <Edit2 size={16} />
                               </button>
-                              {rolePermits('salaries', 'edit') && <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
+                              {rolePermits('salaries', 'edit') && <button className="inline-flex items-center justify-center rounded-tight p-1 text-critical hover:bg-critical-soft [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
                                 onClick={() => setPaymentToDelete(paymentRow)}
-                                style={{ color: 'var(--danger)', borderRadius: '0.25rem', padding: '0.25rem' }}
-                                onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
-                                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                                 title={t('common.delete')}
                               >
                                 <Trash2 size={16} />
@@ -1249,18 +1129,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
           </div>
 
           {/* Footer */}
-          <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)', padding: '1.5rem' }} className="flex justify-end">
-            <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-              onClick={handleClose}
-              style={{ background: 'var(--bg-muted)', color: 'var(--text-primary)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: '1px solid var(--border)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-            >
+          <div className="flex justify-end border-t border-line bg-sunken p-6">
+            <Button variant="secondary" onClick={handleClose}>
               {t('common.close')}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       <SalaryPaymentModal
         isOpen={isPaymentModalOpen}
@@ -1304,14 +1179,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         onUnknownOutcome={() => void reloadAfterStorno()}
       />
 
-      <ConfirmationModal
-        isOpen={!!paymentToDelete}
+      <ConfirmDialog
+        open={!!paymentToDelete}
         onClose={() => setPaymentToDelete(null)}
         onConfirm={handleDeletePayment}
-        type="confirm"
         title={t('sal.payment.deleteTitle')}
-        message={t('sal.payment.deleteConfirm')}
-        confirmText={t('common.delete')}
+        description={t('sal.payment.deleteConfirm')}
+        confirmLabel={t('common.delete')}
       />
     </>
   );

@@ -508,10 +508,14 @@ BEGIN
   -- side: the refusal is raised by a constraint on a table two hops from the
   -- statement, so the Fahrer screen's trash button failed with a message
   -- naming a table the operator has never heard of.
-  PERFORM _ns_rec(11, 'and neither can the DRIVER, the note cascading into the same refusal',
+  -- MOVED 27.11.2026 by 20261127130000: the driver is refused one step earlier
+  -- now, by the guard on drivers (23503, no constraint name), because the note
+  -- and the submission are rows that refer to him. The cascade this probe used
+  -- to follow never starts. The constraint's own refusal is still probe 9.
+  PERFORM _ns_rec(11, 'and neither can the DRIVER, now refused by the drivers guard before any cascade starts',
     _ns_try(_ns_id('user:admin'),
       format('DELETE FROM drivers WHERE id = %L', _ns_id('driver:own'))),
-    'ERR 23514 partner_note_submissions_accepted_has_note');
+    'ERR 23503 -');
 
   PERFORM _ns_set_action(v_was);
   PERFORM _ns_rec(12, 'and the action is back to CASCADE for the sections below',
@@ -588,19 +592,22 @@ END $$;
 
 DO $$
 BEGIN
-  PERFORM _ns_rec(20, 'deleting the driver removes its note''s submission two cascades away',
+  -- MOVED 27.11.2026 by 20261127130000. This section recorded the two-cascade
+  -- chain from the Fahrer screen's trash button; a driver with a note and a
+  -- submission is a driver rows refer to, so the delete is refused before
+  -- anything cascades and all three rows stay. The cascade from the NOTE (the
+  -- section above) is unchanged and is where `driver_notes` still deletes.
+  PERFORM _ns_rec(20, 'deleting the driver is refused by the guard, so no cascade reaches the submission',
     _ns_delete_then(_ns_id('user:admin'),
       format('DELETE FROM drivers WHERE id = %L', _ns_id('driver:own')),
       format('SELECT count(*)::text FROM partner_note_submissions WHERE id = %L', _ns_id('sub:driver'))),
-    'rows 1 / 0');
+    'ERR 23503 -');
 
-  DELETE FROM drivers WHERE id = _ns_id('driver:own');
-
-  PERFORM _ns_rec(21, 'and afterwards the driver, its note and the submission are all gone',
+  PERFORM _ns_rec(21, 'and afterwards the driver, its note and the submission are all still there',
     (SELECT (SELECT count(*) FROM drivers WHERE id = _ns_id('driver:own'))::text || '/' ||
             (SELECT count(*) FROM driver_notes WHERE id = _ns_id('note:driver'))::text || '/' ||
             (SELECT count(*) FROM partner_note_submissions WHERE id = _ns_id('sub:driver'))::text),
-    '0/0/0');
+    '1/1/1');
 END $$;
 
 -- ─── 5. the neighbours ──────────────────────────────────────────────────────
@@ -641,7 +648,7 @@ BEGIN
       format('SELECT count(*)::text FROM partner_note_submissions '
              'WHERE company_id = %L AND external_submission_id LIKE %L',
              _ns_id('company:a'), 'ns-ext-%')),
-    'rows 1 / 4');
+    'rows 1 / 5');  -- 4 until 20261127130000: the driver's own submission now survives the refused driver delete
 END $$;
 
 -- ─── 6. tenancy and the role gate on driver_notes DELETE, unchanged ─────────
@@ -848,11 +855,13 @@ BEGIN
     v_bad := v_bad + 1;
   END IF;
 
-  -- the driver chain: two cascades, and the submission goes with it
+  -- the driver chain: since 20261127130000 the guard on drivers refuses it
+  -- before any cascade runs, so this probe no longer tells a mutation of the
+  -- action apart; the note probes above carry that
   v_res := _ns_delete_then(_ns_id('user:admin'),
     format('DELETE FROM drivers WHERE id = %L', v_drv),
     format('SELECT count(*)::text FROM partner_note_submissions WHERE id = %L', v_sid));
-  IF v_res IS DISTINCT FROM 'rows 1 / 0' THEN
+  IF v_res IS DISTINCT FROM 'ERR 23503 -' THEN
     v_bad := v_bad + 1;
   END IF;
 
@@ -889,9 +898,10 @@ BEGIN
   PERFORM _ns_rec(38, 'control: against the real schema the battery has no mismatch',
     _ns_battery()::text, '0');
 
-  -- M1. the action back to SET NULL — the defect. Four of the five probes
-  --     move: the catalogue, the cascaded row, the note delete and the driver
-  --     delete, all three statements refused by the CHECK. The viewer's
+  -- M1. the action back to SET NULL — the defect. Three of the five probes
+  --     move since 20261127130000 (four before: the driver delete is refused by
+  --     the drivers guard whatever the action, so it no longer moves): the
+  --     catalogue, the cascaded row and the note delete, refused by the CHECK. The viewer's
   --     statement reaches no row at all, so the cascade never runs and it does
   --     not move — which is the point of having it in the battery.
   BEGIN
@@ -900,8 +910,8 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ011', MESSAGE = 'rollback M1';
   EXCEPTION WHEN SQLSTATE 'ZZ011' THEN NULL;
   END;
-  PERFORM _ns_rec(39, 'mutation M1 (ON DELETE SET NULL, the original defect) moves four of five probes',
-    v_m1::text, '4');
+  PERFORM _ns_rec(39, 'mutation M1 (ON DELETE SET NULL, the original defect) moves three of five probes',
+    v_m1::text, '3');
 
   -- M2. NO ACTION: deleting the note is refused by the foreign key itself,
   --     23503 and not 23514, which is why the probes compare by name. The same
@@ -912,8 +922,8 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ011', MESSAGE = 'rollback M2';
   EXCEPTION WHEN SQLSTATE 'ZZ011' THEN NULL;
   END;
-  PERFORM _ns_rec(40, 'mutation M2 (NO ACTION) moves four of five probes',
-    v_m2::text, '4');
+  PERFORM _ns_rec(40, 'mutation M2 (NO ACTION) moves three of five probes',
+    v_m2::text, '3');
 
   -- M3. the page gate removed from driver_notes_delete. Only the viewer moves
   --     — to `rows 1` — so the cascade probes are not quietly measuring the

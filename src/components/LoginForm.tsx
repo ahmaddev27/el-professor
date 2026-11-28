@@ -139,7 +139,7 @@ const LoginForm: React.FC = () => {
 
       <form onSubmit={handleSubmit} className="grid gap-4">
         <Field label={t('auth.email')}>
-          <div className="relative">
+          <div className="relative" dir="ltr">
             <Mail aria-hidden className={authFieldIconClass} />
             <Input
               type="email"
@@ -160,7 +160,7 @@ const LoginForm: React.FC = () => {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className={cn(authFieldWithIconClass, 'pr-11')}
+                className={cn(authFieldWithIconClass, 'pe-11')}
                 placeholder={t('auth.passwordPlaceholder')}
                 required
               />
@@ -170,13 +170,13 @@ const LoginForm: React.FC = () => {
                 size="icon-sm"
                 onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
-                className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                className="absolute end-0.5 top-1/2 -translate-y-1/2"
               >
                 {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
               </Button>
             </div>
           </Field>
-          <div className="text-right">
+          <div className="text-end">
             <Link to="/auth/forgot-password" className={cn(authLinkClass, 'text-[13px]')}>
               {t('auth.forgotPassword')}
             </Link>

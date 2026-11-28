@@ -8,6 +8,11 @@
  * `drivers.name` of an existing driver. `drivers.name` is text with no foreign
  * key and income, receipts and the Abrechnung join on it, so a second row for
  * the same person splits their money across two names.
+ *
+ * The driver import is read from 20261127120000, which restated it on the rule
+ * "link only when certain" (the vehicle import is still 20261015110000's). The
+ * rule itself lives in app_private.partner_driver_certain_match and is pinned
+ * from that migration below.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -18,34 +23,48 @@ const SQL = readFileSync(
   'utf8',
 );
 
+const CERTAIN_SQL = readFileSync(
+  path.resolve(__dirname, '../../supabase/migrations/20261127120000_partner_certain_driver_link.sql'),
+  'utf8',
+);
+
 /** The body of one function, from its CREATE to the closing dollar quote. */
-function body(name: string): string {
-  const start = SQL.indexOf(`FUNCTION public.${name}(`);
+function bodyIn(sql: string, schema: string, name: string): string {
+  const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${schema}.${name}(`);
   expect(start, `${name} is defined`).toBeGreaterThan(-1);
-  const open = SQL.indexOf('AS $$', start);
-  return SQL.slice(open, SQL.indexOf('$$;', open + 5));
+  const open = sql.indexOf('AS $$', start);
+  return sql.slice(open, sql.indexOf('$$;', open + 5));
 }
+const body = (name: string): string => bodyIn(SQL, 'public', name);
 
 describe('partner_drivers_import', () => {
-  const drivers = body('partner_drivers_import');
+  const drivers = bodyIn(CERTAIN_SQL, 'public', 'partner_drivers_import');
+  const rule = bodyIn(CERTAIN_SQL, 'app_private', 'partner_driver_certain_match');
 
-  it('looks an existing driver up by the normalised name inside the company', () => {
-    // Anchored on what follows: a name compared with anything but the bare key
-    // would find nobody, and the import would create everyone.
-    expect(drivers).toMatch(
-      /d\.company_id = v_company AND lower\(btrim\(d\.name\)\) = v_key\s*\n\s*AND NOT EXISTS/,
-    );
-    expect(drivers).toMatch(
-      /d\.company_id = v_company AND lower\(btrim\(d\.name\)\) = v_key\s*\n\s*\) THEN/,
-    );
+  it('asks the one rule and compares no name itself', () => {
+    expect(drivers).toContain('app_private.partner_driver_certain_match(v_company, v_partner, v_link.proposed_name)');
+    expect(drivers).not.toMatch(/btrim\(d\.name\)/);
+    expect(drivers).not.toContain('unbekannter fahrer');
   });
 
-  it('links to the found driver and only creates when none was found', () => {
-    const lookup = drivers.indexOf('lower(btrim(d.name)) = v_key');
+  it('the rule looks a driver up by the exact normalised name inside the company', () => {
+    expect(rule).toMatch(/d\.company_id = p_company AND lower\(btrim\(d\.name\)\) = v_key/);
+    expect(rule).not.toMatch(/similarity|levenshtein|soundex|metaphone|ILIKE/i);
+  });
+
+  it('the rule decides in the owner\'s order: none creates, then ambiguous, inactive, taken, else match', () => {
+    const order = ["o_action := 'create'", "'name_ambiguous'", "'name_inactive'", "'name_taken'", "o_action := 'match'"]
+      .map((needle) => rule.indexOf(needle));
+    expect(order.every((i) => i > -1)).toBe(true);
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+    expect(rule).toContain("v_key = 'unbekannter fahrer'");
+  });
+
+  it('creates only when the rule said create, and links through the one apply', () => {
     const create = drivers.indexOf('INSERT INTO public.drivers');
-    expect(lookup).toBeGreaterThan(-1);
-    expect(create).toBeGreaterThan(lookup);
-    expect(drivers).toMatch(/IF v_reason IS NULL AND v_driver IS NULL THEN\s+v_email/);
+    expect(create).toBeGreaterThan(drivers.indexOf("v_action = 'create'"));
+    expect(drivers).toContain('app_private.partner_driver_link_apply(v_link.id, v_driver, v_caller, v_method)');
+    expect(drivers).not.toMatch(/SET\s+status\s*=\s*'linked'/);
   });
 
   it('never writes an existing driver and never names a ruled-out column', () => {

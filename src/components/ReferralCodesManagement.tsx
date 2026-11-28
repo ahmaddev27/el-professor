@@ -4,9 +4,9 @@ import { useToast } from '../contexts/ToastContext';
 import { deleteChecked } from '../lib/writeOutcome';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { Plus, CreditCard as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Pencil as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
 import { referralUsageCounts } from '../lib/panelFigures';
-import { Alert } from './ui';
+import { Alert, Badge, Button, EmptyState, Field, Input, cn } from './ui';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
@@ -167,95 +167,69 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
     }
   };
 
-  const cardStyle: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '1rem',
-  };
-
-  const inputClass = 'w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none';
-  const inputStyle: React.CSSProperties = { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' };
-
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 font-ui">
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Gift size={18} style={{ color: '#10b981' }} />
-          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.referral.title')}</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+          <Gift size={18} className="text-brand-text" />
+          <h2 className="text-base font-semibold text-fg">{t('codes.referral.title')}</h2>
+          <Badge tone="brand">
             {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, referrals.length)}
-          </span>
+          </Badge>
         </div>
-        <button
-          onClick={() => { setShowForm(v => !v); setEditingId(null); setForm(emptyForm); }}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
-          style={{ background: '#10b981', color: 'white' }}
-        >
+        <Button onClick={() => { setShowForm(v => !v); setEditingId(null); setForm(emptyForm); }}>
           {showForm ? <X size={14} /> : <Plus size={14} />}
           {showForm ? t('common.cancel') : t('codes.referral.newShort')}
-        </button>
+        </Button>
       </div>
 
       {/* Create/edit form */}
       {showForm && (
-        <div className="p-5 space-y-4" style={cardStyle}>
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+        <div className="glass-card rounded-surface p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-fg">
             {editingId ? t('codes.referral.edit') : t('codes.referral.new')}
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.codeRequired')}</label>
-              <input
+            <Field label={t('codes.discount.codeRequired')}>
+              <Input
                 type="text"
                 value={form.ref_code}
                 onChange={e => setForm(f => ({ ...f, ref_code: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '') }))}
                 placeholder="PARTNER2024"
-                className={`${inputClass} font-mono`}
-                style={inputStyle}
+                className="font-mono"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.referral.nameRequired')}</label>
-              <input
+            </Field>
+            <Field label={t('codes.referral.nameRequired')}>
+              <Input
                 type="text"
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 placeholder={t('codes.referral.namePlaceholder')}
-                className={inputClass}
-                style={inputStyle}
               />
-            </div>
+            </Field>
           </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.field.descriptionOptional')}</label>
-            <input
+          <Field label={t('codes.field.descriptionOptional')}>
+            <Input
               type="text"
               value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
               placeholder={t('codes.referral.descPlaceholder')}
-              className={inputClass}
-              style={inputStyle}
             />
-          </div>
+          </Field>
           <div className="flex gap-2 justify-end">
-            <button
-              onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }}
-              className="px-4 py-2 rounded-xl text-sm font-semibold"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            >
+            <Button variant="secondary" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }}>
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleSave}
               disabled={saving || !form.ref_code.trim() || !form.name.trim()}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-              style={{ background: '#10b981', color: 'white' }}
             >
-              {saving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
+              {saving ? <RefreshCw size={13} className="motion-safe:animate-spin" /> : <Check size={13} />}
               {editingId ? t('common.save') : t('codes.actionCreate')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -273,10 +247,10 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
       )}
 
       {/* Table */}
-      <div style={cardStyle} className="overflow-hidden">
+      <div className="glass-card rounded-surface relative overflow-x-auto">
         {loading ? (
           <div className="flex items-center justify-center py-10">
-            <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+            <RefreshCw size={20} className="motion-safe:animate-spin text-fg-subtle" />
           </div>
         ) : loadFailed ? (
           /* Not "no referral codes yet" — the list was not read. */
@@ -286,42 +260,37 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
             </Alert>
           </div>
         ) : referrals.length === 0 ? (
-          <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
-            <Gift size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">{t('codes.referral.none')}</p>
-          </div>
+          <EmptyState icon={Gift} title={t('codes.referral.none')} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                <tr className="bg-wash border-b border-line">
                   {TABLE_HEADER_KEYS.map((key, i) => (
-                    <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{key ? t(key) : ''}</th>
+                    <th key={i} className="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap text-fg-subtle">{key ? t(key) : ''}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {referrals.map(r => (
                   <React.Fragment key={r.id}>
-                    <tr
-                      style={{ borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
+                    <tr className="border-b border-line transition-colors hover:bg-sunken">
                       <td className="px-4 py-3">
-                        <span className="font-mono text-sm font-bold px-2.5 py-1 rounded-lg" style={{ background: r.is_active ? 'rgba(16,185,129,0.1)' : 'var(--bg-subtle)', color: r.is_active ? '#10b981' : 'var(--text-tertiary)' }}>
+                        <span className={cn('rounded-tight px-2.5 py-1 font-mono text-sm font-bold', r.is_active ? 'bg-positive-soft text-positive' : 'bg-sunken text-fg-subtle')}>
                           {r.ref_code}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{r.name}</p>
-                        {r.description && <p className="text-[11px] mt-0.5 truncate max-w-[200px]" style={{ color: 'var(--text-tertiary)' }}>{r.description}</p>}
+                        <p className="font-medium text-sm text-fg">{r.name}</p>
+                        {r.description && <p className="text-[11px] mt-0.5 truncate max-w-[200px] text-fg-subtle">{r.description}</p>}
                       </td>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => setExpandedCode(expandedCode === r.ref_code ? null : r.ref_code)}
-                          className="flex items-center gap-1.5 text-sm font-semibold transition-colors"
-                          style={{ color: (r.usage_count ?? 0) > 0 ? '#10b981' : 'var(--text-tertiary)' }}
+                          className={cn(
+                            'flex items-center gap-1.5 text-sm font-semibold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10',
+                            (r.usage_count ?? 0) > 0 ? 'text-brand-text' : 'text-fg-subtle',
+                          )}
                         >
                           {/* A dash, not a zero, where the companies were not read. */}
                           {r.usage_count ?? '–'}
@@ -331,55 +300,55 @@ export default function ReferralCodesManagement({ companies, companiesKnown }: P
                       <td className="px-4 py-3">
                         <button
                           onClick={() => handleToggleActive(r)}
-                          className="flex items-center gap-1.5 text-xs font-semibold transition-opacity hover:opacity-80"
-                          style={{ color: r.is_active ? '#10b981' : 'var(--text-tertiary)' }}
+                          className={cn(
+                            'flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10',
+                            r.is_active ? 'text-positive' : 'text-fg-subtle',
+                          )}
                         >
                           {r.is_active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                           {r.is_active ? t('codes.status.active') : t('codes.status.inactive')}
                         </button>
                       </td>
-                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                      <td className="px-4 py-3 text-xs whitespace-nowrap tabular-nums text-fg-subtle">
                         {format(new Date(r.created_at), 'dd.MM.yyyy', { locale: de })}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 justify-end">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="hover:text-brand-text"
                             onClick={() => {
                               setEditingId(r.id);
                               setForm({ ref_code: r.ref_code, name: r.name, description: r.description ?? '' });
                               setShowForm(true);
                             }}
-                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                            style={{ color: 'var(--text-tertiary)' }}
-                            onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
-                            onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
                           >
                             <Edit2 size={13} />
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="hover:bg-critical-soft hover:text-critical"
                             onClick={() => handleDelete(r)}
-                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                            style={{ color: 'var(--text-tertiary)' }}
-                            onMouseEnter={e => { (e.currentTarget.style.background = 'var(--danger-subtle)'); (e.currentTarget.style.color = 'var(--danger)'); }}
-                            onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
                           >
                             <Trash2 size={13} />
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
                     {/* Expanded: companies that used this code */}
                     {expandedCode === r.ref_code && (r.usage_count ?? 0) > 0 && (
-                      <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+                      <tr className="border-b border-line bg-sunken">
                         <td colSpan={6} className="px-6 py-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>{t('codes.referral.companiesUsing')}</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 text-fg-subtle">{t('codes.referral.companiesUsing')}</p>
                           <div className="flex flex-wrap gap-2">
                             {companies
                               .filter(c => c.referral_code_used === r.ref_code)
                               .map(c => (
-                                <span key={c.id} className="px-2.5 py-1 rounded-lg text-xs font-medium" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                                <span key={c.id} className="glass-card rounded-tight px-2.5 py-1 text-xs font-medium text-fg">
                                   {c.name}
-                                  <span className="ml-1.5" style={{ color: 'var(--text-tertiary)' }}>
+                                  <span className="ms-1.5 tabular-nums text-fg-subtle">
                                     {format(new Date(c.created_at), 'dd.MM.yy', { locale: de })}
                                   </span>
                                 </span>

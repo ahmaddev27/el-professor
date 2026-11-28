@@ -5,14 +5,14 @@ import { cn } from './cn';
 
 export type AlertTone = 'neutral' | 'brand' | 'positive' | 'caution' | 'critical';
 
-const alertVariants = cva('flex items-start gap-3 rounded-surface border p-4 font-ui text-sm', {
+const alertVariants = cva('flex items-start gap-3 rounded-tile border px-3.5 py-3 font-ui text-[13px]', {
   variants: {
     tone: {
-      neutral: 'border-line bg-sunken',
-      brand: 'border-brand/30 bg-brand-soft',
-      positive: 'border-positive/30 bg-positive-soft',
-      caution: 'border-caution/30 bg-caution-soft',
-      critical: 'border-critical/30 bg-critical-soft',
+      neutral: 'border-edge bg-neutral-soft',
+      brand: 'border-brand/20 bg-brand-soft',
+      positive: 'border-positive/20 bg-positive-soft',
+      caution: 'border-caution/20 bg-caution-soft',
+      critical: 'border-critical/20 bg-critical-soft',
     },
   },
   defaultVariants: { tone: 'neutral' },
@@ -63,7 +63,7 @@ export function Alert({ tone = 'neutral', title, children, icon, action, role, i
     <div id={id} role={role ?? (tone === 'critical' ? 'alert' : 'status')} className={cn(alertVariants({ tone }), className)}>
       <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', TONE_TEXT[tone])} />
       <div className="grid min-w-0 gap-1">
-        {title ? <p className={cn('font-semibold', TONE_TEXT[tone])}>{title}</p> : null}
+        {title ? <p className={cn('font-[550]', TONE_TEXT[tone])}>{title}</p> : null}
         {children ? <div className="text-fg-muted">{children}</div> : null}
         {action ? <div className="mt-1">{action}</div> : null}
       </div>

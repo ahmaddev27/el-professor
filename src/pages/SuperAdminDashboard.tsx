@@ -10,7 +10,7 @@ import {
   Building2, Users, Car, FileText, TrendingUp, AlertTriangle,
   CheckCircle, XCircle, PauseCircle, Plus, ExternalLink,
   RefreshCw, BarChart3, AlertCircle, ChevronRight,
-  ArrowUpRight, Shield, Activity, Tag, ClipboardCheck, Gift, KeyRound, PencilLine,
+  Shield, Activity, Tag, ClipboardCheck, Gift, KeyRound, PencilLine,
 } from 'lucide-react';
 import { callPlatformRpc } from '../lib/platformRpc';
 import DiscountCodesManagement from '../components/DiscountCodesManagement';
@@ -25,7 +25,12 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { contextRefusalMessage } from '../lib/supportSession';
 import { ADMIN_BASE, TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
-import { Alert, ConfirmDialog } from '../components/ui';
+import {
+  Alert, Badge, Button, Card, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, EmptyState, Field, Input, KpiCard, NativeSelect, PageHeader, Tabs,
+  TabsList, TabsTrigger, cn,
+} from '../components/ui';
+import { controlFrameClass } from '../components/ui/Input';
 import type { CompanyStatus } from '../contexts/AuthContext';
 import type { TranslationKey } from '../i18n';
 
@@ -112,18 +117,8 @@ interface PlatformKPIs {
   premiumCount: number;
 }
 
-// ─── Shared style helpers ─────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
-const PLAN_COLOR: Record<Plan, string> = {
-  basic:    'var(--accent)',
-  advanced: '#f59e0b',
-  premium:  '#10b981',
-};
-const PLAN_BG: Record<Plan, string> = {
-  basic:    'rgba(6,182,212,0.12)',
-  advanced: 'rgba(245,158,11,0.12)',
-  premium:  'rgba(16,185,129,0.12)',
-};
 // Product tier names, not words — untranslated in both dictionaries.
 const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced', premium: 'Premium' };
 
@@ -131,70 +126,13 @@ const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced',
 // the approval gates in App.tsx — never translate the key or a comparison, only
 // the label. `label` holds a TranslationKey because this map is module-level
 // and t() is a hook value; CompaniesPage.tsx resolves the same key set.
-const STATUS_CFG: Record<CompanyStatus, { label: TranslationKey; color: string; bg: string; Icon: React.ElementType }> = {
-  active:    { label: 'sa.status.active',    color: 'var(--success)',        bg: 'var(--success-subtle)',  Icon: CheckCircle },
-  suspended: { label: 'sa.status.suspended', color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: PauseCircle },
-  inactive:  { label: 'sa.status.inactive',  color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)',        Icon: XCircle },
-  archived:  { label: 'sa.status.archived',  color: '#64748b',               bg: 'rgba(100,116,139,0.12)', Icon: XCircle },
-  deleted:   { label: 'sa.status.deleted',   color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: XCircle },
+const STATUS_CFG: Record<CompanyStatus, { label: TranslationKey; tone: 'positive' | 'critical' | 'neutral'; Icon: React.ElementType }> = {
+  active:    { label: 'sa.status.active',    tone: 'positive', Icon: CheckCircle },
+  suspended: { label: 'sa.status.suspended', tone: 'critical', Icon: PauseCircle },
+  inactive:  { label: 'sa.status.inactive',  tone: 'neutral',  Icon: XCircle },
+  archived:  { label: 'sa.status.archived',  tone: 'neutral',  Icon: XCircle },
+  deleted:   { label: 'sa.status.deleted',   tone: 'critical', Icon: XCircle },
 };
-
-function StatusBadge({ status }: { status: CompanyStatus }) {
-  const { t } = useTranslation();
-  const cfg = STATUS_CFG[status] || STATUS_CFG.inactive;
-  const Icon = cfg.Icon;
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: cfg.bg, color: cfg.color }}>
-      <Icon size={10} />{t(cfg.label)}
-    </span>
-  );
-}
-
-function PlanBadge({ plan }: { plan: Plan }) {
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: PLAN_BG[plan] ?? 'var(--bg-muted)', color: PLAN_COLOR[plan] ?? 'var(--text-secondary)' }}>
-      {PLAN_LABEL[plan] ?? plan}
-    </span>
-  );
-}
-
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-
-interface KpiCardProps {
-  label: string;
-  value: number | string;
-  icon: React.ElementType;
-  color?: string;
-  bg?: string;
-  sub?: string;
-  trend?: number | null;
-}
-
-function KpiCard({ label, value, icon: Icon, color = 'var(--accent)', bg, sub, trend }: KpiCardProps) {
-  return (
-    <div
-      className="rounded-2xl p-4 flex flex-col gap-3"
-      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-    >
-      <div className="flex items-start justify-between">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: bg ?? `${color}18` }}>
-          <Icon size={18} style={{ color }} />
-        </div>
-        {trend != null && (
-          <span className="flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-md"
-            style={{ background: trend >= 0 ? 'var(--success-subtle)' : 'var(--danger-subtle)', color: trend >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-            <ArrowUpRight size={10} />{trend >= 0 ? '+' : ''}{trend}
-          </span>
-        )}
-      </div>
-      <div>
-        <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{value}</p>
-        <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--text-secondary)' }}>{label}</p>
-        {sub && <p className="text-[10px] mt-1" style={{ color: 'var(--text-tertiary)' }}>{sub}</p>}
-      </div>
-    </div>
-  );
-}
 
 // ─── Attention Item ───────────────────────────────────────────────────────────
 
@@ -204,43 +142,6 @@ interface AttentionItem {
   reason: string;
   severity: 'critical' | 'warning' | 'info';
   company: CompanyRow;
-}
-
-// ─── Plan Distribution Bar ────────────────────────────────────────────────────
-
-function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: number }) {
-  if (total === 0) return null;
-  // Product tier names, none of them German, so none are translated.
-  const segments = [
-    { label: 'Basic',    count: kpis.basicCount,    color: PLAN_COLOR.basic },
-    { label: 'Advanced', count: kpis.advancedCount,  color: PLAN_COLOR.advanced },
-    { label: 'Premium',  count: kpis.premiumCount,   color: PLAN_COLOR.premium },
-  ].filter(s => s.count > 0);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
-        {segments.map(s => (
-          <div
-            key={s.label}
-            className="transition-all duration-500"
-            style={{ width: `${(s.count / total) * 100}%`, background: s.color, minWidth: s.count > 0 ? 4 : 0 }}
-            title={`${s.label}: ${s.count}`}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-3">
-        {segments.map(s => (
-          <div key={s.label} className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
-            <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />
-            <span>{s.label}</span>
-            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{s.count}</span>
-            <span style={{ color: 'var(--text-tertiary)' }}>({Math.round((s.count / total) * 100)}%)</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
@@ -622,60 +523,54 @@ export default function SuperAdminDashboard() {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 8);
 
-  const cardStyle: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '1rem',
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic. Everything below only draws; the
+  // presentation helpers (badges, plan bar, tone maps) are at the end of the file.
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+      <div className="flex h-64 items-center justify-center">
+        <RefreshCw aria-hidden size={24} className="text-fg-subtle motion-safe:animate-spin" />
       </div>
     );
   }
 
   return (
     <>
-    <div className="space-y-6 pb-10">
+    <div className="space-y-6 pb-10 font-ui">
 
       {/* ── Header ────────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--warning-subtle)' }}>
-              <Shield size={16} style={{ color: 'var(--warning)' }} />
-            </div>
-            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--warning)' }}>Super Admin</span>
-          </div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.title')}</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            {t('sa.dash.subtitle')}
-          </p>
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="flex size-8 items-center justify-center rounded-tight bg-caution-soft text-caution">
+            <Shield aria-hidden size={16} />
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-caution">Super Admin</span>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* The one reload besides opening the page that reads the counts again. */}
-          <button
-            onClick={() => { load(true, true); if (canBilling) loadQuotes(); }}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-            {t('common.update')}
-          </button>
-          <Link
-            to={`${ADMIN_BASE}/companies`}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
-            style={{ background: 'var(--warning-solid)', color: 'white' }}
-          >
-            <Building2 size={14} />
-            {t('sa.dash.allCompanies')}
-          </Link>
-        </div>
+        <PageHeader
+          className="pb-0"
+          title={t('sa.dash.title')}
+          description={t('sa.dash.subtitle')}
+          actions={
+            <>
+              {/* The one reload besides opening the page that reads the counts again. */}
+              <Button
+                variant="secondary"
+                onClick={() => { load(true, true); if (canBilling) loadQuotes(); }}
+                disabled={refreshing}
+              >
+                <RefreshCw aria-hidden className={refreshing ? 'motion-safe:animate-spin' : ''} />
+                {t('common.update')}
+              </Button>
+              <Button asChild>
+                <Link to={`${ADMIN_BASE}/companies`}>
+                  <Building2 aria-hidden />
+                  {t('sa.dash.allCompanies')}
+                </Link>
+              </Button>
+            </>
+          }
+        />
       </div>
 
       {/*
@@ -692,33 +587,30 @@ export default function SuperAdminDashboard() {
       )}
 
       {/* ── Section tabs ───────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', width: 'fit-content' }}>
-        {([
-          { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3,      visible: true },
-          { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, visible: true, badge: pendingCompanies.length },
-          { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag,            visible: canCodes },
-          { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift,           visible: canCodes },
-          { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound,       visible: canCodes },
-        ] as const).filter(tab => tab.visible).map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveSection(tab.id)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all relative"
-            style={activeSection === tab.id
-              ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-              : { color: 'var(--text-secondary)' }
-            }
-          >
-            <tab.icon size={14} />
-            {tab.label}
-            {tab.badge !== undefined && tab.badge > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning-solid)' }}>
-                {tab.badge}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <Tabs value={activeSection} onValueChange={value => setActiveSection(value as typeof activeSection)}>
+        <TabsList variant="segmented" className="h-auto flex-wrap">
+          {([
+            { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3,      visible: true },
+            { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, visible: true, badge: pendingCompanies.length },
+            { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag,            visible: canCodes },
+            { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift,           visible: canCodes },
+            { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound,       visible: canCodes },
+          ] as const).filter(tab => tab.visible).map(tab => (
+            <TabsTrigger
+              key={tab.id}
+              value={tab.id}
+              onClick={() => setActiveSection(tab.id)}
+              className="h-9 gap-2 px-4 [@media(pointer:coarse)]:h-11"
+            >
+              <tab.icon aria-hidden size={14} />
+              {tab.label}
+              {tab.badge !== undefined && tab.badge > 0 && (
+                <Badge tone="caution" className="h-[18px] px-1.5 text-[10px] font-bold">{tab.badge}</Badge>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {/* ── Discount Codes section ─────────────────────────────────────────────── */}
       {canCodes && activeSection === 'discounts' && <DiscountCodesManagement />}
@@ -732,92 +624,85 @@ export default function SuperAdminDashboard() {
       {/* ── Approvals section ────────────────────────────────────────────────── */}
       {activeSection === 'approvals' && (
         <div className="space-y-4">
-          <div style={cardStyle} className="overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <Card>
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div className="flex items-center gap-2">
-                <ClipboardCheck size={16} style={{ color: 'var(--warning)' }} />
-                <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                <ClipboardCheck aria-hidden size={16} className="text-caution" />
+                <h3 className="text-sm font-semibold text-fg">
                   {t('sa.dash.pendingApprovals')}
                 </h3>
                 {pendingCompanies.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-                    {pendingCompanies.length}
-                  </span>
+                  <Badge tone="caution" className="font-bold">{pendingCompanies.length}</Badge>
                 )}
               </div>
             </div>
             {pendingCompanies.length === 0 ? (
-              <div className="px-5 py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
-                <CheckCircle size={32} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm">{t('sa.dash.noPendingRequests')}</p>
-              </div>
+              <EmptyState icon={CheckCircle} size="sm" title={t('sa.dash.noPendingRequests')} />
             ) : (
-              <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+              <div className="divide-y divide-line">
                 {pendingCompanies.map(c => (
-                  <div key={c.id} className="flex items-center gap-4 px-5 py-4 flex-wrap"
-                    style={{ borderBottomColor: 'var(--border)' }}>
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
+                  <div key={c.id} className="flex flex-wrap items-center gap-4 px-5 py-4">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-control bg-caution-soft text-sm font-bold text-caution">
                       {c.name.charAt(0).toUpperCase()}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>{c.name}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-fg">{c.name}</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
                         <PlanBadge plan={c.plan ?? 'basic'} />
-                        <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                        <span className="text-[11px] text-fg-subtle">
                           {t('sa.dash.carsCount', { count: c.subscription_car_limit })} · {t(c.billing_cycle === 'yearly' ? 'sa.dash.cycle.yearly' : 'sa.dash.cycle.monthly')}
                         </span>
                         {c.referral_code_used && (
-                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                            <Gift size={9} /> {c.referral_code_used}
-                          </span>
+                          <Badge tone="positive" className="font-mono">
+                            <Gift aria-hidden /> {c.referral_code_used}
+                          </Badge>
                         )}
-                        <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                        <span className="text-[11px] text-fg-subtle">
                           {t('sa.dash.registeredAt', { date: format(new Date(c.created_at), 'dd. MMM yyyy HH:mm', { locale: de }) })}
                         </span>
                       </div>
                     </div>
-                    <div className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 flex-shrink-0`}>
-                      <button
+                    <div className={`${canLifecycle ? 'flex' : 'hidden'} shrink-0 items-center gap-2`}>
+                      <Button
+                        size="sm"
                         onClick={() => handleApprove(c)}
                         disabled={approvingId === c.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-                        style={{ background: 'var(--success-solid)', color: 'white' }}
                       >
-                        {approvingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <CheckCircle size={11} />}
+                        {approvingId === c.id ? <RefreshCw aria-hidden className="motion-safe:animate-spin" /> : <CheckCircle aria-hidden />}
                         {t('sa.dash.approve')}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="text-critical"
                         onClick={() => { setRejectModal({ company: c }); setRejectReason(''); }}
                         disabled={approvingId === c.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-                        style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid var(--danger)30' }}
                       >
-                        <XCircle size={11} />
+                        <XCircle aria-hidden />
                         {t('sa.dash.reject')}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Approved / rejected / suspended table */}
-          <div style={cardStyle} className="overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-              <Activity size={16} style={{ color: 'var(--text-tertiary)' }} />
-              <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.allApprovalStatuses')}</h3>
+          <Card>
+            <div className="flex items-center gap-2 border-b border-line px-5 py-4">
+              <Activity aria-hidden size={16} className="text-fg-subtle" />
+              <h3 className="text-sm font-semibold text-fg">{t('sa.dash.allApprovalStatuses')}</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                  <tr className="border-b border-line bg-wash">
                     {([
                       'sa.dash.col.company', 'sa.dash.col.approval',
                       'sa.dash.col.registered', 'sa.dash.col.referralCode', null,
                     ] as const).map((h, i) => (
-                      <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
+                      <th key={i} className="whitespace-nowrap px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{h ? t(h) : ''}</th>
                     ))}
                   </tr>
                 </thead>
@@ -835,12 +720,9 @@ export default function SuperAdminDashboard() {
                       `approval_status` value that no longer occurs.
                     */
                     const suspended = c.status === 'suspended';
-                    const apColor = suspended || ap === 'rejected' ? 'var(--danger)'
-                      : ap === 'approved' ? 'var(--success)'
-                        : ap === 'pending' ? 'var(--warning)' : 'var(--danger)';
-                    const apBg = suspended || ap === 'rejected' ? 'var(--danger-subtle)'
-                      : ap === 'approved' ? 'var(--success-subtle)'
-                        : ap === 'pending' ? 'var(--warning-subtle)' : 'var(--danger-subtle)';
+                    const apTone = suspended || ap === 'rejected' ? 'critical'
+                      : ap === 'approved' ? 'positive'
+                        : ap === 'pending' ? 'caution' : 'critical';
                     const apLabel = t(
                       suspended ? 'sa.dash.approval.suspended'
                         : ap === 'approved' ? 'sa.dash.approval.approved'
@@ -849,30 +731,27 @@ export default function SuperAdminDashboard() {
                               : 'sa.dash.approval.suspended',
                     );
                     return (
-                      <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <tr key={c.id} className="border-b border-line">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+                            <div className="flex size-7 shrink-0 items-center justify-center rounded-tight bg-brand-soft text-xs font-bold text-brand-text">
                               {c.name.charAt(0).toUpperCase()}
                             </div>
-                            <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
+                            <span className="text-sm font-medium text-fg">{c.name}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: apBg, color: apColor }}>
-                              {apLabel}
-                            </span>
+                            <Badge tone={apTone}>{apLabel}</Badge>
                             {canLifecycle && ap === 'approved' && !suspended && (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="hover:text-critical"
                                 onClick={() => setSuspendConfirm(c)}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
-                                style={{ borderColor: 'var(--border)', color: 'var(--text-tertiary)' }}
-                                onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--danger)'); (e.currentTarget.style.color = 'var(--danger)'); }}
-                                onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
                               >
                                 {t('sa.dash.suspend')}
-                              </button>
+                              </Button>
                             )}
                             {/*
                               The way back from a suspension is `reactivate`,
@@ -881,64 +760,65 @@ export default function SuperAdminDashboard() {
                               would leave it suspended with a green badge.
                             */}
                             {canLifecycle && suspended && (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="text-positive"
                                 onClick={() => handleReactivate(c)}
                                 disabled={approvingId === c.id}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
-                                style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
                                 {approvingId === c.id ? '…' : t('sa.lifecycle.reactivate.confirm')}
-                              </button>
+                              </Button>
                             )}
                             {canLifecycle && !suspended && ap === 'rejected' && (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="text-positive"
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
-                                style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
                                 {t('sa.dash.approve')}
-                              </button>
+                              </Button>
                             )}
                             {canLifecycle && !suspended && ap === 'pending' && (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="text-positive"
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
-                                className="text-[11px] px-2 py-0.5 rounded border transition-colors [@media(pointer:coarse)]:min-h-10"
-                                style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
                                 {approvingId === c.id ? '…' : t('sa.dash.approve')}
-                              </button>
+                              </Button>
                             )}
                           </div>
                           {c.rejection_reason && (
-                            <p className="text-[11px] mt-1 max-w-xs truncate" style={{ color: 'var(--text-tertiary)' }} title={c.rejection_reason}>
+                            <p className="mt-1 max-w-xs truncate text-[11px] text-fg-subtle" title={c.rejection_reason}>
                               {t('sa.dash.reasonPrefix', { reason: c.rejection_reason })}
                             </p>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                        <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-fg-subtle">
                           {format(new Date(c.created_at), 'dd.MM.yyyy', { locale: de })}
                         </td>
                         <td className="px-4 py-3">
                           {c.referral_code_used ? (
-                            <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                              {c.referral_code_used}
-                            </span>
+                            <Badge tone="positive" className="font-mono">{c.referral_code_used}</Badge>
                           ) : (
-                            <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+                            <span className="text-fg-subtle">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="[&[hidden]]:hidden"
+                            aria-label={t('sa.dash.openCompany')}
                             hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                            style={{ color: 'var(--text-tertiary)' }}
-                            onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
-                            onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
                           >
-                            <ExternalLink size={13} />
-                          </button>
+                            <ExternalLink aria-hidden />
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -946,7 +826,7 @@ export default function SuperAdminDashboard() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </Card>
         </div>
       )}
 
@@ -955,54 +835,64 @@ export default function SuperAdminDashboard() {
 
       {/* ── KPI Grid ──────────────────────────────────────────────────────────── */}
       {kpis && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard label={t('sa.dash.kpi.companies')} value={kpis.totalCompanies} icon={Building2} color="var(--accent)" trend={kpis.newThisMonth} sub={t('sa.dash.kpi.newThisMonth', { count: kpis.newThisMonth })} />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <KpiCard
+            label={t('sa.dash.kpi.companies')}
+            value={kpis.totalCompanies}
+            icon={Building2}
+            trend={{
+              direction: kpis.newThisMonth >= 0 ? 'up' : 'down',
+              value: `${kpis.newThisMonth >= 0 ? '+' : ''}${kpis.newThisMonth}`,
+              sentiment: kpis.newThisMonth >= 0 ? 'positive' : 'negative',
+            }}
+            caption={t('sa.dash.kpi.newThisMonth', { count: kpis.newThisMonth })}
+          />
           {/* Users and drivers are summed from the audited read model. The
               receipt total has no read model at all, so it is unknown rather
               than zero — a dash, never a number nobody read. */}
-          <KpiCard label={t('sa.dash.kpi.users')} value={kpis.countsKnown ? kpis.totalUsers : '–'} icon={Users} color="#8b5cf6" />
-          <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.countsKnown ? kpis.totalDrivers : '–'} icon={Car} color="#06b6d4" />
-          <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts ?? '–'} icon={FileText} color="#64748b" />
+          <KpiCard label={t('sa.dash.kpi.users')} value={kpis.countsKnown ? kpis.totalUsers : '–'} icon={Users} />
+          <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.countsKnown ? kpis.totalDrivers : '–'} icon={Car} />
+          <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts ?? '–'} icon={FileText} />
         </div>
       )}
 
       {/* ── Subscription stats + Plan distribution ───────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
 
         {/* Subscription breakdown */}
         {kpis && (
-          <div className="lg:col-span-1 p-5 space-y-4" style={cardStyle}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{t('sa.dash.statusDistribution')}</h3>
+          <Card className="space-y-4 p-5 lg:col-span-1">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-fg-subtle">{t('sa.dash.statusDistribution')}</h3>
             <div className="space-y-2.5">
               {([
                 // `alwaysShow` replaces a filter that matched on the German label.
                 // Active stays visible at zero; the rest appear only when non-zero.
-                { id: 'active',       labelKey: 'sa.status.active',            value: kpis.activeCompanies,    color: 'var(--success)',        Icon: CheckCircle, alwaysShow: true },
-                { id: 'suspended',    labelKey: 'sa.status.suspended',         value: kpis.suspendedCompanies, color: 'var(--danger)',         Icon: PauseCircle },
-                { id: 'inactive',     labelKey: 'sa.status.inactive',          value: kpis.inactiveCompanies,  color: 'var(--text-tertiary)',  Icon: XCircle },
-                { id: 'archived',     labelKey: 'sa.status.archived',          value: kpis.archivedCompanies,  color: '#64748b',               Icon: XCircle },
-                { id: 'deleted',      labelKey: 'sa.status.deleted',           value: kpis.deletedCompanies,   color: 'var(--danger)',         Icon: XCircle },
+                { id: 'active',       labelKey: 'sa.status.active',            value: kpis.activeCompanies,    tone: 'text-positive',  Icon: CheckCircle, alwaysShow: true },
+                { id: 'suspended',    labelKey: 'sa.status.suspended',         value: kpis.suspendedCompanies, tone: 'text-critical',  Icon: PauseCircle },
+                { id: 'inactive',     labelKey: 'sa.status.inactive',          value: kpis.inactiveCompanies,  tone: 'text-fg-subtle', Icon: XCircle },
+                { id: 'archived',     labelKey: 'sa.status.archived',          value: kpis.archivedCompanies,  tone: 'text-fg-muted',  Icon: XCircle },
+                { id: 'deleted',      labelKey: 'sa.status.deleted',           value: kpis.deletedCompanies,   tone: 'text-critical',  Icon: XCircle },
               ] as const).filter(row => row.value > 0 || 'alwaysShow' in row).map(row => (
                 <div key={row.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <row.Icon size={13} style={{ color: row.color }} />
+                  <div className="flex items-center gap-2 text-sm text-fg-muted">
+                    <row.Icon aria-hidden size={13} className={row.tone} />
                     {t(row.labelKey)}
                   </div>
-                  <span className="font-bold text-sm" style={{ color: row.value > 0 ? row.color : 'var(--text-tertiary)' }}>
+                  <span className={`text-sm font-bold tabular-nums ${row.value > 0 ? row.tone : 'text-fg-subtle'}`}>
                     {row.value}
                   </span>
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         )}
 
         {/* Plan distribution */}
         {kpis && (
-          <div className="lg:col-span-2 p-5 space-y-4" style={cardStyle}>
+          <Card className="space-y-4 p-5 lg:col-span-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{t('sa.dash.planDistribution')}</h3>
-              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('sa.dash.companiesCount', { count: kpis.totalCompanies })}</span>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-fg-subtle">{t('sa.dash.planDistribution')}</h3>
+              <span className="text-xs text-fg-subtle">{t('sa.dash.companiesCount', { count: kpis.totalCompanies })}</span>
             </div>
             <PlanDistributionBar kpis={kpis} total={kpis.totalCompanies} />
             <div className="grid grid-cols-3 gap-3 pt-1">
@@ -1011,149 +901,131 @@ export default function SuperAdminDashboard() {
                 { plan: 'advanced' as Plan, count: kpis.advancedCount },
                 { plan: 'premium' as Plan,  count: kpis.premiumCount  },
               ].map(({ plan, count }) => (
-                <div key={plan} className="min-w-0 rounded-xl p-2 text-center sm:p-3" style={{ background: PLAN_BG[plan], border: `1px solid ${PLAN_COLOR[plan]}30` }}>
-                  <p className="text-xl font-bold" style={{ color: PLAN_COLOR[plan] }}>{count}</p>
-                  <p className="text-xs font-semibold mt-0.5" style={{ color: PLAN_COLOR[plan] }}>{PLAN_LABEL[plan]}</p>
+                <div key={plan} className={`min-w-0 rounded-tile border p-2 text-center sm:p-3 ${PLAN_TILE_CLASS[plan]}`}>
+                  <p className="text-xl font-bold tabular-nums">{count}</p>
+                  <p className="mt-0.5 text-xs font-semibold">{PLAN_LABEL[plan]}</p>
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         )}
       </div>
 
       {/* ── Needs attention ───────────────────────────────────────────────────── */}
       {attentionItems.length > 0 && (
-        <div className="p-5 space-y-3" style={cardStyle}>
+        <Card className="space-y-3 p-5">
           <div className="flex items-center gap-2">
-            <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <AlertTriangle aria-hidden size={16} className="text-caution" />
+            <h3 className="text-sm font-semibold text-fg">
               {t('sa.dash.attentionTitle', { count: attentionItems.length })}
             </h3>
           </div>
-          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-            {attentionItems.map(item => {
-              const severityColor = item.severity === 'critical' ? 'var(--danger)' : item.severity === 'warning' ? 'var(--warning)' : 'var(--accent)';
-              const severityBg = item.severity === 'critical' ? 'var(--danger-subtle)' : item.severity === 'warning' ? 'var(--warning-subtle)' : 'var(--accent-subtle)';
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl"
-                  style={{ background: severityBg, border: `1px solid ${severityColor}30` }}
-                >
-                  <div className="flex items-start gap-2.5 min-w-0">
-                    <AlertCircle size={14} style={{ color: severityColor, flexShrink: 0, marginTop: 1 }} />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{item.companyName}</p>
-                      <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.reason}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      hidden={!canOpenCompany} onClick={() => { void enterCompany(item.company as any); }}
-                      className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                      style={{ color: severityColor }}
-                      title={t('sa.dash.openCompany')}
-                      onMouseEnter={e => (e.currentTarget.style.background = severityBg)}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <ExternalLink size={13} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="max-h-64 space-y-2 overflow-y-auto pe-1">
+            {attentionItems.map(item => (
+              <Alert
+                key={item.id}
+                tone={item.severity === 'critical' ? 'critical' : item.severity === 'warning' ? 'caution' : 'brand'}
+                icon={AlertCircle}
+                title={<span className="block truncate">{item.companyName}</span>}
+                action={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="[&[hidden]]:hidden"
+                    hidden={!canOpenCompany} onClick={() => { void enterCompany(item.company as any); }}
+                    title={t('sa.dash.openCompany')}
+                    aria-label={t('sa.dash.openCompany')}
+                  >
+                    <ExternalLink aria-hidden />
+                  </Button>
+                }
+              >
+                {item.reason}
+              </Alert>
+            ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* ── Companies table ───────────────────────────────────────────────────── */}
-      <div style={cardStyle} className="overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+      <Card>
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2">
-            <Activity size={16} style={{ color: 'var(--accent)' }} />
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+            <Activity aria-hidden size={16} className="text-brand-text" />
+            <h3 className="text-sm font-semibold text-fg">
               {t('sa.dash.allCompaniesCount', { count: companies.length })}
             </h3>
           </div>
           <Link
             to={`${ADMIN_BASE}/companies`}
-            className="flex items-center gap-1.5 text-xs font-semibold transition-colors"
-            style={{ color: 'var(--accent)' }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = '0.7')}
-            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+            className="flex items-center gap-1.5 text-xs font-semibold text-brand-text transition-colors hover:underline [@media(pointer:coarse)]:min-h-10"
           >
-            {t('sa.dash.manageAll')} <ChevronRight size={13} />
+            {t('sa.dash.manageAll')} <ChevronRight aria-hidden size={13} className="rtl:-scale-x-100" />
           </Link>
         </div>
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+              <tr className="border-b border-line bg-wash">
                 {([
                   'sa.dash.col.company', 'sa.dash.col.tariff', 'sa.dash.col.billing',
                   'sa.dash.col.cars', 'sa.dash.col.drivers', 'sa.dash.col.price',
                   'common.status', 'sa.dash.col.created', null,
                 ] as const).map((h, i) => (
-                  <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
+                  <th key={i} className="whitespace-nowrap px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">{h ? t(h) : ''}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {recentCompanies.map(c => (
-                <tr
-                  key={c.id}
-                  style={{ borderBottom: '1px solid var(--border)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
+                <tr key={c.id} className="border-b border-line transition-colors hover:bg-wash">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
-                        style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-tight bg-brand-soft text-xs font-bold text-brand-text">
                         {c.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{c.name}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{c.slug}</p>
+                        <p className="font-semibold text-fg">{c.name}</p>
+                        <p className="text-[10px] text-fg-subtle">{c.slug}</p>
                       </div>
                     </div>
                   </td>
                   {/* Tarif */}
                   <td className="px-4 py-3">
-                    <select
+                    <NativeSelect
                       value={c.plan ?? 'basic'}
                       disabled={!canBilling}
                       onChange={e => handlePlanChange(c, e.target.value as Plan)}
-                      className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
-                      style={{ background: PLAN_BG[c.plan ?? 'basic'], color: PLAN_COLOR[c.plan ?? 'basic'] }}
+                      containerClassName="w-32"
+                      className={`h-8 text-xs font-semibold [@media(pointer:coarse)]:h-10 ${PLAN_SELECT_CLASS[c.plan ?? 'basic']}`}
                       title={t('sa.dash.changeTariff')}
                     >
                       {/* Product tier names — untranslated in both languages. */}
                       <option value="basic">Basic</option>
                       <option value="advanced">Advanced</option>
                       <option value="premium">Premium</option>
-                    </select>
+                    </NativeSelect>
                   </td>
 
                   {/* Abrechnung */}
                   <td className="px-4 py-3">
-                    <select
+                    <NativeSelect
                       value={c.billing_cycle}
                       disabled={!canBilling}
                       onChange={e => handleBillingCycleChange(c, e.target.value as 'monthly' | 'yearly')}
-                      className="text-xs rounded-lg px-2 py-1 border-0 outline-none cursor-pointer"
-                      style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
+                      containerClassName="w-32"
+                      className="h-8 text-xs [@media(pointer:coarse)]:h-10"
                       title={t('sa.dash.changeBilling')}
                     >
                       <option value="monthly">{t('sa.dash.cycle.monthly')}</option>
                       <option value="yearly">{t('sa.dash.cycle.yearly')}</option>
-                    </select>
+                    </NativeSelect>
                   </td>
 
                   {/* Fahrzeuge limit + aktive */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
-                      <input
+                      <Input
                         type="number"
                         min={1}
                         max={200}
@@ -1163,8 +1035,7 @@ export default function SuperAdminDashboard() {
                           const v = parseInt(e.target.value);
                           if (!isNaN(v) && v !== c.subscription_car_limit) handleCarLimitChange(c, v);
                         }}
-                        className="w-14 text-xs rounded-lg px-2 py-1 border-0 outline-none text-center font-semibold"
-                        style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+                        className="h-8 w-16 shrink-0 px-2 text-center text-xs font-semibold [@media(pointer:coarse)]:h-10"
                         title={t('sa.dash.carLimit')}
                       />
                       {/*
@@ -1178,7 +1049,7 @@ export default function SuperAdminDashboard() {
                         carries both and a stale allowance beside a live fleet
                         is exactly what nobody could see before.
                       */}
-                      <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}
+                      <span className="whitespace-nowrap text-[10px] tabular-nums text-fg-subtle"
                             title={t('sa.dash.carsBilledHint')}>
                         {c.counts_known ? c.active_car_count : '–'}/{c.subscription_car_limit}
                       </span>
@@ -1208,7 +1079,7 @@ export default function SuperAdminDashboard() {
                       tests/rls/fleet-caps-removed.sql's negative control uses
                       the same arithmetic. It simply has no caller on a screen.
                     */}
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    <span className="text-xs tabular-nums text-fg-muted">
                       {c.counts_known ? c.driver_count : '–'}
                     </span>
                   </td>
@@ -1258,8 +1129,8 @@ export default function SuperAdminDashboard() {
                       const monthly = quote ? quote.amountCents / 100 : bp.monthlyEquivalent;
                       return (
                         <div>
-                          <p className="whitespace-nowrap text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-                            {fmtPrice(monthly)} €<span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('sa.dash.perMonthShort')}</span>
+                          <p className="whitespace-nowrap text-xs font-semibold tabular-nums text-fg">
+                            {fmtPrice(monthly)} €<span className="font-normal text-fg-subtle">{t('sa.dash.perMonthShort')}</span>
                           </p>
                           {quote?.firstInvoice && (
                             <p className="text-[10px] text-fg-subtle">
@@ -1267,7 +1138,7 @@ export default function SuperAdminDashboard() {
                             </p>
                           )}
                           {c.billing_cycle === 'yearly' && (
-                            <p className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                            <p className="whitespace-nowrap text-[10px] tabular-nums text-fg-subtle">
                               {fmtPrice(bp.finalTotal)} €{t('sa.dash.perYearShort')}
                             </p>
                           )}
@@ -1281,51 +1152,48 @@ export default function SuperAdminDashboard() {
                     {(c.status === 'archived' || c.status === 'deleted') ? (
                       <StatusBadge status={c.status} />
                     ) : (
-                      <select
+                      <NativeSelect
                         value={c.status}
                         disabled={!canLifecycle}
                         onChange={e => setStatusConfirm({ company: c, status: e.target.value as CompanyStatus })}
-                        className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
-                        style={{
-                          background: STATUS_CFG[c.status]?.bg ?? 'var(--bg-muted)',
-                          color: STATUS_CFG[c.status]?.color ?? 'var(--text-secondary)',
-                        }}
+                        containerClassName="w-32"
+                        className={`h-8 text-xs font-semibold [@media(pointer:coarse)]:h-10 ${STATUS_SELECT_CLASS[STATUS_CFG[c.status]?.tone ?? 'neutral']}`}
                         title={t('sa.dash.changeStatus')}
                       >
                         {/* `value` is the stored companies.status — only the label is translated. */}
                         <option value="active">{t('sa.status.active')}</option>
                         <option value="suspended">{t('sa.status.suspended')}</option>
                         <option value="inactive">{t('sa.status.inactive')}</option>
-                      </select>
+                      </NativeSelect>
                     )}
                   </td>
 
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-fg-subtle">
                     {format(new Date(c.created_at), 'dd.MM.yy', { locale: de })}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 justify-end">
-                      <button
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="[&[hidden]]:hidden"
                         hidden={!canBilling}
                         onClick={() => setManualSubModal(c)}
-                        className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                        style={{ color: 'var(--text-tertiary)' }}
                         title={t('sa.dash.editSubscriptionManually')}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-subtle)'; e.currentTarget.style.color = 'var(--accent)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-tertiary)'; }}
+                        aria-label={t('sa.dash.editSubscriptionManually')}
                       >
-                        <PencilLine size={13} />
-                      </button>
-                      <button
+                        <PencilLine aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-brand-text [&[hidden]]:hidden"
                         hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                        className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                        style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                        aria-label={t('sa.dash.openAsCompany')}
                       >
-                        <ExternalLink size={13} />
-                      </button>
+                        <ExternalLink aria-hidden />
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -1334,60 +1202,59 @@ export default function SuperAdminDashboard() {
           </table>
         </div>
         {companies.length > 8 && (
-          <div className="px-5 py-3 border-t text-center" style={{ borderColor: 'var(--border)' }}>
-            <Link to={`${ADMIN_BASE}/companies`} className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+          <div className="border-t border-line px-5 py-3 text-center">
+            <Link to={`${ADMIN_BASE}/companies`} className="text-xs font-semibold text-brand-text hover:underline">
               {t('sa.dash.showAllCompanies', { count: companies.length })}
             </Link>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* ── Recent signups (activity) ─────────────────────────────────────────── */}
-      <div className="p-5 space-y-3" style={cardStyle}>
+      <Card className="space-y-3 p-5">
         <div className="flex items-center gap-2">
-          <TrendingUp size={16} style={{ color: 'var(--success)' }} />
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.recentSignups')}</h3>
+          <TrendingUp aria-hidden size={16} className="text-positive" />
+          <h3 className="text-sm font-semibold text-fg">{t('sa.dash.recentSignups')}</h3>
         </div>
         {companies.slice(0, 5).map(c => (
           <div key={c.id} className="flex items-center justify-between gap-3 py-1.5">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0"
-                style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-control bg-brand-soft text-xs font-bold text-brand-text">
                 {c.name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{c.name}</p>
-                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <p className="truncate text-sm font-medium text-fg">{c.name}</p>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                   <StatusBadge status={c.status} />
                   <PlanBadge plan={c.plan ?? 'basic'} />
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs tabular-nums text-fg-subtle">
                 {format(new Date(c.created_at), 'dd. MMM', { locale: de })}
               </span>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="[&[hidden]]:hidden"
                 hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
-                className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors"
-                style={{ color: 'var(--text-tertiary)' }}
-                onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
-                onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
+                aria-label={t('sa.dash.openCompany')}
               >
-                <ExternalLink size={13} />
-              </button>
+                <ExternalLink aria-hidden />
+              </Button>
             </div>
           </div>
         ))}
-      </div>
+      </Card>
 
       {/* ── Quick actions ─────────────────────────────────────────────────────── */}
-      <div className="p-5 space-y-3" style={cardStyle}>
+      <Card className="space-y-3 p-5">
         <div className="flex items-center gap-2">
-          <BarChart3 size={16} style={{ color: 'var(--accent)' }} />
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.quickAccess')}</h3>
+          <BarChart3 aria-hidden size={16} className="text-brand-text" />
+          <h3 className="text-sm font-semibold text-fg">{t('sa.dash.quickAccess')}</h3>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {/*
             Every target is inside the panel. Two of these were the tenant
             paths '/users' and '/settings', which a company-less platform
@@ -1397,70 +1264,55 @@ export default function SuperAdminDashboard() {
             the capability for one is refused there, as it is from the sidebar.
           */}
           {[
-            { id: 'manageCompanies', label: t('sa.dash.quick.manageCompanies'), icon: Building2, color: 'var(--warning)', to: `${ADMIN_BASE}/companies` },
-            { id: 'newCompany', label: t('sa.dash.quick.newCompany'), icon: Plus, color: 'var(--success)', to: `${ADMIN_BASE}/companies` },
-            { id: 'manageUsers', label: t('sa.dash.quick.manageUsers'), icon: Users, color: 'var(--accent)', to: `${ADMIN_BASE}/verzeichnisse` },
-            { id: 'settings', label: t('common.settings'), icon: Shield, color: 'var(--text-secondary)', to: `${ADMIN_BASE}/einstellungen` },
+            { id: 'manageCompanies', label: t('sa.dash.quick.manageCompanies'), icon: Building2, to: `${ADMIN_BASE}/companies` },
+            { id: 'newCompany', label: t('sa.dash.quick.newCompany'), icon: Plus, to: `${ADMIN_BASE}/companies` },
+            { id: 'manageUsers', label: t('sa.dash.quick.manageUsers'), icon: Users, to: `${ADMIN_BASE}/verzeichnisse` },
+            { id: 'settings', label: t('common.settings'), icon: Shield, to: `${ADMIN_BASE}/einstellungen` },
           ].map(action => (
             <Link
               key={action.id}
               to={action.to}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-              onMouseEnter={e => { (e.currentTarget.style.borderColor = action.color); (e.currentTarget.style.color = action.color); }}
-              onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
+              className={QUICK_ACTION_CLASS}
             >
-              <action.icon size={20} />
+              <action.icon aria-hidden size={20} />
               {action.label}
             </Link>
           ))}
           <button
             onClick={() => setActiveSection('discounts')}
-            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
-            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => { (e.currentTarget.style.borderColor = '#06b6d4'); (e.currentTarget.style.color = '#06b6d4'); }}
-            onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
+            className={cn(QUICK_ACTION_CLASS, canCodes ? undefined : 'hidden')}
           >
-            <Tag size={20} />
+            <Tag aria-hidden size={20} />
             {t('sa.dash.tab.discounts')}
           </button>
           <button
             onClick={() => setActiveSection('approvals')}
-            className="relative flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
-            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--warning)'); (e.currentTarget.style.color = 'var(--warning)'); }}
-            onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
+            className={cn('relative', QUICK_ACTION_CLASS)}
           >
             {pendingCompanies.length > 0 && (
-              <span className="absolute top-2 right-2 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning-solid)' }}>
+              <Badge tone="caution" className="absolute end-2 top-2 h-[18px] px-1.5 text-[10px] font-bold">
                 {pendingCompanies.length}
-              </span>
+              </Badge>
             )}
-            <ClipboardCheck size={20} />
+            <ClipboardCheck aria-hidden size={20} />
             {t('sa.dash.tab.approvals')}
           </button>
           <button
             onClick={() => setActiveSection('referrals')}
-            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
-            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => { (e.currentTarget.style.borderColor = '#10b981'); (e.currentTarget.style.color = '#10b981'); }}
-            onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
+            className={cn(QUICK_ACTION_CLASS, canCodes ? undefined : 'hidden')}
           >
-            <Gift size={20} />
+            <Gift aria-hidden size={20} />
             {t('sa.dash.tab.referrals')}
           </button>
           <button
             onClick={() => setActiveSection('activation')}
-            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
-            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--accent)'); (e.currentTarget.style.color = 'var(--accent)'); }}
-            onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
+            className={cn(QUICK_ACTION_CLASS, canCodes ? undefined : 'hidden')}
           >
-            <KeyRound size={20} />
+            <KeyRound aria-hidden size={20} />
             {t('sa.dash.tab.activation')}
           </button>
         </div>
-      </div>
+      </Card>
 
       </>}
 
@@ -1490,50 +1342,47 @@ export default function SuperAdminDashboard() {
 
     {/* ── Reject Modal ──────────────────────────────────────────────────────── */}
     {rejectModal && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
-        <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-            {t('sa.dash.rejectModal.title')}
-          </h3>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            {/* Split so the company name keeps its bold emphasis; the two halves
-                sit either side of the name in both languages. */}
-            {t('sa.dash.rejectModal.questionPrefix')}
-            <strong style={{ color: 'var(--text-primary)' }}>{rejectModal.company.name}</strong>
-            {t('sa.dash.rejectModal.questionSuffix')}
-          </p>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              {t('sa.dash.rejectModal.reasonLabel')}
-            </label>
+      <Dialog open onOpenChange={open => { if (!open && approvingId !== rejectModal.company.id) { setRejectModal(null); setRejectReason(''); } }}>
+        <DialogContent className="max-w-md" onInteractOutside={event => event.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>{t('sa.dash.rejectModal.title')}</DialogTitle>
+            <DialogDescription>
+              {/* Split so the company name keeps its bold emphasis; the two halves
+                  sit either side of the name in both languages. */}
+              {t('sa.dash.rejectModal.questionPrefix')}
+              <strong className="text-fg">{rejectModal.company.name}</strong>
+              {t('sa.dash.rejectModal.questionSuffix')}
+            </DialogDescription>
+          </DialogHeader>
+          <Field label={t('sa.dash.rejectModal.reasonLabel')} id="reject-company-reason">
             <textarea
+              id="reject-company-reason"
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
               rows={3}
               placeholder={t('sa.dash.rejectModal.reasonPlaceholder')}
-              className="w-full px-3 py-2.5 rounded-xl text-sm resize-none focus:outline-none"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+              className={cn(controlFrameClass, 'h-auto min-h-0 resize-none py-2 [@media(pointer:coarse)]:h-auto')}
             />
-          </div>
-          <div className="flex gap-2 pt-1">
-            <button
+          </Field>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
               onClick={() => { setRejectModal(null); setRejectReason(''); }}
-              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
               onClick={handleReject}
               disabled={approvingId === rejectModal.company.id}
-              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-              style={{ background: 'var(--danger-solid)', color: 'white' }}
             >
               {approvingId === rejectModal.company.id ? t('sa.dash.rejecting') : t('sa.dash.reject')}
-            </button>
-          </div>
-        </div>
-      </div>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     )}
     {/* ── Manual Subscription Modal ────────────────────────────────────────── */}
     {manualSubModal && (
@@ -1544,5 +1393,91 @@ export default function SuperAdminDashboard() {
       />
     )}
   </>
+  );
+}
+
+// ── Presentation helpers ──────────────────────────────────────────────────────
+// Plan tiers are a status, not a series: basic is info, advanced caution,
+// premium positive. Every class is written out so Tailwind finds it.
+
+const PLAN_TONE: Record<Plan, 'info' | 'caution' | 'positive'> = {
+  basic: 'info',
+  advanced: 'caution',
+  premium: 'positive',
+};
+const PLAN_SELECT_CLASS: Record<Plan, string> = {
+  basic: 'bg-info-soft text-info',
+  advanced: 'bg-caution-soft text-caution',
+  premium: 'bg-positive-soft text-positive',
+};
+const PLAN_TILE_CLASS: Record<Plan, string> = {
+  basic: 'border-info/20 bg-info-soft text-info',
+  advanced: 'border-caution/20 bg-caution-soft text-caution',
+  premium: 'border-positive/20 bg-positive-soft text-positive',
+};
+const PLAN_DOT_CLASS: Record<Plan, string> = {
+  basic: 'bg-info-dot',
+  advanced: 'bg-caution-dot',
+  premium: 'bg-positive-dot',
+};
+const STATUS_SELECT_CLASS = {
+  positive: 'bg-positive-soft text-positive',
+  critical: 'bg-critical-soft text-critical',
+  neutral: 'bg-neutral-soft text-neutral',
+} as const;
+const QUICK_ACTION_CLASS = [
+  'flex flex-col items-center gap-2 rounded-tile border border-line bg-sunken p-4 text-center text-xs font-medium text-fg-muted',
+  'transition-colors hover:border-brand hover:text-brand-text motion-safe:transition-all',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-11',
+].join(' ');
+
+function StatusBadge({ status }: { status: CompanyStatus }) {
+  const { t } = useTranslation();
+  const cfg = STATUS_CFG[status] || STATUS_CFG.inactive;
+  const Icon = cfg.Icon;
+  return (
+    <Badge tone={cfg.tone}>
+      <Icon aria-hidden />{t(cfg.label)}
+    </Badge>
+  );
+}
+
+function PlanBadge({ plan }: { plan: Plan }) {
+  return <Badge tone={PLAN_TONE[plan] ?? 'neutral'}>{PLAN_LABEL[plan] ?? plan}</Badge>;
+}
+
+function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: number }) {
+  if (total === 0) return null;
+  // Product tier names, none of them German, so none are translated.
+  const segments = [
+    { label: 'Basic',    count: kpis.basicCount,    plan: 'basic' as Plan },
+    { label: 'Advanced', count: kpis.advancedCount, plan: 'advanced' as Plan },
+    { label: 'Premium',  count: kpis.premiumCount,  plan: 'premium' as Plan },
+  ].filter(s => s.count > 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex h-3 gap-0.5 overflow-hidden rounded-full">
+        {segments.map(s => (
+          <div
+            key={s.label}
+            className={`min-w-[4px] motion-safe:transition-all motion-safe:duration-500 ${PLAN_DOT_CLASS[s.plan]}`}
+            // Data-driven: the share of companies on this tier.
+            style={{ width: `${(s.count / total) * 100}%` }}
+            title={`${s.label}: ${s.count}`}
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {segments.map(s => (
+          <div key={s.label} className="flex items-center gap-1.5 text-xs text-fg-muted">
+            <span className={`size-2.5 shrink-0 rounded-sm ${PLAN_DOT_CLASS[s.plan]}`} />
+            <span>{s.label}</span>
+            <span className="font-semibold tabular-nums text-fg">{s.count}</span>
+            <span className="text-fg-subtle">({Math.round((s.count / total) * 100)}%)</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

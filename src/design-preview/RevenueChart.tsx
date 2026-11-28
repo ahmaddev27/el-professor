@@ -13,7 +13,7 @@ function RevenueTooltip({ point }: { point?: RevenuePoint }) {
   // Value first and strong, the month second: the reader already knows which
   // bar they are on and wants the number.
   return (
-    <div className="rounded-control border border-line bg-overlay px-3 py-2 font-ui shadow-overlay">
+    <div className="glass-strong rounded-tight px-3 py-2 font-ui">
       <p className="text-sm font-semibold tabular-nums text-fg">{formatEuro(point.revenue)}</p>
       <p className="text-xs text-fg-muted">{point.longLabel}</p>
     </div>
@@ -32,7 +32,7 @@ function RevenueTooltip({ point }: { point?: RevenuePoint }) {
  */
 export function RevenueChart({ data, label }: { data: RevenuePoint[]; label: string }) {
   return (
-    <div
+    <div dir="ltr"
       role="img"
       aria-label={label}
       className={cn(

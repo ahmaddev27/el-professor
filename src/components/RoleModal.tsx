@@ -218,7 +218,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
     <Dialog open onOpenChange={next => { if (!next) handleClose(); }}>
       <DialogContent aria-labelledby="role-modal-title" className="max-w-[720px] gap-0 p-0">
         {/* HEADER */}
-        <div className="flex items-center gap-3 border-b border-line px-5 py-4 pr-14 sm:px-6">
+        <div className="flex items-center gap-3 border-b border-line px-5 py-4 pe-14 sm:px-6">
           <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand-text">
             <ShieldCheck className="size-[18px]" />
           </span>

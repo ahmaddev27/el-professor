@@ -185,12 +185,12 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 
             <Field label={t('users.form.email')}>
               <div className="relative">
-                <Mail aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+                <Mail aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
                 <Input
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="pl-9"
+                  className="ps-9"
                   placeholder={t('users.form.emailPlaceholder')}
                   required
                   disabled={loading}
@@ -241,12 +241,12 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                   <div className="grid gap-3">
                     <Field label={t('users.invite.tempPassword')}>
                       <div className="relative">
-                        <Lock aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+                        <Lock aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
                         <Input
                           type={showPassword ? 'text' : 'password'}
                           value={formData.password}
                           onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                          className="pl-9 pr-11"
+                          className="ps-9 pe-11"
                           placeholder={t('users.invite.tempPasswordPlaceholder')}
                           required={formData.use_temp_password}
                           minLength={8}
@@ -258,7 +258,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                           size="icon-sm"
                           onClick={() => setShowPassword(!showPassword)}
                           aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
-                          className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                          className="absolute end-0.5 top-1/2 -translate-y-1/2"
                         >
                           {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
                         </Button>
@@ -1096,12 +1096,12 @@ const UserManagement: React.FC = () => {
               <div className="grid gap-4">
                 <Field label={t('users.resetPassword.label')}>
                   <div className="relative">
-                    <Lock aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+                    <Lock aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
                     <Input
                       type={showResetPassword ? 'text' : 'password'}
                       value={resetPasswordValue}
                       onChange={(e) => setResetPasswordValue(e.target.value)}
-                      className="pl-9 pr-11"
+                      className="ps-9 pe-11"
                       placeholder={t('users.password.minLengthPlaceholder')}
                       minLength={8}
                       disabled={resetPasswordLoading}
@@ -1112,7 +1112,7 @@ const UserManagement: React.FC = () => {
                       size="icon-sm"
                       onClick={() => setShowResetPassword(!showResetPassword)}
                       aria-label={showResetPassword ? t('auth.hidePassword') : t('auth.showPassword')}
-                      className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                      className="absolute end-0.5 top-1/2 -translate-y-1/2"
                     >
                       {showResetPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
                     </Button>

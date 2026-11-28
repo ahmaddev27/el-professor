@@ -9,12 +9,16 @@ import { useFieldControlProps } from './Field';
  * the whole page into any field whose text is smaller when it is tapped.
  */
 export const controlFrameClass = [
-  'h-9 w-full min-w-0 rounded-control border border-line-strong bg-field px-3 font-ui text-sm text-fg',
+  'h-10 w-full min-w-0 rounded-control border border-line-strong bg-field px-3 font-ui text-sm text-fg shadow-field',
   '[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:text-base',
-  'transition-colors placeholder:text-fg-subtle',
-  'focus-visible:border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus',
-  'aria-[invalid=true]:border-critical disabled:cursor-not-allowed disabled:opacity-50',
+  'transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-fg-subtle',
+  'focus-visible:border-brand focus-visible:bg-solid/90 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-focus/25',
+  'aria-[invalid=true]:border-critical aria-[invalid=true]:focus-visible:ring-critical/15',
+  'disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-subtle',
 ].join(' ');
+
+// Addresses, URLs and phone numbers read left to right in every UI language.
+const LTR_INPUT_TYPES = new Set(['email', 'url', 'tel']);
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
@@ -26,6 +30,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <input
         ref={ref}
+        dir={props.type && LTR_INPUT_TYPES.has(props.type) ? 'ltr' : undefined}
         className={cn(
           controlFrameClass,
           // Native date pickers follow the page's colour scheme only when told.

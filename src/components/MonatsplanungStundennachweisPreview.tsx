@@ -1883,22 +1883,20 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
   return (
     <div
-      className="fixed inset-0 z-[55] flex items-center justify-center p-4"
-      style={{ background: 'rgba(15, 23, 42, 0.7)' }}
+      className="fixed inset-0 z-[55] flex items-center justify-center p-4 glass-scrim"
       onClick={onClose}
     >
       <div
-        className="rounded-xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="glass-strong rounded-pane w-full max-w-6xl max-h-[92vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {simulated ? <div className="px-5 pt-4"><SimulatedNotice /></div> : null}
-        <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-start justify-between px-5 py-4 border-b border-line">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+            <h3 className="text-base font-semibold flex items-center gap-2 text-fg">
               <CalendarClock size={16} /> {t('stn.preview.title')} · {t(MONTH_NAME_KEYS[run.month - 1])} {run.year}
             </h3>
-            <div className="text-xs mt-1 font-mono" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="text-xs mt-1 font-mono text-fg-subtle">
               {t('stn.preview.runId', { id: run.id })}
             </div>
           </div>
@@ -1906,26 +1904,24 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
             <button
               onClick={() => void load()}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 bg-sunken text-fg-muted border border-line"
             >
               <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> {t('stn.preview.reload')}
             </button>
-            <button onClick={onClose} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
+            <button onClick={onClose} className="p-1 rounded text-fg-subtle">
               <X size={16} />
             </button>
           </div>
         </div>
 
-        <div className="px-5 py-3 border-b flex flex-wrap items-center gap-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="px-5 py-3 border-b flex flex-wrap items-center gap-3 border-line">
           <div className="flex items-center gap-2">
-            <Users size={14} style={{ color: 'var(--text-tertiary)' }} />
-            <label className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.preview.driverLabel')}</label>
+            <Users size={14} className="text-fg-subtle" />
+            <label className="text-xs font-semibold text-fg-muted">{t('stn.preview.driverLabel')}</label>
             <select
               value={selectedDriverId}
               onChange={e => setSelectedDriverId(e.target.value)}
-              className="px-2 py-1 rounded-lg text-sm"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+              className="px-2 py-1 rounded-lg text-sm bg-field text-fg border border-line"
             >
               <option value="__all__">{t('common.allDrivers')} ({driverGroups.length})</option>
               {driverGroups.map(g => (
@@ -1935,13 +1931,12 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               ))}
             </select>
           </div>
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <div className="ms-auto flex items-center gap-2 flex-wrap">
             {selectedDriverId !== '__all__' && (
               <button
                 onClick={handleExportPdf}
                 disabled={pdfExporting || loading || driverGroups.length === 0}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
-                style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity bg-sunken text-fg-muted border border-line"
               >
                 <Download size={12} /> {pdfExporting ? t('stn.preview.exporting') : t('stn.preview.downloadPdf')}
               </button>
@@ -1950,8 +1945,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               <button
                 onClick={handlePruefExportXlsx}
                 disabled={xlsxExporting || loading || driverGroups.length === 0}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
-                style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity bg-sunken text-fg-muted border border-line"
               >
                 <FileSpreadsheet size={12} /> {xlsxExporting ? t('stn.preview.exporting') : t('stn.preview.auditExportXlsx')}
               </button>
@@ -1959,8 +1953,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
             <button
               onClick={() => void handleExportFinalFahrtenbuch()}
               disabled={fahrtenbuchExporting || loading || !run.import_id}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
-              style={{ background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity bg-positive-soft text-positive border border-positive/30"
               title={t('stn.preview.fahrtenbuchTitle')}
             >
               <FileSpreadsheet size={12} /> {fahrtenbuchExporting ? t('stn.preview.exporting') : t('stn.preview.downloadFahrtenbuch')}
@@ -1968,30 +1961,28 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
             <button
               onClick={handleExportFahreruebersicht}
               disabled={fahreruebersichtExporting || loading || driverGroups.length === 0}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
-              style={{ background: 'rgba(59,130,246,0.1)', color: '#1d4ed8', border: '1px solid rgba(59,130,246,0.3)' }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity bg-info-soft text-info border border-info/30"
               title={t('stn.preview.driverOverviewTitle')}
             >
               <FileSpreadsheet size={12} /> {fahreruebersichtExporting ? t('stn.preview.driverOverviewBuilding') : t('stn.preview.downloadDriverOverview')}
             </button>
-            <span className="text-xs pl-2" style={{ color: 'var(--text-secondary)', borderLeft: '1px solid var(--border)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>{totalShifts}</strong> {t('stn.label.shifts')}
+            <span className="text-xs ps-2 text-fg-muted border-s border-line">
+              <strong className="text-fg">{totalShifts}</strong> {t('stn.label.shifts')}
             </span>
-            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>{totalTrips}</strong> {t('stn.label.trips')}
+            <span className="text-xs text-fg-muted">
+              <strong className="text-fg">{totalTrips}</strong> {t('stn.label.trips')}
             </span>
-            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>{fmtHours(totalMinutes)}</strong> {t('stn.label.totalSuffix')}
+            <span className="text-xs text-fg-muted">
+              <strong className="text-fg">{fmtHours(totalMinutes)}</strong> {t('stn.label.totalSuffix')}
             </span>
           </div>
         </div>
 
         {/* Stundennachweise auswählen — PDF export driver selection */}
         {!loading && driverGroups.length > 0 && (
-          <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="px-5 py-3 border-b border-line">
             <button
-              className="inline-flex items-center gap-1.5 text-xs font-semibold mb-0"
-              style={{ color: 'var(--text-secondary)' }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold mb-0 text-fg-muted"
               onClick={() => setShowPdfDriverSelect(v => !v)}
             >
               <Download size={12} />
@@ -2021,9 +2012,9 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                     }}
                     className="rounded"
                   />
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('stn.select.all')}</span>
+                  <span className="font-semibold text-fg">{t('stn.select.all')}</span>
                 </label>
-                <div className="pl-1 flex flex-wrap gap-x-5 gap-y-1.5">
+                <div className="ps-1 flex flex-wrap gap-x-5 gap-y-1.5">
                   {driverGroups.map(g => (
                     <label key={g.driver_id} className="flex items-center gap-2 text-xs cursor-pointer select-none">
                       <input
@@ -2039,28 +2030,26 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                         }}
                         className="rounded"
                       />
-                      <span style={{ color: 'var(--text-primary)' }}>{g.driver_name}</span>
-                      <span style={{ color: 'var(--text-tertiary)' }}>({t('stn.preview.shiftCount', { count: g.shifts.length })})</span>
+                      <span className="text-fg">{g.driver_name}</span>
+                      <span className="text-fg-subtle">({t('stn.preview.shiftCount', { count: g.shifts.length })})</span>
                     </label>
                   ))}
                 </div>
                 <div className="flex items-center gap-3 pt-1 flex-wrap">
                   {selectedPdfDriverIds.size === 0 && (
-                    <span className="text-xs" style={{ color: '#dc2626' }}>{t('stn.err.selectAtLeastOneDriver')}</span>
+                    <span className="text-xs text-critical">{t('stn.err.selectAtLeastOneDriver')}</span>
                   )}
                   <button
                     onClick={handleExportAllPdfs}
                     disabled={pdfExporting || loading || selectedPdfDriverIds.size === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
-                    style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity bg-sunken text-fg-muted border border-line"
                   >
                     <Download size={12} /> {pdfExporting ? t('stn.preview.exporting') : t('stn.select.downloadSelectedPdfs', { count: selectedPdfDriverIds.size })}
                   </button>
                   <button
                     onClick={() => void handleSaveStundennachweise()}
                     disabled={savingStundennachweise || loading || selectedPdfDriverIds.size === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
-                    style={{ background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity bg-positive-soft text-positive border border-positive/30"
                   >
                     <Save size={12} /> {savingStundennachweise
                       ? t('stn.select.saving')
@@ -2070,10 +2059,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                   </button>
                 </div>
                 {saveError && (
-                  <p className="text-xs mt-1.5" style={{ color: '#dc2626' }}>{saveError}</p>
+                  <p className="text-xs mt-1.5 text-critical">{saveError}</p>
                 )}
                 {saveSuccessCount > 0 && !savingStundennachweise && (
-                  <p className="text-xs mt-1.5" style={{ color: '#16a34a' }}>
+                  <p className="text-xs mt-1.5 text-positive">
                     {tPlural(
                       { one: 'stn.select.savedToDocuments.one', other: 'stn.select.savedToDocuments.other' },
                       saveSuccessCount,
@@ -2086,10 +2075,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         )}
 
         {exportError && (
-          <div className="px-5 py-2 text-xs flex items-start gap-2" style={{ background: 'rgba(245,158,11,0.08)', color: '#fcd34d', borderBottom: '1px solid rgba(245,158,11,0.25)' }}>
+          <div className="px-5 py-2 text-xs flex items-start gap-2 bg-caution-soft text-caution border-b border-caution/20">
             <AlertTriangle size={12} className="shrink-0 mt-0.5" />
             <span>{exportError}</span>
-            <button className="ml-auto shrink-0 opacity-70 hover:opacity-100" onClick={() => setExportError('')}>
+            <button className="ms-auto shrink-0 opacity-70 hover:opacity-100" onClick={() => setExportError('')}>
               <X size={12} />
             </button>
           </div>
@@ -2097,13 +2086,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {loading && (
-            <div className="px-3 py-6 rounded-lg text-sm flex items-center justify-center gap-2" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+            <div className="px-3 py-6 rounded-lg text-sm flex items-center justify-center gap-2 bg-sunken text-fg-muted">
               <Loader2 size={14} className="animate-spin" /> {t('stn.preview.loadingBlocks')}
             </div>
           )}
 
           {error && (
-            <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.1)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.35)' }}>
+            <div className="px-3 py-2 rounded-lg text-sm bg-critical-soft text-critical border border-critical/30">
               {t('stn.err.loadFailed')} {error}
             </div>
           )}
@@ -2111,10 +2100,9 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           {!loading && (
             <details
               open={!!error || trips.length === 0}
-              className="rounded-lg text-xs"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+              className="rounded-lg text-xs bg-sunken border border-line text-fg-muted"
             >
-              <summary className="px-3 py-2 cursor-pointer font-semibold select-none" style={{ color: 'var(--text-primary)' }}>
+              <summary className="px-3 py-2 cursor-pointer font-semibold select-none text-fg">
                 {t('stn.preview.debugTitle')}
               </summary>
               {/* DebugRow labels name DB columns and props verbatim — technical
@@ -2143,15 +2131,14 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
           {!loading && validationIssues.length > 0 && (
             <div
-              className="px-3 py-3 rounded-lg text-xs space-y-1"
-              style={{ background: 'rgba(245,158,11,0.1)', color: '#fcd34d', border: '1px solid rgba(245,158,11,0.35)' }}
+              className="px-3 py-3 rounded-lg text-xs space-y-1 bg-caution-soft text-caution border border-caution/30"
             >
               <div className="font-semibold inline-flex items-center gap-1">
                 <AlertTriangle size={13} /> {t('stn.issue.title')} ({validationIssues.length})
               </div>
-              <ul className="list-disc pl-5 space-y-0.5">
+              <ul className="list-disc ps-5 space-y-0.5">
                 {validationIssues.slice(0, 50).map((issue, idx) => (
-                  <li key={idx} style={{ whiteSpace: 'pre-wrap' }}>
+                  <li key={idx} className="whitespace-pre-wrap">
                     {[t(issue.detailKey, issue.detailVars), ...(issue.detailLines ?? [])].join('\n')}
                   </li>
                 ))}
@@ -2163,7 +2150,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           )}
 
           {!loading && isValid && driverGroups.length > 0 && (
-            <div className="px-3 py-2 rounded-lg text-xs inline-flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)', color: '#86efac', border: '1px solid rgba(34,197,94,0.35)' }}>
+            <div className="px-3 py-2 rounded-lg text-xs inline-flex items-center gap-1.5 bg-positive-soft text-positive border border-positive/30">
               <CheckCircle2 size={13} /> {t('stn.preview.integrityOk', { drivers: driverGroups.length, shifts: compressedBlocks.length })}
             </div>
           )}
@@ -2182,7 +2169,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           ))}
 
           {!loading && visibleGroups.length === 0 && !error && validationIssues.length === 0 && (
-            <div className="px-3 py-8 text-center text-sm rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-tertiary)' }}>
+            <div className="px-3 py-8 text-center text-sm rounded-lg bg-sunken text-fg-subtle">
               {t('stn.preview.noBlocks')}
             </div>
           )}
@@ -2203,14 +2190,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
-          <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-line">
+          <div className="text-xs text-fg-subtle">
             {t('stn.preview.sourceFooter')} <span className="font-mono">{run.id.slice(0, 8)}…</span>
           </div>
           <button
             onClick={onClose}
-            className="px-3 py-2 rounded-lg text-sm font-semibold"
-            style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            className="px-3 py-2 rounded-lg text-sm font-semibold bg-sunken text-fg-muted border border-line"
           >
             {t('common.close')}
           </button>
@@ -2254,59 +2240,58 @@ function DriverCard({
   }, [group.shifts]);
 
   return (
-    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+    <div className="rounded-lg overflow-hidden bg-sunken border border-line">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-4 py-3 flex flex-wrap items-start justify-between gap-3 transition-colors hover:brightness-110"
-        style={{ background: 'var(--bg-surface)', borderBottom: expanded ? '1px solid var(--border)' : 'none' }}
+        className={`w-full text-start px-4 py-3 flex flex-wrap items-start justify-between gap-3 transition-colors hover:brightness-110 bg-raised ${expanded ? 'border-b border-line' : ''}`}
       >
         <div className="flex items-start gap-2 min-w-0">
-          {expanded ? <ChevronDown size={16} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} />}
+          {expanded ? <ChevronDown size={16} className="text-fg-muted" /> : <ChevronRight size={16} className="rtl:-scale-x-100 text-fg-muted" />}
           <div className="min-w-0">
-            <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <div className="font-semibold text-fg">
               {group.driver_name}
             </div>
-            <div className="text-[11px] mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-              <span>{t('stn.card.shifts')} <strong style={{ color: 'var(--text-primary)' }}>{group.shifts.length}</strong></span>
-              <span>{t('stn.card.trips')} <strong style={{ color: 'var(--text-primary)' }}>{group.trips}</strong></span>
+            <div className="text-[11px] mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-fg-muted">
+              <span>{t('stn.card.shifts')} <strong className="text-fg">{group.shifts.length}</strong></span>
+              <span>{t('stn.card.trips')} <strong className="text-fg">{group.trips}</strong></span>
               <span>
-                {t('stn.card.workedHours')} <strong style={{ color: 'var(--text-primary)' }}>
+                {t('stn.card.workedHours')} <strong className="text-fg">
                   {fmtHours(group.total_minutes)}
                 </strong>
               </span>
               {group.ausgleich_hours != null && group.ausgleich_hours > 0 && (
                 <span>
-                  {t('stn.card.ausgleichHours')} <strong style={{ color: '#86efac' }}>
+                  {t('stn.card.ausgleichHours')} <strong className="text-positive">
                     +{group.ausgleich_hours.toFixed(2).replace('.', ',')} h
                   </strong>
                 </span>
               )}
               {group.ausgleich_hours != null && group.ausgleich_hours > 0 && (
                 <span>
-                  {t('stn.card.totalHours')} <strong style={{ color: 'var(--text-primary)' }}>
+                  {t('stn.card.totalHours')} <strong className="text-fg">
                     {((group.total_minutes / 60) + group.ausgleich_hours).toFixed(2).replace('.', ',')} h
                   </strong>
                 </span>
               )}
-              <span>{t('stn.card.days')} <strong style={{ color: 'var(--text-primary)' }}>{group.work_days}</strong></span>
-              <span>{t('stn.card.expectedGross')} <strong style={{ color: group.expected_brutto != null ? '#86efac' : 'var(--text-tertiary)' }}>{fmtEuro(group.expected_brutto)}</strong></span>
+              <span>{t('stn.card.days')} <strong className="text-fg">{group.work_days}</strong></span>
+              <span>{t('stn.card.expectedGross')} <strong className={group.expected_brutto != null ? 'text-positive' : 'text-fg-subtle'}>{fmtEuro(group.expected_brutto)}</strong></span>
               {group.manual_exceptions > 0 && (
-                <span>{t('stn.card.manualExceptions')} <strong style={{ color: '#fcd34d' }}>{group.manual_exceptions}</strong></span>
+                <span>{t('stn.card.manualExceptions')} <strong className="text-caution">{group.manual_exceptions}</strong></span>
               )}
             </div>
-            <div className="text-[11px] mt-0.5 flex flex-wrap items-center gap-x-3" style={{ color: 'var(--text-tertiary)' }}>
-              <span>{t('stn.card.nightTotal')} <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_total)}</strong></span>
-              <span>23–00: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_23_00)}</strong></span>
-              <span>00–04: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_00_04)}</strong></span>
-              <span>04–06: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_04_06)}</strong></span>
+            <div className="text-[11px] mt-0.5 flex flex-wrap items-center gap-x-3 text-fg-subtle">
+              <span>{t('stn.card.nightTotal')} <strong className="text-fg-muted">{fmtHours(group.night_total)}</strong></span>
+              <span>23–00: <strong className="text-fg-muted">{fmtHours(group.night_23_00)}</strong></span>
+              <span>00–04: <strong className="text-fg-muted">{fmtHours(group.night_00_04)}</strong></span>
+              <span>04–06: <strong className="text-fg-muted">{fmtHours(group.night_04_06)}</strong></span>
               {group.hourly_rate != null && (
-                <span>{t('stn.card.hourlyRate')} <strong style={{ color: 'var(--text-secondary)' }}>{group.hourly_rate.toFixed(2).replace('.', ',')} €</strong></span>
+                <span>{t('stn.card.hourlyRate')} <strong className="text-fg-muted">{group.hourly_rate.toFixed(2).replace('.', ',')} €</strong></span>
               )}
               {(group.min_salary != null || group.max_salary != null) && (
                 <span>
                   {t('stn.card.salaryRange')}{' '}
-                  <strong style={{ color: 'var(--text-secondary)' }}>
+                  <strong className="text-fg-muted">
                     {group.min_salary != null ? fmtEuro(group.min_salary) : '—'}
                     {' – '}
                     {group.max_salary != null ? fmtEuro(group.max_salary) : '—'}
@@ -2314,10 +2299,10 @@ function DriverCard({
                 </span>
               )}
               {group.expected_brutto != null && group.min_salary != null && group.expected_brutto < group.min_salary - 0.01 && (
-                <span style={{ color: '#fcd34d', fontWeight: 600 }}>{t('stn.summary.belowMinSalary')}</span>
+                <span className="text-caution font-semibold">{t('stn.summary.belowMinSalary')}</span>
               )}
               {group.expected_brutto != null && group.max_salary != null && group.expected_brutto > group.max_salary + 0.01 && (
-                <span style={{ color: '#f87171', fontWeight: 600 }}>{t('stn.summary.aboveMaxSalary')}</span>
+                <span className="text-critical font-semibold">{t('stn.summary.aboveMaxSalary')}</span>
               )}
             </div>
           </div>
@@ -2340,10 +2325,9 @@ function DriverCard({
           ))}
 
           <div
-            className="mt-2 px-3 py-2 rounded text-xs flex flex-wrap items-center gap-x-4 gap-y-1"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+            className="mt-2 px-3 py-2 rounded text-xs flex flex-wrap items-center gap-x-4 gap-y-1 bg-raised border border-line text-fg-muted"
           >
-            <strong style={{ color: 'var(--text-primary)' }}>{t('stn.card.monthTotal')}</strong>
+            <strong className="text-fg">{t('stn.card.monthTotal')}</strong>
             <span>{fmtDuration(group.total_minutes)}</span>
             <span>{group.trips} {t('stn.label.trips')}</span>
             <span>{group.shifts.length} {t('stn.label.shifts')}</span>
@@ -2352,14 +2336,14 @@ function DriverCard({
             <span>23–00: {fmtHours(group.night_23_00)}</span>
             <span>00–04: {fmtHours(group.night_00_04)}</span>
             <span>04–06: {fmtHours(group.night_04_06)}</span>
-            <span style={{ color: group.expected_brutto != null ? '#86efac' : 'var(--text-tertiary)' }}>
+            <span className={group.expected_brutto != null ? 'text-positive' : 'text-fg-subtle'}>
               {t('stn.card.expectedGross')} {fmtEuro(group.expected_brutto)}
             </span>
             {group.expected_brutto != null && group.min_salary != null && group.expected_brutto < group.min_salary - 0.01 && (
-              <span style={{ color: '#fcd34d', fontWeight: 600 }}>{t('stn.summary.belowMinSalary')} ({fmtEuro(group.min_salary)})</span>
+              <span className="text-caution font-semibold">{t('stn.summary.belowMinSalary')} ({fmtEuro(group.min_salary)})</span>
             )}
             {group.expected_brutto != null && group.max_salary != null && group.expected_brutto > group.max_salary + 0.01 && (
-              <span style={{ color: '#f87171', fontWeight: 600 }}>{t('stn.summary.aboveMaxSalary')} ({fmtEuro(group.max_salary)})</span>
+              <span className="text-critical font-semibold">{t('stn.summary.aboveMaxSalary')} ({fmtEuro(group.max_salary)})</span>
             )}
           </div>
         </div>
@@ -2402,23 +2386,23 @@ function DayBlock({
   const hidden = shifts.length - visibleShifts.length;
 
   return (
-    <div className="rounded" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+    <div className="rounded bg-raised border border-line">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition-colors hover:brightness-110"
+        className="w-full text-start px-3 py-2 flex items-center justify-between gap-2 transition-colors hover:brightness-110"
       >
         <div className="flex items-center gap-2 min-w-0">
-          {expanded ? <ChevronDown size={13} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text-secondary)' }} />}
-          <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+          {expanded ? <ChevronDown size={13} className="text-fg-muted" /> : <ChevronRight size={13} className="rtl:-scale-x-100 text-fg-muted" />}
+          <span className="text-xs font-semibold text-fg">
             {fmtDate(date)} · {t('stn.day.dayTotal')} {fmtDuration(dayMinutes)}
           </span>
         </div>
-        <div className="text-[11px] flex flex-wrap items-center gap-x-3" style={{ color: 'var(--text-secondary)' }}>
+        <div className="text-[11px] flex flex-wrap items-center gap-x-3 text-fg-muted">
           <span>{shifts.length} {t('stn.label.shifts')}</span>
           <span>{dayTrips} {t('stn.label.trips')}</span>
           <span>{t('stn.day.night')} {fmtHours(dayNTotal)}</span>
-          {dayExceptions > 0 && <span style={{ color: '#fcd34d' }}>{t('stn.day.exceptions')} {dayExceptions}</span>}
+          {dayExceptions > 0 && <span className="text-caution">{t('stn.day.exceptions')} {dayExceptions}</span>}
         </div>
       </button>
 
@@ -2426,17 +2410,17 @@ function DayBlock({
         <div className="px-3 pb-3 pt-1 overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.start')}</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.end')}</th>
-                <th className="px-2 py-1 text-right">{t('stn.day.col.duration')}</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.plate')}</th>
-                <th className="px-2 py-1 text-right">{t('stn.label.trips')}</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.source')}</th>
-                <th className="px-2 py-1 text-right">23–00</th>
-                <th className="px-2 py-1 text-right">00–04</th>
-                <th className="px-2 py-1 text-right">04–06</th>
-                <th className="px-2 py-1 text-left">{t('stn.day.col.exception')}</th>
+              <tr className="text-[10px] uppercase tracking-wider text-fg-subtle">
+                <th className="px-2 py-1 text-start">{t('stn.day.col.start')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.end')}</th>
+                <th className="px-2 py-1 text-end">{t('stn.day.col.duration')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.plate')}</th>
+                <th className="px-2 py-1 text-end">{t('stn.label.trips')}</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.source')}</th>
+                <th className="px-2 py-1 text-end">23–00</th>
+                <th className="px-2 py-1 text-end">00–04</th>
+                <th className="px-2 py-1 text-end">04–06</th>
+                <th className="px-2 py-1 text-start">{t('stn.day.col.exception')}</th>
               </tr>
             </thead>
             <tbody>
@@ -2445,32 +2429,31 @@ function DayBlock({
                 const paidEndSameDay = localDateString(s.paid_end_ms) === s.service_date;
                 const endLabel = `${fmtTime(s.paid_end_ms)}${paidEndSameDay ? '' : ' +1d'}`;
                 return (
-                  <tr key={s.block_id} style={{ borderTop: '1px dashed var(--border)' }}>
-                    <td className="px-2 py-1 font-mono" style={{ color: 'var(--text-primary)' }}>{fmtTime(s.block_start_ms)}</td>
-                    <td className="px-2 py-1 font-mono" style={{ color: 'var(--text-primary)' }}>{endLabel}</td>
-                    <td className="px-2 py-1 font-mono text-right" style={{ color: 'var(--text-primary)' }}>
+                  <tr key={s.block_id} className="border-t border-dashed border-line">
+                    <td className="px-2 py-1 font-mono text-fg">{fmtTime(s.block_start_ms)}</td>
+                    <td className="px-2 py-1 font-mono text-fg">{endLabel}</td>
+                    <td className="px-2 py-1 font-mono text-end text-fg">
                       {fmtDuration(s.paid_duration_minutes)}
                       {s.minimum_applied && (
                         <span
-                          className="ml-1.5 inline-block px-1 py-0 rounded text-[9px] font-bold uppercase"
-                          style={{ background: 'rgba(59,130,246,0.2)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.4)', verticalAlign: 'middle' }}
+                          className="ms-1.5 inline-block px-1 py-0 rounded text-[9px] font-bold uppercase bg-info-soft text-info border border-info/30 align-middle"
                           title={t('stn.day.minimumTitle', { actual: fmtDuration(s.duration_minutes), added: s.minimum_added_minutes })}
                         >
                           {t('stn.day.minimumBadge')}
                         </span>
                       )}
                       {s.minimum_applied && (
-                        <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                        <div className="text-[9px] mt-0.5 text-fg-subtle">
                           {t('stn.day.actual')} {fmtDuration(s.duration_minutes)} · {t('stn.day.paid')} {fmtDuration(s.paid_duration_minutes)}
                         </div>
                       )}
                     </td>
-                    <td className="px-2 py-1 font-mono" style={{ color: 'var(--text-secondary)' }}>{s.vehicle || '—'}</td>
-                    <td className="px-2 py-1 text-right" style={{ color: 'var(--text-secondary)' }}>{s.trip_count}</td>
+                    <td className="px-2 py-1 font-mono text-fg-muted">{s.vehicle || '—'}</td>
+                    <td className="px-2 py-1 text-end text-fg-muted">{s.trip_count}</td>
                     <td className="px-2 py-1"><SourceBadge source={s.assignment_source} /></td>
-                    <td className="px-2 py-1 text-right font-mono" style={{ color: s.night_23_00 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_23_00 ? fmtDuration(s.night_23_00) : '—'}</td>
-                    <td className="px-2 py-1 text-right font-mono" style={{ color: s.night_00_04 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_00_04 ? fmtDuration(s.night_00_04) : '—'}</td>
-                    <td className="px-2 py-1 text-right font-mono" style={{ color: s.night_04_06 ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{s.night_04_06 ? fmtDuration(s.night_04_06) : '—'}</td>
+                    <td className={`px-2 py-1 text-end font-mono ${s.night_23_00 ? 'text-fg' : 'text-fg-subtle'}`}>{s.night_23_00 ? fmtDuration(s.night_23_00) : '—'}</td>
+                    <td className={`px-2 py-1 text-end font-mono ${s.night_00_04 ? 'text-fg' : 'text-fg-subtle'}`}>{s.night_00_04 ? fmtDuration(s.night_00_04) : '—'}</td>
+                    <td className={`px-2 py-1 text-end font-mono ${s.night_04_06 ? 'text-fg' : 'text-fg-subtle'}`}>{s.night_04_06 ? fmtDuration(s.night_04_06) : '—'}</td>
                     <td className="px-2 py-1"><ExceptionBadges shift={s} /></td>
                   </tr>
                 );
@@ -2481,8 +2464,7 @@ function DayBlock({
             <button
               type="button"
               onClick={onToggleAllShifts}
-              className="mt-2 text-xs font-semibold px-2 py-1 rounded"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              className="mt-2 text-xs font-semibold px-2 py-1 rounded bg-sunken text-fg-muted border border-line"
             >
               {t('stn.day.showMoreShifts', { count: hidden })}
             </button>
@@ -2491,8 +2473,7 @@ function DayBlock({
             <button
               type="button"
               onClick={onToggleAllShifts}
-              className="mt-2 ml-2 text-xs font-semibold px-2 py-1 rounded"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              className="mt-2 ms-2 text-xs font-semibold px-2 py-1 rounded bg-sunken text-fg-muted border border-line"
             >
               {t('stn.day.showLess')}
             </button>
@@ -2505,11 +2486,11 @@ function DayBlock({
 
 // `label` holds a TranslationKey: this map is module-level and t() is a hook
 // value, so the badge resolves it at render.
-const SOURCE_BADGES: Record<string, { bg: string; fg: string; label: TranslationKey }> = {
-  auto:             { bg: 'rgba(34,197,94,0.15)',  fg: '#86efac', label: 'stn.source.auto' },
-  repair:           { bg: 'rgba(59,130,246,0.15)', fg: '#93c5fd', label: 'stn.source.repair' },
-  manual_exception: { bg: 'rgba(245,158,11,0.18)', fg: '#fcd34d', label: 'stn.source.manual' },
-  manual:           { bg: 'rgba(245,158,11,0.18)', fg: '#fcd34d', label: 'stn.source.manual' },
+const SOURCE_BADGES: Record<string, { tone: string; label: TranslationKey }> = {
+  auto:             { tone: 'bg-positive-soft text-positive', label: 'stn.source.auto' },
+  repair:           { tone: 'bg-info-soft text-info', label: 'stn.source.repair' },
+  manual_exception: { tone: 'bg-caution-soft text-caution', label: 'stn.source.manual' },
+  manual:           { tone: 'bg-caution-soft text-caution', label: 'stn.source.manual' },
 };
 
 function SourceBadge({ source }: { source: string }) {
@@ -2519,8 +2500,7 @@ function SourceBadge({ source }: { source: string }) {
   const label = cfg ? t(cfg.label) : (source || t('stn.source.auto'));
   return (
     <span
-      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
-      style={{ background: cfg?.bg ?? 'var(--bg-subtle)', color: cfg?.fg ?? 'var(--text-secondary)' }}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${cfg?.tone ?? 'bg-sunken text-fg-muted'}`}
     >
       {label}
     </span>
@@ -2530,7 +2510,7 @@ function SourceBadge({ source }: { source: string }) {
 function ExceptionBadges({ shift }: { shift: ShiftBlock }) {
   const { t } = useTranslation();
   if (!shift.manual_exception && !shift.dienstzeit_exception && !shift.tageslimit_exception && !shift.monatslimit_exception) {
-    return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
+    return <span className="text-fg-subtle">—</span>;
   }
   const badgeKeys: TranslationKey[] = [];
   if (shift.dienstzeit_exception) badgeKeys.push('stn.exception.dutyTime');
@@ -2541,14 +2521,13 @@ function ExceptionBadges({ shift }: { shift: ShiftBlock }) {
       {badgeKeys.map(key => (
         <span
           key={key}
-          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
-          style={{ background: 'rgba(245,158,11,0.18)', color: '#fcd34d' }}
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-caution-soft text-caution"
         >
           {t(key)}
         </span>
       ))}
       {badgeKeys.length === 0 && (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(245,158,11,0.18)', color: '#fcd34d' }}>
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-caution-soft text-caution">
           {t('stn.exception.manual')}
         </span>
       )}
@@ -2560,8 +2539,8 @@ function DebugRow({ label, value }: { label: string; value: string | number | nu
   const display = value === null || value === undefined || value === '' ? '—' : String(value);
   return (
     <div className="flex gap-3 py-0.5">
-      <span style={{ color: 'var(--text-tertiary)', minWidth: 280 }}>{label}:</span>
-      <span style={{ color: 'var(--text-primary)' }}>{display}</span>
+      <span className="text-fg-subtle min-w-[280px]">{label}:</span>
+      <span className="text-fg">{display}</span>
     </div>
   );
 }
@@ -3563,7 +3542,9 @@ function GehaltsabweichungSection({
     v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
   const statusColor = (s: DeviationStatus) =>
-    s === 'over' ? '#f87171' : s === 'under' ? '#fcd34d' : '#86efac';
+    s === 'over' ? 'text-critical' : s === 'under' ? 'text-caution' : 'text-positive';
+  const statusChip = (s: DeviationStatus) =>
+    s === 'over' ? 'bg-critical-soft text-critical' : s === 'under' ? 'bg-caution-soft text-caution' : 'bg-positive-soft text-positive';
   const statusLabel = (s: DeviationStatus) =>
     s === 'over' ? t('stn.summary.aboveMaxSalary')
       : s === 'under' ? t('stn.summary.belowMinSalary')
@@ -3578,25 +3559,25 @@ function GehaltsabweichungSection({
     <>
     {/* Confirmation dialog */}
     {pendingApply && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
-        <div className="rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim">
+        <div className="rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4 glass-strong rounded-pane">
           <div className="flex items-center gap-2">
-            <ArrowRightLeft size={16} style={{ color: '#86efac' }} />
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{t('stn.transfer.confirmTitle')}</h3>
+            <ArrowRightLeft size={16} className="text-positive" />
+            <h3 className="font-semibold text-sm text-fg">{t('stn.transfer.confirmTitle')}</h3>
           </div>
-          <div className="text-xs space-y-1.5 rounded-lg px-3 py-2.5" style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)' }}>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.from')}</span><strong>{pendingApply.suggestion.source_driver_name}</strong></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.to')}</span><strong>{pendingApply.suggestion.target_driver_name}</strong></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}:</span><span>{pendingApply.suggestion.candidate.shifts.map(s => fmtDate(s.service_date)).join(', ')}</span></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.type')}</span><span>{transferTypeLabel(pendingApply.suggestion.candidate.transfer_type)}</span></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.gross')}</span><strong style={{ color: '#86efac' }}>{pendingApply.suggestion.shift_brutto.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</strong></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.label.trips')}:</span><span>{t('stn.transfer.tripCount', { count: pendingApply.tripIds.length })}</span></div>
+          <div className="text-xs space-y-1.5 rounded-lg px-3 py-2.5 bg-raised text-fg-muted">
+            <div className="flex gap-2"><span className="text-fg-subtle">{t('stn.transfer.from')}</span><strong>{pendingApply.suggestion.source_driver_name}</strong></div>
+            <div className="flex gap-2"><span className="text-fg-subtle">{t('stn.transfer.to')}</span><strong>{pendingApply.suggestion.target_driver_name}</strong></div>
+            <div className="flex gap-2"><span className="text-fg-subtle">{t('common.date')}:</span><span>{pendingApply.suggestion.candidate.shifts.map(s => fmtDate(s.service_date)).join(', ')}</span></div>
+            <div className="flex gap-2"><span className="text-fg-subtle">{t('stn.transfer.type')}</span><span>{transferTypeLabel(pendingApply.suggestion.candidate.transfer_type)}</span></div>
+            <div className="flex gap-2"><span className="text-fg-subtle">{t('stn.transfer.gross')}</span><strong className="text-positive">{pendingApply.suggestion.shift_brutto.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</strong></div>
+            <div className="flex gap-2"><span className="text-fg-subtle">{t('stn.label.trips')}:</span><span>{t('stn.transfer.tripCount', { count: pendingApply.tripIds.length })}</span></div>
           </div>
-          <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <p className="text-[11px] text-fg-subtle">
             {t('stn.transfer.confirmHint')}
           </p>
           {applyError && (
-            <div className="text-[11px] rounded px-2 py-1.5" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
+            <div className="text-[11px] rounded px-2 py-1.5 bg-critical-soft text-critical border border-critical/30">
               {applyError}
             </div>
           )}
@@ -3605,8 +3586,7 @@ function GehaltsabweichungSection({
               type="button"
               onClick={() => { setPendingApply(null); setApplyError(''); }}
               disabled={applying}
-              className="flex-1 px-3 py-2 rounded text-xs font-medium transition-all hover:brightness-110 disabled:opacity-50"
-              style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              className="flex-1 px-3 py-2 rounded text-xs font-medium transition-all hover:brightness-110 disabled:opacity-50 bg-raised text-fg-muted border border-line"
             >
               {t('common.cancel')}
             </button>
@@ -3614,8 +3594,7 @@ function GehaltsabweichungSection({
               type="button"
               onClick={confirmApply}
               disabled={applying}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded text-xs font-semibold transition-all hover:brightness-110 disabled:opacity-50"
-              style={{ background: 'rgba(134,239,172,0.2)', color: '#86efac', border: '1px solid rgba(134,239,172,0.4)' }}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded text-xs font-semibold transition-all hover:brightness-110 disabled:opacity-50 bg-positive-soft text-positive border border-positive/30"
             >
               {applying ? <Loader2 size={12} className="animate-spin" /> : <ArrowRightLeft size={12} />}
               {applying ? t('stn.transfer.applying') : t('stn.transfer.apply')}
@@ -3625,30 +3604,29 @@ function GehaltsabweichungSection({
       </div>
     )}
 
-    <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+    <div className="rounded-lg overflow-hidden border border-line">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:brightness-110 transition-all"
-        style={{ background: 'var(--bg-surface)' }}
+        className="w-full flex items-center justify-between px-4 py-3 text-start hover:brightness-110 transition-all bg-raised"
       >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+          <span className="text-sm font-semibold text-fg">
             {t('stn.dev.title')}
           </span>
           <div className="flex items-center gap-1.5 text-[11px]">
             {overCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171' }}>
+              <span className="px-1.5 py-0.5 rounded font-semibold bg-critical-soft text-critical">
                 {t('stn.dev.badgeOverTarget', { count: overCount })}
               </span>
             )}
             {underCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(252,211,77,0.15)', color: '#fcd34d' }}>
+              <span className="px-1.5 py-0.5 rounded font-semibold bg-caution-soft text-caution">
                 {t('stn.dev.badgeUnderTarget', { count: underCount })}
               </span>
             )}
             {adjustmentMap.size > 0 && (
-              <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac' }}>
+              <span className="px-1.5 py-0.5 rounded font-semibold bg-positive-soft text-positive">
                 {t('stn.dev.badgeAdjustments', { count: adjustmentMap.size })}
               </span>
             )}
@@ -3658,17 +3636,17 @@ function GehaltsabweichungSection({
               return (
                 <>
                   {valid > 0 && (
-                    <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac' }}>
+                    <span className="px-1.5 py-0.5 rounded font-semibold bg-positive-soft text-positive">
                       {t('stn.dev.badgeValid', { count: valid })}
                     </span>
                   )}
                   {invalid > 0 && (
-                    <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171' }}>
+                    <span className="px-1.5 py-0.5 rounded font-semibold bg-critical-soft text-critical">
                       {t('stn.dev.badgeImpossible', { count: invalid })}
                     </span>
                   )}
                   {suggestions.length - valid - invalid > 0 && (
-                    <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(147,197,253,0.15)', color: '#93c5fd' }}>
+                    <span className="px-1.5 py-0.5 rounded font-semibold bg-info-soft text-info">
                       {t('stn.dev.badgeReview', { count: suggestions.length - valid - invalid })}
                     </span>
                   )}
@@ -3677,43 +3655,43 @@ function GehaltsabweichungSection({
             })()}
           </div>
         </div>
-        <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{open ? '▲' : '▼'}</span>
+        <span className="text-fg-subtle text-xs">{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
-        <div className="px-4 pb-4 pt-3 space-y-4" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+        <div className="px-4 pb-4 pt-3 space-y-4 border-t border-line bg-sunken">
 
           {/* Section 1: Deviation table */}
           <div>
-            <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+            <p className="text-xs font-semibold mb-2 text-fg-muted">
               {t('stn.dev.tableTitle', { tolerance })}
             </p>
-            <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+            <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-xs">
                 <thead>
-                  <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.salaryRange')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.expectedGross')}</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.difference')}</th>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</th>
+                  <tr className="bg-raised border-b border-line">
+                    <th className="px-3 py-2 text-start font-semibold text-fg-muted">{t('common.driver')}</th>
+                    <th className="px-3 py-2 text-end font-semibold text-fg-muted">{t('stn.dev.col.salaryRange')}</th>
+                    <th className="px-3 py-2 text-end font-semibold text-fg-muted">{t('stn.dev.col.expectedGross')}</th>
+                    <th className="px-3 py-2 text-end font-semibold text-fg-muted">{t('stn.dev.col.difference')}</th>
+                    <th className="px-3 py-2 text-start font-semibold text-fg-muted">{t('common.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {deviations.map(d => (
-                    <tr key={d.driver_id} style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
-                      <td className="px-3 py-2 font-medium" style={{ color: 'var(--text-primary)' }}>{d.driver_name}</td>
-                      <td className="px-3 py-2 text-right font-mono" style={{ color: 'var(--text-secondary)' }}>
+                    <tr key={d.driver_id} className="border-t border-line bg-sunken">
+                      <td className="px-3 py-2 font-medium text-fg">{d.driver_name}</td>
+                      <td className="px-3 py-2 text-end font-mono text-fg-muted">
                         {d.min_salary != null && d.max_salary != null
                           ? `${fmtEuroVal(d.min_salary)} – ${fmtEuroVal(d.max_salary)}`
                           : fmtEuroVal(d.target)}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono" style={{ color: 'var(--text-primary)' }}>{fmtEuroVal(d.actual)}</td>
-                      <td className="px-3 py-2 text-right font-mono font-semibold" style={{ color: statusColor(d.status) }}>
+                      <td className="px-3 py-2 text-end font-mono text-fg">{fmtEuroVal(d.actual)}</td>
+                      <td className={`px-3 py-2 text-end font-mono font-semibold ${statusColor(d.status)}`}>
                         {fmtDiff(d.diff)}
                       </td>
                       <td className="px-3 py-2">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: `${statusColor(d.status)}20`, color: statusColor(d.status) }}>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${statusChip(d.status)}`}>
                           {statusLabel(d.status)}
                         </span>
                       </td>
@@ -3725,26 +3703,26 @@ function GehaltsabweichungSection({
           </div>
 
           {/* Section 2: Summary */}
-          <div className="rounded-lg px-4 py-3 text-xs grid grid-cols-2 sm:grid-cols-5 gap-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <div className="rounded-lg px-4 py-3 text-xs grid grid-cols-2 sm:grid-cols-5 gap-3 bg-raised border border-line">
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.overTarget')}</div>
-              <div className="font-bold mt-0.5" style={{ color: '#f87171' }}>{t('stn.dev.driverCount', { count: overCount })}</div>
+              <div className="text-fg-subtle">{t('stn.dev.overTarget')}</div>
+              <div className="font-bold mt-0.5 text-critical">{t('stn.dev.driverCount', { count: overCount })}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.underTarget')}</div>
-              <div className="font-bold mt-0.5" style={{ color: '#fcd34d' }}>{t('stn.dev.driverCount', { count: underCount })}</div>
+              <div className="text-fg-subtle">{t('stn.dev.underTarget')}</div>
+              <div className="font-bold mt-0.5 text-caution">{t('stn.dev.driverCount', { count: underCount })}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.totalOver')}</div>
-              <div className="font-bold mt-0.5" style={{ color: '#f87171' }}>{fmtEuroVal(Math.round(totalOver * 100) / 100)}</div>
+              <div className="text-fg-subtle">{t('stn.dev.totalOver')}</div>
+              <div className="font-bold mt-0.5 text-critical">{fmtEuroVal(Math.round(totalOver * 100) / 100)}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.totalUnder')}</div>
-              <div className="font-bold mt-0.5" style={{ color: '#fcd34d' }}>{fmtEuroVal(Math.round(totalUnder * 100) / 100)}</div>
+              <div className="text-fg-subtle">{t('stn.dev.totalUnder')}</div>
+              <div className="font-bold mt-0.5 text-caution">{fmtEuroVal(Math.round(totalUnder * 100) / 100)}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.netDeviation')}</div>
-              <div className="font-bold mt-0.5" style={{ color: netDiff > 0 ? '#f87171' : netDiff < 0 ? '#fcd34d' : '#86efac' }}>
+              <div className="text-fg-subtle">{t('stn.dev.netDeviation')}</div>
+              <div className={`font-bold mt-0.5 ${netDiff > 0 ? 'text-critical' : netDiff < 0 ? 'text-caution' : 'text-positive'}`}>
                 {fmtDiff(netDiff)}
               </div>
             </div>
@@ -3757,7 +3735,7 @@ function GehaltsabweichungSection({
             return (
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                  <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                  <p className="text-xs font-semibold text-fg-muted">
                     {t('stn.ausgleich.suggestionsTitle', { count: underDrivers.length })}
                   </p>
                   {underDrivers.filter(dev => (adjustmentMap.get(dev.driver_id) ?? []).length === 0).length > 1 && (
@@ -3765,8 +3743,7 @@ function GehaltsabweichungSection({
                       type="button"
                       onClick={() => void applyAllAusgleich()}
                       disabled={isApplyingAllAusgleich || !!savingAusgleich}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50"
-                      style={{ background: 'rgba(252,211,77,0.15)', color: '#fcd34d', border: '1px solid rgba(252,211,77,0.35)' }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50 bg-caution-soft text-caution border border-caution/30"
                     >
                       {isApplyingAllAusgleich ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
                       {isApplyingAllAusgleich ? t('stn.ausgleich.applyingAll') : t('stn.ausgleich.applyAll')}
@@ -3784,18 +3761,17 @@ function GehaltsabweichungSection({
                     return (
                       <div
                         key={dev.driver_id}
-                        className="rounded-lg px-3 py-2.5 text-xs space-y-2"
-                        style={{ background: 'var(--bg-surface)', border: `1px solid ${hasAdj ? 'rgba(134,239,172,0.35)' : 'rgba(252,211,77,0.3)'}` }}
+                        className={`rounded-lg px-3 py-2.5 text-xs space-y-2 bg-raised border ${hasAdj ? 'border-positive/30' : 'border-caution/30'}`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{dev.driver_name}</span>
-                            <span className="ml-2" style={{ color: '#fcd34d' }}>
+                            <span className="font-semibold text-fg">{dev.driver_name}</span>
+                            <span className="ms-2 text-caution">
                               {t('stn.dev.underTarget')}: {fmtDiff(dev.diff)}
                             </span>
                           </div>
                           {hasAdj && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac' }}>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-positive-soft text-positive">
                               {t('stn.ausgleich.applied')}
                             </span>
                           )}
@@ -3804,24 +3780,23 @@ function GehaltsabweichungSection({
                           <div className="space-y-1.5">
                             <div className="grid grid-cols-3 gap-3 text-[11px]">
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.hours')}</div>
-                                <div className="font-semibold" style={{ color: '#86efac' }}>{existingAdj.hours.toFixed(2).replace('.', ',')} h</div>
+                                <div className="text-fg-subtle">{t('stn.ausgleich.hours')}</div>
+                                <div className="font-semibold text-positive">{existingAdj.hours.toFixed(2).replace('.', ',')} h</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</div>
-                                <div className="font-semibold" style={{ color: '#86efac' }}>{fmtEuroVal(existingAdj.amount)}</div>
+                                <div className="text-fg-subtle">{t('common.amount')}</div>
+                                <div className="font-semibold text-positive">{fmtEuroVal(existingAdj.amount)}</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.grossAfter')}</div>
-                                <div className="font-semibold" style={{ color: '#86efac' }}>{fmtEuroVal(afterBrutto)}</div>
+                                <div className="text-fg-subtle">{t('stn.ausgleich.grossAfter')}</div>
+                                <div className="font-semibold text-positive">{fmtEuroVal(afterBrutto)}</div>
                               </div>
                             </div>
                             <button
                               type="button"
                               onClick={() => void removeAusgleich(dev.driver_id)}
                               disabled={isSaving}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50"
-                              style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50 bg-critical-soft text-critical border border-critical/30"
                             >
                               {isSaving ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
                               {t('stn.ausgleich.remove')}
@@ -3831,25 +3806,24 @@ function GehaltsabweichungSection({
                           <div className="space-y-1.5">
                             <div className="grid grid-cols-3 gap-3 text-[11px]">
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.neededHours')}</div>
-                                <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{neededHours.toFixed(2).replace('.', ',')} h</div>
-                                <div style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{t('stn.ausgleich.atRate', { rate: dev.hourly_rate!.toFixed(2).replace('.', ',') })}</div>
+                                <div className="text-fg-subtle">{t('stn.ausgleich.neededHours')}</div>
+                                <div className="font-semibold text-fg">{neededHours.toFixed(2).replace('.', ',')} h</div>
+                                <div className="text-fg-subtle text-[10px]">{t('stn.ausgleich.atRate', { rate: dev.hourly_rate!.toFixed(2).replace('.', ',') })}</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.shortfall')}</div>
-                                <div className="font-semibold" style={{ color: '#fcd34d' }}>{fmtEuroVal(missingAmount)}</div>
+                                <div className="text-fg-subtle">{t('stn.ausgleich.shortfall')}</div>
+                                <div className="font-semibold text-caution">{fmtEuroVal(missingAmount)}</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.grossAfter')}</div>
-                                <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtEuroVal(afterBrutto)}</div>
+                                <div className="text-fg-subtle">{t('stn.ausgleich.grossAfter')}</div>
+                                <div className="font-semibold text-fg">{fmtEuroVal(afterBrutto)}</div>
                               </div>
                             </div>
                             <button
                               type="button"
                               onClick={() => void applyAusgleich(dev)}
                               disabled={isSaving}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50"
-                              style={{ background: 'rgba(252,211,77,0.15)', color: '#fcd34d', border: '1px solid rgba(252,211,77,0.35)' }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50 bg-caution-soft text-caution border border-caution/30"
                             >
                               {isSaving ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
                               {t('stn.ausgleich.apply')}
@@ -3861,12 +3835,12 @@ function GehaltsabweichungSection({
                   })}
                 </div>
                 {ausgleichError && (
-                  <div className="mt-2 text-[11px] rounded px-2 py-1.5" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
+                  <div className="mt-2 text-[11px] rounded px-2 py-1.5 bg-critical-soft text-critical border border-critical/30">
                     {ausgleichError}
                   </div>
                 )}
                 {applyAllMessage && (
-                  <div className="mt-2 text-[11px] rounded px-2 py-1.5" style={{ background: applyAllHasError ? 'rgba(248,113,113,0.1)' : 'rgba(134,239,172,0.1)', color: applyAllHasError ? '#f87171' : '#86efac', border: `1px solid ${applyAllHasError ? 'rgba(248,113,113,0.3)' : 'rgba(134,239,172,0.3)'}` }}>
+                  <div className={`mt-2 text-[11px] rounded px-2 py-1.5 border ${applyAllHasError ? 'bg-critical-soft text-critical border-critical/30' : 'bg-positive-soft text-positive border-positive/30'}`}>
                     {applyAllMessage}
                   </div>
                 )}
@@ -3888,7 +3862,7 @@ function GehaltsabweichungSection({
 
             if (suggestions.length === 0 && !allCandidatesSmall) {
               return (
-                <div className="text-xs py-2" style={{ color: 'var(--text-tertiary)' }}>
+                <div className="text-xs py-2 text-fg-subtle">
                   {t('stn.suggest.none')}
                 </div>
               );
@@ -3896,7 +3870,7 @@ function GehaltsabweichungSection({
 
             if (allCandidatesSmall) {
               return (
-                <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>
+                <div className="rounded-lg px-3 py-2.5 text-xs bg-raised border border-line text-fg-subtle">
                   {t('stn.suggest.onlySmall', { min: MIN_TRANSFER_BRUTTO })}
                 </div>
               );
@@ -3920,9 +3894,9 @@ function GehaltsabweichungSection({
                 const srcDev = deviationMap.get(srcId);
                 return (
                   <div key={srcId}>
-                    <div className="text-[11px] font-semibold mb-1.5 flex items-center gap-2" style={{ color: '#f87171' }}>
+                    <div className="text-[11px] font-semibold mb-1.5 flex items-center gap-2 text-critical">
                       <span>{t('stn.transfer.from')} {srcSuggestions[0].source_driver_name}</span>
-                      <span className="font-normal" style={{ color: 'var(--text-tertiary)' }}>
+                      <span className="font-normal text-fg-subtle">
                         ({t('stn.suggest.currentValue', { value: fmtDiff(srcSuggestions[0].source_diff) })})
                       </span>
                     </div>
@@ -3932,67 +3906,66 @@ function GehaltsabweichungSection({
                         const sourceNewDiff = Math.round((s.source_after - (srcDev?.target ?? 0)) * 100) / 100;
                         const targetNewDiff = Math.round((s.target_after - (tgtDev?.target ?? 0)) * 100) / 100;
                         const vs = s.validation.status;
-                        const vColor = vs === 'gueltig' ? '#86efac' : vs === 'nicht_moeglich' ? '#f87171' : '#fcd34d';
-                        const vBg = vs === 'gueltig' ? 'rgba(134,239,172,0.15)' : vs === 'nicht_moeglich' ? 'rgba(248,113,113,0.15)' : 'rgba(245,158,11,0.18)';
+                        const vColor = vs === 'gueltig' ? 'text-positive' : vs === 'nicht_moeglich' ? 'text-critical' : 'text-caution';
+                        const vBg = vs === 'gueltig' ? 'bg-positive-soft' : vs === 'nicht_moeglich' ? 'bg-critical-soft' : 'bg-caution-soft';
                         const vLabel = vs === 'gueltig' ? t('stn.validity.valid')
                           : vs === 'nicht_moeglich' ? t('stn.validity.impossible')
                             : t('stn.validity.review');
                         return (
-                          <div key={i} className="rounded-lg px-3 py-2.5 text-xs space-y-1.5" style={{ background: 'var(--bg-surface)', border: `1px solid ${vs === 'nicht_moeglich' ? 'rgba(248,113,113,0.25)' : 'var(--border)'}` }}>
+                          <div key={i} className={`rounded-lg px-3 py-2.5 text-xs space-y-1.5 bg-raised border ${vs === 'nicht_moeglich' ? 'border-critical/20' : 'border-line'}`}>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                              <span className="font-semibold" style={{ color: '#fcd34d' }}>
+                              <span className="font-semibold text-caution">
                                 {t('stn.transfer.to')} {s.target_driver_name}
                               </span>
-                              <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>
+                              <span className="text-fg-subtle text-[10px]">
                                 ({t('stn.suggest.currentValue', { value: fmtDiff(s.target_diff) })})
                               </span>
-                              <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(134,239,172,0.12)', color: '#86efac' }}>
+                              <span className="ms-auto px-1.5 py-0.5 rounded text-[10px] font-semibold bg-positive-soft text-positive">
                                 {t('stn.suggest.impact', { value: s.impact_score.toFixed(0) })}
                               </span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(147,197,253,0.12)', color: '#93c5fd' }}>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-fg-muted">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-info-soft text-info">
                                 {transferTypeLabel(s.candidate.transfer_type)}
                               </span>
-                              <span style={{ color: 'var(--text-tertiary)' }}>{t(s.candidate.labelKey, s.candidate.labelVars)}</span>
+                              <span className="text-fg-subtle">{t(s.candidate.labelKey, s.candidate.labelVars)}</span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-                              <span>{t('stn.card.shifts')} <strong style={{ color: 'var(--text-primary)' }}>{s.candidate.shifts.length}</strong></span>
-                              <span>{t('stn.transfer.gross')} <strong style={{ color: '#86efac' }}>{fmtEuroVal(s.shift_brutto)}</strong></span>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-fg-muted">
+                              <span>{t('stn.card.shifts')} <strong className="text-fg">{s.candidate.shifts.length}</strong></span>
+                              <span>{t('stn.transfer.gross')} <strong className="text-positive">{fmtEuroVal(s.shift_brutto)}</strong></span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px] text-fg-subtle">
                               <span>
                                 {t('stn.suggest.after', { driver: s.source_driver_name })}{' '}
-                                <strong style={{ color: 'var(--text-secondary)' }}>{fmtEuroVal(s.source_after)}</strong>
+                                <strong className="text-fg-muted">{fmtEuroVal(s.source_after)}</strong>
                                 {' '}({fmtDiff(sourceNewDiff)})
                               </span>
                               <span>
                                 {t('stn.suggest.after', { driver: s.target_driver_name })}{' '}
-                                <strong style={{ color: 'var(--text-secondary)' }}>{fmtEuroVal(s.target_after)}</strong>
+                                <strong className="text-fg-muted">{fmtEuroVal(s.target_after)}</strong>
                                 {' '}({fmtDiff(targetNewDiff)})
                               </span>
                             </div>
                             <div className="pt-0.5 space-y-1">
-                              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: vBg, color: vColor }}>
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${vBg} ${vColor}`}>
                                 {vLabel}
                               </span>
-                              <ul className="text-[10px] space-y-0.5 pl-0 list-none" style={{ color: 'var(--text-tertiary)' }}>
+                              <ul className="text-[10px] space-y-0.5 ps-0 list-none text-fg-subtle">
                                 {s.validation.reasons.map((r, ri) => (
                                   <li key={ri} className="flex items-start gap-1">
-                                    <span style={{ color: vColor, flexShrink: 0 }}>–</span>
+                                    <span className={`shrink-0 ${vColor}`}>–</span>
                                     <span>{r}</span>
                                   </li>
                                 ))}
                               </ul>
                             </div>
                             {vs === 'gueltig' && (
-                              <div className="pt-1.5 border-t" style={{ borderColor: 'rgba(134,239,172,0.2)' }}>
+                              <div className="pt-1.5 border-t border-positive/20">
                                 <button
                                   type="button"
                                   onClick={() => requestApply(s)}
                                   disabled={applying}
-                                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50"
-                                  style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac', border: '1px solid rgba(134,239,172,0.35)' }}
+                                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-semibold transition-all hover:brightness-110 disabled:opacity-50 bg-positive-soft text-positive border border-positive/30"
                                 >
                                   <ArrowRightLeft size={11} />
                                   {t('stn.transfer.apply')}
@@ -4012,9 +3985,9 @@ function GehaltsabweichungSection({
               <div className="space-y-4">
                 {/* Beste Ausgleichsrichtung */}
                 {bestActionable && (
-                  <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.25)' }}>
-                    <span className="font-semibold mr-2" style={{ color: '#86efac' }}>{t('stn.suggest.bestDirection')}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>
+                  <div className="rounded-lg px-3 py-2.5 text-xs bg-positive-soft border border-positive/20">
+                    <span className="font-semibold me-2 text-positive">{t('stn.suggest.bestDirection')}</span>
+                    <span className="text-fg-muted">
                       {bestActionable.source_driver_name} → {bestActionable.target_driver_name}
                       {' '}({t('stn.suggest.impactLabel')} <span className="font-mono">{bestActionable.impact_score.toFixed(0)} €</span>)
                       {' '}· {t(bestActionable.candidate.labelKey, bestActionable.candidate.labelVars)}
@@ -4025,7 +3998,7 @@ function GehaltsabweichungSection({
                 {/* Actionable suggestions */}
                 {actionable.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                    <p className="text-xs font-semibold mb-2 text-fg-muted">
                       {t('stn.suggest.possible', { count: actionable.length })}
                     </p>
                     <div className="space-y-4">
@@ -4037,7 +4010,7 @@ function GehaltsabweichungSection({
                 {/* Impossible suggestions collapsible */}
                 {impossible.length > 0 && (
                   <details className="group">
-                    <summary className="cursor-pointer text-xs font-semibold select-none flex items-center gap-1.5" style={{ color: '#f87171' }}>
+                    <summary className="cursor-pointer text-xs font-semibold select-none flex items-center gap-1.5 text-critical">
                       <span className="group-open:rotate-90 inline-block transition-transform">▶</span>
                       {t('stn.suggest.impossible', { count: impossible.length })}
                     </summary>
@@ -4052,7 +4025,7 @@ function GehaltsabweichungSection({
 
           {/* Apply error outside confirmation dialog */}
           {applyError && !pendingApply && (
-            <div className="mx-3 mb-3 text-[11px] rounded px-2 py-1.5" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
+            <div className="mx-3 mb-3 text-[11px] rounded px-2 py-1.5 bg-critical-soft text-critical border border-critical/30">
               {applyError}
             </div>
           )}
@@ -4061,23 +4034,23 @@ function GehaltsabweichungSection({
           {lastApplied && (
             <div className="mx-3 mb-3 space-y-2">
               {/* Success banner */}
-              <div className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs" style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.25)' }}>
-                <CheckCircle2 size={13} style={{ color: '#86efac', flexShrink: 0, marginTop: 1 }} />
-                <div style={{ color: 'var(--text-secondary)' }}>
-                  <div className="font-semibold mb-0.5" style={{ color: '#86efac' }}>{t('stn.applied.banner')}</div>
+              <div className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs bg-positive-soft border border-positive/20">
+                <CheckCircle2 size={13} className="text-positive shrink-0 mt-px" />
+                <div className="text-fg-muted">
+                  <div className="font-semibold mb-0.5 text-positive">{t('stn.applied.banner')}</div>
                   <div>{lastApplied.source} → {lastApplied.target}</div>
-                  <div style={{ color: 'var(--text-tertiary)' }}>{lastApplied.date} · {t('stn.applied.tripsUpdated', { count: lastApplied.tripCount })}</div>
+                  <div className="text-fg-subtle">{lastApplied.date} · {t('stn.applied.tripsUpdated', { count: lastApplied.tripCount })}</div>
                 </div>
               </div>
 
               {/* Post-transfer required actions */}
               {transferAppliedCount > 0 && (
-                <div className="rounded-lg px-3 py-3 text-xs space-y-2" style={{ background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.35)', color: '#92400e' }}>
+                <div className="rounded-lg px-3 py-3 text-xs space-y-2 bg-caution-soft border border-caution/30 text-caution">
                   <div className="font-semibold flex items-center gap-1.5">
                     <AlertTriangle size={12} />
                     {t('stn.applied.recheckTitle')}
                   </div>
-                  <ul className="space-y-1 pl-1" style={{ color: 'var(--text-secondary)' }}>
+                  <ul className="space-y-1 ps-1 text-fg-muted">
                     <li>• {t('stn.applied.recheckQuality')}</li>
                     <li>• {t('stn.applied.recheckStundennachweis')}</li>
                     <li>• {t('stn.applied.recheckDocuments')}</li>

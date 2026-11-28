@@ -2302,7 +2302,7 @@ const Step1: React.FC<{
           onClick={() => driverId && onNext(driverId, month, year)}
           disabled={!driverId}
         >
-          {t('stn.step1.next')} <ArrowRight aria-hidden />
+          {t('stn.step1.next')} <ArrowRight aria-hidden className="rtl:-scale-x-100" />
         </Button>
       </CardContent>
     </Card>
@@ -2588,7 +2588,7 @@ const Step2: React.FC<Step2Props> = ({
             {t('common.back')}
           </Button>
           <Button size="lg" className="sm:flex-[2]" onClick={tab === 'salary' ? goSalary : goTotals}>
-            {t('stn.step2.generate')} <ArrowRight aria-hidden />
+            {t('stn.step2.generate')} <ArrowRight aria-hidden className="rtl:-scale-x-100" />
           </Button>
         </div>
       </CardContent>
@@ -2662,6 +2662,7 @@ export const Timesheet: React.FC<{
   return (
     <div
       id="stundennachweis-print"
+      dir="ltr" lang="de"
       style={{
         background: '#fff',
         padding: '16px 20px 16px 20px',
@@ -2757,7 +2758,7 @@ export const Timesheet: React.FC<{
                   {row.isHol && <span style={{ marginLeft: 3, fontSize: 7.5, color: '#92400e' }}>F</span>}
                   {isHighlighted && <span style={{ marginLeft: 4, fontSize: 7, color: '#b45309', fontWeight: 800 }}>◀ Notiz</span>}
                   {absentDays?.has(row.dayIndex) && !row.grundlohn && (
-                    <span className="ml-1 text-[7px] font-extrabold text-fg-subtle">{t('stn.badge.absence')}</span>
+                    <span className="ml-1 text-[7px] font-extrabold text-[#525e59]">{t('stn.badge.absence')}</span>
                   )}
                 </td>
                 <td style={{ ...TD, background: bg }}>
@@ -2863,6 +2864,11 @@ function noteIsHoliday(noteDate: string): boolean {
   return dateIsHoliday(new Date(noteDate));
 }
 
+// ── Presentation (phase 5) ────────────────────────────────────────────────
+const NOTE_NAV_BUTTON =
+  'flex size-7 items-center justify-center rounded-[7px] border border-line bg-sunken text-fg transition-colors ' +
+  'hover:bg-line disabled:cursor-not-allowed disabled:text-fg-subtle disabled:hover:bg-sunken';
+
 const NotesCarousel: React.FC<{
   notes: Note[];
   rows: DayRow[];
@@ -2878,28 +2884,15 @@ const NotesCarousel: React.FC<{
 
   if (sorted.length === 0) {
     return (
-      <div style={{
-        borderRadius: 14,
-        border: '1px solid var(--border)',
-        background: 'var(--bg-surface)',
-        padding: '20px 24px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-      }}>
-        <div style={{
-          width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-          background: 'var(--bg-subtle)',
-          border: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <StickyNote size={17} style={{ color: 'var(--text-tertiary)' }} />
+      <div className="glass-card flex items-center gap-3.5 rounded-surface px-6 py-5">
+        <div className="flex size-[38px] shrink-0 items-center justify-center rounded-xl border border-line bg-sunken">
+          <StickyNote size={17} className="text-fg-subtle" />
         </div>
         <div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+          <p className="text-[13px] font-semibold text-fg-muted">
             {t('stn.notes.empty')}
           </p>
-          <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+          <p className="mt-0.5 text-[11px] text-fg-subtle">
             {t('stn.notes.emptyHint')}
           </p>
         </div>
@@ -2955,84 +2948,50 @@ const NotesCarousel: React.FC<{
   };
 
   // Badge helpers
-  const badges: { label: string; icon: React.ReactNode; color: string; bg: string; border: string }[] = [];
-  if (isHol)     badges.push({ label: t('stn.badge.holiday'), icon: <Star size={10} />,    color: '#d97706', bg: 'rgba(217,119,6,0.1)',   border: 'rgba(217,119,6,0.25)' });
-  if (isWeekend) badges.push({ label: dow === 0 ? t('stn.weekday.sunday') : t('stn.weekday.saturday'), icon: <Sun size={10} />,  color: '#0891b2', bg: 'rgba(8,145,178,0.1)',  border: 'rgba(8,145,178,0.25)' });
-  if (isNight)   badges.push({ label: t('stn.badge.night'),   icon: <Moon size={10} />,    color: '#6366f1', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.25)' });
-  if (inPlan)    badges.push({ label: t('stn.badge.inPlan'),  icon: <StickyNote size={10} />, color: '#16a34a', bg: 'rgba(22,163,74,0.1)',  border: 'rgba(22,163,74,0.25)' });
+  const badges: { label: string; icon: React.ReactNode; cls: string }[] = [];
+  if (isHol)     badges.push({ label: t('stn.badge.holiday'), icon: <Star size={10} />,    cls: 'border-caution/25 bg-caution-soft text-caution' });
+  if (isWeekend) badges.push({ label: dow === 0 ? t('stn.weekday.sunday') : t('stn.weekday.saturday'), icon: <Sun size={10} />,  cls: 'border-info/25 bg-info-soft text-info' });
+  if (isNight)   badges.push({ label: t('stn.badge.night'),   icon: <Moon size={10} />,    cls: 'border-violet/25 bg-violet-soft text-violet' });
+  if (inPlan)    badges.push({ label: t('stn.badge.inPlan'),  icon: <StickyNote size={10} />, cls: 'border-positive/25 bg-positive-soft text-positive' });
 
-  if (behavior === 'exclude_from_plan')    badges.push({ label: t('stn.badge.absence'),      icon: <AlertTriangle size={10} />, color: '#dc2626', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.25)' });
-  if (behavior === 'must_include_in_plan') badges.push({ label: t('stn.badge.mandatoryNote'), icon: <AlertTriangle size={10} />, color: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' });
+  if (behavior === 'exclude_from_plan')    badges.push({ label: t('stn.badge.absence'),      icon: <AlertTriangle size={10} />, cls: 'border-critical/25 bg-critical-soft text-critical' });
+  if (behavior === 'must_include_in_plan') badges.push({ label: t('stn.badge.mandatoryNote'), icon: <AlertTriangle size={10} />, cls: 'border-caution/25 bg-caution-soft text-caution' });
   if (note.start_date && note.end_date && note.start_date !== note.end_date) {
-    badges.push({ label: `${note.start_date.slice(8,10)}.${note.start_date.slice(5,7)} – ${note.end_date.slice(8,10)}.${note.end_date.slice(5,7)}`, icon: <CalendarRange size={10} />, color: 'var(--text-secondary)', bg: 'var(--bg-subtle)', border: 'var(--border)' });
+    badges.push({ label: `${note.start_date.slice(8,10)}.${note.start_date.slice(5,7)} – ${note.end_date.slice(8,10)}.${note.end_date.slice(5,7)}`, icon: <CalendarRange size={10} />, cls: 'border-line bg-sunken text-fg-muted' });
   }
 
   return (
-    <div style={{
-      borderRadius: 14,
-      border: '1px solid var(--border)',
-      background: 'var(--bg-surface)',
-      overflow: 'hidden',
-    }}>
+    <div className="glass-card overflow-hidden rounded-surface">
       {/* Header row */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 16px 10px',
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--bg-subtle)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: 'rgba(var(--accent-rgb, 37,99,235),0.1)',
-            border: '1px solid rgba(var(--accent-rgb, 37,99,235),0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <StickyNote size={14} style={{ color: 'var(--accent)' }} />
+      <div className="flex items-center justify-between border-b border-line bg-sunken px-4 pb-2.5 pt-3">
+        <div className="flex items-center gap-2">
+          <div className="flex size-7 items-center justify-center rounded-lg border border-brand/20 bg-brand-soft">
+            <StickyNote size={14} className="text-brand-text" />
           </div>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          <span className="text-xs font-bold uppercase tracking-[0.04em] text-fg">
             {t('stn.notes.title')}
           </span>
-          <span style={{
-            fontSize: 11, fontWeight: 600,
-            padding: '2px 8px', borderRadius: 20,
-            background: 'var(--accent)',
-            color: 'var(--text-inverse)',
-          }}>
+          <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-semibold text-brand-fg">
             {sorted.length}
           </span>
         </div>
 
         {/* Navigation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginRight: 4 }}>
+        <div className="flex items-center gap-1.5">
+          <span className="me-1 text-[11px] text-fg-subtle">
             {idx + 1} / {sorted.length}
           </span>
           <button
             onClick={prev} disabled={idx === 0}
-            style={{
-              width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)',
-              background: idx === 0 ? 'var(--bg-muted)' : 'var(--bg-subtle)',
-              color: idx === 0 ? 'var(--text-tertiary)' : 'var(--text-primary)',
-              cursor: idx === 0 ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.15s',
-            }}
+            className={NOTE_NAV_BUTTON}
           >
-            <ChevronLeft size={15} />
+            <ChevronLeft size={15} className="rtl:-scale-x-100" />
           </button>
           <button
             onClick={next} disabled={idx === sorted.length - 1}
-            style={{
-              width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)',
-              background: idx === sorted.length - 1 ? 'var(--bg-muted)' : 'var(--bg-subtle)',
-              color: idx === sorted.length - 1 ? 'var(--text-tertiary)' : 'var(--text-primary)',
-              cursor: idx === sorted.length - 1 ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.15s',
-            }}
+            className={NOTE_NAV_BUTTON}
           >
-            <ChevronRight size={15} />
+            <ChevronRight size={15} className="rtl:-scale-x-100" />
           </button>
         </div>
       </div>
@@ -3040,66 +2999,35 @@ const NotesCarousel: React.FC<{
       {/* Note card body */}
       <div
         onClick={handleCardClick}
-        style={{
-          padding: '16px 18px',
-          cursor: matchRow ? 'pointer' : 'default',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={e => { if (matchRow) (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; }}
+        className={matchRow ? 'cursor-pointer px-[18px] py-4 transition-colors hover:bg-sunken' : 'px-[18px] py-4'}
       >
         {/* Date + time row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-          }}>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 22, height: 22, borderRadius: 6,
-              background: 'var(--accent)', color: 'var(--text-inverse)',
-              fontSize: 11, fontWeight: 800,
-            }}>
+        <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-[5px] text-xs font-bold text-fg">
+            <span className="inline-flex size-[22px] items-center justify-center rounded-md bg-brand text-[11px] font-extrabold text-brand-fg">
               {dayNum}
             </span>
             <span>{weekday}, {dateStr}</span>
           </div>
-          <span style={{
-            fontSize: 11, fontWeight: 600,
-            padding: '2px 7px', borderRadius: 6,
-            background: 'var(--bg-subtle)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border)',
-          }}>
+          <span className="rounded-md border border-line bg-sunken px-[7px] py-0.5 text-[11px] font-semibold text-fg-muted">
             {t('stn.notes.timeSuffix', { time: timeStr })}
           </span>
           {/* Badges */}
           {badges.map((b, bi) => (
-            <span key={bi} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              fontSize: 10, fontWeight: 600,
-              padding: '2px 7px', borderRadius: 6,
-              background: b.bg, color: b.color, border: `1px solid ${b.border}`,
-            }}>
+            <span key={bi} className={`inline-flex items-center gap-1 rounded-md border px-[7px] py-0.5 text-[10px] font-semibold ${b.cls}`}>
               {b.icon}{b.label}
             </span>
           ))}
         </div>
 
         {/* Note text */}
-        <p style={{
-          fontSize: 13, lineHeight: 1.6,
-          color: 'var(--text-primary)',
-          margin: 0,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}>
+        <p className="m-0 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-fg">
           {note.note_text}
         </p>
 
         {/* Click hint when note has a matching plan row */}
         {matchRow && (
-          <p style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 8, marginBottom: 0 }}>
+          <p className="mb-0 mt-2 text-[10px] text-fg-subtle">
             {t('stn.notes.clickHint', { weekday })}
           </p>
         )}
@@ -3107,24 +3035,12 @@ const NotesCarousel: React.FC<{
 
       {/* Dot navigation */}
       {sorted.length > 1 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-          padding: '8px 16px 12px',
-        }}>
+        <div className="flex items-center justify-center gap-[5px] px-4 pb-3 pt-2">
           {sorted.map((_, i) => (
             <button
               key={i}
               onClick={() => { setIdx(i); onHighlightDay?.(null); }}
-              style={{
-                width: i === idx ? 18 : 7,
-                height: 7,
-                borderRadius: 4,
-                border: 'none',
-                cursor: 'pointer',
-                padding: 0,
-                background: i === idx ? 'var(--accent)' : 'var(--border)',
-                transition: 'all 0.2s',
-              }}
+              className={`h-[7px] cursor-pointer rounded border-none p-0 transition-all duration-200 ${i === idx ? 'w-[18px] bg-brand' : 'w-[7px] bg-line-strong'}`}
             />
           ))}
         </div>
@@ -3135,11 +3051,23 @@ const NotesCarousel: React.FC<{
 
 // ─── Structured warnings display ─────────────────────────────────────────────
 
-function DateGroupRow({ dateKey, items, color }: {
+// ── Presentation (phase 5) ────────────────────────────────────────────────
+// The group's tone, by category. The hex colours the engine's GROUP_META carries
+// are no longer painted here; the text, the card and the count chip follow tokens.
+const WARNING_TONE: Record<WarningGroup['category'], { text: string; card: string; chip: string }> = {
+  critical: { text: 'text-critical', card: 'border-critical/30 bg-critical-soft', chip: 'bg-critical-soft text-critical' },
+  transfer: { text: 'text-caution',  card: 'border-caution/30 bg-caution-soft',   chip: 'bg-caution-soft text-caution' },
+  shift:    { text: 'text-info',     card: 'border-info/30 bg-info-soft',         chip: 'bg-info-soft text-info' },
+  target:   { text: 'text-violet',   card: 'border-violet/30 bg-violet-soft',     chip: 'bg-violet-soft text-violet' },
+  note:     { text: 'text-positive', card: 'border-positive/30 bg-positive-soft', chip: 'bg-positive-soft text-positive' },
+};
+
+function DateGroupRow({ dateKey, items, category }: {
   dateKey: string;
   items: { text: string; date: string | null }[];
-  color: string;
+  category: WarningGroup['category'];
 }) {
+  const tone = WARNING_TONE[category];
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 
@@ -3147,36 +3075,24 @@ function DateGroupRow({ dateKey, items, color }: {
     <div>
       <button
         onClick={() => setOpen(v => !v)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          background: 'none', border: 'none', cursor: 'pointer',
-          padding: '3px 2px', width: '100%', textAlign: 'left',
-        }}
+        className="flex w-full cursor-pointer items-center gap-1.5 border-none bg-transparent px-0.5 py-[3px] text-start"
       >
-        <ChevronDown size={12} style={{
-          color, flexShrink: 0,
-          transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-          transition: 'transform 0.15s ease',
-        }} />
-        <span style={{ fontSize: 12, fontWeight: 600, color }}>
+        <ChevronDown size={12} className={`shrink-0 transition-transform duration-150 ${tone.text} ${open ? 'rotate-180' : 'rotate-0'}`} />
+        <span className={`text-xs font-semibold ${tone.text}`}>
           {dateKey !== '_no_date' ? formatDateDE(dateKey) : t('stn.warn.general')}
         </span>
-        <span style={{
-          fontSize: 10, fontWeight: 600,
-          padding: '0 6px', borderRadius: 12,
-          background: `${color}18`, color,
-        }}>
+        <span className={`rounded-xl px-1.5 text-[10px] font-semibold ${tone.chip}`}>
           {items.length}
         </span>
       </button>
       {open && (
-        <div style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 4 }}>
+        <div className="flex flex-col gap-0.5 pb-1 ps-5">
           {items.map((item, i) => {
             const display = item.date
               ? item.text.replace(/^\d{4}-\d{2}-\d{2}:\s*/, '')
               : item.text;
             return (
-              <p key={i} style={{ fontSize: 11.5, color: '#374151', margin: 0, lineHeight: 1.45 }}>
+              <p key={i} className="m-0 text-[11.5px] leading-[1.45] text-fg-muted">
                 {display}
               </p>
             );
@@ -3192,67 +3108,37 @@ function WarningGroupCard({ group }: { group: WarningGroup }) {
   const [open, setOpen] = React.useState(group.category === 'critical');
   const dateGroups = groupByDate(group.items);
   const showInline = group.category === 'critical' || group.category === 'note';
+  const tone = WARNING_TONE[group.category];
 
   return (
-    <div style={{
-      borderRadius: 10,
-      border: `1px solid ${group.borderColor}`,
-      background: group.bgColor,
-      overflow: 'hidden',
-    }}>
+    <div className={`overflow-hidden rounded-[10px] border ${tone.card}`}>
       <button
         onClick={() => setOpen(v => !v)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 14px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
+        className="flex w-full cursor-pointer items-center gap-2 border-none bg-transparent px-3.5 py-2.5 text-start"
       >
-        <AlertTriangle size={14} style={{ color: group.color, flexShrink: 0 }} />
+        <AlertTriangle size={14} className={`shrink-0 ${tone.text}`} />
         {/* The warning texts stay German: utils/warningCategories.ts classifies
             them by matching German fragments, and the same strings are printed
             on the Stundennachweis PDF. Only the group label has a key. */}
-        <span style={{ fontSize: 12, fontWeight: 700, color: group.color, flex: 1 }}>
+        <span className={`flex-1 text-xs font-bold ${tone.text}`}>
           {engineText(t, group.label, group.labelKey)}
         </span>
-        <span style={{
-          fontSize: 11,
-          fontWeight: 600,
-          padding: '1px 8px',
-          borderRadius: 20,
-          background: group.borderColor,
-          color: group.color,
-          minWidth: 22,
-          textAlign: 'center',
-        }}>
+        <span className={`min-w-[22px] rounded-full px-2 py-px text-center text-[11px] font-semibold ${tone.chip}`}>
           {group.items.length}
         </span>
         <ChevronDown
           size={14}
-          style={{
-            color: group.color,
-            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.2s ease',
-          }}
+          className={`transition-transform duration-200 ${tone.text} ${open ? 'rotate-180' : 'rotate-0'}`}
         />
       </button>
 
       {open && (
-        <div style={{ padding: '0 14px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="flex flex-col gap-1 px-3.5 pb-2.5 pt-0">
           {showInline ? (
             [...dateGroups.entries()].map(([dateKey, items]) => (
               <div key={dateKey}>
                 {dateKey !== '_no_date' && (
-                  <div style={{
-                    fontSize: 11, fontWeight: 600, color: group.color,
-                    opacity: 0.8, marginBottom: 2, paddingLeft: 2,
-                  }}>
+                  <div className={`mb-0.5 ps-0.5 text-[11px] font-semibold opacity-80 ${tone.text}`}>
                     {formatDateDE(dateKey)}
                   </div>
                 )}
@@ -3261,10 +3147,7 @@ function WarningGroupCard({ group }: { group: WarningGroup }) {
                     ? item.text.replace(/^\d{4}-\d{2}-\d{2}:\s*/, '')
                     : item.text;
                   return (
-                    <p key={i} style={{
-                      fontSize: 12, color: '#374151', margin: 0,
-                      lineHeight: 1.5, paddingLeft: dateKey !== '_no_date' ? 10 : 2,
-                    }}>
+                    <p key={i} className={`m-0 text-xs leading-normal text-fg-muted ${dateKey !== '_no_date' ? 'ps-2.5' : 'ps-0.5'}`}>
                       {display}
                     </p>
                   );
@@ -3273,7 +3156,7 @@ function WarningGroupCard({ group }: { group: WarningGroup }) {
             ))
           ) : (
             [...dateGroups.entries()].map(([dateKey, items]) => (
-              <DateGroupRow key={dateKey} dateKey={dateKey} items={items} color={group.color} />
+              <DateGroupRow key={dateKey} dateKey={dateKey} items={items} category={group.category} />
             ))
           )}
         </div>
@@ -3288,22 +3171,14 @@ function StructuredWarnings({ warnings }: { warnings: string[] }) {
   const hasCritical = groups.some(g => g.category === 'critical');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <AlertTriangle size={15} style={{ color: hasCritical ? '#dc2626' : '#d97706', flexShrink: 0 }} />
-        <span style={{
-          fontSize: 12, fontWeight: 700,
-          color: hasCritical ? '#dc2626' : '#d97706',
-          textTransform: 'uppercase', letterSpacing: '0.04em',
-        }}>
+    <div className="flex flex-col gap-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <AlertTriangle size={15} className={`shrink-0 ${hasCritical ? 'text-critical' : 'text-caution'}`} />
+        <span className={`text-xs font-bold uppercase tracking-[0.04em] ${hasCritical ? 'text-critical' : 'text-caution'}`}>
           {t('stn.warn.title')}
         </span>
         {groups.map(g => (
-          <span key={g.category} style={{
-            fontSize: 11, fontWeight: 600,
-            padding: '2px 9px', borderRadius: 20,
-            background: g.borderColor, color: g.color,
-          }}>
+          <span key={g.category} className={`rounded-full px-[9px] py-0.5 text-[11px] font-semibold ${WARNING_TONE[g.category].chip}`}>
             {engineText(t, g.label, g.labelKey)}: {g.items.length}
           </span>
         ))}
@@ -3771,8 +3646,8 @@ const StundennachweisPage: React.FC = () => {
 
       {/* ── Header ── */}
       <div className="font-ui">
-        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={goBack}>
-          <ChevronLeft aria-hidden />
+        <Button variant="ghost" size="sm" className="-ms-2 mb-2" onClick={goBack}>
+          <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
           {t('common.back')}
         </Button>
         <PageHeader
@@ -3787,7 +3662,7 @@ const StundennachweisPage: React.FC = () => {
                 <>
                   {`${selDriver.name} — ${t(MONTH_NAME_KEYS[selMonth-1])} ${selYear}`}
                   {isFromArchive && savedAt && (
-                    <span className="ml-2 text-fg-subtle">
+                    <span className="ms-2 text-fg-subtle">
                       {t('stn.header.lastSaved', {
                         timestamp: new Date(savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
                       })}
@@ -3864,45 +3739,44 @@ const StundennachweisPage: React.FC = () => {
           )}
 
           {/* ── Summary bar ── */}
-          <div className="rounded-xl p-4 flex flex-wrap items-center gap-6"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+          <div className="glass-card flex flex-wrap items-center gap-6 rounded-surface p-4">
             {noSalaryMeta ? (
               <>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.salaryRange')} </span>
-                  <span className="font-bold" style={{ color: 'var(--text-tertiary)' }}>—</span>
+                  <span className="text-fg-subtle">{t('stn.summary.salaryRange')} </span>
+                  <span className="font-bold text-fg-subtle">—</span>
                 </div>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.calculated')} </span>
-                  <span className="font-bold" style={{ color: 'var(--text-tertiary)' }}>—</span>
+                  <span className="text-fg-subtle">{t('stn.summary.calculated')} </span>
+                  <span className="font-bold text-fg-subtle">—</span>
                 </div>
               </>
             ) : genMode === 'salary' ? (
               <>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.salaryRange')} </span>
+                  <span className="text-fg-subtle">{t('stn.summary.salaryRange')} </span>
                   {(minSalary != null || maxSalary != null) ? (
-                    <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+                    <span className="font-bold text-fg">
                       {minSalary != null ? `${minSalary.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '—'}
                       {' – '}
                       {maxSalary != null ? `${maxSalary.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '—'}
                     </span>
                   ) : targetSalary > 0 ? (
-                    <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+                    <span className="font-bold text-fg">
                       {targetSalary.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                     </span>
                   ) : (
-                    <span className="font-bold" style={{ color: 'var(--text-tertiary)' }}>—</span>
+                    <span className="font-bold text-fg-subtle">—</span>
                   )}
                 </div>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.calculated')} </span>
+                  <span className="text-fg-subtle">{t('stn.summary.calculated')} </span>
                   {hourlyRate > 0 ? (
-                    <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+                    <span className="font-bold text-fg">
                       {calcSal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                     </span>
                   ) : (
-                    <span className="font-bold text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.hourlyRateMissing')}</span>
+                    <span className="font-bold text-xs text-fg-subtle">{t('stn.summary.hourlyRateMissing')}</span>
                   )}
                 </div>
                 {hourlyRate > 0 && (() => {
@@ -3912,23 +3786,20 @@ const StundennachweisPage: React.FC = () => {
                   const tol = 0.01;
                   if (effMin != null && calcSal < effMin - tol) {
                     return (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>
+                      <span className="rounded-full border border-caution/25 bg-caution-soft px-2 py-0.5 text-xs font-semibold text-caution">
                         {t('stn.summary.belowMinSalary')}
                       </span>
                     );
                   }
                   if (effMax != null && calcSal > effMax + tol) {
                     return (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7' }}>
+                      <span className="rounded-full border border-positive/25 bg-positive-soft px-2 py-0.5 text-xs font-semibold text-positive">
                         {t('stn.summary.aboveMaxSalary')}
                       </span>
                     );
                   }
                   return (
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                      style={{ background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7' }}>
+                    <span className="rounded-full border border-positive/25 bg-positive-soft px-2 py-0.5 text-xs font-semibold text-positive">
                       {t('stn.summary.inSalaryRange')}
                     </span>
                   );
@@ -3937,13 +3808,13 @@ const StundennachweisPage: React.FC = () => {
             ) : (
               <>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.mode')} </span>
-                  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('stn.step2.tabTotals')}</span>
+                  <span className="text-fg-subtle">{t('stn.summary.mode')} </span>
+                  <span className="font-bold text-fg">{t('stn.step2.tabTotals')}</span>
                 </div>
                 {totalsTarget && (
                   <div className="text-sm">
-                    <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.targetBaseWage')} </span>
-                    <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-fg-subtle">{t('stn.summary.targetBaseWage')} </span>
+                    <span className="font-bold text-fg">
                       {t('stn.summary.hoursValue', { value: fmtDec(minsToDecimal(totalsTarget.grundlohn)) })}
                     </span>
                   </div>
@@ -3951,21 +3822,20 @@ const StundennachweisPage: React.FC = () => {
               </>
             )}
             <div className="text-sm">
-              <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.totalHours')} </span>
-              <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+              <span className="text-fg-subtle">{t('stn.summary.totalHours')} </span>
+              <span className="font-bold text-fg">
                 {t('stn.summary.hoursValue', { value: fmtDec(minsToDecimal(totals.grundlohn)) })}
               </span>
             </div>
             <div className="text-sm">
-              <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.workingDays')} </span>
-              <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+              <span className="text-fg-subtle">{t('stn.summary.workingDays')} </span>
+              <span className="font-bold text-fg">
                 {rows.filter(r => r.grundlohn).length}
               </span>
             </div>
             {rows.some(r => r.noteHighlight && r.grundlohn) && (
-              <div className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full"
-                style={{ background: '#fffde7', color: '#e65100', border: '1px solid #ffcc80' }}>
-                <span style={{ fontWeight: 'bold' }}>●</span>
+              <div className="flex items-center gap-1.5 rounded-full border border-caution/25 bg-caution-soft px-2.5 py-1 text-xs text-caution">
+                <span className="font-bold">●</span>
                 {t('stn.summary.noteRowsAutofilled')}
               </div>
             )}
@@ -3981,27 +3851,27 @@ const StundennachweisPage: React.FC = () => {
 
           {/* ── Hard duration violations (blocks save / export) ── */}
           {hasDurationViolations && (
-            <div className="rounded-xl p-4" style={{ background: '#fef2f2', border: '1px solid #fca5a5' }}>
+            <div className="rounded-surface border border-critical/25 bg-critical-soft p-4">
               <div className="flex items-start gap-3">
-                <AlertTriangle size={20} style={{ color: '#b91c1c', flexShrink: 0, marginTop: 2 }} />
+                <AlertTriangle size={20} className="mt-0.5 shrink-0 text-critical" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold" style={{ color: '#991b1b' }}>
+                  <p className="text-sm font-semibold text-critical">
                     {tPlural(
                       { one: 'stn.violation.headline.one', other: 'stn.violation.headline.other' },
                       durationViolations.length,
                     )}
                   </p>
-                  <p className="text-xs mt-1" style={{ color: '#991b1b', opacity: 0.85 }}>
+                  <p className="mt-1 text-xs text-critical opacity-[0.85]">
                     {t('stn.violation.limitsHint')}
                   </p>
-                  <ul className="mt-2 space-y-1 text-xs" style={{ color: '#991b1b' }}>
+                  <ul className="mt-2 space-y-1 text-xs text-critical">
                     {durationViolations.map((v, idx) => {
                       const dateLabel = `${t(WEEKDAY_SHORT_KEYS_BY_JS[v.date.getDay()])} ${String(v.dayIndex).padStart(2, '0')}.${String(v.date.getMonth() + 1).padStart(2, '0')}.${v.date.getFullYear()}`;
                       const limitSuffix = ` (${t('stn.violation.limit', { value: minsToHHMM(v.limit) })})`;
                       if (v.type === 'shift') {
                         return (
                           <li key={idx} className="flex items-start gap-2">
-                            <span style={{ fontWeight: 'bold' }}>•</span>
+                            <span className="font-bold">•</span>
                             <span>
                               {dateLabel} — {t('stn.violation.shift', { number: v.shiftNumber })} {v.von}–{v.bis}:{' '}
                               <strong>{t('stn.summary.hoursValue', { value: minsToHHMM(v.durationMinutes) })}</strong>
@@ -4012,7 +3882,7 @@ const StundennachweisPage: React.FC = () => {
                       }
                       return (
                         <li key={idx} className="flex items-start gap-2">
-                          <span style={{ fontWeight: 'bold' }}>•</span>
+                          <span className="font-bold">•</span>
                           <span>
                             {dateLabel} — {t('stn.violation.dailyTotal')}{' '}
                             <strong>{t('stn.summary.hoursValue', { value: minsToHHMM(v.durationMinutes) })}</strong>
@@ -4033,8 +3903,9 @@ const StundennachweisPage: React.FC = () => {
           )}
 
           {/* ── Document ── */}
-          <div className="rounded-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflowX: 'auto' }}>
-            <div style={{ padding: '8px 4px' }}>
+          {/* dir="ltr": an RTL scroller would open the 740 px sheet at its right edge. */}
+          <div dir="ltr" className="glass-card overflow-x-auto rounded-surface">
+            <div className="px-1 py-2">
               <Timesheet
                 driver={selDriver}
                 month={selMonth}

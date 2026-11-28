@@ -67,18 +67,18 @@ export function Field({ label, hint, error, required = false, id, className, chi
   return (
     <FieldContext.Provider value={{ controlId, hintId, errorId, invalid: Boolean(error), required }}>
       <div className={cn('grid content-start gap-1.5', className)}>
-        <LabelPrimitive.Root htmlFor={controlId} className="font-ui text-[13px] font-medium text-fg-muted">
+        <LabelPrimitive.Root htmlFor={controlId} className="font-ui text-[13px] font-[550] text-fg-muted">
           {label}
           {required ? (
             <>
-              <span aria-hidden className="ml-0.5 text-critical">*</span>
+              <span aria-hidden className="ms-0.5 text-critical">*</span>
               <span className="sr-only"> ({t('common.required')})</span>
             </>
           ) : null}
         </LabelPrimitive.Root>
         {children}
         {hint ? (
-          <p id={hintId} className="font-ui text-xs text-fg-subtle">
+          <p id={hintId} className="font-ui text-[12.5px] text-fg-subtle">
             {hint}
           </p>
         ) : null}

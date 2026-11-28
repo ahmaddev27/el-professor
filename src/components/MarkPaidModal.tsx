@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
-import { X, Banknote, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Banknote, CheckCircle } from 'lucide-react';
 import { callPlatformRpc } from '../lib/platformRpc';
 import { parseGermanAmountToCents } from '../utils/money';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { format } from 'date-fns';
+import {
+  Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Field, Input, cn,
+} from './ui';
+import { controlFrameClass } from './ui/Input';
 
 /**
  * What this dialog needs of one `platform_invoices_list` row (migration
@@ -71,93 +76,86 @@ export default function MarkPaidModal({ invoice, onClose, onConfirm }: Props) {
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '0.625rem 0.75rem',
-    borderRadius: '0.75rem',
-    fontSize: '0.875rem',
-    background: 'var(--bg-subtle)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border)',
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the dialog's logic and is unchanged, bar the
+  // `inputStyle` object, which was only look and is classes now. Everything
+  // below only draws.
+
+  const textareaClass = cn(
+    controlFrameClass,
+    'h-auto min-h-16 resize-y py-2 [@media(pointer:coarse)]:h-auto',
+  );
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="rounded-2xl w-full max-w-md" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(34,197,94,0.12)' }}>
-              <Banknote size={20} style={{ color: 'var(--success)' }} />
-            </div>
-            <div>
-              <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.markPaid.title')}</h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+    <Dialog
+      open
+      onOpenChange={open => {
+        // The dialog stays open while the save runs, so a failure is shown in it.
+        if (!open && !saving) onClose();
+      }}
+    >
+      <DialogContent className="max-w-md" onInteractOutside={event => event.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-tile bg-positive-soft text-positive">
+              <Banknote aria-hidden className="size-5" />
+            </span>
+            <span className="grid min-w-0 gap-0.5">
+              <span>{t('bill.markPaid.title')}</span>
+              <span className="truncate text-xs font-normal text-fg-subtle">
                 {invoice.company_name || ''} &middot; {invoice.invoice_number}
-              </p>
-            </div>
-          </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10" onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
-        </div>
+              </span>
+            </span>
+          </DialogTitle>
+          <DialogDescription className="sr-only">{t('bill.markPaid.title')}</DialogDescription>
+        </DialogHeader>
 
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.amountReceived')}</label>
-            <input
+        <div className="grid gap-4">
+          <Field label={t('bill.field.amountReceived')}>
+            <Input
               type="text"
               value={amount}
               onChange={e => setAmount(e.target.value)}
-              style={inputStyle}
+              className="tabular-nums"
               /* German decimal comma in both languages — see src/i18n/index.ts. */
               placeholder="0,00"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.dateTime')}</label>
-            <input
+          </Field>
+          <Field label={t('bill.field.dateTime')}>
+            <Input
               type="datetime-local"
               value={paidAt}
               onChange={e => setPaidAt(e.target.value)}
-              style={inputStyle}
             />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.collectedBy')}</label>
-            <input
+          </Field>
+          <Field label={t('bill.field.collectedBy')}>
+            <Input
               type="text"
               value={profile?.full_name || profile?.email || ''}
               disabled
-              style={{ ...inputStyle, opacity: 0.6 }}
             />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.commentOptional')}</label>
+          </Field>
+          <Field label={t('bill.field.commentOptional')} id="mark-paid-note">
             <textarea
+              id="mark-paid-note"
               value={note}
               onChange={e => setNote(e.target.value)}
-              style={{ ...inputStyle, minHeight: '4rem', resize: 'vertical' }}
+              className={textareaClass}
               placeholder={t('bill.notePlaceholder')}
             />
-          </div>
+          </Field>
         </div>
 
-        <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-sm font-medium"
-            style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-          >
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {t('common.cancel')}
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--success-solid)', opacity: saving ? 0.6 : 1 }}
-          >
-            <CheckCircle size={16} /> {saving ? t('common.saving') : t('bill.markPaid.submit')}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button type="button" onClick={handleSubmit} disabled={saving} loading={saving}>
+            {saving ? null : <CheckCircle aria-hidden />}
+            {saving ? t('common.saving') : t('bill.markPaid.submit')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

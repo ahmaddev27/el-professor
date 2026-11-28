@@ -70,17 +70,17 @@ const UserMenu: React.FC = () => {
     .join('')
     .toUpperCase();
 
-  const menuItemClass = 'flex w-full items-center gap-2.5 rounded-control px-3 py-2 text-left text-sm transition-colors';
+  const menuItemClass = 'flex w-full items-center gap-2.5 rounded-control px-3 py-2 text-start text-sm transition-colors';
 
   return (
     <div className="flex items-center gap-2">
       {isViewingAsCompany && (
-        <div className="flex items-center gap-2 rounded-control border border-caution bg-caution-soft px-3 py-1.5 text-xs font-semibold text-caution">
+        <div className="flex items-center gap-2 rounded-control border border-caution/30 bg-caution-soft px-3 py-1.5 text-xs font-semibold text-caution shadow-hi">
           <Building2 size={13} className="shrink-0" />
           <span className="hidden max-w-[120px] truncate sm:inline">{activeCompany?.name}</span>
           <button
             onClick={handleExitCompany}
-            className="ml-1 shrink-0 rounded transition-opacity hover:opacity-70"
+            className="ms-1 shrink-0 rounded transition-opacity hover:opacity-70"
             title={t('shell.exitCompanyView')}
           >
             <XIcon size={13} />
@@ -90,12 +90,12 @@ const UserMenu: React.FC = () => {
       <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2.5 rounded-control border border-line bg-canvas px-3 py-1.5 text-fg transition-colors hover:bg-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        className="flex items-center gap-2.5 rounded-control border border-edge bg-raised px-3 py-1.5 text-fg shadow-hi transition-colors hover:bg-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-brand-fg">
           {initials}
         </div>
-        <div className="hidden text-left sm:block">
+        <div className="hidden text-start sm:block">
           <div className="text-xs font-semibold leading-tight text-fg">
             {profile?.full_name || user?.email?.split('@')[0]}
           </div>
@@ -109,7 +109,7 @@ const UserMenu: React.FC = () => {
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="animate-fade-in absolute right-0 z-20 mt-2 w-60 overflow-hidden rounded-surface border border-line bg-overlay shadow-overlay">
+          <div className="glass-strong motion-safe:animate-ui-menu-in absolute end-0 z-20 mt-2 w-60 overflow-hidden rounded-tile">
             {/* User info */}
             <div className="border-b border-line p-4">
               <div className="flex items-center gap-3">

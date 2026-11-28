@@ -1,5 +1,5 @@
 import type { WorkbookPayload } from '../../lib/workbookContract';
-import type { FullMonthResult } from './fullMonth';
+import type { CapacityReason, FullMonthResult } from './fullMonth';
 import {
   REASON_TEXT,
   SHEET_SOURCE,
@@ -57,6 +57,7 @@ const PURPOSE_WORD: Record<RepositioningPurpose, string> = {
   from_base: 'Betriebssitz zur ersten Abholung',
   to_waiting_position: 'Zielort zum Warteplatz',
   to_pickup: 'zur naechsten Abholung',
+  to_base: 'letzter Zielort zurueck zum Betriebssitz',
 };
 
 export const LEG_HEADERS: readonly string[] = [
@@ -131,7 +132,7 @@ export function internalRevenueSheetRows(result: FullMonthResult): Row[] {
 }
 
 export const SCHEDULING_HEADERS: readonly string[] = [
-  'Art', 'Schicht', 'Tag', 'Kennzeichen', 'Fahrer-ID', 'Beginn', 'Geplantes Ende', 'Ende', 'Dauer (min)',
+  'Art', 'Schicht', 'Dienst', 'Teil', 'Tag', 'Kennzeichen', 'Fahrer-ID', 'Beginn', 'Geplantes Ende', 'Ende', 'Dauer (min)',
   'Schleife endete mit', 'Verworfene Versuche: keine Anfahrt', 'Verworfene Versuche: keine Zeit',
   'Verworfene Versuche: kein Zielort', 'Grund', 'Anzahl',
 ];
@@ -145,11 +146,11 @@ const END_WORD: Record<string, string> = {
 /** Accepted shifts with their loop's own refusals, then every refusal of a shift that was not placed. */
 export function schedulingSheetRows(result: FullMonthResult): Row[] {
   const accepted = result.scheduling.map((s): Row => [
-    'Schicht eingeplant', s.shiftId, s.day, s.plate, s.driverId ?? '', stamp(s.startMs), stamp(s.plannedEndMs), stamp(s.endMs),
+    'Schicht eingeplant', s.shiftId, s.dutyId, s.part ?? '', s.day, s.plate, s.driverId ?? '', stamp(s.startMs), stamp(s.plannedEndMs), stamp(s.endMs),
     Math.round((s.endMs - s.startMs) / 60_000), END_WORD[s.endedBy] ?? s.endedBy, s.refusedSteps.no_approach ?? 0,
     s.refusedSteps.no_budget ?? 0, s.refusedSteps.no_dropoff ?? 0, '', 1,
   ]);
-  const counts = new Map<string, { day: string; plate: string; driverId: string; reason: string; n: number }>();
+  const counts = new Map<string, { day: string; plate: string; driverId: string; reason: CapacityReason; n: number }>();
   for (const r of result.refusals) {
     const key = `${r.day}|${r.plate ?? ''}|${r.driverId ?? ''}|${r.reason}`;
     const entry = counts.get(key) ?? { day: r.day, plate: r.plate ?? '', driverId: r.driverId ?? '', reason: r.reason, n: 0 };
@@ -157,7 +158,7 @@ export function schedulingSheetRows(result: FullMonthResult): Row[] {
     counts.set(key, entry);
   }
   const refused = [...counts.values()].map((c): Row => [
-    'Versuch verworfen', '', c.day, c.plate, c.driverId, '', '', '', '', '', '', '', '', REASON_TEXT[c.reason] ?? c.reason, c.n,
+    'Versuch verworfen', '', '', '', c.day, c.plate, c.driverId, '', '', '', '', '', '', '', '', REASON_TEXT[c.reason] ?? c.reason, c.n,
   ]);
   return [[...SCHEDULING_HEADERS], ...accepted, ...refused];
 }

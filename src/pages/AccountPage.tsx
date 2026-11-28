@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { User, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Building2, ShieldCheck, KeyRound } from 'lucide-react';
+import { Alert, Button, Card, Input, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -23,6 +24,8 @@ const MIN_LEN = 8;
 
 /** A code went to the new address; the change happens once it is entered. */
 type EmailChallenge = { newEmail: string; accessToken: string; cooldownSeconds: number };
+
+type AccountTab = 'profile' | 'email' | 'password' | 'passkeys';
 
 /**
  * The signed-in user's own account: display name, email address, password.
@@ -56,6 +59,7 @@ const AccountPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const { user, profile, isSuperAdmin } = useAuth();
   const passkeysOn = usePasskeysEnabled();
+  const [tab, setTab] = useState<AccountTab>('profile');
 
   const [companyName, setCompanyName] = useState<string | null>(null);
 
@@ -258,107 +262,119 @@ const AccountPage: React.FC = () => {
     setPwMsg({ ok: true, text: t('account.saved.password') });
   };
 
-  const card: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    boxShadow: 'var(--shadow-md)',
-  };
-  const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-muted)',
-    border: '1px solid var(--border)',
-    color: 'var(--text-primary)',
-  };
-  const btn = (busy: boolean): React.CSSProperties => ({
-    background: busy ? 'var(--bg-muted)' : 'var(--accent)',
-    color: busy ? 'var(--text-tertiary)' : 'var(--text-inverse)',
-    cursor: busy ? 'not-allowed' : 'pointer',
-  });
-
+  // ── Presentation (phase 5)
   const Notice: React.FC<{ msg: { ok: boolean; text: string } | null }> = ({ msg }) =>
     !msg ? null : (
-      <div
+      <Alert
+        tone={msg.ok ? 'positive' : 'critical'}
+        icon={msg.ok ? CheckCircle2 : AlertCircle}
         role={msg.ok ? 'status' : 'alert'}
-        className="mt-3 flex items-start gap-2 rounded-lg p-3 text-sm"
-        style={{
-          background: msg.ok ? 'var(--success-subtle)' : 'var(--danger-subtle)',
-          color: msg.ok ? 'var(--success)' : 'var(--danger)',
-        }}
+        className="mt-3"
       >
-        {msg.ok ? <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
-                : <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />}
-        <span>{msg.text}</span>
-      </div>
+        {msg.text}
+      </Alert>
     );
 
+  const sectionTitle = 'flex items-center gap-2 font-ui text-base font-semibold text-fg';
+
   const emailHeading = (
-    <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-      <Mail size={16} style={{ color: 'var(--accent)' }} />
+    <h3 className={sectionTitle}>
+      <Mail size={16} className="text-brand-text" aria-hidden />
       {t('account.email.heading')}
     </h3>
   );
 
-  return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          {t('account.title')}
-        </h2>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          {t('account.subtitle')}
-        </p>
-      </div>
+  // Panels stay mounted and are only hidden, so a pending email code and
+  // half-typed fields survive a tab switch.
+  const panel = 'space-y-6 data-[state=inactive]:hidden';
+  const formCard = 'glass-card rounded-surface p-5 text-fg lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-10';
+  const activeTab: AccountTab = tab === 'passkeys' && !passkeysOn ? 'profile' : tab;
+  const shownName = profile?.full_name?.trim() ?? '';
+  const shownEmail = profile?.email ?? user?.email ?? '';
+  const initials = (shownName || shownEmail).slice(0, 2).toUpperCase();
 
+  return (
+    <div className="mx-auto w-full max-w-4xl space-y-6 font-ui">
+      <PageHeader title={t('account.title')} description={t('account.subtitle')} className="pb-0" />
+
+      <Tabs value={activeTab} onValueChange={id => setTab(id as AccountTab)}>
+        <TabsList>
+          <TabsTrigger value="profile"><User size={15} aria-hidden />{t('account.tab.profile')}</TabsTrigger>
+          <TabsTrigger value="email"><Mail size={15} aria-hidden />{t('account.email.heading')}</TabsTrigger>
+          <TabsTrigger value="password"><Lock size={15} aria-hidden />{t('account.password.heading')}</TabsTrigger>
+          {passkeysOn && (
+            <TabsTrigger value="passkeys"><KeyRound size={15} aria-hidden />{t('passkey.heading')}</TabsTrigger>
+          )}
+        </TabsList>
+
+      <TabsContent value="profile" forceMount className={`mt-6 ${panel}`}>
       {/* Who you are — read-only facts about the account */}
-      <div className="rounded-xl p-5" style={card}>
-        <div className="grid gap-4 sm:grid-cols-3">
+      <Card className="p-5">
+        <div className="flex items-center gap-4 pb-5">
+          <span
+            aria-hidden
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand-soft text-base font-semibold text-brand-text"
+          >
+            {initials}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-fg">{shownName || shownEmail}</p>
+            {shownName && <p className="truncate text-sm text-fg-muted" dir="ltr">{shownEmail}</p>}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 border-t border-edge pt-5 sm:grid-cols-3">
           <div>
-            <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>
+            <p className="text-xs uppercase tracking-wide text-fg-subtle">
               {t('account.field.role')}
             </p>
-            <p className="text-sm font-semibold mt-1 flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
-              <ShieldCheck size={14} style={{ color: 'var(--accent)' }} />
+            <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-fg">
+              <ShieldCheck size={14} className="text-brand-text" aria-hidden />
               {isSuperAdmin ? t('account.role.superAdmin') : t(`account.role.${profile?.role ?? 'viewer'}` as never)}
             </p>
           </div>
           <div className="sm:col-span-2">
-            <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>
+            <p className="text-xs uppercase tracking-wide text-fg-subtle">
               {t('account.field.company')}
             </p>
-            <p className="text-sm font-semibold mt-1 flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
-              <Building2 size={14} style={{ color: 'var(--accent)' }} />
+            <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-fg">
+              <Building2 size={14} className="text-brand-text" aria-hidden />
               {/* "No company" is a claim, so it waits for the profile and is only made for an account with none. */}
               {companyName ?? (profile && !profile.company_id ? t('account.company.none') : '…')}
             </p>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Display name */}
-      <form onSubmit={saveName} className="rounded-xl p-5" style={card}>
-        <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-          <User size={16} style={{ color: 'var(--accent)' }} />
-          {t('account.name.heading')}
-        </h3>
-        <input
-          type="text"
-          value={fullName}
-          onChange={e => setFullName(e.target.value)}
-          className="mt-3 w-full rounded-lg px-3 py-2 text-sm outline-none"
-          style={inputStyle}
-          placeholder={t('account.name.placeholder')}
-        />
-        <Notice msg={nameMsg} />
-        <button type="submit" disabled={nameBusy}
-          className="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-          style={btn(nameBusy)}>
-          {nameBusy ? t('common.saving') : t('common.save')}
-        </button>
+      <form onSubmit={saveName} className={formCard}>
+          <div>
+          <h3 className={sectionTitle}>
+            <User size={16} className="text-brand-text" aria-hidden />
+            {t('account.name.heading')}
+          </h3>
+          </div>
+          <div className="mt-3 lg:mt-0">
+          <Input
+            type="text"
+            value={fullName}
+            onChange={e => setFullName(e.target.value)}
+            placeholder={t('account.name.placeholder')}
+            aria-label={t('account.name.heading')}
+          />
+          <Notice msg={nameMsg} />
+          <Button type="submit" disabled={nameBusy} className="mt-4">
+            {nameBusy ? t('common.saving') : t('common.save')}
+          </Button>
+          </div>
       </form>
+      </TabsContent>
+
+      <TabsContent value="email" forceMount className={`mt-6 ${panel}`}>
 
       {/* Email. A company user gets a code at the new address and the challenge
           below completes the change; a platform account changes it in one step. */}
       {emailChallenge ? (
-        <section className="rounded-xl p-5" style={card}>
+        <Card className="p-5">
           {emailHeading}
           <div className="mt-3">
             <OtpChallenge
@@ -373,8 +389,7 @@ const AccountPage: React.FC = () => {
                   template={t('account.email.codeSentTo')}
                   placeholder="email"
                   value={emailChallenge.newEmail}
-                  className="font-medium"
-                  style={{ color: 'var(--text-primary)' }}
+                  className="font-medium text-fg"
                 />
               }
               verifyLabel={t('account.email.submit')}
@@ -385,139 +400,139 @@ const AccountPage: React.FC = () => {
               backLabel={t('common.cancel')}
             />
           </div>
-        </section>
+        </Card>
       ) : (
         <form
           onSubmit={e => {
             e.preventDefault();
             void (isSuperAdmin ? changeEmailDirectly : requestEmailChange)(withPassword);
           }}
-          className="rounded-xl p-5"
-          style={card}
+          className={formCard}
         >
-          {emailHeading}
-          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {isSuperAdmin ? t('account.email.platformHint') : t('account.email.hint')}
-          </p>
-          <div className="mt-3 space-y-3">
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-              style={inputStyle}
-              aria-label={t('account.email.heading')}
-              autoComplete="email"
-            />
-            <input
-              type="password"
-              value={emailPw}
-              onChange={e => setEmailPw(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-              style={inputStyle}
-              placeholder={t('account.email.currentPassword')}
-              aria-label={t('account.email.currentPassword')}
-              autoComplete="current-password"
-              required
-            />
-          </div>
-          <Notice msg={emailMsg} />
-          <button type="submit" disabled={emailBusy || !emailPw}
-            className="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-            style={btn(emailBusy || !emailPw)}>
-            {emailBusy
-              ? (isSuperAdmin ? t('common.saving') : t('otp.verifying'))
-              : (isSuperAdmin ? t('account.email.changeNow') : t('account.email.sendCode'))}
-          </button>
-
-          {/* The same change, proved with a passkey instead of the password.
-              `type="button"`, so the password field's `required` does not block
-              it — which is the whole point: an operator who holds no password
-              they can type must still be able to move their address, and for a
-              platform account that proof is the only control there is. It is
-              drawn only once GoTrue reports passkeys, so this is absent on
-              today's server. */}
-          {passkeysOn && user?.id && (
-            <div className="mt-3 font-ui">
-              <button
-                type="button"
-                disabled={emailBusy}
-                onClick={() => { void (isSuperAdmin ? changeEmailDirectly : requestEmailChange)(withPasskey); }}
-                className="inline-flex h-9 items-center gap-2 rounded-control border border-line bg-raised px-3.5 text-sm font-semibold text-fg transition-colors hover:bg-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:pointer-events-none disabled:opacity-50 [@media(pointer:coarse)]:h-11"
-              >
-                <KeyRound size={16} aria-hidden />
-                {t('passkey.reauth.useInstead')}
-              </button>
-              <p className="mt-1.5 text-xs text-fg-subtle">{t('passkey.reauth.hint')}</p>
+            <div>
+            {emailHeading}
+            <p className="mt-1 text-xs text-fg-muted">
+              {isSuperAdmin ? t('account.email.platformHint') : t('account.email.hint')}
+            </p>
             </div>
-          )}
+            <div className="mt-3 lg:mt-0">
+            <div className="space-y-3">
+              <Input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                aria-label={t('account.email.heading')}
+                autoComplete="email"
+              />
+              <Input
+                type="password"
+                value={emailPw}
+                onChange={e => setEmailPw(e.target.value)}
+                placeholder={t('account.email.currentPassword')}
+                aria-label={t('account.email.currentPassword')}
+                autoComplete="current-password"
+                required
+              />
+            </div>
+            <Notice msg={emailMsg} />
+            <Button type="submit" disabled={emailBusy || !emailPw} className="mt-4">
+              {emailBusy
+                ? (isSuperAdmin ? t('common.saving') : t('otp.verifying'))
+                : (isSuperAdmin ? t('account.email.changeNow') : t('account.email.sendCode'))}
+            </Button>
+
+            {/* The same change, proved with a passkey instead of the password.
+                `type="button"`, so the password field's `required` does not block
+                it — which is the whole point: an operator who holds no password
+                they can type must still be able to move their address, and for a
+                platform account that proof is the only control there is. It is
+                drawn only once GoTrue reports passkeys, so this is absent on
+                today's server. */}
+            {passkeysOn && user?.id && (
+              <div className="mt-3 font-ui">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={emailBusy}
+                  onClick={() => { void (isSuperAdmin ? changeEmailDirectly : requestEmailChange)(withPasskey); }}
+                >
+                  <KeyRound size={16} aria-hidden />
+                  {t('passkey.reauth.useInstead')}
+                </Button>
+                <p className="mt-1.5 text-xs text-fg-subtle">{t('passkey.reauth.hint')}</p>
+              </div>
+            )}
+            </div>
         </form>
       )}
+      </TabsContent>
 
+      <TabsContent value="password" forceMount className={`mt-6 ${panel}`}>
       {/* Password */}
-      <form onSubmit={savePassword} className="rounded-xl p-5" style={card}>
-        <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-          <Lock size={16} style={{ color: 'var(--accent)' }} />
-          {t('account.password.heading')}
-        </h3>
-        <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-          {t('account.password.hint', { n: String(MIN_LEN) })}
-        </p>
+      <form onSubmit={savePassword} className={formCard}>
+          <div>
+          <h3 className={sectionTitle}>
+            <Lock size={16} className="text-brand-text" aria-hidden />
+            {t('account.password.heading')}
+          </h3>
+          <p className="mt-1 text-xs text-fg-muted">
+            {t('account.password.hint', { n: String(MIN_LEN) })}
+          </p>
+          </div>
 
-        <div className="mt-3 space-y-3">
-          <input
-            type={showPw ? 'text' : 'password'}
-            value={currentPw}
-            onChange={e => setCurrentPw(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style={inputStyle}
-            placeholder={t('account.password.current')}
-            autoComplete="current-password"
-          />
-          <div className="relative">
-            <input
+          <div className="mt-3 lg:mt-0">
+          <div className="space-y-3">
+            <Input
               type={showPw ? 'text' : 'password'}
-              value={newPw}
-              onChange={e => setNewPw(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 pr-10 text-sm outline-none"
-              style={inputStyle}
-              placeholder={t('account.password.new')}
+              value={currentPw}
+              onChange={e => setCurrentPw(e.target.value)}
+              placeholder={t('account.password.current')}
+              aria-label={t('account.password.current')}
+              autoComplete="current-password"
+            />
+            <div className="relative">
+              <Input
+                type={showPw ? 'text' : 'password'}
+                value={newPw}
+                onChange={e => setNewPw(e.target.value)}
+                className="pe-10"
+                placeholder={t('account.password.new')}
+                aria-label={t('account.password.new')}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw(v => !v)}
+                className="absolute end-2 top-1/2 -translate-y-1/2 rounded-tight p-1 text-fg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:end-0 [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center"
+                aria-label={showPw ? t('account.password.hide') : t('account.password.show')}
+              >
+                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            <Input
+              type={showPw ? 'text' : 'password'}
+              value={confirmPw}
+              onChange={e => setConfirmPw(e.target.value)}
+              placeholder={t('account.password.confirm')}
+              aria-label={t('account.password.confirm')}
               autoComplete="new-password"
             />
-            <button
-              type="button"
-              onClick={() => setShowPw(v => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 [@media(pointer:coarse)]:right-0 [@media(pointer:coarse)]:flex [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center"
-              style={{ color: 'var(--text-tertiary)' }}
-              aria-label={showPw ? t('account.password.hide') : t('account.password.show')}
-            >
-              {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
           </div>
-          <input
-            type={showPw ? 'text' : 'password'}
-            value={confirmPw}
-            onChange={e => setConfirmPw(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style={inputStyle}
-            placeholder={t('account.password.confirm')}
-            autoComplete="new-password"
-          />
-        </div>
 
-        <Notice msg={pwMsg} />
-        <button type="submit" disabled={pwBusy}
-          className="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-          style={btn(pwBusy)}>
-          {pwBusy ? t('common.saving') : t('account.password.submit')}
-        </button>
+          <Notice msg={pwMsg} />
+          <Button type="submit" disabled={pwBusy} className="mt-4">
+            {pwBusy ? t('common.saving') : t('account.password.submit')}
+          </Button>
+          </div>
       </form>
+      </TabsContent>
 
       {/* Renders nothing until GoTrue reports passkeys, so this page is
-          unchanged on today's server. It is a separate file on the design
-          system: this page is one of the six phase 5 never converted and sits
-          at 33 in style-baseline.json, which must not move. */}
-      <PasskeyCard />
+          unchanged on today's server. */}
+      <TabsContent value="passkeys" forceMount className={`mt-6 ${panel}`}>
+        <PasskeyCard />
+      </TabsContent>
+      </Tabs>
     </div>
   );
 };

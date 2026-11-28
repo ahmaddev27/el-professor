@@ -3,7 +3,7 @@ import { AlertTriangle, Download, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
-import type { TranslationKey } from '../i18n';
+import { wordLocale, type Language, type TranslationKey } from '../i18n';
 import { addDaysIso, splitIntoBusinessWeeks, type UnmatchedEarner } from '../../supabase/functions/_shared/uber-earnings-core';
 import {
   blockingEarners,
@@ -199,9 +199,9 @@ function periodProblemKey(
 }
 
 /** 'Di.' / 'Tue': display only, from the ISO date itself so no time zone moves it. */
-function weekdayShort(iso: string, language: string): string {
+function weekdayShort(iso: string, language: Language): string {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'de-DE', { weekday: 'short', timeZone: 'UTC' })
+  return new Intl.DateTimeFormat(wordLocale(language), { weekday: 'short', timeZone: 'UTC' })
     .format(new Date(Date.UTC(y!, m! - 1, d!)));
 }
 
@@ -422,7 +422,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     <div className="grid grid-cols-1 gap-4">
       <p className="text-xs text-fg-subtle">{t('inc.uber.period.dayHint')}</p>
       <p className="text-xs text-fg-subtle">{t('inc.uber.period.dayWrites')}</p>
-      <div role="group" aria-label={t('inc.uber.period.dayListLabel')} className="grid max-h-80 grid-cols-1 gap-4 overflow-y-auto pr-1">
+      <div role="group" aria-label={t('inc.uber.period.dayListLabel')} className="grid max-h-80 grid-cols-1 gap-4 overflow-y-auto pe-1">
         {dayGroups.map(month => (
           <section key={`${month.year}-${month.month}`} className="grid grid-cols-1 gap-3">
             <h3 className="text-sm font-semibold text-fg">{`${monthName(month.month)} ${month.year}`}</h3>
@@ -459,7 +459,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const weekPicker = (
     <div className="grid grid-cols-1 gap-4">
       <p className="text-xs text-fg-subtle">{t('inc.uber.period.weekHint')}</p>
-      <div role="group" aria-label={t('inc.uber.period.weekListLabel')} className="grid max-h-80 grid-cols-1 gap-4 overflow-y-auto pr-1">
+      <div role="group" aria-label={t('inc.uber.period.weekListLabel')} className="grid max-h-80 grid-cols-1 gap-4 overflow-y-auto pe-1">
         {weekGroups.map(group => (
           <section key={`${group.year}-${group.month}`} className="grid grid-cols-1 gap-2">
             <h3 className="text-sm font-semibold text-fg">{`${monthName(group.month)} ${group.year}`}</h3>
@@ -494,7 +494,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const monthPicker = (
     <div className="grid grid-cols-1 gap-4">
       <p className="text-xs text-fg-subtle">{t('inc.uber.period.monthHint')}</p>
-      <div role="radiogroup" aria-label={t('inc.uber.period.monthListLabel')} className="grid max-h-80 grid-cols-1 gap-2 overflow-y-auto pr-1">
+      <div role="radiogroup" aria-label={t('inc.uber.period.monthListLabel')} className="grid max-h-80 grid-cols-1 gap-2 overflow-y-auto pe-1">
         {monthOptions.map(m => {
           const selected = monthKey === monthKeyOf(m);
           return (
@@ -601,7 +601,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
             {blocking.length > 0 && (
               <Alert tone="critical" title={t('inc.uber.blockedTitle')}>
                 <p>{t('inc.uber.blockedBody')}</p>
-                <ul className="mt-2 list-disc pl-5">
+                <ul className="mt-2 list-disc ps-5">
                   {blocking.map((b, i) => (
                     <li key={`${b.kind}-${b.externalDriverId ?? b.name}-${i}`}>
                       {b.kind === 'unmatched_at_reidey'
@@ -615,7 +615,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
             {importedWeeks.length > 0 && (
               <Alert tone="caution" title={t('inc.uber.replace.title')}>
                 <p>{t('inc.uber.replace.body')}</p>
-                <ul className="mt-2 list-disc pl-5">
+                <ul className="mt-2 list-disc ps-5">
                   {importedWeeks.map(e => (
                     <li key={`i-${e.driverName}-${e.segment.from}`}>
                       {t('inc.uber.importedItem', existingVars(e, e.importedCount))}
@@ -637,7 +637,7 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
             {manualWeeks.length > 0 && (
               <Alert tone="caution" title={t('inc.uber.manualTitle')}>
                 <p>{t('inc.uber.manualBody')}</p>
-                <ul className="mt-2 list-disc pl-5">
+                <ul className="mt-2 list-disc ps-5">
                   {manualWeeks.map(e => (
                     <li key={`m-${e.driverName}-${e.segment.from}`}>
                       {t('inc.uber.manualItem', existingVars(e, e.manualCount))}

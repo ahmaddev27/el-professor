@@ -8,6 +8,8 @@
  * for display.
  */
 
+import { wordLocale, type Language } from '../i18n';
+
 /** A fixed "today", so the TÜV countdowns and the screenshots never drift. */
 export const PREVIEW_TODAY = '2026-09-14';
 export const PREVIEW_COMPANY = 'Stadttaxi Lindner GmbH';
@@ -144,16 +146,16 @@ export function tuevOn(validUntil: string | null, today: string = PREVIEW_TODAY)
 }
 
 /** "August 2026" or "August", in the UI language; numbers stay German elsewhere. */
-export function monthLabel(year: number, monthIndex: number, language: string, withYear = true): string {
-  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'de-DE', {
+export function monthLabel(year: number, monthIndex: number, language: Language, withYear = true): string {
+  return new Intl.DateTimeFormat(wordLocale(language), {
     month: 'long',
     ...(withYear ? { year: 'numeric' } : {}),
     timeZone: 'UTC',
   }).format(Date.UTC(year, monthIndex, 1));
 }
 
-export function shortMonthLabel(year: number, monthIndex: number, language: string): string {
-  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'de-DE', { month: 'short', timeZone: 'UTC' }).format(
+export function shortMonthLabel(year: number, monthIndex: number, language: Language): string {
+  return new Intl.DateTimeFormat(wordLocale(language), { month: 'short', timeZone: 'UTC' }).format(
     Date.UTC(year, monthIndex, 1),
   );
 }

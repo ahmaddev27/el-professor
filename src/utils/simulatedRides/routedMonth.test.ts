@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { RouteBatchAnswer } from '../../../supabase/functions/_shared/travel-route-core';
 import type { StructuredNote } from '../monatsplanungPhase3';
 import type { TravelRouter } from '../travelRouting/prefetch';
-import { DECLINE_RULE_IDLE_IN_SHIFT, FULL_MONTH_GENERATOR_VERSION, generateFullMonth, validateFullMonth, type FullMonthInput } from './fullMonth';
-import { validateRides } from './generator';
+import { CALENDAR_SHIFT_LIMITS, DECLINE_RULE_IDLE_IN_SHIFT, FULL_MONTH_GENERATOR_VERSION, generateFullMonth, validateFullMonth, type FullMonthInput } from './fullMonth';
+import { DEFAULT_OPTIONS, validateRides } from './generator';
 import { haversineKm } from './geo';
 import { routeChecks, summariseRouteChecks } from './routeCheck';
 import { ESTIMATE_TRAVEL_MODEL, buildRoutedMatrix, matrixTravelModel, selectRoutingPoints, type TravelModel } from './travelModel';
@@ -46,9 +46,9 @@ async function routed(): Promise<{ model: TravelModel; pool: PoolAddress[] }> {
 }
 
 const DRIVERS = [
-  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1' },
-  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2' },
-  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3' },
+  { id: '22222222-2222-4222-8222-222222222201', name: 'Fahrer 1', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222202', name: 'Fahrer 2', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
+  { id: '22222222-2222-4222-8222-222222222203', name: 'Fahrer 3', planning_min_salary: 600, planning_max_salary: 1200, planning_hourly_rate: 13 },
 ];
 const VEHICLES = [
   { id: '11111111-1111-4111-8111-111111111101', plate: 'XX-TEST-1', type: 'Limousine', tuev_gueltig_bis: '2027-04-30' },
@@ -110,7 +110,7 @@ describe('the route a gap must hold', () => {
     const built = month({ pool, travel: model });
     const used = built.month.rides.filter(r => r.status === 'completed').flatMap(r => [r.pickup.label, r.dropoff.label]);
     expect(used).not.toContain(cut.label);
-    expect(validateRides(built.month, BASE, model)).toEqual([]);
+    expect(validateRides(built.month, BASE, model, DEFAULT_OPTIONS, CALENDAR_SHIFT_LIMITS)).toEqual([]);
   });
 
   it('a gap shorter than its route is caught by the validator, not only avoided by the builder', async () => {

@@ -46,5 +46,5 @@ export function FleetImportPrompt() {
   }, [companyId, mayImport]);
 
   if (!shouldShowImportPrompt({ mayImport, drivers, vehicles })) return null;
-  return <FleetImportShortcut empty />;
+  return <FleetImportShortcut />;
 }

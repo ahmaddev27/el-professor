@@ -180,7 +180,7 @@ const CompleteRegistrationPage: React.FC = () => {
         <>
           {!dead && (
             confirmDiscard ? (
-              <div className="grid w-full gap-3 rounded-surface border border-line bg-raised p-4 text-left">
+              <div className="grid w-full gap-3 rounded-surface border border-line bg-raised p-4 text-start">
                 <p className="text-sm leading-relaxed text-fg-muted">{t('gsignup.discardConfirm')}</p>
                 <div className="grid grid-cols-2 gap-2">
                   <Button
@@ -314,7 +314,7 @@ const CompleteRegistrationPage: React.FC = () => {
               loading={submitting}
               className="w-full"
             >
-              {!submitting && <>{t('gsignup.submit')}<ArrowRight aria-hidden /></>}
+              {!submitting && <>{t('gsignup.submit')}<ArrowRight aria-hidden className="rtl:-scale-x-100" /></>}
             </Button>
           </form>
         )}

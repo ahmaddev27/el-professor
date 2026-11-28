@@ -61,22 +61,22 @@ class StundennachweisErrorBoundary extends Component<
     const { t } = this.props;
     if (this.state.error) {
       return (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.7)' }}>
-          <div className="rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={18} style={{ color: '#f87171' }} />
-              <h3 className="text-base font-semibold" style={{ color: '#f87171' }}>{t('mp.runs.previewCrashTitle')}</h3>
+        <div className="glass-scrim fixed inset-0 z-[55] flex items-center justify-center p-4">
+          <div className="glass-strong w-full max-w-md space-y-4 rounded-pane p-6 font-ui text-fg">
+            <div className="flex items-center gap-2 text-critical">
+              <AlertTriangle aria-hidden size={18} />
+              <h3 className="text-base font-semibold">{t('mp.runs.previewCrashTitle')}</h3>
             </div>
-            <p className="text-xs rounded px-3 py-2.5 font-mono break-all" style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.2)' }}>
+            <p className="break-all rounded-control border border-critical/30 bg-critical-soft px-3 py-2.5 font-mono text-xs text-critical">
               {this.state.error.message}
             </p>
             <div className="flex gap-2 pt-1">
-              <button onClick={this.props.onBack} className="flex-1 px-3 py-2 rounded text-sm font-medium" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              <Button variant="secondary" onClick={this.props.onBack} className="flex-1">
                 {t('common.back')}
-              </button>
-              <button onClick={() => { this.setState({ error: null }); }} className="flex-1 px-3 py-2 rounded text-sm font-medium" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
+              </Button>
+              <Button variant="secondary" onClick={() => { this.setState({ error: null }); }} className="flex-1 border-critical/30 bg-critical-soft text-critical">
                 {t('mp.runs.reload')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -351,20 +351,20 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       {stundenRun && (() => {
         if (!stundenRun.id || !stundenRun.company_id) {
           return (
-            <div className="fixed inset-0 z-[55] flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.7)' }}>
-              <div className="rounded-xl shadow-2xl w-full max-w-md p-6 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="glass-scrim fixed inset-0 z-[55] flex items-center justify-center p-4">
+              <div className="glass-strong w-full max-w-md space-y-3 rounded-pane p-6 font-ui text-fg">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle size={18} style={{ color: '#fcd34d' }} />
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.previewUnavailableTitle')}</h3>
+                  <AlertTriangle aria-hidden size={18} className="text-caution" />
+                  <h3 className="text-sm font-semibold text-fg">{t('mp.runs.previewUnavailableTitle')}</h3>
                 </div>
-                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <p className="text-xs text-fg-muted">
                   {t('mp.runs.previewUnavailableBody')}
                   {!stundenRun.id && ` ${t('mp.runs.missingRunId')}`}
                   {!stundenRun.company_id && ` ${t('mp.runs.missingCompanyId')}`}
                 </p>
-                <button onClick={() => setStundenRun(null)} className="w-full px-3 py-2 rounded text-sm font-medium" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                <Button variant="secondary" onClick={() => setStundenRun(null)} className="w-full">
                   {t('common.back')}
-                </button>
+                </Button>
               </div>
             </div>
           );
@@ -528,7 +528,7 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
   return (
     <div
       className={cn(
-        'w-full cursor-pointer rounded-control border border-line bg-raised text-left transition-colors hover:bg-sunken/50',
+        'w-full cursor-pointer rounded-control border border-line bg-raised text-start transition-colors hover:bg-sunken/50',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
       )}
       onClick={onOpen}
@@ -676,39 +676,38 @@ function RunDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(15, 23, 42, 0.6)' }}
+      className="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="glass-strong flex max-h-[90vh] w-full max-w-2xl flex-col rounded-pane font-ui text-fg"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex shrink-0 items-start justify-between border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <Archive size={16} /> {t(MONTH_KEYS[run.month - 1])} {run.year}
+            <h3 className="flex items-center gap-2 text-base font-semibold text-fg">
+              <Archive aria-hidden size={16} /> {t(MONTH_KEYS[run.month - 1])} {run.year}
             </h3>
-            <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="mt-0.5 truncate text-xs text-fg-subtle">
               {run.file_name || '—'}
             </div>
           </div>
-          <button onClick={onClose} disabled={exporting} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
-            <X size={16} />
-          </button>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} disabled={exporting} aria-label={t('common.close')}>
+            <X aria-hidden size={16} />
+          </Button>
         </div>
 
-        <div className="px-5 py-4 space-y-3 overflow-y-auto">
+        <div className="space-y-3 overflow-y-auto px-5 py-4">
 
           {/* Finalization status banner */}
           {finalization && (
             <div
-              className="px-3 py-2.5 rounded-lg text-xs flex items-start gap-2"
-              style={finalization.is_stale
-                ? { background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.4)', color: '#92400e' }
-                : { background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', color: '#15803d' }
-              }
+              className={cn(
+                'flex items-start gap-2 rounded-control border px-3 py-2.5 text-xs',
+                finalization.is_stale
+                  ? 'border-caution/40 bg-caution-soft text-caution'
+                  : 'border-positive/30 bg-positive-soft text-positive',
+              )}
             >
               {finalization.is_stale
                 ? <AlertCircle size={13} className="shrink-0 mt-0.5" />
@@ -726,8 +725,7 @@ function RunDetailModal({
           )}
 
           {!finalization && run.status === 'applied' && (
-            <div className="px-3 py-2 rounded-lg text-xs flex items-center gap-2"
-              style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: '#92400e' }}>
+            <div className="flex items-center gap-2 rounded-control border border-caution/30 bg-caution-soft px-3 py-2 text-xs text-caution">
               <AlertTriangle size={12} className="shrink-0" />
               {t('mp.runs.notFinalizedHint')}
             </div>
@@ -750,16 +748,15 @@ function RunDetailModal({
           {/* Technical details (collapsed) */}
           <div>
             <button
-              className="text-xs flex items-center gap-1.5 py-1 transition-colors hover:opacity-80"
-              style={{ color: 'var(--text-tertiary)' }}
+              className="flex items-center gap-1.5 py-1 text-xs text-fg-subtle transition-colors hover:text-fg"
               onClick={() => setShowTechnical(v => !v)}
             >
               <Hash size={11} />
               {showTechnical ? t('mp.runs.hideTechnical') : t('mp.runs.showTechnical')}
-              <span className="ml-0.5">{showTechnical ? '▲' : '▼'}</span>
+              <span className="ms-0.5">{showTechnical ? '▲' : '▼'}</span>
             </button>
             {showTechnical && (
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+              <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-2 text-sm">
                 <Row label={t('mp.planningRunId')} value={<span className="font-mono text-xs break-all">{run.id}</span>} />
                 <Row label={t('mp.runs.importedAt')} value={fmtDateTime(run.imported_at)} />
                 <Row label={t('mp.appliedBy')} value={<span className="font-mono text-xs">{run.applied_by ?? '—'}</span>} />
@@ -772,19 +769,19 @@ function RunDetailModal({
           </div>
 
           {validating && (
-            <div className="px-3 py-2 rounded-lg text-sm flex items-center gap-2" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+            <div className="flex items-center gap-2 rounded-control bg-sunken px-3 py-2 text-sm text-fg-muted">
               <Loader2 size={14} className="animate-spin" /> {t('mp.runs.validating')}
             </div>
           )}
 
           {validation && (
             <div
-              className="px-3 py-3 rounded-lg text-xs space-y-1"
-              style={{
-                background: validation.ok ? '#ecfdf5' : '#fef3c7',
-                color: validation.ok ? '#065f46' : '#92400e',
-                border: `1px solid ${validation.ok ? '#a7f3d0' : '#fde68a'}`,
-              }}
+              className={cn(
+                'space-y-1 rounded-control border px-3 py-3 text-xs',
+                validation.ok
+                  ? 'border-positive/30 bg-positive-soft text-positive'
+                  : 'border-caution/40 bg-caution-soft text-caution',
+              )}
             >
               <div className="font-semibold inline-flex items-center gap-1">
                 {validation.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
@@ -799,15 +796,15 @@ function RunDetailModal({
                 <div>{t('mp.runs.driverColumn')}: <strong>{validation.driver_column ?? '—'}</strong></div>
               </div>
               {actionableWarnings.length > 0 && (
-                <ul className="mt-1 list-disc pl-4">
+                <ul className="mt-1 list-disc ps-4">
                   {actionableWarnings.map((m, i) => <li key={i}>{m}</li>)}
                 </ul>
               )}
             </div>
           )}
 
-          <div className="rounded-lg px-3 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.exportFormat')}</div>
+          <div className="rounded-control border border-line bg-sunken px-3 py-3">
+            <div className="mb-2 text-xs font-semibold text-fg">{t('mp.runs.exportFormat')}</div>
             <div className="flex flex-col gap-1.5 text-sm">
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
@@ -820,8 +817,8 @@ function RunDetailModal({
                   disabled={exporting}
                 />
                 <span>
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.modeOriginal')}</span>
-                  <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <span className="font-semibold text-fg">{t('mp.runs.modeOriginal')}</span>
+                  <span className="block text-xs text-fg-subtle">
                     {t('mp.runs.modeOriginalDesc')}
                   </span>
                 </span>
@@ -837,8 +834,8 @@ function RunDetailModal({
                   disabled={exporting}
                 />
                 <span>
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.modeAudit')}</span>
-                  <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  <span className="font-semibold text-fg">{t('mp.runs.modeAudit')}</span>
+                  <span className="block text-xs text-fg-subtle">
                     {t('mp.runs.modeAuditDesc')}
                   </span>
                 </span>
@@ -847,55 +844,51 @@ function RunDetailModal({
           </div>
 
           {exportError && (
-            <div className="px-3 py-2 rounded-lg text-sm" style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
-              {exportError}
-            </div>
+            <Alert tone="critical">{exportError}</Alert>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-5 py-3">
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {run.status === 'applied' && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={onStundennachweis}
                 disabled={exporting}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-                style={{ background: 'rgba(59,130,246,0.15)', color: '#1d4ed8', border: '1px solid rgba(59,130,246,0.45)' }}
+                className="border-info/40 bg-info-soft text-info"
                 title={t('mp.runs.previewTooltip')}
               >
-                <CalendarClock size={13} /> {t('mp.stundennachweisPreview')}
-              </button>
+                <CalendarClock aria-hidden /> {t('mp.stundennachweisPreview')}
+              </Button>
             )}
             {run.status === 'applied' && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={onFinalize}
                 disabled={exporting}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50 transition-all hover:brightness-110"
-                style={{ background: finalization?.is_stale ? 'rgba(234,179,8,0.2)' : 'rgba(245,158,11,0.2)', color: '#b45309', border: '1px solid rgba(245,158,11,0.5)' }}
+                className="border-caution/50 bg-caution-soft font-bold text-caution hover:brightness-110"
                 title={t('mp.runs.createFinalDocsTooltip')}
               >
-                <Sparkles size={13} />
+                <Sparkles aria-hidden />
                 {finalization?.is_stale ? t('mp.runs.recreateFinalDocs') : finalization ? t('mp.runs.finalizeAgain') : t('mp.runs.createFinalDocs')}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
+              variant="secondary"
               onClick={onClose}
               disabled={exporting}
-              className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
               {t('common.close')}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
               onClick={onExport}
               disabled={exporting || validating || !canExport}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               title={t('mp.runs.rawExportTooltip')}
             >
-              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              {exporting ? <Loader2 aria-hidden className="animate-spin" /> : <Download aria-hidden />}
               {exporting ? t('mp.runs.exporting') : t('mp.runs.rawExport')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -906,8 +899,8 @@ function RunDetailModal({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <>
-      <dt className="text-xs uppercase tracking-wider font-semibold" style={{ color: 'var(--text-tertiary)' }}>{label}</dt>
-      <dd className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{value}</dd>
+      <dt className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{label}</dt>
+      <dd className="text-sm font-semibold text-fg">{value}</dd>
     </>
   );
 }

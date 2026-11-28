@@ -77,6 +77,26 @@ vi.mock('../contexts/LanguageContext', () => ({ useTranslation: () => world.tran
 vi.mock('../hooks/usePartnerCatchUp', () => ({
   usePartnerCatchUp: () => ({ catchUp: async () => false, fetching: false, available: false }),
 }));
+vi.mock('../components/ui', async importOriginal => {
+  const original = await importOriginal<typeof import('../components/ui')>();
+  const pass = ({ children }: { children?: unknown }) => createElement('div', null, children as never);
+  return {
+    ...original,
+    // Radix portals cannot be rendered by react-test-renderer: an open dialog
+    // draws its children inline, a closed one nothing.
+    Dialog: ({ open, children }: { open: boolean; children?: unknown }) =>
+      open ? createElement('div', null, children as never) : null,
+    DialogContent: pass, DialogHeader: pass, DialogFooter: pass, DialogTitle: pass, DialogDescription: pass,
+    // ConfirmDialog's contract, kept: confirm calls onConfirm() then onClose(),
+    // cancel calls onClose() alone.
+    ConfirmDialog: (p: { open: boolean; onConfirm: () => void; onClose: () => void; confirmLabel: string; cancelLabel?: string }) =>
+      p.open
+        ? createElement('div', null,
+            createElement('button', { onClick: p.onClose }, p.cancelLabel ?? 'common.cancel'),
+            createElement('button', { onClick: () => { p.onConfirm(); p.onClose(); } }, p.confirmLabel))
+        : null,
+  };
+});
 
 const eventTarget = () => ({ addEventListener: () => {}, removeEventListener: () => {} });
 Object.assign(globalThis, { window: eventTarget(), document: { ...eventTarget(), visibilityState: 'visible' } });
@@ -99,7 +119,7 @@ async function mount(): Promise<ReactTestRenderer> {
 async function openForEdit(note: Record<string, unknown>): Promise<ReactTestRenderer> {
   world.notes = [note];
   const tree = await mount();
-  await press(buttonsWithIcon(tree, 'credit-card')[0]);
+  await press(buttonsWithIcon(tree, 'pencil')[0]);
   return tree;
 }
 
@@ -286,7 +306,7 @@ describe('the review', () => {
     world.notes = [baseNote({ verification_status: 'verified', reviewed_by: 'u1', reviewed_at: '2026-10-14T10:00:00+00:00' })];
     const tree = await mount();
     expect(textOf(tree)).toContain('notes.prov.status.verified');
-    expect(buttonsWithIcon(tree, 'credit-card')).toHaveLength(0);
+    expect(buttonsWithIcon(tree, 'pencil')).toHaveLength(0);
   });
 
   it('names the reviewer from the company\'s people, and an unknown one as unknown', async () => {

@@ -38,7 +38,7 @@ export function DemandHeatmap({ profile, thresholdCents }: { profile: DemandProf
             <tbody>
               {WEEKDAY_KEYS.map((dayKey, day) => (
                 <tr key={dayKey}>
-                  <th scope="row" className="pr-2 text-left font-semibold text-fg-muted">{t(dayKey)}</th>
+                  <th scope="row" className="pe-2 text-start font-semibold text-fg-muted">{t(dayKey)}</th>
                   {grid.slice(day * 24, day * 24 + 24).map(cell => {
                     const text =
                       cell.revenuePerHourCents === null

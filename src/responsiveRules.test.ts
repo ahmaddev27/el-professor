@@ -43,16 +43,19 @@ describe('responsive rules', () => {
     const tables = companies.split('<table className="w-full text-sm">');
     expect(tables).toHaveLength(3);
     for (const before of tables.slice(0, 2)) {
-      const frame = before.lastIndexOf('rounded-2xl overflow-');
-      expect(before.slice(frame, frame + 'rounded-2xl overflow-x-auto'.length)).toBe('rounded-2xl overflow-x-auto');
+      // The frame is the table's parent: its class list ends right before the tag.
+      const frame = before.lastIndexOf('overflow-');
+      expect(before.slice(frame, frame + 'overflow-x-auto'.length)).toBe('overflow-x-auto');
+      // Positioned, so a screen-reader label in a scrolled-off cell cannot escape it.
+      expect(before.slice(before.lastIndexOf('className="', frame)).split('"')[1]).toContain('relative');
     }
   });
 
   it('lets the salary payments table scroll, because its row actions are the last column', () => {
     // overflow hidden cut "view payment" and delete off by up to 298 px on a phone, with no way to reach them.
-    const frame = source('components/SalaryDetailsModal.tsx').match(/<div style=\{\{[^}]*\}\}>\s*<table className="w-full">/);
-    expect(frame?.[0]).toContain("overflowX: 'auto'");
-    expect(frame?.[0]).not.toContain("overflow: 'hidden'");
+    const frame = source('components/SalaryDetailsModal.tsx').match(/<div className="[^"]*">\s*<table className="w-full">/);
+    expect(frame?.[0]).toContain('overflow-x-auto');
+    expect(frame?.[0]).not.toContain('overflow-hidden');
   });
 
   it('sizes a figure to its card, not to a fixed 28 px', () => {

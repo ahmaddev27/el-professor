@@ -18,6 +18,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { Badge, Button, Input, NativeSelect } from './ui';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -164,22 +165,23 @@ async function upsertTarget(
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
-const IMPORT_STATUS_STYLES: Record<ImportStatus, { label: TranslationKey; bg: string; color: string }> = {
-  new:       { label: 'hrt.statusNew',       bg: 'rgba(21,128,61,0.1)',    color: '#15803d' },
-  update:    { label: 'hrt.statusUpdate',    bg: 'rgba(37,99,235,0.1)',    color: '#2563eb' },
-  duplicate: { label: 'hrt.statusDuplicate', bg: 'rgba(107,114,128,0.1)',  color: '#4b5563' },
-  error:     { label: 'common.error',        bg: 'rgba(220,38,38,0.1)',    color: '#b91c1c' },
-  unmatched: { label: 'hrt.statusUnmatched', bg: 'rgba(217,119,6,0.1)',    color: '#b45309' },
+// ── Presentation (phase 5)
+
+const IMPORT_STATUS_STYLES: Record<ImportStatus, { label: TranslationKey; tone: 'positive' | 'info' | 'neutral' | 'critical' | 'caution' }> = {
+  new:       { label: 'hrt.statusNew',       tone: 'positive' },
+  update:    { label: 'hrt.statusUpdate',    tone: 'info' },
+  duplicate: { label: 'hrt.statusDuplicate', tone: 'neutral' },
+  error:     { label: 'common.error',        tone: 'critical' },
+  unmatched: { label: 'hrt.statusUnmatched', tone: 'caution' },
 };
 
 function StatusBadge({ status }: { status: ImportStatus }) {
   const { t } = useTranslation();
   const s = IMPORT_STATUS_STYLES[status];
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
-      style={{ background: s.bg, color: s.color }}>
+    <Badge tone={s.tone}>
       {t(s.label)}
-    </span>
+    </Badge>
   );
 }
 
@@ -212,13 +214,6 @@ export default function HistoricalHourTargetsManager({
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const yearOptions = Array.from({ length: 8 }, (_, i) => now.getFullYear() - 6 + i);
-
-  // ── Shared input style ────────────────────────────────────────────────────
-
-  const inp: React.CSSProperties = {
-    background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.375rem',
-    color: 'var(--text-primary)', fontSize: '0.8rem', padding: '0.3rem 0.5rem', outline: 'none',
-  };
 
   // ── Load records ──────────────────────────────────────────────────────────
 
@@ -441,80 +436,75 @@ export default function HistoricalHourTargetsManager({
     (!hasNegativeInPreview || negativeConfirmed);
   const importableCount = preview?.filter(r => r.status !== 'error' && r.status !== 'duplicate').length ?? 0;
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Presentation (phase 5)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)' }}
+      className="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4 font-ui"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div
-        className="flex flex-col rounded-2xl shadow-2xl w-full max-w-5xl"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', maxHeight: '90vh' }}
-      >
+      <div className="glass-strong flex max-h-[90vh] w-full max-w-5xl flex-col rounded-pane">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-xl p-2" style={{ background: 'rgba(37,99,235,0.1)' }}>
-              <Database size={18} style={{ color: '#2563eb' }} />
+            <div className="rounded-tile bg-brand-soft p-2">
+              <Database size={18} className="text-brand-text" />
             </div>
             <div>
-              <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
+              <h2 className="text-base font-bold text-fg">
                 {t('hrt.title')}
               </h2>
-              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              <p className="text-xs text-fg-muted">
                 {t('hrt.subtitle')}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg transition-colors hover:opacity-70"
-            style={{ color: 'var(--text-secondary)' }}>
+          <button onClick={onClose} aria-label={t('common.close')} className="inline-flex items-center justify-center rounded-tight p-1.5 text-fg-muted transition-colors hover:bg-sunken hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10">
             <X size={18} />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex shrink-0 overflow-x-auto border-b border-line" role="tablist">
           {(['import','manage'] as const).map(tabKey => (
             <button key={tabKey} onClick={() => setTab(tabKey)}
-              className="px-6 py-3 text-sm font-medium transition-colors"
-              style={{
-                color: tab === tabKey ? '#2563eb' : 'var(--text-secondary)',
-                borderBottom: tab === tabKey ? '2px solid #2563eb' : '2px solid transparent',
-              }}>
+              role="tab"
+              aria-selected={tab === tabKey}
+              className={`-mb-px whitespace-nowrap border-b-2 px-6 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus [@media(pointer:coarse)]:min-h-11 ${
+                tab === tabKey ? 'border-brand text-brand-text' : 'border-transparent text-fg-muted hover:text-fg'
+              }`}>
               {t(tabKey === 'import' ? 'hrt.tabImport' : 'hrt.tabManage')}
             </button>
           ))}
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 space-y-4 overflow-y-auto p-6">
 
           {/* ── Import tab ────────────────────────────────────────────────── */}
           {tab === 'import' && (
             <>
               {importSummary && (
-                <div className="rounded-2xl p-4 space-y-2" style={{ background: 'rgba(21,128,61,0.06)', border: '1px solid rgba(21,128,61,0.2)' }}>
-                  <div className="flex items-center gap-2 font-semibold text-sm" style={{ color: '#15803d' }}>
+                <div className="space-y-2 rounded-tile border border-positive/20 bg-positive-soft p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-positive">
                     <CheckCircle2 size={16} /> {t('hrt.importDone')}
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-fg-muted sm:grid-cols-5">
                     {([
-                      { label: 'hrt.summaryImported',  val: importSummary.imported,  color: '#15803d' },
-                      { label: 'hrt.summaryUpdated',   val: importSummary.updated,   color: '#2563eb' },
-                      { label: 'hrt.summarySkipped',   val: importSummary.skipped,   color: '#4b5563' },
-                      { label: 'hrt.summaryErrors',    val: importSummary.errors,    color: '#b91c1c' },
-                      { label: 'hrt.summaryUnmatched', val: importSummary.unmatched, color: '#b45309' },
+                      { label: 'hrt.summaryImported',  val: importSummary.imported,  color: 'text-positive' },
+                      { label: 'hrt.summaryUpdated',   val: importSummary.updated,   color: 'text-info' },
+                      { label: 'hrt.summarySkipped',   val: importSummary.skipped,   color: 'text-neutral' },
+                      { label: 'hrt.summaryErrors',    val: importSummary.errors,    color: 'text-critical' },
+                      { label: 'hrt.summaryUnmatched', val: importSummary.unmatched, color: 'text-caution' },
                     ] as const).map(s => (
                       <div key={s.label} className="text-center">
-                        <div className="text-lg font-bold" style={{ color: s.color }}>{s.val}</div>
+                        <div className={`text-lg font-bold tabular-nums ${s.color}`}>{s.val}</div>
                         <div>{t(s.label)}</div>
                       </div>
                     ))}
                   </div>
                   <button onClick={() => setImportSummary(null)}
-                    className="text-xs underline" style={{ color: 'var(--text-secondary)' }}>
+                    className="rounded-chip text-xs text-fg-muted underline hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                     {t('hrt.startNewImport')}
                   </button>
                 </div>
@@ -522,17 +512,16 @@ export default function HistoricalHourTargetsManager({
 
               {!importSummary && !preview && (
                 <div
-                  className="rounded-2xl border-2 border-dashed p-10 text-center cursor-pointer transition-colors hover:opacity-80"
-                  style={{ borderColor: 'var(--border)' }}
+                  className="cursor-pointer rounded-surface border-2 border-dashed border-line-strong p-10 text-center transition-colors hover:bg-sunken"
                   onDragOver={e => e.preventDefault()}
                   onDrop={handleDrop}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <Upload size={28} className="mx-auto mb-3" style={{ color: 'var(--text-secondary)' }} />
-                  <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
+                  <Upload size={28} className="mx-auto mb-3 text-fg-muted" />
+                  <p className="mb-1 text-sm font-medium text-fg">
                     {t('hrt.dropzoneTitle')}
                   </p>
-                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  <p className="text-xs text-fg-muted">
                     {/* The code sample is the literal JSON the importer expects — data, not a label. */}
                     {t('hrt.dropzoneFormatLabel')} <code>dataset_name: "historical_driver_hours_targets"</code>
                   </p>
@@ -542,42 +531,41 @@ export default function HistoricalHourTargetsManager({
               )}
 
               {parseError && (
-                <div className="rounded-xl px-4 py-3 flex items-start gap-2 text-sm"
-                  style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-                  <AlertTriangle size={15} className="shrink-0 mt-0.5" /> {parseError}
+                <div role="alert" className="flex items-start gap-2 rounded-tile border border-critical/20 bg-critical-soft px-4 py-3 text-sm text-critical">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" /> {parseError}
                 </div>
               )}
 
               {preview && (
                 <>
                   {/* Preview header */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      <p className="text-sm font-semibold text-fg">
                         {t('hrt.previewTitle', { count: preview.length })}
                       </p>
-                      <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                      <p className="mt-0.5 text-xs text-fg-muted">
                         {t('hrt.previewImportable', { count: importableCount })}
                         {preview.filter(r => r.status === 'duplicate').length > 0 &&
                           t('hrt.previewDuplicates', { count: preview.filter(r => r.status === 'duplicate').length })}
                       </p>
                     </div>
                     <button onClick={() => { setPreview(null); setParseError(null); }}
-                      className="text-xs underline" style={{ color: 'var(--text-secondary)' }}>
+                      className="rounded-chip text-xs text-fg-muted underline hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                       {t('hrt.reset')}
                     </button>
                   </div>
 
                   {/* Negative warning */}
                   {hasNegativeInPreview && (
-                    <div className="rounded-xl px-4 py-3 flex items-start gap-3 text-sm"
-                      style={{ background: 'rgba(217,119,6,0.06)', border: '1px solid rgba(217,119,6,0.2)', color: '#b45309' }}>
-                      <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                    <div role="alert" className="flex items-start gap-3 rounded-tile border border-caution/20 bg-caution-soft px-4 py-3 text-sm text-caution">
+                      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                       <div>
                         <p className="font-semibold">{t('hrt.negativeTitle')}</p>
-                        <p className="text-xs mt-0.5">{t('hrt.negativeBody')}</p>
-                        <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                        <p className="mt-0.5 text-xs">{t('hrt.negativeBody')}</p>
+                        <label className="mt-2 flex cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={negativeConfirmed}
+                            className="accent-brand"
                             onChange={e => setNegativeConfirmed(e.target.checked)} />
                           <span className="text-xs">{t('hrt.negativeConfirm')}</span>
                         </label>
@@ -586,47 +574,46 @@ export default function HistoricalHourTargetsManager({
                   )}
 
                   {/* Preview table */}
-                  <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                  <div className="glass-card relative rounded-surface">
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
-                          <tr style={{ background: 'var(--bg-subtle)' }}>
+                          <tr className="bg-wash">
                             {([
                               'common.month', 'hrt.year', 'common.driver',
                               ...HOUR_COLUMN_KEYS, 'common.status',
                             ] as TranslationKey[]).map(h => (
-                              <th key={h} className="px-3 py-2 text-left font-semibold whitespace-nowrap"
-                                style={{ color: 'var(--text-secondary)' }}>{t(h)}</th>
+                              <th key={h} className="whitespace-nowrap px-3 py-2 text-start font-semibold text-fg-muted">{t(h)}</th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
                           {preview.map(row => (
-                            <tr key={row.idx} style={{ borderTop: '1px solid var(--border)',
-                              background: row.status === 'error' ? 'rgba(220,38,38,0.03)' :
-                                row.status === 'duplicate' ? 'rgba(107,114,128,0.03)' : undefined }}>
+                            <tr key={row.idx} className={`border-t border-line ${
+                              row.status === 'error' ? 'bg-critical-soft' :
+                                row.status === 'duplicate' ? 'bg-neutral-soft' : ''}`}>
                               {/* row.month is the German month name carried by the JSON payload — data, not a label. */}
-                              <td className="px-3 py-2" style={{ color: 'var(--text-primary)' }}>{row.month}</td>
-                              <td className="px-3 py-2" style={{ color: 'var(--text-primary)' }}>{row.year}</td>
-                              <td className="px-3 py-2" style={{ color: 'var(--text-primary)', minWidth: 160 }}>
+                              <td className="px-3 py-2 text-fg">{row.month}</td>
+                              <td className="px-3 py-2 tabular-nums text-fg">{row.year}</td>
+                              <td className="min-w-40 px-3 py-2 text-fg">
                                 {row.status === 'unmatched' ? (
-                                  <select
+                                  <NativeSelect
                                     value={row.overrideDriverId}
                                     onChange={e => setOverrideDriver(row.idx, e.target.value)}
-                                    style={{ ...inp, fontSize: '0.75rem', maxWidth: 180 }}>
+                                    className="h-8 text-xs"
+                                    containerClassName="max-w-[180px]">
                                     <option value="">{t('hrt.selectDriver')}</option>
                                     {drivers.map(d => (
                                       <option key={d.id} value={d.id}>{d.name}</option>
                                     ))}
-                                  </select>
+                                  </NativeSelect>
                                 ) : (
                                   <span>{row.driverName}</span>
                                 )}
-                                {row.errorMsg && <span className="block text-xs mt-0.5" style={{ color: '#b91c1c' }}>{row.errorMsg}</span>}
+                                {row.errorMsg && <span className="mt-0.5 block text-xs text-critical">{row.errorMsg}</span>}
                               </td>
                               {[row.baseH, row.night25H, row.night40H, row.sunH, row.holH].map((h, i) => (
-                                <td key={i} className="px-3 py-2 font-mono text-right"
-                                  style={{ color: h < 0 ? '#b91c1c' : 'var(--text-primary)' }}>
+                                <td key={i} className={`whitespace-nowrap px-3 py-2 text-end font-mono tabular-nums ${h < 0 ? 'text-critical' : 'text-fg'}`}>
                                   {h !== 0 ? h.toFixed(2).replace('.', ',') : ''}
                                 </td>
                               ))}
@@ -639,15 +626,13 @@ export default function HistoricalHourTargetsManager({
                   </div>
 
                   <div className="flex justify-end">
-                    <button
+                    <Button
                       onClick={handleImportConfirm}
-                      disabled={!canConfirmImport}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
-                      style={{ background: '#2563eb', color: '#fff' }}>
+                      disabled={!canConfirmImport}>
                       {importing
-                        ? <><RefreshCw size={14} className="animate-spin" /> {t('hrt.importing')}</>
+                        ? <><RefreshCw size={14} className="motion-safe:animate-spin" /> {t('hrt.importing')}</>
                         : <><CheckCircle2 size={14} /> {t('hrt.importCount', { count: importableCount })}</>}
-                    </button>
+                    </Button>
                   </div>
                 </>
               )}
@@ -658,65 +643,63 @@ export default function HistoricalHourTargetsManager({
           {tab === 'manage' && (
             <>
               {/* Filters */}
-              <div className="flex flex-wrap items-end gap-3 p-3 rounded-2xl" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                <Filter size={14} className="mt-1.5 shrink-0" style={{ color: 'var(--text-secondary)' }} />
+              <div className="glass-card flex flex-wrap items-end gap-3 rounded-surface p-3">
+                <Filter size={14} className="mb-3 shrink-0 text-fg-muted" />
                 <div>
-                  <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('hrt.year')}</label>
-                  <select value={filterYear} onChange={e => setFilterYear(+e.target.value)} style={inp}>
+                  <label className="mb-1 block text-xs text-fg-muted">{t('hrt.year')}</label>
+                  <NativeSelect value={filterYear} onChange={e => setFilterYear(+e.target.value)} className="h-9 text-[13px]" containerClassName="min-w-28">
                     {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
-                  <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</label>
-                  <select value={filterMonth} onChange={e => setFilterMonth(+e.target.value)} style={inp}>
+                  <label className="mb-1 block text-xs text-fg-muted">{t('common.month')}</label>
+                  <NativeSelect value={filterMonth} onChange={e => setFilterMonth(+e.target.value)} className="h-9 text-[13px]" containerClassName="min-w-36">
                     <option value={0}>{t('hrt.allMonths')}</option>
                     {MONTH_NAME_KEYS.map((key, i) => <option key={key} value={i+1}>{t(key)}</option>)}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
-                  <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
-                  <select value={filterDriverId} onChange={e => setFilterDriverId(e.target.value)} style={inp}>
+                  <label className="mb-1 block text-xs text-fg-muted">{t('common.driver')}</label>
+                  <NativeSelect value={filterDriverId} onChange={e => setFilterDriverId(e.target.value)} className="h-9 text-[13px]" containerClassName="min-w-40">
                     <option value="">{t('common.allDrivers')}</option>
                     {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
-                  <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('hrt.assignment')}</label>
-                  <select value={filterMatched} onChange={e => setFilterMatched(e.target.value as 'all'|'matched'|'unmatched')} style={inp}>
+                  <label className="mb-1 block text-xs text-fg-muted">{t('hrt.assignment')}</label>
+                  <NativeSelect value={filterMatched} onChange={e => setFilterMatched(e.target.value as 'all'|'matched'|'unmatched')} className="h-9 text-[13px]" containerClassName="min-w-32">
                     <option value="all">{t('common.all')}</option>
                     <option value="matched">{t('hrt.assigned')}</option>
                     <option value="unmatched">{t('hrt.unassigned')}</option>
-                  </select>
+                  </NativeSelect>
                 </div>
-                <button onClick={loadRecords} disabled={loadingRecords}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-                  style={{ background: 'var(--border)', color: 'var(--text-primary)' }}>
-                  <RefreshCw size={12} className={loadingRecords ? 'animate-spin' : ''} /> {t('common.update')}
-                </button>
+                <Button onClick={loadRecords} disabled={loadingRecords}
+                  variant="secondary" size="sm">
+                  <RefreshCw size={12} className={loadingRecords ? 'motion-safe:animate-spin' : ''} /> {t('common.update')}
+                </Button>
               </div>
 
               {loadingRecords ? (
-                <div className="flex items-center gap-2 py-8 justify-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  <RefreshCw size={16} className="animate-spin" /> {t('common.loading')}
+                <div className="flex items-center justify-center gap-2 py-8 text-sm text-fg-muted">
+                  <RefreshCw size={16} className="motion-safe:animate-spin" /> {t('common.loading')}
                 </div>
               ) : records.length === 0 ? (
-                <div className="text-center py-10 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                <div className="py-10 text-center text-sm text-fg-muted">
                   {t('hrt.noRecords')}
                 </div>
               ) : (
-                <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                <div className="glass-card relative rounded-surface">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
-                        <tr style={{ background: 'var(--bg-subtle)' }}>
-                          <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</th>
-                          <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hrt.year')}</th>
-                          <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 150 }}>{t('common.driver')}</th>
+                        <tr className="bg-wash">
+                          <th className="px-3 py-2 text-start font-semibold text-fg-muted">{t('common.month')}</th>
+                          <th className="px-3 py-2 text-start font-semibold text-fg-muted">{t('hrt.year')}</th>
+                          <th className="min-w-[150px] px-3 py-2 text-start font-semibold text-fg-muted">{t('common.driver')}</th>
                           {HOUR_COLUMN_KEYS.map((key, i) => (
-                            <th key={key} className="px-3 py-2 text-right font-semibold"
-                              style={{ color: 'var(--text-secondary)', minWidth: i === 0 ? 80 : 75 }}>{t(key)}</th>
+                            <th key={key} className={`px-3 py-2 text-end font-semibold text-fg-muted ${i === 0 ? 'min-w-20' : 'min-w-[75px]'}`}>{t(key)}</th>
                           ))}
-                          <th className="px-3 py-2 text-center font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>{t('common.status')}</th>
+                          <th className="min-w-20 px-3 py-2 text-center font-semibold text-fg-muted">{t('common.status')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -724,24 +707,25 @@ export default function HistoricalHourTargetsManager({
                           const saveState = saveStates.get(rec.id);
                           const isUnmatched = !rec.driver_id;
                           return (
-                            <tr key={rec.id} style={{ borderTop: '1px solid var(--border)' }}>
+                            <tr key={rec.id} className="border-t border-line">
                               {/* rec.month is the stored German month name — data, not a label. */}
-                              <td className="px-3 py-1.5" style={{ color: 'var(--text-primary)' }}>{rec.month}</td>
-                              <td className="px-3 py-1.5" style={{ color: 'var(--text-primary)' }}>{rec.year}</td>
+                              <td className="px-3 py-1.5 text-fg">{rec.month}</td>
+                              <td className="px-3 py-1.5 tabular-nums text-fg">{rec.year}</td>
                               <td className="px-3 py-1.5">
                                 {isUnmatched ? (
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-xs" style={{ color: '#b45309' }}>{rec.driver_name}</span>
-                                    <select
+                                    <span className="text-xs text-caution">{rec.driver_name}</span>
+                                    <NativeSelect
                                       value=""
                                       onChange={e => updateDriverAssignment(rec, e.target.value)}
-                                      style={{ ...inp, fontSize: '0.7rem', maxWidth: 140 }}>
+                                      className="h-8 text-xs"
+                                      containerClassName="max-w-[140px]">
                                       <option value="">{t('hrt.assignDriver')}</option>
                                       {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                    </select>
+                                    </NativeSelect>
                                   </div>
                                 ) : (
-                                  <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                                  <span className="font-medium text-fg">
                                     {drivers.find(d => d.id === rec.driver_id)?.name ?? rec.driver_name}
                                   </span>
                                 )}
@@ -750,30 +734,31 @@ export default function HistoricalHourTargetsManager({
                                 ['base_hours','night_25_hours','night_0_4_40_hours','sunday_50_hours','holiday_hours'] as const
                               ).map(field => (
                                 <td key={field} className="px-2 py-1">
-                                  <input
+                                  <Input
                                     type="text" inputMode="decimal"
+                                    size={1}
                                     value={getEditVal(rec.id, field, rec[field] as number)}
                                     onChange={e => setEditVal(rec.id, field, e.target.value)}
                                     onBlur={e => commitEdit(rec, field, e.target.value)}
                                     placeholder="0,00"
-                                    style={{ ...inp, textAlign: 'right', width: 70 }}
+                                    className="h-8 w-[70px] px-2 text-end text-xs"
                                   />
                                 </td>
                               ))}
                               <td className="px-3 py-1.5 text-center">
                                 {saveState === 'saving' && (
-                                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('common.saving')}</span>
+                                  <span className="text-xs text-fg-muted">{t('common.saving')}</span>
                                 )}
                                 {saveState === 'saved' && (
-                                  <span className="text-xs flex items-center justify-center gap-1" style={{ color: '#15803d' }}>
+                                  <span className="flex items-center justify-center gap-1 text-xs text-positive">
                                     <CheckCircle2 size={11} /> {t('hrt.saved')}
                                   </span>
                                 )}
                                 {saveState === 'error' && (
-                                  <span className="text-xs" style={{ color: '#b91c1c' }}>{t('common.error')}</span>
+                                  <span className="inline-flex items-center gap-1 text-xs text-critical"><AlertTriangle size={11} /> {t('common.error')}</span>
                                 )}
                                 {!saveState && (
-                                  <span className="text-xs" style={{ color: 'var(--text-secondary)', opacity: 0.5 }}>—</span>
+                                  <span className="text-xs text-fg-subtle">—</span>
                                 )}
                               </td>
                             </tr>
@@ -790,12 +775,10 @@ export default function HistoricalHourTargetsManager({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end px-6 py-4 border-t shrink-0" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={onClose}
-            className="px-5 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
-            style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+        <div className="flex shrink-0 justify-end border-t border-line px-6 py-4">
+          <Button onClick={onClose} variant="secondary">
             {t('common.close')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -807,13 +790,14 @@ export default function HistoricalHourTargetsManager({
 export function HourTargetsTrigger({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <button
+    <Button
       onClick={onClick}
-      className="inline-flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:brightness-110 [@media(pointer:coarse)]:min-h-10"
-      style={{ background: 'rgba(37,99,235,0.08)', color: '#2563eb', border: '1px solid rgba(37,99,235,0.2)' }}>
+      variant="secondary"
+      size="sm"
+      className="px-3 text-xs">
       <Database size={13} />
       {t('hrt.triggerLabel')}
-    </button>
+    </Button>
   );
 }
 

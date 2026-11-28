@@ -1902,7 +1902,7 @@ export default function MonthlyPlanPage() {
 
           {plan.validation.violations.length > 0 ? (
             <Alert tone="critical" title={t('mplan.violations.title')}>
-              <ul className="list-disc space-y-1 pl-5">
+              <ul className="list-disc space-y-1 ps-5">
                 {plan.validation.violations.slice(0, VIOLATIONS_SHOWN).map((v, index) => (
                   <li key={`${v.rule}-${v.blockId ?? ''}-${v.driverId ?? ''}-${index}`}>
                     <span className="font-medium">{t(VIOLATION_KEYS[v.rule])}</span>
@@ -1962,7 +1962,7 @@ export default function MonthlyPlanPage() {
                           count: group.count,
                         })}
                       </p>
-                      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[13px] text-fg-muted">
+                      <ul className="mt-1 list-disc space-y-0.5 ps-5 text-[13px] text-fg-muted">
                         {group.items.map((warning, index) => (
                           <li key={`${group.kind}-${index}`}>{describePlanWarning(warning, findingContext)}</li>
                         ))}
@@ -2065,7 +2065,7 @@ export default function MonthlyPlanPage() {
                   ) : null}
                   <ul className="mt-2 space-y-1 text-[13px]">
                     {regenerationDiff.changed.slice(0, 12).map(c => (
-                      <li key={c.blockId} className="ltr:text-left">
+                      <li key={c.blockId} className="ltr:text-start">
                         {/* The block by its vehicle and when it starts, never by
                             its id: that id is `vehicleId|startMs`, so the line
                             read "351ca614-…-fb70-d9fbf899bac5|1791664200000",
@@ -2180,7 +2180,7 @@ export default function MonthlyPlanPage() {
               <CardHeader>
                 <CardTitle className="text-base">
                   {d.driverName}
-                  <span className="ml-2 text-[13px] font-normal text-fg-muted">
+                  <span className="ms-2 text-[13px] font-normal text-fg-muted">
                     {d.shifts.length > 0
                       ? `${d.shifts.length} · ${hoursText(d.totalHours)} ${t('mplan.unitHours')}`
                       : ''}

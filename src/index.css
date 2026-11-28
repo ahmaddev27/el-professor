@@ -1,33 +1,64 @@
-/* Barlow, self-hosted through @fontsource so no request leaves for a font CDN.
-   The @font-face rules cost nothing until an element uses `font-ui`: a browser
-   only downloads a face it has to render. */
+/* Barlow stays for one picture only: the Abrechnung share card, which html2canvas turns into the
+   PNG a driver receives, pins it so the remake does not change that document (PLAN.md §4). */
 @import '@fontsource/barlow/400.css';
 @import '@fontsource/barlow/500.css';
 @import '@fontsource/barlow/600.css';
 @import '@fontsource/barlow/700.css';
 
+/* Tajawal (SIL OFL 1.1), the Arabic UI's face (owner, 27.11.2026). Only the Arabic-subset files are
+   imported, so nothing but Arabic glyphs ever comes from it: Latin text and every figure stay Geist, as
+   the German documents print them. Tajawal has no 600, so `font-semibold` draws its 700 in Arabic.
+   Self-hosted through @fontsource, nothing loads from a font CDN. */
+@import '@fontsource/tajawal/arabic-400.css';
+@import '@fontsource/tajawal/arabic-500.css';
+@import '@fontsource/tajawal/arabic-700.css';
+
+/* Geist and Geist Mono, self-hosted (src/assets/fonts, SIL OFL 1.1): the design remake's faces
+   (Docs/design/remake-v2/PLAN.md §4). Nothing loads from a font CDN, and a browser downloads a face
+   only when it has to render one. */
+@font-face {
+  font-family: 'Geist';
+  src: url('./assets/fonts/geist-latin-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('./assets/fonts/geist-mono-latin-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design system tokens (Phase 2) ───────────────────────────────────────────
- * The palette of src/components/ui and the AppShell, derived from the brand
- * board: night #0A0F1C, surface #0C1730, blue #146BFF, cyan #00E7FF.
- *
- * Deliberately separate from the legacy variables further down. Those still
- * drive every existing screen, and Phase 5 moves screens across in batches, so
- * nothing in this block may change how a current page looks. No name here is
- * shared with the legacy set.
+/* ── Design system tokens (Phase 2, remade 27.11.2026) ───────────────────────
+ * The palette of src/components/ui and both shells: the "Glass" design remake
+ * (Docs/design/remake-v2/PLAN.md). The logo's blue as the brand (owner,
+ * 27.11.2026: it replaced the spec's emerald), a blue-grey canvas on the
+ * logo's hue (the same day: it was green-grey), an ambient glow and film grain
+ * behind translucent glass panes. Mapped onto our
+ * token names by ROLE, never by the spec's names: our `--overlay` is the dialog
+ * surface (the spec's glass-strong), our `--scrim` is the spec's overlay.
  *
  * Colours are space-separated RGB channels so Tailwind's opacity modifier works
- * (`bg-brand/10`); the hex in each comment is the same colour. Every text and
- * surface pairing is held to WCAG AA by src/components/ui/tokens.contrast.test.ts,
- * which parses the two blocks below by their marker comments, so a changed value
- * fails the build if it no longer passes.
+ * (`bg-brand/10`); the hex in each comment is the same colour. A TRANSLUCENT
+ * token carries its alpha in a sibling `--<name>-a`, and tailwind.config.js
+ * multiplies the two, so `bg-raised` paints white at .62 and `bg-raised/50` half
+ * of that. Every text and surface pairing is held to WCAG AA by
+ * src/components/ui/tokens.contrast.test.ts, which parses both blocks by their
+ * marker comments and composites every translucent token over the canvas, each
+ * ambient glow at its peak and the glass sheet before it measures.
  *
- * Shape rule: controls (buttons, inputs, selects) use --radius-control, surfaces
- * (cards, tables, dialogs, sheets) use --radius-surface, badges and avatars are
- * fully round.
+ * Where a value differs from the spec, the spec value failed that test; the
+ * comment says so (PLAN.md §3).
+ *
+ * Shape rule: controls use --radius-control (10px), surfaces --radius-surface
+ * (18px), dialogs and the shell's panes --radius-pane (22px), badges and
+ * avatars are fully round.
  */
 /* A screen-reader label in a scrolled-off table cell is absolutely positioned. With nothing
    positioned inside its scrolling frame it escapes the frame's clipping, and the whole page
@@ -51,243 +82,459 @@ td select, th select { max-width: none; }
   }
 }
 
+/* @scale brand-blue
+ * The brand's scale, built in OKLCH at one hue from the logo's own blue: the
+ * "Professor" of public/brand/wordmark-on-dark.png runs from #0058FF to #0066FF
+ * and centres on #0060FF, which is step 500 exactly. Every brand token in both
+ * blocks below is one of these steps (tokens.contrast.test.ts checks that), so
+ * a light theme takes the dark half and a dark theme the light half of the same
+ * blue. Nothing paints from the scale directly; it is the source the tokens are
+ * read off, and the place to look when a new brand tone is needed.
+ */
+:root {
+  --blue-50:        242 247 255;  /* #F2F7FF */
+  --blue-100:       227 237 255;  /* #E3EDFF */
+  --blue-200:       202 221 255;  /* #CADDFF */
+  --blue-300:       164 197 255;  /* #A4C5FF */
+  --blue-400:       112 163 255;  /* #70A3FF */
+  --blue-500:       0 96 255;     /* #0060FF the logo */
+  --blue-600:       0 81 218;     /* #0051DA */
+  --blue-700:       0 65 180;     /* #0041B4 */
+  --blue-800:       0 50 144;     /* #003290 */
+  --blue-900:       0 35 107;     /* #00236B */
+  --blue-950:       0 18 68;      /* #001244 */
+}
+
 /* @tokens light */
 :root {
-  --canvas:         244 246 250;  /* #F4F6FA page background */
-  --raised:         255 255 255;  /* #FFFFFF cards, tables, sidebar */
-  --overlay:        255 255 255;  /* #FFFFFF dialogs, sheets, popovers */
-  --sunken:         237 241 247;  /* #EDF1F7 table header, hover, skeleton */
-  --field:          255 255 255;  /* #FFFFFF input fill */
-  --fg:             10 15 28;     /* #0A0F1C primary text */
-  --fg-muted:       70 83 107;    /* #46536B secondary text */
-  --fg-subtle:      95 107 130;   /* #5F6B82 captions, placeholders */
-  --line:           220 226 236;  /* #DCE2EC dividers */
-  --line-strong:    124 136 158;  /* #7C889E input borders (3:1 non-text) */
-  --brand:          20 107 255;   /* #146BFF primary actions, chart marks */
-  --brand-hover:    15 90 224;    /* #0F5AE0 */
+  --canvas:         234 237 243;  /* #EAEDF3 page background, under the glow */
+  --raised:         255 255 255;  /* white at .62: cards, tables, panels */
+  --raised-a:       0.62;
+  --overlay:        250 251 254;  /* #FAFBFE at .80: dialogs, sheets, menus */
+  --overlay-a:      0.8;
+  --sunken:         20 23 29;     /* ink at .06: skeleton, inset fills, counts */
+  --sunken-a:       0.06;
+  --wash:           255 255 255;  /* white at .30: a table's header row */
+  --wash-a:         0.3;
+  --field:          255 255 255;  /* white at .62: input fill */
+  --field-a:        0.62;
+  --solid:          248 249 252;  /* #F8F9FC an opaque surface */
+  --sheet:          255 255 255;  /* white at .34: the sidebar and the content sheet */
+  --sheet-a:        0.34;
+  --edge:           255 255 255;  /* white at .78: the 1px edge of every glass pane */
+  --edge-a:         0.78;
+  --scrim:          11 14 18;     /* #0B0E12 at .20: behind a dialog or the drawer */
+  --scrim-a:        0.2;
+  --toast:          17 20 26;     /* #11141A at .84: the toast, dark in both themes */
+  --toast-a:        0.84;
+  --toast-fg:       235 240 247;  /* #EBF0F7 */
+  --fg:             20 23 29;     /* #14171D primary text */
+  --fg-muted:       83 88 98;     /* #535862 secondary text */
+  --fg-subtle:      86 91 101;    /* #565B65 captions, placeholders (spec #5D6964: 3.83:1 over the glow) */
+  --line:           20 23 29;     /* ink at .08: dividers */
+  --line-a:         0.08;
+  --line-strong:    20 23 29;     /* ink at .50: control borders (spec .15 is under 3:1) */
+  --line-strong-a:  0.5;
+  --brand:          0 96 255;     /* #0060FF blue-500, the logo's blue: primary actions, active marks (5.1:1 under white) */
+  --brand-hover:    0 81 218;     /* #0051DA blue-600 */
   --brand-fg:       255 255 255;  /* #FFFFFF text on brand */
-  --brand-soft:     231 240 255;  /* #E7F0FF selected and info fills */
-  --brand-text:     15 90 224;    /* #0F5AE0 links, active navigation */
-  --signal:         0 124 145;    /* #007C91 brand cyan, darkened to read on light */
-  --focus:          20 107 255;   /* #146BFF focus outline */
-  --positive:       10 122 69;    /* #0A7A45 */
-  --positive-soft:  227 246 236;  /* #E3F6EC */
-  --caution:        143 82 0;     /* #8F5200 */
-  --caution-soft:   253 241 220;  /* #FDF1DC */
-  --critical:       192 38 45;    /* #C0262D */
-  --critical-soft:  253 232 232;  /* #FDE8E8 */
-  --critical-solid: 192 38 45;    /* #C0262D destructive button fill */
+  --brand-soft:     227 237 255;  /* #E3EDFF blue-100: selected and info fills */
+  --brand-text:     0 81 218;     /* #0051DA blue-600: links, active navigation (#0060FF is 4.4:1 on the canvas) */
+  --signal:         11 98 89;     /* #0B6259 teal, the second brand colour */
+  --focus:          0 96 255;     /* #0060FF blue-500 focus outline */
+  --positive:       5 96 63;      /* #05603F */
+  --positive-soft:  230 245 238;  /* #E6F5EE */
+  --positive-dot:   18 162 114;   /* #12A272 */
+  --positive-solid: 4 120 87;     /* #047857 a fill that means "good" (the profit card), under white: the brand's emerald until the blue */
+  --positive-fg:    255 255 255;  /* #FFFFFF the label on that fill */
+  --caution:        138 75 6;     /* #8A4B06 */
+  --caution-soft:   252 242 223;  /* #FCF2DF */
+  --caution-dot:    217 154 38;   /* #D99A26 */
+  --critical:       168 35 27;    /* #A8231B */
+  --critical-soft:  253 236 236;  /* #FDECEC */
+  --critical-dot:   229 72 77;    /* #E5484D */
+  --critical-solid: 192 38 45;    /* #C0262D destructive fill (spec #E5484D is 4.2:1 under white) */
+  --critical-fg:    255 255 255;  /* #FFFFFF the label on that fill, in both themes */
+  --info:           28 85 179;    /* #1C55B3 */
+  --info-soft:      232 240 252;  /* #E8F0FC */
+  --info-dot:       59 130 246;   /* #3B82F6 */
+  --violet:         84 64 173;    /* #5440AD */
+  --violet-soft:    239 237 250;  /* #EFEDFA */
+  --violet-dot:     139 124 240;  /* #8B7CF0 */
+  --teal:           11 98 89;     /* #0B6259 */
+  --teal-soft:      224 243 241;  /* #E0F3F1 */
+  --teal-dot:       20 168 154;   /* #14A89A */
+  --neutral:        83 88 98;     /* #535862 */
+  --neutral-soft:   239 240 243;  /* #EFF0F3 */
+  --neutral-dot:    155 160 169;  /* #9BA0A9 */
+  /* Chart series (R1). A series is a mark with no word beside it, so each one
+     reaches 3:1 on every pane a chart sits on; tokens.contrast.test.ts measures it. */
+  --chart-1:        0 96 255;     /* #0060FF blue-500, the logo's blue */
+  --chart-2:        10 132 91;    /* #0A845B emerald, series 1 before the blue */
+  --chart-3:        166 100 29;   /* #A6641D orange (spec #E0892B is 1.8:1) */
+  --chart-4:        115 102 200;  /* #7366C8 violet (spec #8B7CF0 is 2.3:1) */
+  --chart-5:        112 116 123;  /* #70747B grey (spec #98A39E is 1.7:1) */
+  --chart-1-soft:   0 96 255;     /* series 1 at .14, an area's fill */
+  --chart-1-soft-a: 0.14;
+  --amb-1:          112 163 255;  /* the four ambient glows, each at its own alpha: blue-400, blue-300, sky, blue-200 */
+  --amb-1-a:        0.24;
+  --amb-2:          164 197 255;
+  --amb-2-a:        0.22;
+  --amb-3:          56 189 248;
+  --amb-3-a:        0.16;
+  --amb-4:          202 221 255;
+  --amb-4-a:        0.1;
 
-  --radius-control: 0.5rem;
-  --radius-surface: 0.75rem;
-  --shadow-raised:  0 1px 2px rgb(10 15 28 / 0.05), 0 1px 3px rgb(10 15 28 / 0.04);
-  --shadow-overlay: 0 16px 40px rgb(10 15 28 / 0.16), 0 2px 6px rgb(10 15 28 / 0.08);
+  --radius-xs:      6px;
+  --radius-sm:      8px;
+  --radius-control: 10px;
+  --radius-lg:      14px;
+  --radius-surface: 18px;
+  --radius-pane:    22px;
+  --ease:           cubic-bezier(0.22, 1, 0.36, 1);
+  --grain:          0.035;
+  --glass-hi:       inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --glass-shadow:   0 1px 1px rgb(32 50 82 / 0.04), 0 12px 32px -20px rgb(32 50 82 / 0.3);
+  --elev-xs:        0 1px 2px rgb(20 23 29 / 0.05);
+  --elev-md:        0 10px 30px -14px rgb(20 23 29 / 0.22), 0 2px 6px -2px rgb(20 23 29 / 0.06);
+  --elev-lg:        0 30px 70px -24px rgb(20 23 29 / 0.38), 0 6px 16px -6px rgb(20 23 29 / 0.1);
+  --brand-gradient:       linear-gradient(180deg, #196aff 0%, #0060ff 100%); /* top 4.62:1 under white, bottom the logo's 5.1:1 */
+  --brand-gradient-hover: linear-gradient(180deg, #0058ec 0%, #0051da 100%);
+  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.24), 0 1px 2px rgb(0 96 255 / 0.3), 0 8px 20px -10px rgb(0 96 255 / 0.55);
+  --mark-gradient:  linear-gradient(150deg, #12305f, #070e1d);
+  --mark-glow:      inset 0 1px 0 rgb(255 255 255 / 0.18), 0 6px 16px -8px rgb(0 35 107 / 0.6);
+  --shadow-raised:  var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--glass-shadow);
+  --shadow-overlay: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-lg);
 }
 
 /* @tokens dark */
 .dark {
-  --canvas:         10 15 28;     /* #0A0F1C brand night */
-  --raised:         12 23 48;     /* #0C1730 brand surface */
-  --overlay:        17 30 59;     /* #111E3B */
-  --sunken:         20 34 65;     /* #142241 */
-  --field:          10 15 28;     /* #0A0F1C */
-  --fg:             238 242 250;  /* #EEF2FA */
-  --fg-muted:       169 181 204;  /* #A9B5CC */
-  --fg-subtle:      130 144 171;  /* #8290AB */
-  --line:           30 44 75;     /* #1E2C4B */
-  --line-strong:    94 110 143;   /* #5E6E8F */
-  --brand:          20 107 255;   /* #146BFF */
-  --brand-hover:    15 90 224;    /* #0F5AE0 */
-  --brand-fg:       255 255 255;  /* #FFFFFF */
-  --brand-soft:     18 41 90;     /* #12295A */
-  --brand-text:     111 164 255;  /* #6FA4FF */
-  --signal:         0 231 255;    /* #00E7FF brand cyan */
-  --focus:          0 231 255;    /* #00E7FF */
-  --positive:       74 222 152;   /* #4ADE98 */
-  --positive-soft:  15 46 42;     /* #0F2E2A */
-  --caution:        255 194 102;  /* #FFC266 */
-  --caution-soft:   51 38 15;     /* #33260F */
-  --critical:       255 138 138;  /* #FF8A8A */
-  --critical-soft:  58 21 32;     /* #3A1520 */
+  --canvas:         6 9 13;       /* #06090D */
+  --raised:         255 255 255;  /* white at .045 */
+  --raised-a:       0.045;
+  --overlay:        16 19 23;     /* #101317 at .80 */
+  --overlay-a:      0.8;
+  --sunken:         255 255 255;  /* white at .07 */
+  --sunken-a:       0.07;
+  --wash:           255 255 255;  /* white at .025 */
+  --wash-a:         0.025;
+  --field:          255 255 255;  /* white at .04 */
+  --field-a:        0.04;
+  --solid:          19 22 26;     /* #13161A */
+  --sheet:          255 255 255;  /* white at .025 */
+  --sheet-a:        0.025;
+  --edge:           255 255 255;  /* white at .09 */
+  --edge-a:         0.09;
+  --scrim:          0 0 0;        /* black at .45 */
+  --scrim-a:        0.45;
+  --toast:          17 20 26;     /* #11141A at .84 */
+  --toast-a:        0.84;
+  --toast-fg:       235 240 247;  /* #EBF0F7 */
+  --fg:             231 233 239;  /* #E7E9EF */
+  --fg-muted:       184 188 197;  /* #B8BCC5 (spec #A3AFAA: 4.20:1 on a table header over the glow) */
+  --fg-subtle:      178 183 192;  /* #B2B7C0 (spec #93A09A: 3.51:1 there; one step above the turn onto the logo's hue, which left it at 4.49:1 on sunken) */
+  --line:           255 255 255;  /* white at .08 */
+  --line-a:         0.08;
+  --line-strong:    255 255 255;  /* white at .42 (spec .15 is under 3:1) */
+  --line-strong-a:  0.42;
+  --brand:          112 163 255;  /* #70A3FF blue-400 */
+  --brand-hover:    164 197 255;  /* #A4C5FF blue-300 */
+  --brand-fg:       0 18 68;      /* #001244 blue-950 on the light blue */
+  --brand-soft:     14 31 61;     /* #0E1F3D */
+  --brand-text:     164 197 255;  /* #A4C5FF blue-300 */
+  --signal:         132 217 207;  /* #84D9CF */
+  --focus:          112 163 255;  /* #70A3FF blue-400 */
+  --positive:       116 227 184;  /* #74E3B8 */
+  --positive-soft:  14 42 31;     /* #0E2A1F */
+  --positive-dot:   47 191 138;   /* #2FBF8A */
+  --positive-solid: 52 211 153;   /* #34D399 */
+  --positive-fg:    4 38 26;      /* #04261A */
+  --caution:        245 196 107;  /* #F5C46B */
+  --caution-soft:   46 34 12;     /* #2E220C */
+  --caution-dot:    226 163 54;   /* #E2A336 */
+  --critical:       255 163 158;  /* #FFA39E */
+  --critical-soft:  51 20 22;     /* #331416 */
+  --critical-dot:   240 97 106;   /* #F0616A */
   --critical-solid: 214 58 64;    /* #D63A40 */
+  --critical-fg:    255 255 255;  /* #FFFFFF */
+  --info:           156 194 251;  /* #9CC2FB */
+  --info-soft:      16 32 58;     /* #10203A */
+  --info-dot:       91 156 246;   /* #5B9CF6 */
+  --violet:         195 184 251;  /* #C3B8FB */
+  --violet-soft:    31 26 56;     /* #1F1A38 */
+  --violet-dot:     155 141 243;  /* #9B8DF3 */
+  --teal:           132 217 207;  /* #84D9CF */
+  --teal-soft:      15 41 39;     /* #0F2927 */
+  --teal-dot:       45 212 191;   /* #2DD4BF */
+  --neutral:        184 188 197;  /* #B8BCC5 */
+  --neutral-soft:   32 35 41;     /* #202329 */
+  --neutral-dot:    115 120 130;  /* #737882 */
+  --chart-1:        112 163 255;  /* #70A3FF blue-400 */
+  --chart-2:        47 191 138;   /* #2FBF8A emerald, series 1 before the blue */
+  --chart-3:        240 162 74;   /* #F0A24A */
+  --chart-4:        155 141 243;  /* #9B8DF3 */
+  --chart-5:        140 147 159;  /* #8C939F (spec #6F7B76 is 2.2:1 on a card) */
+  --chart-1-soft:   112 163 255;
+  --chart-1-soft-a: 0.16;
+  --amb-1:          112 163 255;
+  --amb-1-a:        0.22;
+  --amb-2:          0 81 218;
+  --amb-2-a:        0.14;
+  --amb-3:          56 189 248;
+  --amb-3-a:        0.09;
+  --amb-4:          112 163 255;
+  --amb-4-a:        0.06;
 
-  --shadow-raised:  0 0 #0000;
-  --shadow-overlay: 0 20px 48px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --grain:          0.05;
+  --glass-hi:       inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --glass-shadow:   0 1px 1px rgb(0 0 0 / 0.3), 0 16px 36px -20px rgb(0 0 0 / 0.75);
+  --elev-xs:        0 1px 2px rgb(0 0 0 / 0.4);
+  --elev-md:        0 12px 30px -12px rgb(0 0 0 / 0.6);
+  --elev-lg:        0 30px 70px -20px rgb(0 0 0 / 0.75);
+  --brand-gradient:       linear-gradient(180deg, #99beff 0%, #70a3ff 100%);
+  --brand-gradient-hover: linear-gradient(180deg, #b8d2ff 0%, #85b1ff 100%);
+  --brand-glow:     inset 0 1px 0 rgb(255 255 255 / 0.4), 0 8px 24px -10px rgb(112 163 255 / 0.55);
 }
 
-/* ── Legacy theme tokens (every screen built before Phase 2) ─────────────── */
-/* @legacy-tokens light */
-:root {
-  /* Light */
-  --bg-base:        #f4f6fa;
-  --bg-surface:     #ffffff;
-  --bg-elevated:    #ffffff;
-  --bg-subtle:      #f8f9fc;
-  --bg-muted:       #eef1f7;
-  --border:         #e4e8f0;
-  --border-subtle:  #edf0f7;
-  --text-primary:   #111827;
-  --text-secondary: #6b7280;
-  --text-tertiary:  #9ca3af;
-  --text-inverse:   #ffffff;
-  --accent:         #2563eb;
-  --accent-hover:   #1d4ed8;
-  --accent-subtle:  #eff6ff;
-  --accent-text:    #2563eb;
-  /* Darkened 17.09.2026 (owner's decision) from #059669 / #d97706, which were
-     too light to carry a white label: 3.77:1 and 3.19:1. See the note above the
-     dark block for why the fill needs its own token.
-
-     --danger followed on 18.09.2026, from #dc2626. It was the last status colour
-     still failing as text on its own -subtle fill (4.41:1), and here one value
-     serves both roles: a white label needs the fill at luminance <= 0.1833, and
-     reading on --danger-subtle needs the token at <= 0.1633, which is the
-     tighter of the two. #C0262D is the Phase-2 --critical / --critical-solid,
-     already approved, so the two palettes hold one red. */
-  --success:        #0A7A45;
-  --success-solid:  #0A7A45;
-  --success-subtle: #ecfdf5;
-  --warning:        #8F5200;
-  --warning-solid:  #8F5200;
-  --warning-subtle: #fffbeb;
-  --danger:         #C0262D;
-  --danger-solid:   #C0262D;
-  --danger-subtle:  #fef2f2;
-  --shadow-sm:      0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md:      0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-  --shadow-lg:      0 8px 24px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.04);
+/* ── Base: the canvas, the ambient field and the grain ────────────────────── */
+/* The canvas is painted on html and the page body is transparent, so the two fixed
+   pseudo-elements below sit behind every screen and scrolling never repaints them. */
+html {
+  background-color: rgb(var(--canvas));
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-
-/* @legacy-tokens dark */
-.dark {
-  --bg-base:        #0b0f17;
-  --bg-surface:     #111827;
-  --bg-elevated:    #1a2235;
-  --bg-subtle:      #141d2e;
-  --bg-muted:       #1e2a3d;
-  --border:         rgba(255,255,255,0.08);
-  --border-subtle:  rgba(255,255,255,0.05);
-  --text-primary:   #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-tertiary:  #64748b;
-  --text-inverse:   #111827;
-  --accent:         #06b6d4;
-  --accent-hover:   #0891b2;
-  --accent-subtle:  rgba(6,182,212,0.1);
-  --accent-text:    #22d3ee;
-  /* --success / --warning are TEXT here and keep their values: on a dark
-     surface a status colour has to be light, and they already reach 5.35:1 to
-     8.93:1 that way.
-
-     --success-solid / --warning-solid are the same status colour as a FILL
-     under a white label, and in the dark theme they cannot be the same value.
-     A label needs the fill at luminance <= 0.183; reading as text on
-     --bg-surface needs the token at >= 0.237. Those windows do not overlap, so
-     one token cannot do both — which is why the fill has its own name, exactly
-     as --critical-solid does in the Phase-2 block above. In the light theme
-     both roles want the same darkness and the two tokens hold one value.
-
-     --danger is the same arithmetic, with a wider gap. #ef4444 was too dark for
-     the text role — 4.21:1 on --bg-elevated and 3.87:1 on its own -subtle fill
-     over it — and too light for the fill role, 3.76:1 under white. The text
-     role needs luminance >= 0.2741 (the -subtle fill over --bg-elevated is the
-     binding surface) and the white label needs <= 0.1833, so the split is
-     forced here too. #FF8A8A and #D63A40 are the Phase-2 --critical and
-     --critical-solid.
-
-     --danger-subtle keeps rgba(239,68,68,0.1): the wash is the same hue (0°) as
-     the new text colour, it reaches 6.42:1 to 7.81:1 under it, and moving it
-     would repaint some forty badges for no contrast gain. */
-  --success:        #10b981;
-  --success-solid:  #0B824A;
-  --success-subtle: rgba(16,185,129,0.1);
-  --warning:        #f59e0b;
-  --warning-solid:  #A85F00;
-  --warning-subtle: rgba(245,158,11,0.1);
-  --danger:         #FF8A8A;
-  --danger-solid:   #D63A40;
-  --danger-subtle:  rgba(239,68,68,0.1);
-  --shadow-sm:      0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
-  --shadow-md:      0 4px 16px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.3);
-  --shadow-lg:      0 8px 32px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.3);
-}
-
-/* ── Base resets ──────────────────────────────────────────────────────────── */
+html.dark { color-scheme: dark; }
 body {
-  background-color: var(--bg-base);
-  color: var(--text-primary);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  background: transparent;
+  isolation: isolate;
+  color: rgb(var(--fg));
+}
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+/* The glow and the grain sit below every pane's blur layer (z-index -1, the
+   `::before` of .glass-sheet and .glass-topbar below), so a pane blurs them. */
+body::before {
+  z-index: -3;
+  background:
+    radial-gradient(42% 38% at 6% 4%, rgb(var(--amb-1) / var(--amb-1-a)), transparent 72%),
+    radial-gradient(36% 36% at 94% 18%, rgb(var(--amb-2) / var(--amb-2-a)), transparent 72%),
+    radial-gradient(44% 40% at 72% 98%, rgb(var(--amb-3) / var(--amb-3-a)), transparent 72%),
+    radial-gradient(30% 30% at 20% 80%, rgb(var(--amb-4) / var(--amb-4-a)), transparent 72%);
+}
+body::after {
+  z-index: -2;
+  opacity: var(--grain);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
-/* ── Scrollbar styling ────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+/* Figures line up in every table, and in anything that asks for them. */
+table { font-variant-numeric: tabular-nums; }
+
+/* ── Fallbacks: a person who asks for less transparency or more contrast, and a browser
+   without backdrop-filter, get opaque panes and no grain. The glass utilities read these
+   same variables, so one block covers every pane. ───────────────────────────────────── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root {
+    --raised: 255 255 255; --raised-a: 1;
+    --sheet: 248 251 250;  --sheet-a: 1;
+    --overlay: 255 255 255; --overlay-a: 1;
+    --field: 255 255 255;  --field-a: 1;
+  }
+  .dark {
+    --raised: 18 24 22;    --raised-a: 1;
+    --sheet: 14 20 18;     --sheet-a: 1;
+    --overlay: 21 28 25;   --overlay-a: 1;
+    --field: 21 28 25;     --field-a: 1;
+  }
+  body::after { display: none; }
+  *, *::before, *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+}
+@media (prefers-contrast: more) {
+  :root { --line-a: 0.25; --line-strong-a: 0.6; }
+  .dark { --line-a: 0.28; --line-strong-a: 0.6; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --sheet: 248 251 250;  --sheet-a: 1;
+    --overlay: 255 255 255; --overlay-a: 1;
+  }
+  .dark {
+    --sheet: 14 20 18;     --sheet-a: 1;
+    --overlay: 21 28 25;   --overlay-a: 1;
+  }
+}
+
+/* ── Glass panes ──────────────────────────────────────────────────────────────
+   One recipe per layer (PLAN.md §2). A card is a translucent pane with an edge and a
+   highlight and NO blur; only the layers that sit over moving content blur what is
+   behind them: the sidebar and the content sheet, the topbar, dialogs and menus, the
+   drawer, the toast and the scrim. In @layer components so a utility passed through
+   className still wins. Every colour is a token, so the fallbacks above cover them. */
+@layer components {
+  .glass-card {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--raised) / var(--raised-a));
+    box-shadow: var(--shadow-raised);
+  }
+  /* The sheet and the topbar blur through a `::before` layer, never on the element itself.
+     An element with a backdrop-filter becomes the containing block of every `position:
+     fixed` descendant, and the content sheet holds every page: the hand-built
+     `fixed inset-0` overlays a few dialogs still draw would open inside the sheet instead of
+     over the viewport, and UserMenu's click-outside layer would shrink to the 60px topbar.
+     The layer adds no stacking context either, so such a dialog's z-50 still covers the
+     sidebar. The
+     topbar is sticky with a z-index, so its layer stays inside it; the sheet's layer
+     joins the body's stacking context, above the glow (-3) and the grain (-2). */
+  .glass-sheet {
+    position: relative;
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    box-shadow: var(--shadow-raised);
+  }
+  .glass-sheet::before,
+  .glass-topbar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .glass-sheet::before {
+    background-color: rgb(var(--sheet) / var(--sheet-a));
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    backdrop-filter: blur(22px) saturate(160%);
+  }
+  .glass-strong {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--overlay) / var(--overlay-a));
+    box-shadow: var(--shadow-overlay);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    backdrop-filter: blur(26px) saturate(180%);
+  }
+  .glass-drawer {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--overlay) / var(--overlay-a));
+    box-shadow: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-lg);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+  }
+  .glass-topbar {
+    position: relative;
+    isolation: isolate;
+    border-bottom: 1px solid rgb(var(--line) / var(--line-a));
+  }
+  .glass-topbar::before {
+    background-color: rgb(var(--solid) / 0.52);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+  }
+  .glass-scrim {
+    background-color: rgb(var(--scrim) / var(--scrim-a));
+    -webkit-backdrop-filter: blur(6px) saturate(120%);
+    backdrop-filter: blur(6px) saturate(120%);
+  }
+  /* The collapsed sidebar's tooltip, the spec's `.sb-tip`: strong glass with
+     a lighter blur than a dialog, the hairline ring and a medium shadow. */
+  .glass-tip {
+    border: 1px solid rgb(var(--edge) / var(--edge-a));
+    background-color: rgb(var(--overlay) / var(--overlay-a));
+    box-shadow: var(--glass-hi), 0 0 0 1px rgb(var(--line) / var(--line-a)), var(--elev-md);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+  }
+  .glass-toast {
+    background-color: rgb(var(--toast) / var(--toast-a));
+    color: rgb(var(--toast-fg));
+    border: 1px solid rgb(var(--toast-fg) / 0.1);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    backdrop-filter: blur(16px) saturate(160%);
+  }
+}
+
+/* A page's direct children settle into place once, staggered. `backwards`, not the spec's
+   `both`: a transform left in effect after the animation would make each child a containing
+   block for position: fixed, and a hand-built dialog rendered inside a page would open inside
+   that child instead of over the viewport. Nothing moves for a person who asks for less
+   motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .page-settle > * { animation: page-settle 0.45s var(--ease) backwards; }
+  .page-settle > *:nth-child(2) { animation-delay: 0.03s; }
+  .page-settle > *:nth-child(3) { animation-delay: 0.06s; }
+  .page-settle > *:nth-child(4) { animation-delay: 0.09s; }
+  .page-settle > *:nth-child(5) { animation-delay: 0.12s; }
+  @keyframes page-settle { from { transform: translateY(6px); } }
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+::-webkit-scrollbar-thumb { background: rgb(var(--line-strong) / calc(var(--line-strong-a) * 0.6)); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--line-strong) / var(--line-strong-a)); }
 
 /* ── Native select dropdown readability ───────────────────────────────────── */
+/* The option list is drawn by the browser over everything, so it takes the opaque
+   surface: a translucent field fill would leave it see-through. */
 select {
-  color: var(--text-primary);
-  background-color: var(--bg-surface);
+  color: rgb(var(--fg));
+  background-color: rgb(var(--solid));
 }
 select option {
-  color: #111827;
-  background-color: #ffffff;
+  color: rgb(var(--fg));
+  background-color: rgb(var(--solid));
 }
 select option:disabled {
-  color: #94a3b8;
-  background-color: #ffffff;
+  color: rgb(var(--fg-subtle));
 }
-.dark select option {
-  color: #f1f5f9;
-  background-color: #1e2a3d;
-}
-.dark select option:disabled {
-  color: #64748b;
-  background-color: #1e2a3d;
-}
+
+/* The landing hero's three cards sit at start and end, so in Arabic they stand on the
+   other side and every sideways move and tilt below has to mirror with them. --hero-x is 1
+   left to right and -1 right to left; it inherits, so a nested dir resets it. Outside the
+   layer, because Tailwind keeps a layer's rules only for classes it finds in the source. */
+:root, [dir='ltr'] { --hero-x: 1; }
+[dir='rtl'] { --hero-x: -1; }
 
 /* ── Utility animations ───────────────────────────────────────────────────── */
 @layer utilities {
-  @keyframes slide-in-right {
-    from { transform: translateX(100%); opacity: 0; }
-    to   { transform: translateX(0);    opacity: 1; }
-  }
-  .animate-slide-in-right { animation: slide-in-right 0.3s ease-out; }
-
   @keyframes hero-card-enter-left {
-    from { opacity: 0; transform: translateX(-24px) translateY(12px) rotate(-4deg) scale(0.92); }
-    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(-4deg) scale(1); }
+    from { opacity: 0; transform: translateX(calc(var(--hero-x) * -24px)) translateY(12px) rotate(calc(var(--hero-x) * -4deg)) scale(0.92); }
+    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(calc(var(--hero-x) * -4deg)) scale(1); }
   }
   @keyframes hero-card-enter-right {
-    from { opacity: 0; transform: translateX(24px)  translateY(12px) rotate(3deg)  scale(0.92); }
-    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(3deg)  scale(1); }
+    from { opacity: 0; transform: translateX(calc(var(--hero-x) * 24px))  translateY(12px) rotate(calc(var(--hero-x) * 3deg))  scale(0.92); }
+    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(calc(var(--hero-x) * 3deg))  scale(1); }
   }
   @keyframes hero-card-enter-bottom-right {
-    from { opacity: 0; transform: translateX(24px)  translateY(20px) rotate(-2deg) scale(0.92); }
-    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(-2deg) scale(1); }
+    from { opacity: 0; transform: translateX(calc(var(--hero-x) * 24px))  translateY(20px) rotate(calc(var(--hero-x) * -2deg)) scale(0.92); }
+    to   { opacity: 1; transform: translateX(0)     translateY(0)    rotate(calc(var(--hero-x) * -2deg)) scale(1); }
   }
 
   @keyframes float-card-1 {
-    0%   { transform: rotate(-4deg) translateY(0px)    translateX(0px); }
-    25%  { transform: rotate(-4.4deg) translateY(-7px) translateX(1.5px); }
-    50%  { transform: rotate(-3.7deg) translateY(-11px) translateX(-1px); }
-    75%  { transform: rotate(-4.2deg) translateY(-5px)  translateX(2px); }
-    100% { transform: rotate(-4deg) translateY(0px)    translateX(0px); }
+    0%   { transform: rotate(calc(var(--hero-x) * -4deg)) translateY(0px)    translateX(0px); }
+    25%  { transform: rotate(calc(var(--hero-x) * -4.4deg)) translateY(-7px) translateX(calc(var(--hero-x) * 1.5px)); }
+    50%  { transform: rotate(calc(var(--hero-x) * -3.7deg)) translateY(-11px) translateX(calc(var(--hero-x) * -1px)); }
+    75%  { transform: rotate(calc(var(--hero-x) * -4.2deg)) translateY(-5px)  translateX(calc(var(--hero-x) * 2px)); }
+    100% { transform: rotate(calc(var(--hero-x) * -4deg)) translateY(0px)    translateX(0px); }
   }
   @keyframes float-card-2 {
-    0%   { transform: rotate(3deg)   translateY(0px)    translateX(0px); }
-    30%  { transform: rotate(3.3deg) translateY(-9px)   translateX(-2px); }
-    60%  { transform: rotate(2.8deg) translateY(-13px)  translateX(1.5px); }
-    85%  { transform: rotate(3.1deg) translateY(-6px)   translateX(-1px); }
-    100% { transform: rotate(3deg)   translateY(0px)    translateX(0px); }
+    0%   { transform: rotate(calc(var(--hero-x) * 3deg))   translateY(0px)    translateX(0px); }
+    30%  { transform: rotate(calc(var(--hero-x) * 3.3deg)) translateY(-9px)   translateX(calc(var(--hero-x) * -2px)); }
+    60%  { transform: rotate(calc(var(--hero-x) * 2.8deg)) translateY(-13px)  translateX(calc(var(--hero-x) * 1.5px)); }
+    85%  { transform: rotate(calc(var(--hero-x) * 3.1deg)) translateY(-6px)   translateX(calc(var(--hero-x) * -1px)); }
+    100% { transform: rotate(calc(var(--hero-x) * 3deg))   translateY(0px)    translateX(0px); }
   }
   @keyframes float-card-3 {
-    0%   { transform: rotate(-2deg)   translateY(0px)    translateX(0px); }
-    35%  { transform: rotate(-2.5deg) translateY(-8px)   translateX(1px); }
-    65%  { transform: rotate(-1.8deg) translateY(-12px)  translateX(-2px); }
-    90%  { transform: rotate(-2.2deg) translateY(-4px)   translateX(1.5px); }
-    100% { transform: rotate(-2deg)   translateY(0px)    translateX(0px); }
+    0%   { transform: rotate(calc(var(--hero-x) * -2deg))   translateY(0px)    translateX(0px); }
+    35%  { transform: rotate(calc(var(--hero-x) * -2.5deg)) translateY(-8px)   translateX(calc(var(--hero-x) * 1px)); }
+    65%  { transform: rotate(calc(var(--hero-x) * -1.8deg)) translateY(-12px)  translateX(calc(var(--hero-x) * -2px)); }
+    90%  { transform: rotate(calc(var(--hero-x) * -2.2deg)) translateY(-4px)   translateX(calc(var(--hero-x) * 1.5px)); }
+    100% { transform: rotate(calc(var(--hero-x) * -2deg))   translateY(0px)    translateX(0px); }
   }
 
   @keyframes dot-pulse {
@@ -326,103 +573,8 @@ select option:disabled {
     .hero-float-card-3 {
       animation: none !important;
     }
-    .hero-float-card-1 { transform: rotate(-4deg); opacity: 1; }
-    .hero-float-card-2 { transform: rotate(3deg);  opacity: 1; }
-    .hero-float-card-3 { transform: rotate(-2deg); opacity: 1; }
-  }
-
-  .animate-float-slow   { animation: float-card-1 5.8s ease-in-out infinite; }
-  .animate-float-medium { animation: float-card-2 6.4s ease-in-out infinite; }
-  .animate-float-fast   { animation: float-card-3 5.2s ease-in-out infinite; }
-
-  @keyframes fade-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .animate-fade-in { animation: fade-in 0.25s ease-out both; }
-
-  /* ── Theme-aware component classes ── */
-
-  .panel {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s ease;
-  }
-  .panel:hover { box-shadow: var(--shadow-md); }
-
-  .panel-elevated {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    box-shadow: var(--shadow-md);
-  }
-
-  .panel-subtle {
-    background: var(--bg-subtle);
-    border: 1px solid var(--border-subtle);
-    border-radius: 0.75rem;
-  }
-
-  .text-main    { color: var(--text-primary); }
-  .text-sub     { color: var(--text-secondary); }
-  .text-muted   { color: var(--text-tertiary); }
-  .text-accent  { color: var(--accent-text); }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--text-inverse);
-    border-radius: 0.625rem;
-    font-weight: 600;
-    font-size: 0.875rem;
-    padding: 0.5rem 1rem;
-    transition: all 0.15s ease;
-    border: none;
-    cursor: pointer;
-  }
-  .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow-md); }
-
-  .btn-ghost {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    border-radius: 0.625rem;
-    font-weight: 500;
-    font-size: 0.875rem;
-    padding: 0.5rem 1rem;
-    transition: all 0.15s ease;
-    cursor: pointer;
-  }
-  .btn-ghost:hover { background: var(--bg-muted); color: var(--text-primary); }
-
-  .input-base {
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 0.625rem;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-    padding: 0.5rem 0.75rem;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    width: 100%;
-    outline: none;
-  }
-  .input-base::placeholder { color: var(--text-tertiary); }
-  .input-base:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-subtle);
-  }
-
-  .badge-success { background: var(--success-subtle); color: var(--success); border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-  .badge-warning { background: var(--warning-subtle); color: var(--warning); border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-  .badge-danger  { background: var(--danger-subtle);  color: var(--danger);  border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-  .badge-accent  { background: var(--accent-subtle);  color: var(--accent-text); border-radius: 9999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; }
-
-  .divider { border-color: var(--border); }
-
-  /* dark utility overrides for Tailwind classes */
-  .dark .dark\:panel {
-    background: var(--bg-surface);
-    border-color: var(--border);
+    .hero-float-card-1 { transform: rotate(calc(var(--hero-x) * -4deg)); opacity: 1; }
+    .hero-float-card-2 { transform: rotate(calc(var(--hero-x) * 3deg));  opacity: 1; }
+    .hero-float-card-3 { transform: rotate(calc(var(--hero-x) * -2deg)); opacity: 1; }
   }
 }

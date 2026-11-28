@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, DollarSign, Calendar, FileText, Lock } from 'lucide-react';
+import { Save, DollarSign, Calendar, FileText, Lock } from 'lucide-react';
 import { SalaryPayment } from '../types/receipt';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -9,6 +9,18 @@ import {
   decidePaymentWrite,
   paymentFieldLock,
 } from '../utils/salaryPaymentWrite';
+import {
+  Alert,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Field,
+  Input,
+  NativeSelect,
+} from './ui';
 
 /**
  * Add or edit one salary payment.
@@ -36,17 +48,6 @@ interface SalaryPaymentModalProps {
    */
   issuedReceiptId?: string | null;
 }
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-  width: '100%',
-};
 
 const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
   isOpen,
@@ -151,91 +152,67 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)' }} className="w-full max-w-md">
-        <div style={{ borderBottom: '1px solid var(--border)' }} className="p-6 flex items-center justify-between">
-          <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold flex items-center space-x-2">
-            <DollarSign size={24} />
-            <span>{payment ? t('sal.payment.editTitle') : t('sal.payment.newTitle')}</span>
-          </h2>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-            onClick={onClose}
-            style={{ color: 'var(--text-tertiary)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-          >
-            <X size={24} />
-          </button>
-        </div>
+  // ── Presentation (phase 5)
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && (
-            <div style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.5rem', padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <AlertCircle style={{ color: 'var(--danger)', flexShrink: 0 }} size={20} />
-              <span style={{ color: 'var(--danger)', fontSize: '0.875rem' }}>{error}</span>
-            </div>
-          )}
+  return (
+    <Dialog
+      open
+      onOpenChange={next => {
+        if (!next && !loading) onClose();
+      }}
+    >
+      <DialogContent className="max-w-md" onPointerDownOutside={e => e.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-xl">
+            <DollarSign size={24} aria-hidden />
+            <span>{payment ? t('sal.payment.editTitle') : t('sal.payment.newTitle')}</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="grid gap-4">
+          {error && <Alert tone="critical">{error}</Alert>}
 
           {!payment && (
-            <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)', borderRadius: '0.5rem', padding: '1rem' }}>
-              <p style={{ color: 'var(--accent)', fontSize: '0.875rem' }}>
-                <span className="font-semibold">{t('sal.payment.remainingLabel')}</span> {remainingBalance.toFixed(2)} €
-              </p>
-            </div>
+            <Alert tone="brand">
+              <span className="font-semibold">{t('sal.payment.remainingLabel')}</span> {remainingBalance.toFixed(2)} €
+            </Alert>
           )}
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('sal.payment.type')} *
-            </label>
-            <select
-              value={formData.payment_type}
-              onChange={(e) => setFormData({ ...formData, payment_type: e.target.value as 'cash' | 'bank' })}
-              style={{ ...inputStyle, appearance: 'none', opacity: fieldLock === 'none' ? 1 : 0.6 }}
-              disabled={loading || fieldLock !== 'none'}
-              required
-            >
-              {/* The `value`s are the stored `salary_payments.payment_type`. */}
-              <option value="cash">{t('sal.payment.cash')}</option>
-              <option value="bank">{t('sal.payment.bankTransfer')}</option>
-            </select>
+          <div className="grid gap-3">
+            <Field label={t('sal.payment.type')} required>
+              <NativeSelect
+                value={formData.payment_type}
+                onChange={(e) => setFormData({ ...formData, payment_type: e.target.value as 'cash' | 'bank' })}
+                disabled={loading || fieldLock !== 'none'}
+                required
+              >
+                {/* The `value`s are the stored `salary_payments.payment_type`. */}
+                <option value="cash">{t('sal.payment.cash')}</option>
+                <option value="bank">{t('sal.payment.bankTransfer')}</option>
+              </NativeSelect>
+            </Field>
 
             {/* Why this stored row is read-only. */}
             {lockMessage && (
-              <div
-                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
-              >
-                <Lock size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0, marginTop: '0.125rem' }} />
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>{lockMessage}</span>
-              </div>
+              <Alert tone="neutral" icon={Lock} role="note">{lockMessage}</Alert>
             )}
             {/* Shown beside the select rather than after a failed submit. */}
             {blocked && (
-              <div
-                role="alert"
-                style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
-              >
-                <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '0.125rem' }} />
-                <span style={{ color: 'var(--danger)', fontSize: '0.8125rem' }}>{blocked}</span>
-              </div>
+              <Alert tone="critical" role="alert">{blocked}</Alert>
             )}
           </div>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('sal.payment.amount')} *
-            </label>
-            <div className="space-y-2">
+          <Field label={t('sal.payment.amount')} required>
+            <div className="grid gap-2">
               <div className="relative">
-                <DollarSign style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
-                <input
+                <DollarSign aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-[18px] -translate-y-1/2 text-fg-subtle" />
+                <Input
                   type="number"
                   step="0.01"
                   min="0.01"
                   value={formData.amount}
                   onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem', opacity: fieldLock === 'none' ? 1 : 0.6 }}
+                  className="ps-9"
                   placeholder="0.00"
                   disabled={loading || fieldLock !== 'none'}
                   readOnly={fieldLock !== 'none'}
@@ -243,83 +220,64 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
                 />
               </div>
               {!payment && remainingBalance > 0 && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setFormData({ ...formData, amount: remainingBalance.toFixed(2) })}
-                  style={{ width: '100%', padding: '0.375rem 0.75rem', fontSize: '0.875rem', background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: '0.5rem' }}
-                  onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
-                  onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                  className="w-full text-positive"
                   disabled={loading}
                 >
                   {t('sal.payment.payRemaining', { amount: remainingBalance.toFixed(2) })}
-                </button>
+                </Button>
               )}
             </div>
-          </div>
+          </Field>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('sal.payment.date')} *
-            </label>
+          <Field label={t('sal.payment.date')} required>
             <div className="relative">
-              <Calendar style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
-              <input
+              <Calendar aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-[18px] -translate-y-1/2 text-fg-subtle" />
+              <Input
                 type="date"
                 value={formData.payment_date}
                 onChange={(e) => setFormData({ ...formData, payment_date: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem' }}
+                className="ps-9"
                 disabled={loading}
                 required
               />
             </div>
-          </div>
+          </Field>
 
           {/* Offered on every path again: the Gehaltsquittung step that wrote its
               own description ("Gehaltsquittung GQ-…") is gone, and the owner named
               the missing note as one of the things it cost him. */}
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('common.description')}
-            </label>
+          <Field label={t('common.description')} id="sal-payment-description">
             <div className="relative">
-              <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
+              <FileText aria-hidden className="pointer-events-none absolute start-3 top-3 size-[18px] text-fg-subtle" />
               <textarea
+                id="sal-payment-description"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
+                className="min-h-20 w-full resize-y rounded-control border border-line-strong bg-field py-2 pe-3 ps-9 font-ui text-sm text-fg shadow-field transition-[border-color,box-shadow] placeholder:text-fg-subtle focus-visible:border-brand focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-focus/25 disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-subtle [@media(pointer:coarse)]:text-base"
                 placeholder={t('sal.payment.descriptionPlaceholder')}
                 rows={3}
                 disabled={loading}
               />
             </div>
-          </div>
+          </Field>
 
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.5rem 1rem' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-              disabled={loading}
-            >
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
               {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={loading || blocked !== null}
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
-              onMouseEnter={e => { if (!loading && !blocked) e.currentTarget.style.background = 'var(--accent-hover)'; }}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-              className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Save size={20} />
+            </Button>
+            <Button type="submit" disabled={loading || blocked !== null}>
+              <Save aria-hidden />
               <span>{loading ? t('common.saving') : t('common.save')}</span>
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 

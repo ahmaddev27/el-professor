@@ -205,7 +205,13 @@ export function applyFigures(rng: Rng, rides: SimRide[], f: WeekFigures): string
   return spreadTips(rng, done, f.trinkgeld);
 }
 
-function spreadTips(rng: Rng, done: SimRide[], tip: number): string | null {
+/**
+ * Spreads a tip total, in integer cents, over some of the given completed
+ * rides, exactly: the rides' tips add up to the total to the cent. Weeks mode
+ * spreads a week's tips with it, calendar mode a driver-day's imported tips
+ * (reconciliation.ts), so both modes use one rule. Null, or a reason.
+ */
+export function spreadTips(rng: Rng, done: SimRide[], tip: number): string | null {
   if (tip === 0) return null;
   const count = Math.max(1, Math.min(done.length, Math.round(tip / 300), Math.floor(tip / 50)));
   const chosen = [...done].sort(() => rng.next() - 0.5).slice(0, count);

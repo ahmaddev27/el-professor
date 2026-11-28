@@ -1,7 +1,7 @@
 import { CONTRACT_LIMITS, CONTRACT_VERSION, type PayloadCell, type WorkbookPayload } from '../../lib/workbookContract';
 import type { ConstraintDecision } from '../constraintDecisionLog';
 import { formatCentsDe } from '../money';
-import type { FullMonthResult } from './fullMonth';
+import type { CapacityReason, FullMonthResult } from './fullMonth';
 import { SIMULATED_NOTICE, SIMULATED_SHEET_NAME, simulatedFileName } from './marker';
 import {
   TOTAL_LABEL,
@@ -13,12 +13,13 @@ import {
 } from './monthTotals';
 import { VERDICT_TEXT, verifyMonth, type MonthVerification, type CheckOutcome } from './monthVerification';
 import { operatingDayIn } from './period';
+import { SHARE_MEANING_TEXT } from './reconciliation';
 import { cancellationFeeOf, inExportScope } from './revenue';
 import type { RouteCheck } from './routeCheck';
 import type { ShiftDecision } from './simulationConstraints';
 import type { SimulationTenantSettings } from './tenantSettings';
 import { formatStamp } from './time';
-import type { SimRide } from './types';
+import { startsDuty, type SimRide } from './types';
 
 export { TOTAL_LABEL, monthTotals, reconcile, totalsByDriver, totalsByVehicle };
 export type { DriverTotals, ReconciliationRow, Totals, VehicleTotals } from './monthTotals';
@@ -101,7 +102,7 @@ export function labelled(rows: readonly Row[]): Row[] {
 const euro = (cents: number): number => cents / 100;
 export const yesNo = (v: boolean): string => (v ? 'Ja' : 'Nein');
 
-const dayOfRide = (ride: SimRide, s: SimulationTenantSettings): string =>
+export const dayOfRide = (ride: SimRide, s: SimulationTenantSettings): string =>
   operatingDayIn(ride.startMs ?? ride.orderTransmittedMs, s.timeZone, s.operatingDayStartHour);
 
 const stampOrEmpty = (ms: number | null, millis = false): string => (ms === null ? '' : formatStamp(ms, millis));
@@ -158,20 +159,25 @@ export function ridesSheetRows(result: FullMonthResult): Row[] {
 
 // ── Sheets B, C, D: the breakdowns ─────────────────────────────────────────
 
-const WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+export const WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
-export const REASON_TEXT: Record<string, string> = {
+export const REASON_TEXT: Record<CapacityReason, string> = {
   no_vehicle_in_fleet: 'kein Fahrzeug im Bestand',
   no_driver_in_pool: 'kein Fahrer im Pool',
   operating_day_has_no_start_instant: 'Betriebstag hat keinen Startzeitpunkt (Zeitumstellung)',
-  no_driver_available: 'kein Fahrer verfuegbar',
-  no_vehicle_free: 'kein Fahrzeug frei',
+  no_vehicle_free: 'kein Fahrzeug im Fenster des Fahrers frei',
   driver_blocked_by_note: 'Fahrer durch Notiz gesperrt',
   driver_weekday_not_allowed: 'Wochentag fuer Fahrer nicht erlaubt',
   driver_resting: 'Fahrer in Ruhezeit',
+  driver_not_needed: 'Fahrer nicht benoetigt (Monatsziel mit weniger Tagen erreicht)',
+  driver_window_too_short: 'Arbeitsfenster des Fahrers zu kurz',
+  driver_window_unreadable: 'Arbeitsfenster in der Zeitumstellung nicht eindeutig',
+  driver_no_uber_activity: 'Uber meldet keine Fahrt des Fahrers',
+  driver_has_real_trips: 'echte Fahrten des Fahrers - nicht simuliert',
+  driver_configuration_required: 'Stundenrahmen oder Arbeitsfenster fehlt (CONFIGURATION_REQUIRED)',
   shift_produced_no_ride: 'Schicht ohne Fahrt',
-  shift_too_short: 'Schicht unter der Mindestdauer verworfen',
   vehicle_tuev_expired: 'TUEV des Fahrzeugs abgelaufen',
+  vehicle_unavailable: 'Fahrzeug laut Ausfallzeitraum nicht verfuegbar',
 };
 
 export const DAY_HEADERS: readonly string[] = [
@@ -195,7 +201,7 @@ export function daysSheetRows(result: FullMonthResult): Row[] {
   const t = monthTotals(result);
   const hours = result.days.reduce((n, d) => n + d.hours, 0);
   const total: Row = [
-    TOTAL_LABEL, '', hours, result.month.shifts.length, '', t.rides, t.completed,
+    TOTAL_LABEL, '', hours, result.month.shifts.filter(startsDuty).length, '', t.rides, t.completed,
     t.cancelled, euro(t.fareCents), euro(t.cancelledFeeCents), euro(t.tipCents), t.kmHundredths / 100, '', '',
   ];
   return [[...DAY_HEADERS], ...body, total];
@@ -393,7 +399,7 @@ export function eventsSheetRows(result: FullMonthResult): Row[] {
 
 export const DECISION_HEADERS: readonly string[] = [
   'Tag', 'Kennzeichen', 'Fahrer', 'Ergebnis', 'Code', 'Grund', 'Ereignis', 'Sicherheit', 'Anzahl',
-  'Schichtbeginn', 'Schichtende',
+  'Schichtbeginn', 'Schichtende', 'Dienst', 'Teil',
 ];
 
 const OUTCOME_WORD: Record<ShiftDecision['outcome'], string> = {
@@ -415,7 +421,7 @@ export function decisionsSheetRows(result: FullMonthResult): Row[] {
   const rows = result.decisions.map((d): Row => [
     d.day, d.plate, d.driverId === null ? '' : (labels.get(d.driverId) ?? d.driverId), OUTCOME_WORD[d.outcome],
     d.code, d.reason, d.eventRef ?? '', certaintyWord(d.certainty), d.count,
-    stampOrEmpty(d.startMs), stampOrEmpty(d.endMs),
+    stampOrEmpty(d.startMs), stampOrEmpty(d.endMs), d.dutyId ?? '', d.part ?? '',
   ]);
   return [[...DECISION_HEADERS], ...rows];
 }
@@ -432,11 +438,11 @@ function scalar(v: unknown): Cell {
   return JSON.stringify(v);
 }
 
-function settingLines(prefix: string, values: object): Row[] {
+export function settingLines(prefix: string, values: object): Row[] {
   return Object.entries(values).map(([k, v]): Row => [`${prefix}${k}`, scalar(v)]);
 }
 
-function routingLines(result: FullMonthResult): Row[] {
+export function routingLines(result: FullMonthResult): Row[] {
   const p = result.provenance;
   const r = p.routing;
   const rs = result.routeSummary;
@@ -470,6 +476,28 @@ function routingLines(result: FullMonthResult): Row[] {
   ];
 }
 
+export const BASE_SOURCE_TEXT: Record<NonNullable<FullMonthResult['provenance']['base']['source']> | 'none', string> = {
+  saved_point: 'gespeicherter Punkt (Fahrtenanalyse)',
+  company_address: 'aus der Firmenadresse abgeleitet, auf Hausnummer genau geocodiert',
+  none: 'nicht angegeben (CONFIGURATION_REQUIRED)',
+};
+
+/** The financial reconciliation's headline: its status, why, the tips and the share, never booked. */
+export function financialLines(result: FullMonthResult): Row[] {
+  const f = result.financial;
+  return [
+    ['Finanzabgleich mit Uber (getrennt vom Exportstatus)', f.status],
+    ['Finanzabgleich Gruende', f.reasons.join(', ')],
+    ['Uber-Zahlen gelesen', yesNo(f.uberRead)],
+    ['Trinkgeld laut Uber (EUR)', euro(f.totals.tipsImportedCents)],
+    ['Trinkgeld auf simulierte Fahrten verteilt (EUR, SIMULIERT)', euro(f.totals.tipsAllocatedCents)],
+    ['Trinkgeld nicht verteilt (EUR)', euro(f.totals.tipsUnallocatedCents)],
+    ['Anteil: Grundlage', 'Uber-Umsatz je Fahrer und Betriebstag (importiert); Aktionen und Trinkgeld daneben, nicht darin'],
+    ['Anteil: Bedeutung', `${SHARE_MEANING_TEXT[f.share.meaning]} (D1) - berechnet und angezeigt, nicht gebucht, nicht in den Fahrpreisen`],
+    ['Unternehmensanteil berechnet (EUR, Summe der Tage)', euro(f.totals.shareCents)],
+  ];
+}
+
 export function sourceSheetRows(result: FullMonthResult, verification: MonthVerification = verifyMonth(result)): Row[] {
   const p = result.provenance;
   return [
@@ -486,6 +514,18 @@ export function sourceSheetRows(result: FullMonthResult, verification: MonthVeri
     ['Monat', p.month],
     ['Eingabequelle', 'period_driven: Tage aus dem Kalender, Einnahmen erzeugt, keine Messung'],
     ['Schichten je Fahrzeug und Tag', p.shiftsPerVehicleDay],
+    ['Betriebssitz', p.base.label],
+    ['Betriebssitz Herkunft', BASE_SOURCE_TEXT[p.base.source ?? 'none']],
+    ['Betriebssitz Breite', p.base.lat],
+    ['Betriebssitz Laenge', p.base.lon],
+    ['Rueckkehr zum Betriebssitz am Schichtende', yesNo(p.returnToBase)],
+    // The real trips are records; this file holds the simulation only and names how many it left alone.
+    ['Echte Fahrten im Monat (IMPORTIERT, unveraendert, nicht in dieser Datei)', p.realTrips ? p.realTrips.trips : 'nicht gelesen'],
+    ['Fahrertage mit echten Fahrten (nicht simuliert)', p.realTrips ? p.realTrips.driverDays : 'nicht gelesen'],
+    ['Echte Fahrten ohne eindeutigen Fahrer', p.realTrips ? p.realTrips.unattributed : 'nicht gelesen'],
+    ['Echte Fahrten mit unlesbarem Betrag', p.realTrips ? p.realTrips.unreadableAmounts : 'nicht gelesen'],
+    // Section 5 and 6: the money against Uber, a status of its own beside the export status (D10).
+    ...financialLines(result),
     ...settingLines('Einstellung ', p.settings),
     ...settingLines('Option ', p.options),
     ...settingLines('Eingabe ', p.inputs),

@@ -138,7 +138,7 @@ const AuthCallbackPage: React.FC = () => {
   }
 
   return (
-    <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center bg-canvas px-4 font-ui">
+    <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center px-4 font-ui">
       <div role="status" className="grid justify-items-center gap-4 text-center">
         <div aria-hidden className="size-10 rounded-full border-2 border-line border-b-brand motion-safe:animate-spin" />
         <p className="text-sm text-fg-muted">{t('signup.callback.checking')}</p>

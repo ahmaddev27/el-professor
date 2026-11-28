@@ -313,10 +313,17 @@ BEGIN
                           CASE WHEN u.allowed THEN 'updates' ELSE 'matches no' END),
       writes = CASE WHEN u.allowed THEN 'rows 1' ELSE 'rows 0' END);
 
-    writes := _ts_try(uid, format('DELETE FROM drivers WHERE id = %L', drv));
+    -- MOVED 27.11.2026 by 20261127130000: deleting a driver asks for an
+    -- administrator (the page gate is gone for this one command) and the guard
+    -- refuses a driver rows refer to, so the probe takes a driver nothing
+    -- refers to and only an administrator of a live company deletes it. The
+    -- fixture driver above is referenced (the trip names it) and is left alone.
+    INSERT INTO drivers (id, company_id, name)
+    VALUES (_ts_id('driver-del:' || u.who), co, 'TS deletable') ON CONFLICT (id) DO NOTHING;
+    writes := _ts_try(uid, format('DELETE FROM drivers WHERE id = %L', _ts_id('driver-del:' || u.who)));
     PERFORM _ts_ok(format('drivers: %s %s an existing row', u.label,
-                          CASE WHEN u.allowed THEN 'deletes' ELSE 'matches no' END),
-      writes = CASE WHEN u.allowed THEN 'rows 1' ELSE 'rows 0' END);
+                          CASE WHEN u.allowed AND u.role = 'admin' THEN 'deletes' ELSE 'matches no' END),
+      writes = CASE WHEN u.allowed AND u.role = 'admin' THEN 'rows 1' ELSE 'rows 0' END);
 
     -- The Fahrtenbuch, the planning tables and the historical tables had no
     -- tenant path of their own before this slice; now they answer like the rest.

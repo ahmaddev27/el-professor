@@ -11,8 +11,8 @@ import {
   type FeatureFlags,
   type FlagRow,
 } from '../../lib/featureFlags';
+import { Badge, Button, Card, cn } from '../ui';
 import {
-  cardStyle,
   EditorShell,
   Note,
   SaveRow,
@@ -71,37 +71,34 @@ const FeatureFlagsEditor: React.FC = () => {
           {hasUnknown && <Note textKey="admin.flags.unknownNote" />}
           {!maySave && <Note textKey="admin.settings.readOnly" />}
 
-          <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+          <Card className="overflow-hidden font-ui">
             {form.length === 0 ? (
-              <p className="px-5 py-6 text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.flags.none')}</p>
+              <p className="px-5 py-6 text-sm text-fg-subtle">{t('admin.flags.none')}</p>
             ) : (
               <ul>
                 {form.map((row, index) => {
                   const definition = flagDefinition(row.key);
                   return (
-                    <li key={row.key} className="flex items-start justify-between gap-4 px-5 py-4"
-                      style={{ borderBottom: index < form.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <li key={row.key} className={cn('flex items-start justify-between gap-4 px-5 py-4', index < form.length - 1 && 'border-b border-line')}>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          <span className="text-sm font-semibold text-fg">
                             {definition ? t(definition.label) : row.key}
                           </span>
                           {!row.known && (
-                            <span className="px-2 py-0.5 rounded-md text-xs font-semibold"
-                              style={{ background: 'var(--bg-subtle)', color: 'var(--warning)', border: '1px solid var(--border)' }}>
-                              {t('admin.flags.unknown')}
-                            </span>
+                            <Badge tone="caution">{t('admin.flags.unknown')}</Badge>
                           )}
                         </div>
-                        <code className="block text-xs mt-0.5 break-all" style={{ color: 'var(--text-tertiary)' }}>{row.key}</code>
-                        <p className="text-xs mt-1.5" style={{ color: 'var(--text-secondary)' }}>
+                        <code className="mt-0.5 block break-all text-xs text-fg-subtle">{row.key}</code>
+                        <p className="mt-1.5 text-xs text-fg-muted">
                           {definition ? t(definition.description) : t('admin.flags.unknownDesc')}
                         </p>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
-                        <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        <label className="flex items-center gap-2 text-sm text-fg-muted">
                           <input
                             type="checkbox"
+                            className="size-4 cursor-pointer accent-brand disabled:cursor-not-allowed"
                             checked={row.enabled}
                             disabled={!maySave}
                             onChange={e => {
@@ -119,15 +116,16 @@ const FeatureFlagsEditor: React.FC = () => {
                           would promise something it cannot do.
                         */}
                         {maySave && !row.known && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => setForm(form.filter((_, i) => i !== index))}
-                            className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 p-1.5 rounded-lg"
-                            style={{ color: 'var(--danger)' }}
+                            className="text-critical hover:text-critical"
                             title={t('admin.flags.remove')}
                             aria-label={t('admin.flags.remove')}
                           >
                             <Trash2 size={15} />
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </li>
@@ -135,7 +133,7 @@ const FeatureFlagsEditor: React.FC = () => {
                 })}
               </ul>
             )}
-          </div>
+          </Card>
 
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
         </>
@@ -143,5 +141,7 @@ const FeatureFlagsEditor: React.FC = () => {
     </EditorShell>
   );
 };
+
+// ── Presentation (phase 5): the markup above only draws; its logic is unchanged ──
 
 export default FeatureFlagsEditor;

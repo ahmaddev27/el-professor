@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Wrench, Calendar } from 'lucide-react';
+import { Save, Wrench, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -7,6 +7,11 @@ import { getWeekNumber, getWeeksOfMonth, getWeekNumberForDate, getBusinessMonth 
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { updateChecked } from '../lib/writeOutcome';
+import {
+  Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Field, Input, NativeSelect, cn,
+} from './ui';
+import { controlFrameClass } from './ui/Input';
 
 interface Car {
   id: string;
@@ -31,17 +36,6 @@ interface WerkstattCheckModalProps {
   onClose: () => void;
   onSuccess: () => void;
 }
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-  width: '100%',
-};
 
 export default function WerkstattCheckModal({
   check,
@@ -224,37 +218,53 @@ export default function WerkstattCheckModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)' }} className="max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0 }} className="px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div style={{ background: 'var(--warning-subtle)', borderRadius: '0.5rem', padding: '0.5rem' }}>
-              <Wrench style={{ color: 'var(--warning)' }} className="w-6 h-6" />
-            </div>
-            <h2 style={{ color: 'var(--text-primary)' }} className="text-xl font-semibold">
-              {check ? t('fleet.editCheck') : t('fleet.newWerkstattCheck')}
-            </h2>
-          </div>
-          <button className="inline-flex items-center justify-center [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10"
-            onClick={onClose}
-            style={{ color: 'var(--text-tertiary)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the form's logic and is unchanged, bar the module-level
+  // `inputStyle` object, which was only look and is classes now. Everything
+  // below only draws.
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('fleet.vehicle')} *
-            </label>
-            <select
+  const FORM_ID = 'werkstatt-check-form';
+
+  const textareaClass = cn(
+    controlFrameClass,
+    'h-auto min-h-0 resize-y py-2 [@media(pointer:coarse)]:h-auto',
+  );
+
+  const statusOptions = [
+    { key: 'positive' as const, label: t('werkstatt.positive'), active: 'border-positive bg-positive-soft text-positive' },
+    { key: 'negative' as const, label: t('werkstatt.negative'), active: 'border-critical bg-critical-soft text-critical' },
+    { key: 'repaired' as const, label: t('werkstatt.repaired'), active: 'border-info bg-info-soft text-info' },
+  ];
+
+  return (
+    <Dialog
+      open
+      onOpenChange={open => {
+        // Cancel is disabled while a save runs, so Escape and the close button wait too.
+        if (!open && !loading) onClose();
+      }}
+    >
+      <DialogContent
+        className="max-w-2xl"
+        // A click beside the form must not throw away what was typed; the old
+        // modal ignored it as well. Escape and the close button still close.
+        onInteractOutside={event => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3 text-xl">
+            <span className="flex size-10 items-center justify-center rounded-tile bg-caution-soft text-caution">
+              <Wrench aria-hidden className="size-5" />
+            </span>
+            {check ? t('fleet.editCheck') : t('fleet.newWerkstattCheck')}
+          </DialogTitle>
+          <DialogDescription className="sr-only">{t('werkstatt.subtitle')}</DialogDescription>
+        </DialogHeader>
+
+        <form id={FORM_ID} onSubmit={handleSubmit} className="grid gap-5">
+          <Field label={t('fleet.vehicle')} required>
+            <NativeSelect
               value={carId}
               onChange={(e) => setCarId(e.target.value)}
-              style={{ ...inputStyle, appearance: 'none' }}
               required
               disabled={loading || loadingCars || !!check}
             >
@@ -264,55 +274,53 @@ export default function WerkstattCheckModal({
                   {car.kennzeichen}
                 </option>
               ))}
-            </select>
-          </div>
+            </NativeSelect>
+          </Field>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('fleet.monthAndWeek')} *
-            </label>
-            <div style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Calendar style={{ color: 'var(--text-secondary)' }} className="w-5 h-5" />
-              <button
-                type="button"
-                onClick={() => handleMonthChange('prev')}
-                style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.25rem 0.75rem', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
-                disabled={loading}
-              >
-                ←
-              </button>
-              <div className="text-center min-w-[140px]">
-                <div style={{ color: 'var(--text-primary)' }} className="font-semibold">
+          <Field label={t('fleet.monthAndWeek')} required>
+            <div className="flex flex-wrap items-center gap-3 rounded-control border border-line bg-sunken p-3">
+              {/* One group, so a phone never leaves „→“ on a line of its own. */}
+              <div className="flex items-center gap-2">
+                <Calendar aria-hidden className="size-5 text-fg-muted" />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="[@media(pointer:coarse)]:min-w-10"
+                  onClick={() => handleMonthChange('prev')}
+                  disabled={loading}
+                >
+                  <span aria-hidden className="inline-block rtl:-scale-x-100">←</span>
+                </Button>
+                <div className="min-w-[120px] whitespace-nowrap text-center font-semibold text-fg sm:min-w-[140px]">
                   {selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
                 </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="[@media(pointer:coarse)]:min-w-10"
+                  onClick={() => handleMonthChange('next')}
+                  disabled={loading}
+                >
+                  <span aria-hidden className="inline-block rtl:-scale-x-100">→</span>
+                </Button>
               </div>
-              <button
+              <Button
                 type="button"
-                onClick={() => handleMonthChange('next')}
-                style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.25rem 0.75rem', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
-                disabled={loading}
-              >
-                →
-              </button>
-              <button
-                type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => setSelectedMonth(new Date())}
-                style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', borderRadius: '0.5rem', padding: '0.25rem 0.75rem', fontSize: '0.875rem', border: '1px solid var(--border)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 disabled={loading}
               >
                 {t('common.today')}
-              </button>
+              </Button>
               <div className="flex-1" />
-              <select
+              <NativeSelect
+                containerClassName="w-auto"
+                className="h-9"
                 value={selectedWeek}
                 onChange={(e) => setSelectedWeek(Number(e.target.value))}
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', color: 'var(--text-primary)', padding: '0.25rem 0.75rem', outline: 'none', appearance: 'none' }}
                 disabled={loading}
               >
                 {weeks.map((week) => (
@@ -320,169 +328,105 @@ export default function WerkstattCheckModal({
                     {week.label}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
-          </div>
+          </Field>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('fleet.checkDateOptional')}
-            </label>
-            <input
+          <Field label={t('fleet.checkDateOptional')} hint={t('fleet.checkDateHint')}>
+            <Input
               type="date"
               value={checkDate}
               onChange={(e) => setCheckDate(e.target.value)}
-              style={inputStyle}
               disabled={loading}
             />
-            <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              {t('fleet.checkDateHint')}
-            </p>
-          </div>
+          </Field>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('common.status')} *
-            </label>
-            <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
-              <button
-                type="button"
-                onClick={() => setStatus('positive')}
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderRadius: '0.5rem',
-                  border: status === 'positive' ? '2px solid var(--success)' : '2px solid var(--border)',
-                  background: status === 'positive' ? 'var(--success-subtle)' : 'transparent',
-                  color: status === 'positive' ? 'var(--success)' : 'var(--text-secondary)',
-                  fontWeight: status === 'positive' ? 500 : 400,
-                  cursor: 'pointer',
-                }}
-                disabled={loading}
-              >
-                {t('werkstatt.positive')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatus('negative')}
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderRadius: '0.5rem',
-                  border: status === 'negative' ? '2px solid var(--danger)' : '2px solid var(--border)',
-                  background: status === 'negative' ? 'var(--danger-subtle)' : 'transparent',
-                  color: status === 'negative' ? 'var(--danger)' : 'var(--text-secondary)',
-                  fontWeight: status === 'negative' ? 500 : 400,
-                  cursor: 'pointer',
-                }}
-                disabled={loading}
-              >
-                {t('werkstatt.negative')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatus('repaired')}
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderRadius: '0.5rem',
-                  border: status === 'repaired' ? '2px solid var(--accent)' : '2px solid var(--border)',
-                  background: status === 'repaired' ? 'var(--accent-subtle)' : 'transparent',
-                  color: status === 'repaired' ? 'var(--accent)' : 'var(--text-secondary)',
-                  fontWeight: status === 'repaired' ? 500 : 400,
-                  cursor: 'pointer',
-                }}
-                disabled={loading}
-              >
-                {t('werkstatt.repaired')}
-              </button>
+          <fieldset className="grid gap-1.5">
+            <legend className="mb-1.5 text-[13px] font-[550] text-fg-muted">
+              {t('common.status')}<span aria-hidden className="ms-0.5 text-critical">*</span>
+            </legend>
+            <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-3">
+              {statusOptions.map(option => (
+                <button
+                  key={option.key}
+                  type="button"
+                  aria-pressed={status === option.key}
+                  onClick={() => setStatus(option.key)}
+                  disabled={loading}
+                  className={cn(
+                    'rounded-control border-2 px-4 py-3 text-sm transition-colors [@media(pointer:coarse)]:min-h-11',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-50',
+                    status === option.key ? cn('font-medium', option.active) : 'border-line font-normal text-fg-muted hover:bg-sunken',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
-          </div>
+          </fieldset>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('werkstatt.oilStatus')}
-            </label>
-            {/* The example values stay German: whatever is typed here is stored
-                verbatim and printed into the German Werkstatt Excel export. */}
-            <input
+          {/* The example values stay German: whatever is typed here is stored
+              verbatim and printed into the German Werkstatt Excel export. */}
+          <Field label={t('werkstatt.oilStatus')}>
+            <Input
               type="text"
               value={oilStatus}
               onChange={(e) => setOilStatus(e.target.value)}
-              style={inputStyle}
               placeholder={t('fleet.oilStatusPlaceholder')}
               disabled={loading}
             />
-          </div>
+          </Field>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('werkstatt.odometer')} *
-            </label>
-            <input
+          <Field label={t('werkstatt.odometer')} required>
+            <Input
               type="number"
               value={kmStand}
               onChange={(e) => setKmStand(e.target.value)}
-              style={inputStyle}
               placeholder={t('fleet.odometerPlaceholder')}
               min="0"
               required
               disabled={loading}
             />
-          </div>
+          </Field>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('fleet.checkNotes')} *
-            </label>
+          <Field label={t('fleet.checkNotes')} required id="werkstatt-check-notes">
             <textarea
+              id="werkstatt-check-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={4}
-              style={{ ...inputStyle, resize: 'vertical' }}
+              className={textareaClass}
               placeholder={t('fleet.checkNotesPlaceholder')}
               required
               disabled={loading}
             />
-          </div>
+          </Field>
 
           {status === 'repaired' && (
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                {t('fleet.repairNotes')}
-              </label>
+            <Field label={t('fleet.repairNotes')} id="werkstatt-repair-notes">
               <textarea
+                id="werkstatt-repair-notes"
                 value={repairNotes}
                 onChange={(e) => setRepairNotes(e.target.value)}
                 rows={3}
-                style={{ ...inputStyle, resize: 'vertical' }}
+                className={textareaClass}
                 placeholder={t('fleet.repairNotesPlaceholder')}
                 disabled={loading}
               />
-            </div>
+            </Field>
           )}
-
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }} className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ flex: 1, padding: '0.5rem 1rem', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: '0.5rem', background: 'transparent' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              disabled={loading}
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              style={{ flex: 1, padding: '0.5rem 1rem', background: loading ? 'var(--bg-muted)' : 'var(--warning-solid)', color: loading ? 'var(--text-tertiary)' : '#fff', borderRadius: '0.5rem', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
-              onMouseEnter={e => { if (!loading) e.currentTarget.style.opacity = '0.9'; }}
-              onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-              disabled={loading}
-            >
-              <Save className="w-5 h-5" />
-              {loading ? t('common.saving') : t('common.save')}
-            </button>
-          </div>
         </form>
-      </div>
-    </div>
+
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" form={FORM_ID} loading={loading}>
+            {loading ? null : <Save aria-hidden />}
+            {loading ? t('common.saving') : t('common.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
