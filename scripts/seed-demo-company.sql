@@ -51,10 +51,13 @@
 -- Section 6 (FleetBook round 8, the owner's go of 27.11.2026, D9) adds invented
 -- daily Uber figures for September and October 2026, in the nightly pull's own
 -- row shape, so the simulator's calendar month has Uber to reconcile against,
--- and writes a Betriebssitz only when the caller names one:
+-- and writes a Betriebssitz and the company's city only when the caller names
+-- them (the month needs both: the base, and the city its address pool is built
+-- for):
 --
 --   ... psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
 --     [-v demo_base_lat=<lat> -v demo_base_lon=<lon>] \
+--     [-v demo_city=<city> -v demo_postal_code=<plz>] \
 --     [-v demo_share_percent=30..33 [-v demo_return_to_base=on]] < scripts/seed-demo-company.sql
 --
 -- `demo_share_percent` writes the company's simulation settings row (D1, the
@@ -246,7 +249,8 @@ SELECT
 -- driver off overlapping blocks, `must_include_in_plan` pins one, `neutral`
 -- records something without affecting the plan. One of each, so the Notizen
 -- screen and its export have all three and the planner has a pin and an exclusion
--- to honour.
+-- to honour. A fourth, Anna's approved leave on Thursday 08.10.2026, is section
+-- 6's deliberate case: Uber reports her driving on a day she is on leave.
 --
 -- A type and its effect have to agree (driver_notes_behavior_follows_type,
 -- 20261022143000): `sick`, `vacation` and `off` exclude, the five incident types
@@ -265,7 +269,8 @@ SELECT ctx.company_id, d.id, ctx.admin_id, n.text, n.kind, n.behaviour,
   FROM (VALUES
     ('Anna Beispiel',   'Krankmeldung liegt vor',        'sick',     'exclude_from_plan',    DATE '2026-11-09', DATE '2026-11-11', true),
     ('Bert Nachtfahrt', 'Kontrollfahrt eingeplant',      'other',    'must_include_in_plan', DATE '2026-11-19', DATE '2026-11-19', false),
-    ('Emil Normal',     'Urlaub beantragt, noch offen',  'general',  'neutral',              DATE '2026-11-30', DATE '2026-11-30', true)
+    ('Emil Normal',     'Urlaub beantragt, noch offen',  'general',  'neutral',              DATE '2026-11-30', DATE '2026-11-30', true),
+    ('Anna Beispiel',   'Urlaub genehmigt',              'vacation', 'exclude_from_plan',    DATE '2026-10-08', DATE '2026-10-08', true)
   ) AS n(driver, text, kind, behaviour, start_date, end_date, full_day)
   JOIN drivers d ON d.name = n.driver
   CROSS JOIN ctx
@@ -403,6 +408,16 @@ SELECT ctx.company_id, d.id, DATE '2026-11-01', DATE '2026-11-30',
 -- them:
 --   * Anna has one day of Uber activity on a weekday she is not allowed to work
 --     (the first such day in September), if her weekdays leave one out.
+--   * Anna has one day of Uber activity on a day of approved leave, Thursday
+--     08.10.2026 (section 2's `Urlaub genehmigt`). Unlike the weekday case it
+--     needs no driver setting, so it is there whatever her weekdays are: the
+--     simulator plans her nothing that day, and the report shows Uber's figures,
+--     her tip among them, with no simulated ride. Its figures are the regular
+--     formula's, so a database seeded before the note existed (where the regular
+--     row for that day is already in) and a fresh one hold the same rows. It is
+--     in October, beside the refund, so September stays the month whose every
+--     day reconciles: one month shows the case that passes, the other each case
+--     that must not.
 --   * Emil has a refund day, 20.10.2026: a negative `umsatz` with no trips, which
 --     the reader keeps with its sign (`income_amount_check` admits it for uber).
 --
@@ -468,10 +483,23 @@ WITH days AS (
      AND d.day < DATE '2026-10-01'
      AND NOT (extract(isodow FROM d.day)::int = ANY (k.allowed))
    GROUP BY k.driver_id, k.name, k.n, k.ext
+), absent AS (
+  -- Anna's one day inside her approved leave, with the regular formula's figures.
+  SELECT k.driver_id, k.name, k.n, k.ext, d.day,
+         8000 + ((extract(day FROM d.day)::int * 37 + k.n * 53) % 9000)       AS umsatz_cents,
+         5 + ((extract(day FROM d.day)::int + k.n * 2) % 8)                    AS trips
+    FROM r8_uber_keys k CROSS JOIN days d CROSS JOIN ctx
+   WHERE k.name = 'Anna Beispiel'
+     AND EXISTS (SELECT 1 FROM driver_notes x
+                  WHERE x.company_id = ctx.company_id AND x.driver_id = k.driver_id
+                    AND x.note_text = 'Urlaub genehmigt' AND x.note_planning_behavior = 'exclude_from_plan'
+                    AND d.day BETWEEN x.start_date AND coalesce(x.end_date, x.start_date))
 )
 SELECT driver_id, name, n, ext, day, umsatz_cents, trips, 'regular' AS kind FROM regular
 UNION ALL
 SELECT driver_id, name, n, ext, day, umsatz_cents, trips, 'forbidden_weekday' FROM forbidden
+UNION ALL
+SELECT driver_id, name, n, ext, day, umsatz_cents, trips, 'absent_day' FROM absent
 UNION ALL
 SELECT k.driver_id, k.name, k.n, k.ext, DATE '2026-10-20', -1250, 0, 'refund'
   FROM r8_uber_keys k WHERE k.name = 'Emil Normal';
@@ -480,6 +508,9 @@ DO $r8_cases$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM r8_uber_days WHERE kind = 'forbidden_weekday') THEN
     RAISE NOTICE 'seed-demo-company §6: Anna Beispiel may work every weekday (or none is recorded), so the forbidden-weekday case is not seeded';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM r8_uber_days WHERE kind = 'absent_day') THEN
+    RAISE NOTICE 'seed-demo-company §6: Anna Beispiel has no "Urlaub genehmigt" note, so the Uber-day-on-leave case is not seeded';
   END IF;
 END
 $r8_cases$;
@@ -498,9 +529,9 @@ SELECT ctx.company_id, x.name, f.type, round(f.cents / 100.0, 2),
   ) w
   CROSS JOIN LATERAL (VALUES
     ('umsatz',    x.umsatz_cents),
-    ('trinkgeld', CASE WHEN x.kind = 'regular' AND (extract(day FROM x.day)::int + x.n) % 3 = 0
+    ('trinkgeld', CASE WHEN x.kind IN ('regular', 'absent_day') AND (extract(day FROM x.day)::int + x.n) % 3 = 0
                        THEN 100 + ((extract(day FROM x.day)::int * 11 + x.n * 7) % 500) END),
-    ('aktionen',  CASE WHEN x.kind = 'regular' AND (extract(day FROM x.day)::int + x.n) % 10 = 0 THEN 500 END),
+    ('aktionen',  CASE WHEN x.kind IN ('regular', 'absent_day') AND (extract(day FROM x.day)::int + x.n) % 10 = 0 THEN 500 END),
     ('bargeld',   CASE WHEN x.kind <> 'refund' THEN (x.umsatz_cents * (25 + x.n * 5)) / 100 END)
   ) AS f(type, cents)
  WHERE f.cents IS NOT NULL
@@ -529,6 +560,29 @@ UPDATE trip_analysis_settings t
    SET base_latitude = :'demo_base_lat'::numeric(9,6), base_longitude = :'demo_base_lon'::numeric(9,6)
   FROM ctx
  WHERE t.company_id = ctx.company_id AND t.base_latitude IS NULL AND t.base_longitude IS NULL;
+\endif
+
+-- The company's city (Einstellungen). The month builds its address pool for the
+-- company's city, as the screen does, and refuses with CONFIGURATION_REQUIRED
+-- without one; a saved base does not replace it. Written only when the person
+-- running this names it, and only where it is empty: a row that has a city
+-- keeps it, postal code included. A company with no settings row gets one,
+-- named after the company, because the column's default is another company's
+-- name. No street is written: an invented street would be geocoded into
+-- somebody's real address, so the base stays the point named above.
+\if :{?demo_city}
+\if :{?demo_postal_code}
+\else
+\set demo_postal_code ''
+\endif
+INSERT INTO company_settings (company_id, company_name, postal_code, city)
+SELECT ctx.company_id, c.name, nullif(:'demo_postal_code', ''), :'demo_city'
+  FROM ctx JOIN companies c ON c.id = ctx.company_id
+ WHERE NOT EXISTS (SELECT 1 FROM company_settings s WHERE s.company_id = ctx.company_id);
+UPDATE company_settings s
+   SET city = :'demo_city', postal_code = coalesce(s.postal_code, nullif(:'demo_postal_code', ''))
+  FROM ctx
+ WHERE s.company_id = ctx.company_id AND nullif(btrim(s.city), '') IS NULL;
 \endif
 
 -- The simulation settings (D1). A fixed company share and the return-to-base

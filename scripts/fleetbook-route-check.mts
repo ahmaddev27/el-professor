@@ -13,7 +13,7 @@
  * retry after 5 s for an infrastructure failure. Answers are cached as JSON in
  * the output directory so a re-run asks nothing it already knows.
  *
- * Credentials come from e2e/.env.local and are never printed or written. The
+ * Credentials come from e2e/.env.local (or the file R8_E2E_ENV names) and are never printed or written. The
  * outputs hold real data (addresses, names): keep --out OUTSIDE the repository.
  * Driver and vehicle names are replaced by D01.. / V1.. in every output; the
  * mapping is written to names-mapping.local.csv, which must never leave the machine.
@@ -69,7 +69,9 @@ mkdirSync(OUT, { recursive: true });
 // -- staging access -------------------------------------------------------------
 
 function loadEnv(): Record<string, string> {
-  const text = readFileSync(path.resolve(import.meta.dirname, '../e2e/.env.local'), 'utf8');
+  // R8_E2E_ENV names the file when the checkout has none (a worktree), as the
+  // month script reads it.
+  const text = readFileSync(process.env.R8_E2E_ENV || path.resolve(import.meta.dirname, '../e2e/.env.local'), 'utf8');
   const out: Record<string, string> = {};
   for (const line of text.split(/\r?\n/u)) {
     const m = /^([A-Z0-9_]+)=(.*)$/u.exec(line.trim());

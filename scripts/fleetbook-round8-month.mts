@@ -37,6 +37,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DEFAULT_CALENDAR_FORM } from '../src/utils/simulatedRides/calendarForm.ts';
 import type { MonthReport } from '../src/utils/simulatedRides/monthWorkbook.ts';
 import {
@@ -85,7 +86,9 @@ async function stagingSession() {
   const api = env.E2E_API_URL ?? '';
   if (new URL(api).host !== STAGING_API_HOST) fail(3, `e2e/.env.local names ${new URL(api).host}, not staging`);
   if (process.env.R8_STAGING_CHILD !== '1') {
-    const child = spawnSync(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+    // vite-node hands a script `[node, vite-node, ...args]` without the
+    // script's own path, so the child names it, or vite-node starts with no file.
+    const child = spawnSync(process.execPath, [...process.execArgv, process.argv[1], fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
       stdio: 'inherit',
       env: { ...process.env, R8_STAGING_CHILD: '1', VITE_SUPABASE_URL: api, VITE_SUPABASE_ANON_KEY: env.E2E_ANON_KEY, VITE_APP_URL: STAGING_APP_URL },
     });
