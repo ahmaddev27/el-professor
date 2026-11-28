@@ -39,12 +39,20 @@ import type { UberMonthImport } from './uberImport';
  *   ends where its operating day does (04:00), so a shift never spills into
  *   the next operating day or the next month.
  *
- * ## The two numbers that are not configuration
+ * ## The numbers that are law and not configuration (Round 8, owner's decision)
  *
- * - **360 minutes is the ceiling of a day**, because it is the ceiling of a
- *   shift and a driver gets one shift a day: a longer one needs a rest break
- *   (§4 ArbZG) that this simulator does not place, and no break is configured
- *   anywhere (decision D2). It is a legal bound, not a preference.
+ * - **§3 ArbZG: 480 minutes of work a day** (`MAX_DAY_WORK_MINUTES`). The
+ *   extension to ten hours is not used: it needs an eight-hour average over
+ *   six months, which one simulated month cannot show.
+ * - **§3 ArbZG: 2880 minutes (48 h) of work in an ISO week**
+ *   (`MAX_WEEK_WORK_MINUTES`), counted by operating-day date.
+ * - **§4 ArbZG: no stretch over 360 minutes without a break, and work over 360
+ *   minutes needs 30.** A day of 360 minutes or less is one shift, as before.
+ *   A longer day is one duty of two shifts, "parts", each at most 360
+ *   (`MAX_PART_MINUTES`), with one unpaid 30-minute break (`BREAK_MINUTES`) at
+ *   the base between them, which the scheduler places. The break is not work,
+ *   but it lies inside the driver's window, so a day's span is work plus 30.
+ *   45 minutes over nine hours is unreachable under 480.
  * - **60 minutes is the floor of a planned day.** A simulation preference: a
  *   shorter shift holds hardly a ride. The old universal 240-minute floor is
  *   gone; nothing on the Drivers page asked for it.
@@ -52,15 +60,60 @@ import type { UberMonthImport } from './uberImport';
  * ## How many minutes
  *
  * The month's target is the middle of the configured range (the owner's: the
- * minimum), cut to what the eligible days can hold, and spread as evenly as
- * the days allow. When the days cannot hold even the minimum, the plan takes
- * what they hold and the shortfall is a discrepancy row (test class 24). It
- * never adds a day, lengthens a shift past its window or past 360 minutes, or
- * touches a salary to make the figures meet.
+ * minimum), cut to what the eligible days can hold under both the day and the
+ * week caps, and spread as evenly as the days allow. Spreading is water-filling,
+ * so a month whose goal already fitted under 360 a day plans exactly the same
+ * minutes per day as before the cap was raised. When the days cannot hold even
+ * the minimum, the plan takes what they hold and the shortfall is a discrepancy
+ * row (test class 24). It never adds a day, lengthens a shift past its window
+ * or the legal caps, or touches a salary to make the figures meet.
  */
 
-export const MAX_DAY_MINUTES = 360;
+export const MAX_PART_MINUTES = 360;
+export const MAX_DAY_WORK_MINUTES = 480;
+export const BREAK_MINUTES = 30;
+export const MAX_WEEK_WORK_MINUTES = 2880;
 export const MIN_DAY_MINUTES = 60;
+
+/**
+ * What a free window of `windowMinutes` can hold of work in one day: 480 when
+ * it also holds the 30-minute break (510), the window less the break when it is
+ * long enough that a break is needed at all (390 and up), else one shift of at
+ * most 360. Continuous at both steps, so no length is skipped.
+ */
+export function dayCapacityMinutes(windowMinutes: number): number {
+  if (windowMinutes >= MAX_DAY_WORK_MINUTES + BREAK_MINUTES) return MAX_DAY_WORK_MINUTES;
+  if (windowMinutes >= MAX_PART_MINUTES + BREAK_MINUTES) return windowMinutes - BREAK_MINUTES;
+  return Math.min(windowMinutes, MAX_PART_MINUTES);
+}
+
+/** A duty's two parts, in minutes: quarter-hour grid for part 1, both 180 to 240 for 361 to 480. */
+export function splitDutyMinutes(minutes: number): { part1: number; part2: number } {
+  const part1 = 15 * Math.round(minutes / 30);
+  return { part1, part2: minutes - part1 };
+}
+
+/** The Monday of the ISO week a YYYY-MM-DD operating day belongs to. */
+export function isoWeekStart(date: string): string {
+  return shiftDate(date, -(isoWeekdayOf(date) - 1));
+}
+
+/**
+ * Day caps lowered so that no ISO week holds more than `weekCap` minutes: a week
+ * over it is water-filled down to it, longest days first, so the cut is as even
+ * as the days allow.
+ */
+export function capByWeek(dates: readonly string[], caps: readonly number[], weekCap = MAX_WEEK_WORK_MINUTES): number[] {
+  const byWeek = new Map<string, number[]>();
+  dates.forEach((d, i) => byWeek.set(isoWeekStart(d), [...(byWeek.get(isoWeekStart(d)) ?? []), i]));
+  const out = [...caps];
+  for (const idx of byWeek.values()) {
+    if (idx.reduce((n, i) => n + caps[i], 0) <= weekCap) continue;
+    const cut = spreadMinutes(idx.map(i => caps[i]), weekCap);
+    idx.forEach((i, j) => { out[i] = cut[j]; });
+  }
+  return out;
+}
 
 /** The Drivers page's columns, by the driver's UUID. */
 export interface DriverPlanConfig {
@@ -380,10 +433,13 @@ export function planDriverMonth(config: DriverPlanConfig, inputs: DriverMonthInp
       return { ...day, status: day.blockingNote ? 'absent' : 'window_too_short', windowStartMs: start, windowEndMs: end };
     }
     if (activeDays && !activeDays.has(w.date)) return { ...day, status: 'no_uber_activity', windowStartMs: start, windowEndMs: end };
-    return { ...day, windowStartMs: start, windowEndMs: end, capacityMinutes: Math.min(MAX_DAY_MINUTES, length) };
+    return { ...day, windowStartMs: start, windowEndMs: end, capacityMinutes: dayCapacityMinutes(length) };
   });
 
-  const capacityMinutes = days.reduce((s, d) => s + d.capacityMinutes, 0);
+  // The week cap is part of what the days can hold, so a cut it forces is a
+  // discrepancy row and never a silent shortfall.
+  const weekCaps = capByWeek(days.map(d => d.date), days.map(d => d.capacityMinutes));
+  const capacityMinutes = weekCaps.reduce((s, c) => s + c, 0);
   const base = {
     driverId: config.id, driverName: config.name, employmentType: config.employmentType, isOwner, range, window, uberDetail,
     days, targetMinutes: null as number | null, capacityMinutes, discrepancies,
@@ -422,7 +478,7 @@ export function planDriverMonth(config: DriverPlanConfig, inputs: DriverMonthInp
   if (goal < MIN_DAY_MINUTES) discrepancies.push({ kind: 'target_below_one_shift', targetMinutes: goal });
 
   // Even spread; when that would leave a day under the floor, fewer days, spread over the month.
-  const caps = open.map(x => x.d.capacityMinutes);
+  const caps = open.map(x => weekCaps[x.i]);
   let chosen = open.map((_, k) => k);
   let minutes = spreadMinutes(caps, goal);
   if (minutes.some(m => m < MIN_DAY_MINUTES)) {

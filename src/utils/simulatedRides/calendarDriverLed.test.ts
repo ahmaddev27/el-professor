@@ -8,7 +8,7 @@ import {
   type FullMonthInput,
   type FullMonthResult,
 } from './fullMonth';
-import { MAX_DAY_MINUTES } from './driverMonthPlan';
+import { MAX_PART_MINUTES } from './driverMonthPlan';
 import { verifyMonth } from './monthVerification';
 import { readUnavailability, type VehicleUnavailabilityRow } from './vehicleAvailability';
 import type { GeoPoint, PoolAddress, SimRide, SimShift } from './types';
@@ -240,7 +240,7 @@ describe('every month length, and the two nights the clocks change (class 10)', 
       expect(day.status, s.id).toBe('planned');
       // Absolute milliseconds: a wall-clock subtraction is an hour off on the change night.
       expect(minutes(plannedEnd(s) - s.startMs), s.id).toBe(day.plannedMinutes);
-      expect(minutes(plannedEnd(s) - s.startMs), s.id).toBeLessThanOrEqual(MAX_DAY_MINUTES);
+      expect(minutes(plannedEnd(s) - s.startMs), s.id).toBeLessThanOrEqual(MAX_PART_MINUTES);
     }
     expect(r.month.shifts.every(s => s.operatingDay.startsWith(`${year}-${String(month).padStart(2, '0')}`))).toBe(true);
     expect(recheck(r)).toEqual([]);
@@ -300,7 +300,7 @@ describe('overlaps are judged by UUID, never by name (class 21)', () => {
   it('negative: a second shift for one driver on one day, and a ride overlap, are both found', () => {
     const first = r.month.shifts.find(s => s.driver.id === ID_A)!;
     const twin = { ...first, id: `${first.id}-twin`, vehicle: VEHICLES[1] };
-    expect(recheck(r, [...r.month.shifts, twin]).some(v => v.includes(`two shifts on ${first.operatingDay}`))).toBe(true);
+    expect(recheck(r, [...r.month.shifts, twin]).some(v => v.includes(`two duties on ${first.operatingDay}`))).toBe(true);
 
     const done = r.month.rides.filter(x => x.status === 'completed' && x.driver.id === ID_A);
     const [a, b] = [done[0], done.find(x => x.shiftId !== done[0].shiftId)!];
@@ -374,7 +374,7 @@ describe('a shortfall is reported, never filled in', () => {
     expect(r.driverPlans.find(p => p.driverId === ID_A)!.discrepancies.some(d => d.kind === 'capacity_below_minimum')).toBe(true);
     // Nothing was stretched to close the gap: every shift is still at most six hours and on a Monday or Tuesday.
     for (const s of r.month.shifts.filter(x => x.driver.id === ID_A)) {
-      expect(minutes(plannedEnd(s) - s.startMs)).toBeLessThanOrEqual(MAX_DAY_MINUTES);
+      expect(minutes(plannedEnd(s) - s.startMs)).toBeLessThanOrEqual(MAX_PART_MINUTES);
       expect([1, 2]).toContain(new Date(`${s.operatingDay}T12:00:00Z`).getUTCDay());
     }
     expect(recheck(r)).toEqual([]);

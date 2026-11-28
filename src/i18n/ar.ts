@@ -7038,7 +7038,7 @@ export const ar: PartialDictionary = {
   'simrides.cal.check.code.routePairs': 'فحص المسار لكل زوج رحلات',
   'simrides.cal.check.code.routingMeasured': 'أوقات القيادة من خدمة مسارات',
   'simrides.cal.check.code.rules': 'قواعد مقروءة من النتيجة',
-  'simrides.cal.check.code.shiftLimits': 'الورديات ضمن وقت عمل السائق ونطاق ساعاته، 360 دقيقة كحد أقصى',
+  'simrides.cal.check.code.shiftLimits': 'الورديات ضمن وقت عمل السائق ونطاق ساعاته، 360 دقيقة كحد أقصى للوردية الواحدة، و480 دقيقة في اليوم مع استراحة 30 دقيقة (§ 3 و§ 4 ArbZG)',
   'simrides.cal.check.failed': 'غير ناجح:',
   'simrides.cal.check.notVerified': 'لم يُفحص:',
   'simrides.cal.check.passed': 'ناجح:',

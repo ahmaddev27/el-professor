@@ -18,9 +18,12 @@ zoneinfo):
     company setting in I; the basis, amount, remainder and rate of F;
   - the calendar: every day of the month a row of B, 24 h or 23/25;
   - overlaps: no vehicle and no driver (by id) holds two rides at once;
-  - shifts at most 360 minutes (no universal floor since Round 8: a shift is
-    as long as its driver's plan), the last ride by the planned end, one shift
-    per driver id and day, and the rest between them, from H2, O and I;
+  - shifts (parts) at most 360 minutes (no universal floor since Round 8: a
+    shift is as long as its driver's plan), the last ride by the planned end;
+    at most one Dienst (duty) per driver id and day, of one part or of exactly
+    two parts with at least 30 minutes between them and at most 480 minutes of
+    work in all (§ 3, § 4 ArbZG); at most 2880 minutes of work per ISO week; and
+    the rest between Dienste, not between the two parts of one; from H2, O, I;
   - TÜV and confirmed full-day blocks, read from H and H2;
   - the route sheet G: one row per consecutive completed pair, its gap
     recomputed from A, and for a verified pair road + 45 s + margin <= gap;
@@ -31,7 +34,8 @@ zoneinfo):
     or in conflict;
   - round 8, the return to the base: when I says "Ja", every shift with a
     completed ride ends with exactly one drive from its last ride's Zielort to
-    the base coordinates of I, and when "Nein", no shift has one. A last
+    the base coordinates of I, and when "Nein", only a part 1 has one (it ends
+    at the base for the break of a two-part Dienst). A last
     drop-off at the base itself is recorded too, as a drive of nothing, so the
     rule has no exception a reader could not see.
 
@@ -249,19 +253,50 @@ def verify(report_path, ops_path):
     check(len(planned) == len(accepted) and not unreadable and not too_long and not late,
           "O: the same shifts, each planned for at most 360 minutes, the last ride by its planned end",
           f"{len(planned)} shifts; {len(unreadable)} unreadable, {len(too_long)} over 360, {len(late)} ending late")
-    per_day = Counter((r["Fahrer-ID"], str(r["Tag"])) for r in planned)
-    twice = sorted(k for k, n in per_day.items() if n > 1)
-    check(all(r["Fahrer-ID"] for r in planned) and not twice, "O: every shift names its driver id, at most one per driver and day",
+    duties = defaultdict(list)
+    for r, b, p, e in spans:
+        duties[r["Dienst"] or r["Schicht"]].append((r, b, p))
+    per_day = defaultdict(set)
+    for did, parts in duties.items():
+        per_day[(parts[0][0]["Fahrer-ID"], str(parts[0][0]["Tag"]))].add(did)
+    twice = sorted(k for k, ids in per_day.items() if len(ids) > 1)
+    check(all(r["Fahrer-ID"] for r in planned) and not twice, "O: every shift names its driver id, at most one Dienst per driver and day",
           f"{len(per_day)} driver-days" + (f"; twice: {twice[:3]}" if twice else ""))
+    bad_duty = []
+    for did, parts in duties.items():
+        parts.sort(key=lambda x: x[1] or datetime.min.replace(tzinfo=UTC))
+        nums = [x[0]["Teil"] for x in parts]
+        if len(parts) == 1:
+            if nums[0] not in ("", None):
+                bad_duty.append(did)
+            continue
+        if len(parts) != 2 or nums != [1, 2] or not all(x[1] and x[2] for x in parts):
+            bad_duty.append(did)
+            continue
+        gap = (parts[1][1] - parts[0][2]).total_seconds() / 60
+        work = sum((x[2] - x[1]).total_seconds() / 60 for x in parts)
+        if gap < 30 or work > 480 or parts[0][0]["Kennzeichen"] != parts[1][0]["Kennzeichen"]:
+            bad_duty.append(did)
+    check(not bad_duty, "O: a Dienst is one part, or parts 1 and 2 on one vehicle with a break of at least 30 minutes and at most 480 minutes of work",
+          f"{len(duties)} Dienste, {len(bad_duty)} wrong")
+    weeks = defaultdict(float)
+    for parts in duties.values():
+        day = datetime.strptime(str(parts[0][0]["Tag"]), "%Y-%m-%d").date()
+        monday = day - timedelta(days=day.weekday())
+        weeks[(parts[0][0]["Fahrer-ID"], monday)] += sum((x[2] - x[1]).total_seconds() / 60 for x in parts if x[1] and x[2])
+    over = sorted(k for k, m in weeks.items() if m > 2880)
+    check(not over, "O: at most 2880 minutes (48 h) of work per driver and ISO week", f"{len(weeks)} driver-weeks, {len(over)} over")
     rest = settings_of(book).get("Option minDriverRestMinutes")
     if isinstance(rest, (int, float)):
         by_driver = defaultdict(list)
-        for r, b, p, e in spans:
-            if b and p:
-                by_driver[r["Fahrer-ID"]].append((b, p))
+        for parts in duties.values():
+            starts = [x[1] for x in parts if x[1]]
+            ends = [x[2] for x in parts if x[2]]
+            if starts and ends:
+                by_driver[parts[0][0]["Fahrer-ID"]].append((min(starts), max(ends)))
         short_rest = sum(1 for v in by_driver.values() for a, b in zip(sorted(v), sorted(v)[1:])
                          if (b[0] - a[1]).total_seconds() / 60 < rest)
-        check(short_rest == 0, f"O: at least {rest} minutes of rest between two shifts of one driver",
+        check(short_rest == 0, f"O: at least {rest} minutes of rest between two Dienste of one driver",
               f"{short_rest} pairs short")
     else:
         check(False, "O: rest between two shifts of one driver", "cannot be checked: I names no Option minDriverRestMinutes")
@@ -369,13 +404,17 @@ def verify(report_path, ops_path):
         if r["Schicht"] not in last_ride or instant(r["Fahrtbeginn"]) > instant(last_ride[r["Schicht"]]["Fahrtbeginn"]):
             last_ride[r["Schicht"]] = r
     home_by_shift = Counter(leg["Schicht"] for leg in home_legs)
+    part_one = {r["Schicht"] for r in planned if r["Teil"] == 1}
     if returns_home == "Ja":
         missing = [s for s in last_ride if home_by_shift.get(s, 0) != 1]
         wrong_start = [leg["Leerfahrt-ID"] for leg in home_legs if leg["Fahrt-ID vorher"] != last_ride.get(leg["Schicht"], {}).get("Fahrt-ID")]
         check(not missing, "L: every shift with a completed ride returns to the base exactly once", f"{len(missing)} of {len(last_ride)} do not")
         check(not wrong_start, "L: every return starts at its shift's last completed ride", f"{len(wrong_start)} do not")
     else:
-        check(not home_legs, "L: no return to the base in a month that does not return", f"{len(home_legs)} returns")
+        extra = [leg for leg in home_legs if leg["Schicht"] not in part_one]
+        check(not extra and all(home_by_shift.get(s, 0) <= 1 for s in part_one),
+              "L: in a month that does not return, only a part 1 returns to the base (for its break), once",
+              f"{len(home_legs)} returns, {len(extra)} outside a part 1")
     for leg in legs:
         if leg["Zweck"] == RETURN_PURPOSE:
             continue
@@ -530,7 +569,9 @@ def verify_closing(path):
         not_last = [r["Leerfahrt-ID"] for r in home if last[r["Schicht-ID"]]["Leerfahrt-ID"] != r["Leerfahrt-ID"]]
         check(not not_last, "5: the return is the shift's last drive", f"{len(not_last)} are not")
     else:
-        check(not home, "5: no return to the base in a month that does not return", f"{len(home)} returns")
+        part_one = {r["Schicht-ID"] for r in shift_rows if r.get("Teil") == 1}
+        extra = [r for r in home if r["Schicht-ID"] not in part_one]
+        check(not extra, "5: in a month that does not return, only a part 1 returns to the base", f"{len(home)} returns, {len(extra)} outside a part 1")
 
     header, _ = table(book, "Lohn und Arbeitszeit")
     loose = [h for h in header if h and any(w in h for w in ("Lohn", "Gehalt", "Provision")) and "EUR" in h

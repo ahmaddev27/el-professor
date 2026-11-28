@@ -7303,7 +7303,7 @@ export const en: PartialDictionary = {
   'simrides.cal.check.code.routePairs':    'Route check per ride pair',
   'simrides.cal.check.code.routingMeasured': 'Drive times from a routing service',
   'simrides.cal.check.code.rules':         'Rules read back from the result',
-  'simrides.cal.check.code.shiftLimits':   'Shifts inside the driver\'s window and hours range, at most 360 minutes',
+  'simrides.cal.check.code.shiftLimits':   'Shifts inside the driver\'s window and hours range, at most 360 minutes a shift, 480 a day with a 30-minute break (§ 3 and § 4 ArbZG)',
   'simrides.cal.check.failed':             'Failed:',
   'simrides.cal.check.notVerified':        'Not verified:',
   'simrides.cal.check.passed':             'Passed:',

@@ -132,7 +132,7 @@ export function internalRevenueSheetRows(result: FullMonthResult): Row[] {
 }
 
 export const SCHEDULING_HEADERS: readonly string[] = [
-  'Art', 'Schicht', 'Tag', 'Kennzeichen', 'Fahrer-ID', 'Beginn', 'Geplantes Ende', 'Ende', 'Dauer (min)',
+  'Art', 'Schicht', 'Dienst', 'Teil', 'Tag', 'Kennzeichen', 'Fahrer-ID', 'Beginn', 'Geplantes Ende', 'Ende', 'Dauer (min)',
   'Schleife endete mit', 'Verworfene Versuche: keine Anfahrt', 'Verworfene Versuche: keine Zeit',
   'Verworfene Versuche: kein Zielort', 'Grund', 'Anzahl',
 ];
@@ -146,7 +146,7 @@ const END_WORD: Record<string, string> = {
 /** Accepted shifts with their loop's own refusals, then every refusal of a shift that was not placed. */
 export function schedulingSheetRows(result: FullMonthResult): Row[] {
   const accepted = result.scheduling.map((s): Row => [
-    'Schicht eingeplant', s.shiftId, s.day, s.plate, s.driverId ?? '', stamp(s.startMs), stamp(s.plannedEndMs), stamp(s.endMs),
+    'Schicht eingeplant', s.shiftId, s.dutyId, s.part ?? '', s.day, s.plate, s.driverId ?? '', stamp(s.startMs), stamp(s.plannedEndMs), stamp(s.endMs),
     Math.round((s.endMs - s.startMs) / 60_000), END_WORD[s.endedBy] ?? s.endedBy, s.refusedSteps.no_approach ?? 0,
     s.refusedSteps.no_budget ?? 0, s.refusedSteps.no_dropoff ?? 0, '', 1,
   ]);
@@ -158,7 +158,7 @@ export function schedulingSheetRows(result: FullMonthResult): Row[] {
     counts.set(key, entry);
   }
   const refused = [...counts.values()].map((c): Row => [
-    'Versuch verworfen', '', c.day, c.plate, c.driverId, '', '', '', '', '', '', '', '', REASON_TEXT[c.reason] ?? c.reason, c.n,
+    'Versuch verworfen', '', '', '', c.day, c.plate, c.driverId, '', '', '', '', '', '', '', '', REASON_TEXT[c.reason] ?? c.reason, c.n,
   ]);
   return [[...SCHEDULING_HEADERS], ...accepted, ...refused];
 }

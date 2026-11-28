@@ -9,8 +9,13 @@ import {
 import { DEFAULT_OPTIONS, SHIFT_LIMITS, runShift, validateRides, type Context, type PlannedShift, type ShiftEnd } from './generator';
 import { assessAgainstRange, type RangeAssessment } from '../monthlyPlan/hoursRange';
 import {
-  MAX_DAY_MINUTES,
+  BREAK_MINUTES,
+  isoWeekStart,
+  MAX_DAY_WORK_MINUTES,
+  MAX_PART_MINUTES,
+  MAX_WEEK_WORK_MINUTES,
   planDriverMonth,
+  splitDutyMinutes,
   uberActivity,
   type DriverDayPlan,
   type DriverMonthPlan,
@@ -38,7 +43,7 @@ import {
   type ShiftDecision,
 } from './simulationConstraints';
 import { ESTIMATE_TRAVEL_MODEL, type TravelModel } from './travelModel';
-import type { GeneratedMonth, GeneratorOptions, GeoPoint, PoolAddress, SimRide, SimShift, SimVehicle } from './types';
+import { startsDuty, type GeneratedMonth, type GeneratorOptions, type GeoPoint, type PoolAddress, type SimRide, type SimShift, type SimVehicle } from './types';
 import type { BaseSource } from './baseSelection';
 import { unavailableDuring, type UnavailabilityWindow } from './vehicleAvailability';
 import { plateKey, type RealTrip, type RealTripsRead } from './realTrips';
@@ -354,13 +359,15 @@ export interface Provenance {
 /**
  * The shift lengths a calendar month is read back against: no floor, because a
  * driver's own range decides how short his day is (Round 8), and the
- * 360-minute ceiling, because a longer shift needs a break the generator does
- * not place (§4 ArbZG). The weeks generator keeps `SHIFT_LIMITS`' 240 to 360.
+ * 360-minute ceiling of one shift or one part, because no stretch of work may
+ * be longer without a break (§4 ArbZG). A duty over 360 minutes is two parts
+ * with the break between them. The weeks generator keeps `SHIFT_LIMITS`' 240 to 360.
  */
-export const CALENDAR_SHIFT_LIMITS = { minMinutes: 0, maxMinutes: MAX_DAY_MINUTES } as const;
+export const CALENDAR_SHIFT_LIMITS = { minMinutes: 0, maxMinutes: MAX_PART_MINUTES } as const;
 
 // 4.1.0 (27.11.2026): the wait for the next order is capped at CALENDAR_MAX_WAIT_SECONDS.
-export const FULL_MONTH_GENERATOR_VERSION = 'full-month/4.1.0';
+// 4.2.0 (28.11.2026): a day holds up to 480 minutes, as two parts around a 30-minute break at the base.
+export const FULL_MONTH_GENERATOR_VERSION = 'full-month/4.2.0';
 
 /**
  * The longest wait for the next order after a ride, in a calendar month (owner,
@@ -433,6 +440,10 @@ export interface DriverMonthOutcome {
 /** One accepted shift's scheduling record, for the operational report. */
 export interface SchedulingRecord {
   shiftId: string;
+  /** The duty this shift belongs to: its own id for a single shift, the shared id of two parts. */
+  dutyId: string;
+  /** 1 or 2 for the parts of a duty over 360 minutes; null for a single shift. */
+  part: 1 | 2 | null;
   day: string;
   plate: string;
   driverId: string | null;
@@ -662,19 +673,23 @@ export function generateFullMonth(
       }
       const vehicle = placed.vehicle;
       nextShift += 1;
-      month.shifts.push(placed.shift);
-      month.rides.push(...placed.rides);
-      scheduling.push({
-        shiftId: placed.shift.id,
-        day: day.day,
-        plate: vehicle.plate,
-        driverId: driver.id,
-        startMs: placed.shift.startMs,
-        plannedEndMs: placed.plannedEndMs,
-        endMs: placed.shift.endMs,
-        endedBy: placed.endedBy,
-        refusedSteps: placed.refusedSteps,
-      });
+      for (const part of placed.parts) {
+        month.shifts.push(part.shift);
+        month.rides.push(...part.rides);
+        scheduling.push({
+          shiftId: part.shift.id,
+          dutyId: part.shift.dutyId ?? part.shift.id,
+          part: part.shift.part ?? null,
+          day: day.day,
+          plate: vehicle.plate,
+          driverId: driver.id,
+          startMs: part.shift.startMs,
+          plannedEndMs: part.plannedEndMs,
+          endMs: part.shift.endMs,
+          endedBy: part.endedBy,
+          refusedSteps: part.refusedSteps,
+        });
+      }
       const verdict = tuevOf.get(vehicle.plate) ?? vehicleVerdict(vehicle, day.day);
       const workshop = workshopOn.get(`${vehicle.id}|${day.day}`) ?? null;
       const reviews = [
@@ -683,8 +698,10 @@ export function generateFullMonth(
         ...(workshop ? [`Werkstatt-Prüfung negativ am ${workshop.check_date} - kein Ausfallzeitraum erfasst, nicht sperrend, bitte prüfen`] : []),
       ];
       const review = reviewOf(placed.review, verdict, workshop);
-      accepted.push({
+      for (const { shift } of placed.parts) accepted.push({
         day: day.day,
+        dutyId: shift.dutyId,
+        part: shift.part,
         plate: vehicle.plate,
         vehicleId: vehicle.id,
         driverId: driver.id,
@@ -693,8 +710,8 @@ export function generateFullMonth(
         reason: reviews.length > 0 ? reviews.join('; ') : 'Keine bestätigte Einschränkung im Zeitraum',
         eventRef: review?.eventRef ?? null,
         certainty: review?.certainty ?? null,
-        startMs: placed.shift.startMs,
-        endMs: placed.shift.endMs,
+        startMs: shift.startMs,
+        endMs: shift.endMs,
         count: 1,
       });
     }
@@ -996,21 +1013,27 @@ interface DriverShiftArgs {
   shiftId: string;
 }
 
+/** One placed shift of a duty, with what the scheduling record and the read-back need of it. */
+interface PlacedPart {
+  shift: SimShift;
+  plannedEndMs: number;
+  endedBy: ShiftEnd;
+  refusedSteps: Partial<Record<ShiftEnd, number>>;
+  rides: SimRide[];
+}
+
 type DriverShift =
   | {
       ok: true;
-      shift: SimShift;
+      /** One part for a duty up to 360 minutes, two with the break between them. */
+      parts: PlacedPart[];
       vehicle: FullMonthVehicle;
-      rides: SimRide[];
       review: StructuredNote[];
-      plannedEndMs: number;
-      endedBy: ShiftEnd;
-      refusedSteps: Partial<Record<ShiftEnd, number>>;
     }
   | { ok: false; reason: CapacityReason };
 
 /**
- * The planned driver-day's shift, or the reason there is none.
+ * The planned driver-day's duty, or the reason there is none.
  *
  * The length is the plan's, exactly; only the start is drawn, on a quarter-hour
  * grid inside the driver's window and after his rest. The vehicle is chosen
@@ -1018,6 +1041,11 @@ type DriverShift =
  * unavailability window, free with the gap between two shifts, and under the
  * day's shift cap. The vehicle is held, and the driver's rest counts, to the
  * planned end — he is on duty until then whether or not an order came.
+ *
+ * A day over 360 minutes is one duty of two parts (§4 ArbZG): part 1 ends with
+ * the car at the base, the break of 30 minutes follows there, part 2 starts
+ * from the base. The duty is placed whole or not at all: a part that produces
+ * no ride fails the attempt and the next draw starts afresh.
  */
 function placeDriverShift(args: DriverShiftArgs): DriverShift {
   const { ctx, day, driver, plan, refusals } = args;
@@ -1027,7 +1055,10 @@ function placeDriverShift(args: DriverShiftArgs): DriverShift {
     return { ok: false, reason };
   };
   if (plan.windowStartMs === null || plan.windowEndMs === null) return refuse('driver_window_unreadable');
-  const lengthMs = plan.plannedMinutes * 60_000;
+  const twoParts = plan.plannedMinutes > MAX_PART_MINUTES;
+  const workMs = plan.plannedMinutes * 60_000;
+  const breakMs = twoParts ? BREAK_MINUTES * 60_000 : 0;
+  const lengthMs = workMs + breakMs;
   const restMs = opts.minDriverRestMinutes * 60_000;
   const { windowStartMs, windowEndMs } = plan;
   const real = args.driverReal.get(driver.id) ?? [];
@@ -1061,9 +1092,8 @@ function placeDriverShift(args: DriverShiftArgs): DriverShift {
       continue;
     }
     const vehicle = rng.pick(free);
-    const planned: PlannedShift = { vehicle, startMs, plannedEndMs: endMs, operatingDay: day.day };
-    const run = runShift(ctx, planned, { shiftId: args.shiftId, vehicle, driver });
-    if (!run) {
+    const parts = runDuty(args, vehicle, startMs, plan.plannedMinutes);
+    if (!parts) {
       refusals.push({ day: day.day, reason: 'shift_produced_no_ride', plate: vehicle.plate, driverId: driver.id });
       lastProblem = 'shift_produced_no_ride';
       continue;
@@ -1071,18 +1101,39 @@ function placeDriverShift(args: DriverShiftArgs): DriverShift {
     args.vehicleBusy.set(vehicle.plate, [...(args.vehicleBusy.get(vehicle.plate) ?? []), { start: startMs, end: endMs }]);
     args.shiftsOn.set(vehicle.plate, (args.shiftsOn.get(vehicle.plate) ?? 0) + 1);
     args.driverLastEnd.set(driver.id, endMs);
-    return {
-      ok: true,
-      shift: { id: args.shiftId, vehicle, driver, operatingDay: day.day, startMs, endMs: run.endMs, plannedEndMs: endMs },
-      vehicle,
-      rides: run.rides,
-      review: verdict.review,
-      plannedEndMs: endMs,
-      endedBy: run.endedBy,
-      refusedSteps: run.refusedSteps,
-    };
+    return { ok: true, parts, vehicle, review: verdict.review };
   }
   return lastProblem === 'no_vehicle_free' ? refuse('no_vehicle_free') : { ok: false, reason: lastProblem };
+}
+
+/** Runs the one shift, or both parts of a duty; null when any of them produced no ride. */
+function runDuty(
+  args: DriverShiftArgs,
+  vehicle: FullMonthVehicle,
+  startMs: number,
+  minutes: number,
+): PlacedPart[] | null {
+  const { ctx, day, driver } = args;
+  const place = (shiftId: string, from: number, until: number, extra: Partial<PlannedShift>, shiftExtra: Partial<SimShift>): PlacedPart | null => {
+    const planned: PlannedShift = { vehicle, startMs: from, plannedEndMs: until, operatingDay: day.day, ...extra };
+    const run = runShift(ctx, planned, { shiftId, vehicle, driver });
+    if (!run) return null;
+    const shift: SimShift = { id: shiftId, vehicle, driver, operatingDay: day.day, startMs: from, endMs: run.endMs, plannedEndMs: until, ...shiftExtra };
+    return { shift, plannedEndMs: until, endedBy: run.endedBy, refusedSteps: run.refusedSteps, rides: run.rides };
+  };
+  if (minutes <= MAX_PART_MINUTES) {
+    const one = place(args.shiftId, startMs, startMs + minutes * 60_000, {}, {});
+    return one && [one];
+  }
+  const { part1, part2 } = splitDutyMinutes(minutes);
+  const end1 = startMs + part1 * 60_000;
+  const breakEnd = end1 + BREAK_MINUTES * 60_000;
+  const first = place(`${args.shiftId}.1`, startMs, end1, { endAtBase: true },
+    { dutyId: args.shiftId, part: 1, breakAfter: { startMs: end1, endMs: breakEnd }, endsAtBase: true });
+  if (!first) return null;
+  const second = place(`${args.shiftId}.2`, breakEnd, breakEnd + part2 * 60_000, {}, { dutyId: args.shiftId, part: 2 });
+  if (!second) return null;
+  return [first, second];
 }
 
 /** The minutes of a shift the driver is on duty: start to planned end. */
@@ -1097,7 +1148,7 @@ function outcomeOf(plan: DriverMonthPlan, shifts: readonly SimShift[], missed: {
     planned: plan.planned,
     plannedMinutes: plan.plannedMinutes,
     placedMinutes,
-    placedShifts: own.length,
+    placedShifts: new Set(own.map(s => s.dutyId ?? s.id)).size,
     missedDays: missed,
     assessment: assessAgainstRange(placedMinutes, plan.range, plan.isOwner),
   };
@@ -1108,8 +1159,11 @@ function outcomeOf(plan: DriverMonthPlan, shifts: readonly SimShift[], missed: {
  * its driver by UUID, lies on a day his plan gave him and inside that day's
  * window, is at most 360 minutes from start to planned end, ends its last
  * ride by the planned end and does not touch its vehicle's unavailability
- * window. Per driver: one shift per operating day, the rest between two
- * shifts, and (but for the owner) no more minutes than his range's maximum.
+ * window. Per driver: one duty per operating day, the rest between two duties,
+ * the week's 48 hours and (but for the owner) no more minutes than his range's
+ * maximum. A duty is one shift, or exactly two parts on one vehicle with at
+ * least 30 minutes between them, the first ending at the base, 480 minutes of
+ * work at most (§3, §4 ArbZG).
  */
 export function checkDriverShifts(
   shifts: readonly SimShift[],
@@ -1131,7 +1185,7 @@ export function checkDriverShifts(
     byDriver.set(id, [...(byDriver.get(id) ?? []), s]);
     const end = s.plannedEndMs ?? s.endMs;
     const minutes = (end - s.startMs) / 60_000;
-    if (minutes > MAX_DAY_MINUTES) out.push(`${s.id}: a shift of ${minutes} minutes is longer than ${MAX_DAY_MINUTES}`);
+    if (minutes > MAX_PART_MINUTES) out.push(`${s.id}: a shift of ${minutes} minutes is longer than ${MAX_PART_MINUTES}`);
     if (s.endMs > end) out.push(`${s.id}: the last ride ends after the shift's planned end`);
     const d = dayPlan.get(`${id}|${s.operatingDay}`);
     if (!d || d.status !== 'planned') {
@@ -1145,24 +1199,61 @@ export function checkDriverShifts(
   }
 
   for (const [id, list] of byDriver) {
-    const sorted = [...list].sort((a, b) => a.startMs - b.startMs);
+    const duties = groupDuties(list, out);
     const days = new Set<string>();
-    for (const [i, s] of sorted.entries()) {
-      if (days.has(s.operatingDay)) out.push(`driver ${id}: two shifts on ${s.operatingDay}`);
-      days.add(s.operatingDay);
-      const prev = sorted[i - 1];
-      if (prev && s.startMs < (prev.plannedEndMs ?? prev.endMs) + restMinutes * 60_000) {
-        out.push(`driver ${id}: ${prev.id} and ${s.id} leave less than ${restMinutes} minutes of rest`);
+    for (const [i, duty] of duties.entries()) {
+      if (days.has(duty.day)) out.push(`driver ${id}: two duties on ${duty.day}`);
+      days.add(duty.day);
+      const prev = duties[i - 1];
+      if (prev && duty.startMs < prev.endMs + restMinutes * 60_000) {
+        out.push(`driver ${id}: ${prev.label} and ${duty.label} leave less than ${restMinutes} minutes of rest`);
       }
     }
+    const weeks = new Map<string, number>();
+    for (const duty of duties) weeks.set(isoWeekStart(duty.day), (weeks.get(isoWeekStart(duty.day)) ?? 0) + duty.workMinutes);
+    for (const [week, minutes] of weeks) {
+      if (minutes > MAX_WEEK_WORK_MINUTES) out.push(`driver ${id}: ${minutes} minutes of work in the week of ${week} exceed ${MAX_WEEK_WORK_MINUTES}`);
+    }
     const plan = planOf.get(id);
-    const total = sorted.reduce((n, s) => n + dutyMinutes(s), 0);
+    const total = list.reduce((n, s) => n + dutyMinutes(s), 0);
     const max = plan && !plan.isOwner ? plan.range.effectiveMaxHours : null;
     if (max !== null && total > max * 60 + 1e-6) {
       out.push(`driver ${id}: ${total} minutes in the month exceed the maximum of ${Math.floor(max * 60)}`);
     }
   }
   return out;
+}
+
+interface Duty { label: string; day: string; startMs: number; endMs: number; workMinutes: number }
+
+/** One driver's shifts as duties, in start order, each checked against §3 and §4 ArbZG. */
+function groupDuties(list: readonly SimShift[], out: string[]): Duty[] {
+  const byDuty = new Map<string, SimShift[]>();
+  for (const s of list) byDuty.set(s.dutyId ?? s.id, [...(byDuty.get(s.dutyId ?? s.id) ?? []), s]);
+  const duties: Duty[] = [];
+  for (const [label, parts] of byDuty) {
+    const sorted = [...parts].sort((a, b) => a.startMs - b.startMs);
+    const work = sorted.reduce((n, s) => n + dutyMinutes(s), 0);
+    checkDutyShape(label, sorted, work, out);
+    const last = sorted[sorted.length - 1];
+    duties.push({ label, day: sorted[0].operatingDay, startMs: sorted[0].startMs, endMs: last.plannedEndMs ?? last.endMs, workMinutes: work });
+  }
+  return duties.sort((a, b) => a.startMs - b.startMs);
+}
+
+function checkDutyShape(label: string, parts: readonly SimShift[], work: number, out: string[]): void {
+  if (parts.length === 1 && parts[0].dutyId === undefined && parts[0].part === undefined) return;
+  const [one, two] = parts;
+  if (parts.length !== 2 || one.part !== 1 || two.part !== 2) {
+    out.push(`${label}: a duty is one shift or exactly parts 1 and 2`);
+    return;
+  }
+  if (one.operatingDay !== two.operatingDay) out.push(`${label}: the parts lie on two operating days`);
+  if (one.vehicle.plate !== two.vehicle.plate) out.push(`${label}: the parts run on two vehicles`);
+  const gap = (two.startMs - (one.plannedEndMs ?? one.endMs)) / 60_000;
+  if (gap < BREAK_MINUTES) out.push(`${label}: the break between the parts is ${gap} minutes, less than ${BREAK_MINUTES}`);
+  if (work > MAX_DAY_WORK_MINUTES) out.push(`${label}: ${work} minutes of work in one day exceed ${MAX_DAY_WORK_MINUTES}`);
+  if (one.endsAtBase !== true) out.push(`${label}: part 1 does not end at the base`);
 }
 
 /**
@@ -1312,7 +1403,7 @@ function summariseDays(
     ridesByDay.set(key, [...(ridesByDay.get(key) ?? []), ride]);
   }
   const shiftsByDay = new Map<string, number>();
-  for (const shift of month.shifts) shiftsByDay.set(shift.operatingDay, (shiftsByDay.get(shift.operatingDay) ?? 0) + 1);
+  for (const shift of month.shifts.filter(startsDuty)) shiftsByDay.set(shift.operatingDay, (shiftsByDay.get(shift.operatingDay) ?? 0) + 1);
 
   return period.map(day => {
     const all = ridesByDay.get(day.day) ?? [];

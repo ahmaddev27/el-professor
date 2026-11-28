@@ -1,6 +1,6 @@
 import { isShareRateAllowed } from './monthlyRate';
 import { checkDriverShifts, checkRealTrips, type FullMonthResult } from './fullMonth';
-import { MAX_DAY_MINUTES } from './driverMonthPlan';
+import { BREAK_MINUTES, MAX_DAY_WORK_MINUTES, MAX_PART_MINUTES } from './driverMonthPlan';
 import { reconcile } from './monthTotals';
 import { inExportScope } from './revenue';
 import { checkTips } from './reconciliation';
@@ -74,9 +74,9 @@ function shiftLimits(result: FullMonthResult): VerificationCheck {
   // plan — his day, his window, his range's maximum — and the 360-minute ceiling.
   const problems = checkDriverShifts(result.month.shifts, result.driverPlans, result.vehicleUnavailability,
     result.provenance.options.minDriverRestMinutes);
-  return check('shift_limits', `Schichten im Fenster und Stundenrahmen des Fahrers, hoechstens ${MAX_DAY_MINUTES} Minuten`,
+  return check('shift_limits', `Schichten im Fenster und Stundenrahmen des Fahrers, hoechstens ${MAX_PART_MINUTES} Minuten je Schicht, ${MAX_DAY_WORK_MINUTES} am Tag mit ${BREAK_MINUTES} Minuten Pause`,
     problems.length === 0 ? 'passed' : 'failed',
-    problems.length === 0 ? `${result.month.shifts.length} Schichten, alle im Rahmen ihres Fahrers` : `${problems.length} Abweichungen: ${problems.slice(0, 3).join('; ')}`);
+    problems.length === 0 ? `${result.month.shifts.length} Schichten (Teile), alle im Rahmen ihres Fahrers` : `${problems.length} Abweichungen: ${problems.slice(0, 3).join('; ')}`);
 }
 
 function routePairs(result: FullMonthResult): VerificationCheck {

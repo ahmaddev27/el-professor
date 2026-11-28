@@ -7377,7 +7377,7 @@ export const de = {
   'simrides.cal.check.code.routePairs':    'Routenprüfung je Fahrtenpaar',
   'simrides.cal.check.code.routingMeasured': 'Fahrzeiten aus einem Routenservice',
   'simrides.cal.check.code.rules':         'Regeln aus der Rückprüfung',
-  'simrides.cal.check.code.shiftLimits':   'Schichten im Fenster und Stundenrahmen des Fahrers, höchstens 360 Minuten',
+  'simrides.cal.check.code.shiftLimits':   'Schichten im Fenster und Stundenrahmen des Fahrers, höchstens 360 Minuten je Schicht, 480 am Tag mit 30 Minuten Pause (§ 3 und § 4 ArbZG)',
   'simrides.cal.check.failed':             'Nicht bestanden:',
   'simrides.cal.check.notVerified':        'Nicht geprüft:',
   'simrides.cal.check.passed':             'Bestanden:',

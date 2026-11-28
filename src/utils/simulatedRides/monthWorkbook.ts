@@ -19,7 +19,7 @@ import type { RouteCheck } from './routeCheck';
 import type { ShiftDecision } from './simulationConstraints';
 import type { SimulationTenantSettings } from './tenantSettings';
 import { formatStamp } from './time';
-import type { SimRide } from './types';
+import { startsDuty, type SimRide } from './types';
 
 export { TOTAL_LABEL, monthTotals, reconcile, totalsByDriver, totalsByVehicle };
 export type { DriverTotals, ReconciliationRow, Totals, VehicleTotals } from './monthTotals';
@@ -201,7 +201,7 @@ export function daysSheetRows(result: FullMonthResult): Row[] {
   const t = monthTotals(result);
   const hours = result.days.reduce((n, d) => n + d.hours, 0);
   const total: Row = [
-    TOTAL_LABEL, '', hours, result.month.shifts.length, '', t.rides, t.completed,
+    TOTAL_LABEL, '', hours, result.month.shifts.filter(startsDuty).length, '', t.rides, t.completed,
     t.cancelled, euro(t.fareCents), euro(t.cancelledFeeCents), euro(t.tipCents), t.kmHundredths / 100, '', '',
   ];
   return [[...DAY_HEADERS], ...body, total];
@@ -399,7 +399,7 @@ export function eventsSheetRows(result: FullMonthResult): Row[] {
 
 export const DECISION_HEADERS: readonly string[] = [
   'Tag', 'Kennzeichen', 'Fahrer', 'Ergebnis', 'Code', 'Grund', 'Ereignis', 'Sicherheit', 'Anzahl',
-  'Schichtbeginn', 'Schichtende',
+  'Schichtbeginn', 'Schichtende', 'Dienst', 'Teil',
 ];
 
 const OUTCOME_WORD: Record<ShiftDecision['outcome'], string> = {
@@ -421,7 +421,7 @@ export function decisionsSheetRows(result: FullMonthResult): Row[] {
   const rows = result.decisions.map((d): Row => [
     d.day, d.plate, d.driverId === null ? '' : (labels.get(d.driverId) ?? d.driverId), OUTCOME_WORD[d.outcome],
     d.code, d.reason, d.eventRef ?? '', certaintyWord(d.certainty), d.count,
-    stampOrEmpty(d.startMs), stampOrEmpty(d.endMs),
+    stampOrEmpty(d.startMs), stampOrEmpty(d.endMs), d.dutyId ?? '', d.part ?? '',
   ]);
   return [[...DECISION_HEADERS], ...rows];
 }
