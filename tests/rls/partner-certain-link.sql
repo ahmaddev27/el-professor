@@ -3,11 +3,8 @@
 --  (20261127120000)
 -- ════════════════════════════════════════════════════════════════════════════
 --
---  Written by the author of the migration, NOT RUN by him: the RLS kit is the
---  coordinator's to run. Every expectation is derived from the migration's text
---  and from the neighbouring files (partner-fleet-import.sql, driver-defaults.sql,
---  partner-link-review.sql); if a line fails, read the actual value before
---  touching the expectation.
+--  CI's rls-kit job runs it on every push. If a line fails, read the actual
+--  value and find why it moved before touching the expectation.
 --
 --  The owner's rule of 27.11.2026: the roster import and the nightly Uber
 --  placement link by exact name, but only when certain, and leave every other
@@ -28,14 +25,27 @@
 --        holds a link is still refused, reject clears the reason, and the three
 --        CHECKs refuse what they must.
 --    §5  the nightly placement (mode active) applies the same rule, with
---        linked_by NULL, the claim made with no session, and the reasons.
+--        linked_by NULL, the claim made with no session, and the reasons. A
+--        subject is left set in the transaction ON PURPOSE while it runs, and
+--        through the job's own door (uber_pull_place_unlinked) as well: who
+--        made a link is said by the door, never read from the session.
 --    §6  the human earnings resolve (mode inactive) matches exactly as before
---        and records the method.
+--        and records the method and the administrator.
 --    §7  the catalogue: nobody the API authenticates as reaches the three
---        app_private functions, the grants of the three public ones stand.
+--        app_private functions, the four-argument placement is gone, the
+--        grants of the four public ones and of the job's door stand.
 --    §8  mutation controls: each rule is broken inside a subtransaction and the
 --        probe is shown to notice. The mutated function is rolled back each
---        time by the sentinel exception, as in conflict-review-record.sql.
+--        time by the sentinel exception, as in conflict-review-record.sql, and
+--        so is the unmutated run each control is compared with, because the
+--        import walks every pending proposal of the company and would leave
+--        none for the next control.
+--
+--  Two rules every probe here keeps, both learnt from this file's first run:
+--  a read of a write goes in the statement AFTER the write (_pc_link is
+--  STABLE and sees the snapshot of the statement that calls it), and _pc_call
+--  clears the claims it set (set_config(..., true) lasts the transaction, so a
+--  subject would otherwise follow every later probe).
 --
 --  Runs inside BEGIN ... ROLLBACK. Ids start with `2e` so a failure names a row.
 --  All names are invented.
@@ -56,6 +66,9 @@ BEGIN
   IF p_who = 'anon' THEN
     PERFORM set_config('request.jwt.claim.role', 'anon', true);
     EXECUTE 'SET LOCAL ROLE anon';
+  ELSIF p_who = 'service' THEN
+    PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+    EXECUTE 'SET LOCAL ROLE service_role';
   ELSE
     PERFORM set_config('request.jwt.claim.sub', p_who, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -64,8 +77,21 @@ BEGIN
   END IF;
 END $$;
 
-/* Runs p_sql as p_who ('owner', 'anon' or a user id) and returns the scalar,
-   'null' for NULL, or `ERR <sqlstate> <hint-or-none>`. */
+/* The claims as the owner runs: no subject, no role, no sign-in method. */
+CREATE OR REPLACE FUNCTION _pc_clear() RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('request.jwt.claim.role', '', true);
+END $$;
+
+/* Runs p_sql as p_who ('owner', 'anon', 'service' or a user id) and returns the
+   scalar, 'null' for NULL, or `ERR <sqlstate> <hint-or-none>`. It clears the
+   claims on the way out, on both paths: without that the last user's subject
+   stayed auth.uid() for every owner probe after it, and the nightly
+   placement's first run here wrote that user as linked_by. */
 CREATE OR REPLACE FUNCTION _pc_call(p_who text, p_sql text) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -74,10 +100,12 @@ BEGIN
   IF p_who <> 'owner' THEN PERFORM _pc_as(p_who); END IF;
   EXECUTE p_sql INTO v_out;
   RESET ROLE;
+  PERFORM _pc_clear();
   RETURN coalesce(v_out, 'null');
 EXCEPTION WHEN OTHERS THEN
   GET STACKED DIAGNOSTICS v_hint = PG_EXCEPTION_HINT, v_state = RETURNED_SQLSTATE;
   RESET ROLE;
+  PERFORM _pc_clear();
   RETURN 'ERR ' || v_state || ' ' || coalesce(nullif(v_hint, ''), '(no hint)');
 END $$;
 
@@ -115,7 +143,10 @@ LANGUAGE sql IMMUTABLE AS $$
               FROM jsonb_array_elements(partner_drivers_import()->'skipped') e$q$
 $$;
 
-/* One link of company A by its partner id: status, driver, method, reason, who. */
+/* One link of company A by its partner id: status, driver, method, reason, who.
+   STABLE, so it reads with the snapshot of the statement that calls it: a
+   write made by another call in that same statement is invisible to it. Read
+   a write in the statement after it. */
 CREATE OR REPLACE FUNCTION _pc_link(p_ext text) RETURNS text
 LANGUAGE sql STABLE AS $$
   SELECT l.status || '|' || coalesce(d.name, 'no driver') || '|' || coalesce(l.link_method, 'null') || '|'
@@ -132,10 +163,11 @@ LANGUAGE sql STABLE AS $$
     FROM app_private.partner_driver_certain_match('c0000000-0000-4000-8000-00000000000a', 'reidey', p_name) m
 $$;
 
-/* The nightly placement of a list of earners, as the owner with no session. */
+/* The placement of a list of earners, as the owner, with no caller: what the
+   job's door passes. */
 CREATE OR REPLACE FUNCTION _pc_place(p_earners jsonb, p_status text) RETURNS jsonb
 LANGUAGE sql AS $$
-  SELECT app_private.partner_place_earners('c0000000-0000-4000-8000-00000000000a', 'reidey', p_earners, p_status)
+  SELECT app_private.partner_place_earners('c0000000-0000-4000-8000-00000000000a', 'reidey', p_earners, p_status, NULL)
 $$;
 
 CREATE OR REPLACE FUNCTION _pc_earner(p_ext text, p_name text) RETURNS jsonb
@@ -186,6 +218,52 @@ BEGIN
   END;
   RESET ROLE;
   RETURN v_out;
+END $$;
+
+/* p_sql as p_who, then everything rolled back: the unmutated run a control is
+   compared with, leaving the state as it found it for the next control. */
+CREATE OR REPLACE FUNCTION _pc_undone(p_who text, p_sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out text;
+BEGIN
+  BEGIN
+    v_out := _pc_call(p_who, p_sql);
+    RAISE EXCEPTION USING ERRCODE = 'ZZ042', MESSAGE = v_out;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ042' THEN
+      v_out := SQLERRM;
+  END;
+  RESET ROLE;
+  RETURN v_out;
+END $$;
+
+/* The open run of company A that §5 claims, for the job's door. */
+CREATE TEMP TABLE _pc_run (id uuid);
+
+/* The job's door for one earner, with a subject left set in the transaction
+   on purpose, then the link it wrote, read in a statement of its own. The
+   door must write no caller whatever the session says. */
+CREATE OR REPLACE FUNCTION _pc_door_then(p_ext text, p_name text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE v_answer jsonb; v_out text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000001', true);
+  v_answer := uber_pull_place_unlinked((SELECT id FROM _pc_run), jsonb_build_array(_pc_earner(p_ext, p_name)));
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  EXECUTE 'SELECT _pc_link($1)' INTO v_out USING p_ext;
+  RETURN coalesce(v_answer->>'ok', 'null') || '|' || coalesce(v_out, 'no link');
+END $$;
+
+/* The human earnings resolve for one earner, as whoever _pc_call made the
+   caller, then the link it wrote. */
+CREATE OR REPLACE FUNCTION _pc_resolve_then(p_ext text, p_name text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE v_answer jsonb; v_out text;
+BEGIN
+  v_answer := partner_earners_resolve('reidey', jsonb_build_array(_pc_earner(p_ext, p_name)));
+  EXECUTE 'SELECT _pc_link($1)' INTO v_out USING p_ext;
+  RETURN coalesce(v_answer->>'ok', 'null') || '|' || coalesce(v_out, 'no link');
 END $$;
 
 /* The roster import, then one read, in one function so the read sees the
@@ -369,24 +447,28 @@ END $$;
 DO $$
 DECLARE
   admin_a constant text := 'a0000000-0000-4000-8000-000000000001';
+  v_out text;
 BEGIN
+  -- Each call is its own statement and its link is read in the next one: a
+  -- read in the same statement keeps that statement's snapshot and shows the
+  -- row as it was before the call (this file's first run read exactly that).
+  v_out := _pc_call(admin_a, $q$SELECT partner_driver_link_confirm('2e000000-0000-4000-8000-000000005005',
+                                '2e000000-0000-4000-8000-0000000000d4') ->> 'ok'$q$);
   PERFORM _pc_rec(40, 'a person confirms the doubtful link: manual, the reason cleared, linked_by the person',
-    _pc_call(admin_a, $q$SELECT partner_driver_link_confirm('2e000000-0000-4000-8000-000000005005',
-                                '2e000000-0000-4000-8000-0000000000d4') ->> 'ok'$q$)
-    || '|' || _pc_link('5005'),
+    v_out || '|' || _pc_link('5005'),
     'true|linked|Pc Alt|manual|null|' || admin_a);
+  v_out := _pc_call(admin_a, $q$SELECT partner_driver_link_confirm('2e000000-0000-4000-8000-000000005006',
+                                '2e000000-0000-4000-8000-0000000000d4') ->> 'ok'$q$);
   PERFORM _pc_rec(41, 'a driver that already holds a link is still refused by name, and the other link keeps its reason',
-    _pc_call(admin_a, $q$SELECT partner_driver_link_confirm('2e000000-0000-4000-8000-000000005006',
-                                '2e000000-0000-4000-8000-0000000000d4') ->> 'ok'$q$)
-    || '|' || _pc_link('5006'),
+    v_out || '|' || _pc_link('5006'),
     'ERR P0001 driver_already_linked|pending|no driver|null|name_inactive|null');
   PERFORM _pc_rec(42, 'a decided link cannot be confirmed again',
     _pc_call(admin_a, $q$SELECT partner_driver_link_confirm('2e000000-0000-4000-8000-000000005005',
                                 '2e000000-0000-4000-8000-0000000000d4') ->> 'ok'$q$),
     'ERR P0001 already_decided');
+  v_out := _pc_call(admin_a, $q$SELECT partner_driver_link_reject('2e000000-0000-4000-8000-000000005004') ->> 'stranded'$q$);
   PERFORM _pc_rec(43, 'rejecting clears the reason and reports the stranded note',
-    _pc_call(admin_a, $q$SELECT partner_driver_link_reject('2e000000-0000-4000-8000-000000005004') ->> 'stranded'$q$)
-    || '|' || _pc_link('5004'),
+    v_out || '|' || _pc_link('5004'),
     '1|rejected|no driver|null|null|null');
 
   PERFORM _pc_rec(44, 'a reason on a link that is not pending is refused by the CHECK',
@@ -408,10 +490,13 @@ END $$;
 DO $$
 DECLARE
   co_a constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  admin_a constant text := 'a0000000-0000-4000-8000-000000000001';
   v_next text;
   v_answer jsonb;
+  v_run uuid;
 BEGIN
   INSERT INTO drivers (id, company_id, name, status) VALUES
+    ('2e000000-0000-4000-8000-0000000000e7', co_a, 'Pc Tuer Eins', 'active'),
     ('2e000000-0000-4000-8000-0000000000e1', co_a, 'Pc N Eins', 'active'),
     ('2e000000-0000-4000-8000-0000000000e2', co_a, 'Pc N Zwei', 'active'),
     ('2e000000-0000-4000-8000-0000000000e3', co_a, 'pc n zwei', 'active'),
@@ -422,10 +507,14 @@ BEGIN
   VALUES (co_a, 'reidey', '6900', '2e000000-0000-4000-8000-0000000000e6', 'Pc N Besetzt', 'linked', now());
 
   v_next := app_private.next_driver_personalnummer(co_a);
+  -- A subject left set in the transaction, on purpose: the placement reads no
+  -- session, so it must still write no caller.
+  PERFORM set_config('request.jwt.claim.sub', admin_a, true);
   v_answer := _pc_place(jsonb_build_array(
     _pc_earner('6001', ' pc n eins'), _pc_earner('6002', 'Pc N Zwei'), _pc_earner('6003', 'PC N ALT'),
     _pc_earner('6004', 'Pc N Besetzt'), _pc_earner('6005', 'Pc N Neu'), _pc_earner('6006', 'Unbekannter Fahrer')),
     'active');
+  PERFORM _pc_clear();
 
   PERFORM _pc_rec(50, 'two active namesakes, active plus inactive, an already linked one and no name are refused with their reasons',
     _pc_refused(v_answer),
@@ -433,7 +522,7 @@ BEGIN
   PERFORM _pc_rec(51, 'the certain match is linked and the new name is created',
     _pc_names(v_answer, 'linked') || ' / ' || _pc_names(v_answer, 'created'),
     '6001=Pc N Eins / 6005=Pc N Neu');
-  PERFORM _pc_rec(52, 'the match: automatic_match with no caller (the job has no session)',
+  PERFORM _pc_rec(52, 'the match: automatic_match with no caller, although a subject was set',
     _pc_link('6001'), 'linked|Pc N Eins|automatic_match|null|null');
   PERFORM _pc_rec(53, 'the created driver: active, numbered next, German, automatic_create with no caller',
     (SELECT d.status || '|' || coalesce(d.personalnummer, 'null') || '|' || d.preferred_language
@@ -447,6 +536,25 @@ BEGIN
     (SELECT count(*)::text FROM partner_driver_links WHERE external_driver_id IN ('6002', '6003', '6004', '6006'))
     || '/' || (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND lower(btrim(name)) IN ('pc n zwei', 'pc n alt', 'pc n besetzt', 'unbekannter fahrer')),
     '0/5');
+
+  -- The job's own door, on an open run, with a subject left set: it names no
+  -- caller, so the links it makes carry none.
+  v_run := uber_pull_claim(co_a, ((now() AT TIME ZONE 'Europe/Berlin') - interval '4 hours')::date - 1, 'first');
+  INSERT INTO _pc_run VALUES (v_run);
+  PERFORM _pc_rec(56, 'fixture: an open run for company A',
+    (v_run IS NOT NULL)::text, 'true');
+  PERFORM set_config('request.jwt.claim.sub', admin_a, true);
+  v_answer := uber_pull_place_unlinked(v_run, jsonb_build_array(
+    _pc_earner('6101', 'pc tuer eins'), _pc_earner('6102', 'Pc Tuer Neu')));
+  PERFORM _pc_clear();
+  PERFORM _pc_rec(57, 'the door answers ok with one link and one new driver',
+    (v_answer->>'ok') || ' ' || (v_answer->'linked')::text || ' ' || (v_answer->'created')::text,
+    'true [{"name": "Pc Tuer Eins"}] [{"name": "Pc Tuer Neu"}]');
+  PERFORM _pc_rec(58, 'through the door neither link carries a caller, although a subject was set',
+    _pc_link('6101') || ' ' || _pc_link('6102'),
+    'linked|Pc Tuer Eins|automatic_match|null|null linked|Pc Tuer Neu|automatic_create|null|null');
+  PERFORM _pc_rec(59, 'and the run records both',
+    (SELECT jsonb_array_length(placed_drivers)::text FROM uber_pull_runs WHERE id = v_run), '2');
 END $$;
 
 -- ─── 6. the human earnings resolve keeps its matching ───────────────────────
@@ -483,7 +591,7 @@ BEGIN
   FOREACH v_oid IN ARRAY ARRAY[
     'app_private.partner_driver_certain_match(uuid,text,text)'::regprocedure,
     'app_private.partner_driver_link_apply(uuid,uuid,uuid,text)'::regprocedure,
-    'app_private.partner_place_earners(uuid,text,jsonb,text)'::regprocedure] LOOP
+    'app_private.partner_place_earners(uuid,text,jsonb,text,uuid)'::regprocedure] LOOP
     IF has_function_privilege('anon', v_oid, 'EXECUTE') OR has_function_privilege('authenticated', v_oid, 'EXECUTE')
        OR has_function_privilege('service_role', v_oid, 'EXECUTE')
        OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = v_oid AND a.grantee = 0) THEN
@@ -496,24 +604,37 @@ BEGIN
   FOREACH v_oid IN ARRAY ARRAY[
     'public.partner_drivers_import(text)'::regprocedure,
     'public.partner_driver_link_confirm(uuid,uuid)'::regprocedure,
-    'public.partner_driver_link_reject(uuid)'::regprocedure] LOOP
+    'public.partner_driver_link_reject(uuid)'::regprocedure,
+    'public.partner_earners_resolve(text,jsonb)'::regprocedure] LOOP
     IF has_function_privilege('anon', v_oid, 'EXECUTE') OR NOT has_function_privilege('authenticated', v_oid, 'EXECUTE')
        OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = v_oid AND a.grantee = 0) THEN
       v_bad := v_bad || v_oid::regprocedure::text || ' ';
     END IF;
   END LOOP;
-  PERFORM _pc_rec(71, 'the three public functions keep authenticated and refuse anon and PUBLIC', v_bad, '');
+  PERFORM _pc_rec(71, 'the four public functions keep authenticated and refuse anon and PUBLIC', v_bad, '');
 
-  PERFORM _pc_rec(72, 'all six are SECURITY DEFINER with a pinned search_path',
+  v_oid := 'public.uber_pull_place_unlinked(uuid,jsonb)'::regprocedure;
+  PERFORM _pc_rec(73, 'the job''s door is service_role only',
+    has_function_privilege('service_role', v_oid, 'EXECUTE')::text || '/'
+    || has_function_privilege('authenticated', v_oid, 'EXECUTE')::text || '/'
+    || has_function_privilege('anon', v_oid, 'EXECUTE')::text || '/'
+    || EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = v_oid AND a.grantee = 0)::text,
+    'true/false/false/false');
+  PERFORM _pc_rec(74, 'the four-argument placement, which read the session, is gone',
+    (to_regprocedure('app_private.partner_place_earners(uuid,text,jsonb,text)') IS NULL)::text, 'true');
+
+  PERFORM _pc_rec(72, 'all eight are SECURITY DEFINER with a pinned search_path',
     (SELECT count(*)::text FROM pg_proc p
       WHERE p.oid IN ('app_private.partner_driver_certain_match(uuid,text,text)'::regprocedure,
                       'app_private.partner_driver_link_apply(uuid,uuid,uuid,text)'::regprocedure,
-                      'app_private.partner_place_earners(uuid,text,jsonb,text)'::regprocedure,
+                      'app_private.partner_place_earners(uuid,text,jsonb,text,uuid)'::regprocedure,
                       'public.partner_drivers_import(text)'::regprocedure,
                       'public.partner_driver_link_confirm(uuid,uuid)'::regprocedure,
-                      'public.partner_driver_link_reject(uuid)'::regprocedure)
+                      'public.partner_driver_link_reject(uuid)'::regprocedure,
+                      'public.partner_earners_resolve(text,jsonb)'::regprocedure,
+                      'public.uber_pull_place_unlinked(uuid,jsonb)'::regprocedure)
         AND p.prosecdef AND p.proconfig @> ARRAY['search_path=pg_catalog, public']),
-    '6');
+    '8');
 END $$;
 
 -- ─── 8. mutation controls ───────────────────────────────────────────────────
@@ -526,7 +647,12 @@ DECLARE
   admin_a constant text := 'a0000000-0000-4000-8000-000000000001';
   c_sig constant text := 'app_private.partner_driver_certain_match(uuid,text,text)';
   c_apply constant text := 'app_private.partner_driver_link_apply(uuid,uuid,uuid,text)';
+  c_place constant text := 'app_private.partner_place_earners(uuid,text,jsonb,text,uuid)';
+  c_door constant text := 'public.uber_pull_place_unlinked(uuid,jsonb)';
+  c_resolve constant text := 'public.partner_earners_resolve(text,jsonb)';
   v_zwei text := $q$SELECT _pc_decide('Pc Zwei')$q$;
+  v_door text := $q$SELECT _pc_door_then('6201', 'Pc Tuer Mut')$q$;
+  v_resolve text := $q$SELECT _pc_resolve_then('7101', 'Pc Res Mut')$q$;
 BEGIN
   -- An active and a departed namesake, both unlinked (section 4 linked Pc Alt).
   INSERT INTO drivers (id, company_id, name, status) VALUES
@@ -563,9 +689,12 @@ BEGIN
                $q$SELECT _pc_refused(_pc_place(jsonb_build_array(_pc_earner('6991', 'Pc Zwei')), 'active'))$q$),
     '6990:name_ambiguous vs none');
 
-  -- A fresh certain match per control, each with a waiting note, because the
-  -- import links a proposal once and the controls are rolled back one by one.
+  -- A certain match per control, each with a waiting note. The import walks
+  -- every pending proposal of the company, so the unmutated run (87) is rolled
+  -- back like the mutants: in this file's first run it was not, it linked all
+  -- three, and 88 and 89 then read 87's links and measured nothing.
   INSERT INTO drivers (id, company_id, name, status) VALUES
+    ('2e000000-0000-4000-8000-0000000000f4', 'c0000000-0000-4000-8000-00000000000a', 'Pc Res Mut', 'active'),
     ('2e000000-0000-4000-8000-0000000000f1', 'c0000000-0000-4000-8000-00000000000a', 'Pc Mut Eins', 'active'),
     ('2e000000-0000-4000-8000-0000000000f2', 'c0000000-0000-4000-8000-00000000000a', 'Pc Mut Zwei', 'active'),
     ('2e000000-0000-4000-8000-0000000000f3', 'c0000000-0000-4000-8000-00000000000a', 'Pc Mut Drei', 'active');
@@ -580,7 +709,7 @@ BEGIN
     ('2e000000-0000-4000-8000-0000000c0903', 'c0000000-0000-4000-8000-00000000000a', 'reidey', 'pc-note-m3', '5903', 'wait', 'x');
 
   PERFORM _pc_rec(87, 'control: the apply as written gives the method and the claim',
-    _pc_call(admin_a, _pc_probe('5901', 'pc-note-m1')), 'automatic_match/true');
+    _pc_undone(admin_a, _pc_probe('5901', 'pc-note-m1')), 'automatic_match/true');
   PERFORM _pc_rec(88, 'control: an apply that claims nothing leaves the waiting note unclaimed',
     _pc_mutant(c_apply, 'AND driver_id IS NULL AND status = ''pending'';', 'AND driver_id IS NULL AND status = ''never'';',
                admin_a, _pc_probe('5902', 'pc-note-m2')),
@@ -588,6 +717,22 @@ BEGIN
   PERFORM _pc_rec(89, 'control: an apply that writes the wrong method is noticed',
     _pc_mutant(c_apply, 'link_method = p_method', 'link_method = ''manual''', admin_a, _pc_probe('5903', 'pc-note-m3')),
     'manual/true');
+
+  -- Who made a link is said by the door. Each door's unmutated run is the
+  -- control the mutants are compared with; all of them are rolled back.
+  PERFORM _pc_rec(90, 'control: the job''s door as written leaves linked_by NULL with a subject set',
+    _pc_undone('owner', v_door), 'true|linked|Pc Tuer Mut|automatic_create|null|null');
+  PERFORM _pc_rec(91, 'control: a door that passes the session''s subject is noticed',
+    _pc_mutant(c_door, 'p_earners, ''active'', NULL)', 'p_earners, ''active'', auth.uid())', 'owner', v_door),
+    'true|linked|Pc Tuer Mut|automatic_create|null|' || admin_a);
+  PERFORM _pc_rec(92, 'control: a placement that reads the session instead of p_caller is noticed',
+    _pc_mutant(c_place, 'v_driver, p_caller, v_method)', 'v_driver, auth.uid(), v_method)', 'owner', v_door),
+    'true|linked|Pc Tuer Mut|automatic_create|null|' || admin_a);
+  PERFORM _pc_rec(93, 'control: the human resolve as written records its administrator',
+    _pc_undone(admin_a, v_resolve), 'true|linked|Pc Res Mut|automatic_match|null|' || admin_a);
+  PERFORM _pc_rec(94, 'control: a resolve that passes no caller is noticed',
+    _pc_mutant(c_resolve, 'p_earners, ''inactive'', v_caller)', 'p_earners, ''inactive'', NULL)', admin_a, v_resolve),
+    'true|linked|Pc Res Mut|automatic_match|null|null');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────

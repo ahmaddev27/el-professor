@@ -508,16 +508,32 @@ REVOKE ALL ON FUNCTION public.partner_drivers_import(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.partner_drivers_import(text) TO authenticated;
 
 -- ─── 6. the placement of earners, restated on the rule ──────────────────────
--- Signature, argument checks, lock and the answer are those of 20261126110000.
--- Mode 'active' (the nightly pull) asks the certain rule; mode 'inactive' (the
+-- Argument checks, lock and the answer are those of 20261126110000. Mode
+-- 'active' (the nightly pull) asks the certain rule; mode 'inactive' (the
 -- human earnings resolve) keeps its matching. Both write the link through
 -- partner_driver_link_apply and so record link_method.
+--
+-- The one change of signature: the caller is an ARGUMENT, p_caller, and this
+-- function reads no session. 20261126110000's body read auth.uid() and wrote
+-- it as linked_by, and used it to choose how to claim the waiting submissions.
+-- That answers whatever subject the transaction happens to carry. The nightly
+-- door is service_role, whose key carries no sub, so production writes NULL
+-- there today; but a function on the job's path that reads the session is the
+-- wrong shape, and the kit showed it: a subject left set by an earlier probe
+-- in the same transaction came out as linked_by on a link nobody made. So each
+-- door says who it is: partner_earners_resolve passes the administrator it has
+-- already checked, uber_pull_place_unlinked passes NULL, always. The
+-- four-argument version is dropped rather than kept beside it, so no caller
+-- can reach the old shape by its old name.
 
-CREATE OR REPLACE FUNCTION app_private.partner_place_earners(
+DROP FUNCTION IF EXISTS app_private.partner_place_earners(uuid, text, jsonb, text);
+
+CREATE FUNCTION app_private.partner_place_earners(
   p_company    uuid,
   p_partner    text,
   p_earners    jsonb,
-  p_new_status text
+  p_new_status text,
+  p_caller     uuid
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -526,7 +542,6 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  v_caller  uuid := auth.uid();
   v_partner text := lower(btrim(coalesce(p_partner, '')));
   v_earner  record;
   v_link    public.partner_driver_links;
@@ -649,7 +664,7 @@ BEGIN
        WHERE l.status = 'pending'
       RETURNING l.id INTO v_link_id;
 
-      PERFORM app_private.partner_driver_link_apply(v_link_id, v_driver, v_caller, v_method);
+      PERFORM app_private.partner_driver_link_apply(v_link_id, v_driver, p_caller, v_method);
     ELSE
       v_skipped := v_skipped || jsonb_build_object(
         'external_driver_id', v_earner.external_id, 'name', v_name, 'reason', v_reason);
@@ -661,12 +676,137 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION app_private.partner_place_earners(uuid, text, jsonb, text) IS
-  'Gives each earner with no confirmed link a named home. Mode active (the nightly pull) uses app_private.partner_driver_certain_match: links only a certain exact-name match, creates the driver when no namesake of any status exists, refuses the rest with name_missing, name_ambiguous, name_inactive or name_taken. Mode inactive (the human partner_earners_resolve) links any same-named driver with no link, otherwise creates an inactive one. Never renames a driver. Links are written through partner_driver_link_apply. The caller has done the authorization. 20261127120000.';
+COMMENT ON FUNCTION app_private.partner_place_earners(uuid, text, jsonb, text, uuid) IS
+  'Gives each earner with no confirmed link a named home. Mode active (the nightly pull) uses app_private.partner_driver_certain_match: links only a certain exact-name match, creates the driver when no namesake of any status exists, refuses the rest with name_missing, name_ambiguous, name_inactive or name_taken. Mode inactive (the human partner_earners_resolve) links any same-named driver with no link, otherwise creates an inactive one. Never renames a driver. Links are written through partner_driver_link_apply with p_caller as linked_by; reads no session. The caller has done the authorization. 20261127120000.';
 
-ALTER FUNCTION app_private.partner_place_earners(uuid, text, jsonb, text) OWNER TO CURRENT_USER;
-REVOKE ALL ON FUNCTION app_private.partner_place_earners(uuid, text, jsonb, text)
+ALTER FUNCTION app_private.partner_place_earners(uuid, text, jsonb, text, uuid) OWNER TO CURRENT_USER;
+REVOKE ALL ON FUNCTION app_private.partner_place_earners(uuid, text, jsonb, text, uuid)
   FROM PUBLIC, anon, authenticated, service_role;
+
+-- ─── 6b. the two doors, restated for the caller argument ────────────────────
+-- Both bodies are 20261126110000's, copied, with one line changed in each: the
+-- call to partner_place_earners now names its caller. Signatures, gates,
+-- grants and answers are unchanged, so a release before this one calls them
+-- the same way.
+
+CREATE OR REPLACE FUNCTION public.partner_earners_resolve(
+  p_partner text,
+  p_earners jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_company uuid := public.get_active_company_id();
+  v_caller  uuid := auth.uid();
+  v_member  uuid;
+BEGIN
+  IF v_caller IS NULL OR v_company IS NULL THEN
+    RAISE EXCEPTION 'Keine Berechtigung.' USING ERRCODE = '42501', HINT = 'not_authorized';
+  END IF;
+
+  -- A company and no membership is an open platform context.
+  SELECT up.company_id INTO v_member FROM public.user_profiles up WHERE up.user_id = v_caller;
+  IF v_member IS DISTINCT FROM v_company THEN
+    RAISE EXCEPTION 'a platform session imports nothing'
+      USING ERRCODE = '42501', HINT = 'platform_session_not_allowed';
+  END IF;
+
+  IF NOT public.is_company_admin() THEN
+    RAISE EXCEPTION 'Keine Berechtigung.' USING ERRCODE = '42501', HINT = 'not_authorized';
+  END IF;
+
+  RETURN app_private.partner_place_earners(v_company, p_partner, p_earners, 'inactive', v_caller);
+END;
+$$;
+
+COMMENT ON FUNCTION public.partner_earners_resolve(text, jsonb) IS
+  'Gives each earner of an earnings import that has no confirmed link a named '
+  'home: links a driver of the company with the same normalised name that holds '
+  'no link, otherwise creates an INACTIVE driver from the partner''s name, and '
+  'links it. Reports every driver created or linked, and every earner it could '
+  'not resolve with a reason. Administrator only; refuses a platform session.';
+
+REVOKE ALL ON FUNCTION public.partner_earners_resolve(text, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.partner_earners_resolve(text, jsonb) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.uber_pull_place_unlinked(p_run_id uuid, p_earners jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  c_partner CONSTANT text := 'reidey';
+  c_max     CONSTANT integer := 5;
+  v_run     public.uber_pull_runs%ROWTYPE;
+  v_answer  jsonb;
+  v_placed  jsonb;
+BEGIN
+  IF p_run_id IS NULL OR p_earners IS NULL OR jsonb_typeof(p_earners) <> 'array' THEN
+    RAISE EXCEPTION 'invalid argument' USING ERRCODE = '22023', HINT = 'invalid_request';
+  END IF;
+
+  SELECT * INTO v_run FROM public.uber_pull_runs r WHERE r.id = p_run_id FOR UPDATE;
+  IF NOT FOUND OR v_run.settled_at IS NOT NULL THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'run_not_open');
+  END IF;
+
+  -- The writer's own rule for a company that may be written to without a person.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.companies c
+     WHERE c.id = v_run.company_id
+       AND c.approval_status = 'approved'
+       AND c.status IN ('active', 'trial')
+       AND (
+             (c.subscription_status = 'active'
+              AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now()))
+             OR (c.status = 'trial' AND c.trial_end IS NOT NULL AND c.trial_end > now())
+           )
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'company_blocked');
+  END IF;
+
+  IF (SELECT count(DISTINCT e->>'external_driver_id') FROM jsonb_array_elements(p_earners) e) > c_max THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'too_many');
+  END IF;
+
+  -- NULL, always: nobody pressed anything, whatever subject the transaction
+  -- carries. See section 6.
+  v_answer := app_private.partner_place_earners(v_run.company_id, c_partner, p_earners, 'active', NULL);
+
+  SELECT coalesce(jsonb_agg(x.item), '[]'::jsonb) INTO v_placed FROM (
+    SELECT jsonb_build_object('name', c->>'name', 'action', 'created') AS item
+      FROM jsonb_array_elements(v_answer->'created') c
+    UNION ALL
+    SELECT jsonb_build_object('name', l->>'name', 'action', 'linked')
+      FROM jsonb_array_elements(v_answer->'linked') l
+  ) x;
+
+  UPDATE public.uber_pull_runs
+     SET placed_drivers = v_placed
+   WHERE id = v_run.id;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'created', (SELECT coalesce(jsonb_agg(jsonb_build_object('name', c->>'name')), '[]'::jsonb)
+                  FROM jsonb_array_elements(v_answer->'created') c),
+    'linked',  (SELECT coalesce(jsonb_agg(jsonb_build_object('name', l->>'name')), '[]'::jsonb)
+                  FROM jsonb_array_elements(v_answer->'linked') l),
+    'refused', (SELECT coalesce(jsonb_agg(jsonb_build_object('name', s->>'name', 'reason', s->>'reason')), '[]'::jsonb)
+                  FROM jsonb_array_elements(v_answer->'skipped') s));
+END;
+$$;
+
+COMMENT ON FUNCTION public.uber_pull_place_unlinked(uuid, jsonb) IS
+  'The scheduled pull''s placement of earners with no link: at most five per call, only on an open run of a company that may be written to, then partner_place_earners with status active and no caller (linked_by stays NULL). Records what it created or linked on the run (placed_drivers). A refusal is a returned reason: run_not_open, company_blocked, too_many. service_role only. 20261126110000, restated in 20261127120000 for the caller argument.';
+
+ALTER FUNCTION public.uber_pull_place_unlinked(uuid, jsonb) OWNER TO CURRENT_USER;
+REVOKE ALL ON FUNCTION public.uber_pull_place_unlinked(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.uber_pull_place_unlinked(uuid, jsonb) TO service_role;
 
 -- ─── 7. self-check ──────────────────────────────────────────────────────────
 
@@ -674,8 +814,10 @@ DO $check$
 DECLARE
   v_match   oid := 'app_private.partner_driver_certain_match(uuid,text,text)'::regprocedure;
   v_apply   oid := 'app_private.partner_driver_link_apply(uuid,uuid,uuid,text)'::regprocedure;
-  v_place   oid := 'app_private.partner_place_earners(uuid,text,jsonb,text)'::regprocedure;
+  v_place   oid := 'app_private.partner_place_earners(uuid,text,jsonb,text,uuid)'::regprocedure;
   v_import  oid := 'public.partner_drivers_import(text)'::regprocedure;
+  v_resolve oid := 'public.partner_earners_resolve(text,jsonb)'::regprocedure;
+  v_door    oid := 'public.uber_pull_place_unlinked(uuid,jsonb)'::regprocedure;
   v_confirm oid := 'public.partner_driver_link_confirm(uuid,uuid)'::regprocedure;
   v_reject  oid := 'public.partner_driver_link_reject(uuid)'::regprocedure;
   v_oid     oid;
@@ -704,7 +846,7 @@ BEGIN
   END IF;
 
   -- 2. every new or restated function is a definer with a pinned search_path.
-  FOREACH v_oid IN ARRAY ARRAY[v_match, v_apply, v_place, v_import, v_confirm, v_reject] LOOP
+  FOREACH v_oid IN ARRAY ARRAY[v_match, v_apply, v_place, v_import, v_confirm, v_reject, v_resolve, v_door] LOOP
     IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = v_oid)
        OR NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_oid
                        AND p.proconfig @> ARRAY['search_path=pg_catalog, public']) THEN
@@ -723,13 +865,19 @@ BEGIN
   END LOOP;
 
   -- 4. the three restated public functions keep their grants.
-  FOREACH v_oid IN ARRAY ARRAY[v_import, v_confirm, v_reject] LOOP
+  FOREACH v_oid IN ARRAY ARRAY[v_import, v_confirm, v_reject, v_resolve] LOOP
     IF has_function_privilege('anon', v_oid, 'EXECUTE')
        OR NOT has_function_privilege('authenticated', v_oid, 'EXECUTE')
        OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = v_oid AND a.grantee = 0) THEN
       RAISE EXCEPTION 'certain link self-check 4: % lost its grants', v_oid::regprocedure;
     END IF;
   END LOOP;
+  IF has_function_privilege('anon', v_door, 'EXECUTE')
+     OR has_function_privilege('authenticated', v_door, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', v_door, 'EXECUTE')
+     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = v_door AND a.grantee = 0) THEN
+    RAISE EXCEPTION 'certain link self-check 4: uber_pull_place_unlinked is not service_role only';
+  END IF;
 
   -- 5. every path that links goes through the one apply, and none writes the
   --    link's status or driver itself.
@@ -817,6 +965,35 @@ BEGIN
      OR v_src ~* '(public\.)?income' OR v_src ~* 'cash_movements'
      OR v_src ~* 'personalnummer' THEN
     RAISE EXCEPTION 'certain link self-check 7: partner_place_earners lost the lock, a refusal, its argument checks, or rewrites a driver or touches money';
+  END IF;
+
+  -- 8. who made a link is said by the door, never read from the session on
+  --    the way. The placement reads no session at all and hands p_caller to
+  --    the apply; the four-argument shape is gone; the nightly door passes
+  --    NULL and the human door the administrator it checked; and both doors
+  --    keep the gates of 20261126110000.
+  IF to_regprocedure('app_private.partner_place_earners(uuid,text,jsonb,text)') IS NOT NULL THEN
+    RAISE EXCEPTION 'certain link self-check 8: the four-argument partner_place_earners still exists';
+  END IF;
+  SELECT prosrc INTO v_src FROM pg_proc WHERE oid = v_place;
+  IF v_src ~* '(auth\.(uid|jwt|role|email)\s*\(|request\.jwt|current_setting\s*\()'
+     OR v_src NOT LIKE '%partner_driver_link_apply(v_link_id, v_driver, p_caller, v_method)%' THEN
+    RAISE EXCEPTION 'certain link self-check 8: the placement reads the session, or does not pass p_caller to the apply';
+  END IF;
+  SELECT prosrc INTO v_src FROM pg_proc WHERE oid = v_door;
+  IF v_src NOT LIKE '%partner_place_earners(v_run.company_id, c_partner, p_earners, ''active'', NULL)%'
+     OR v_src ~* 'auth\.uid\s*\('
+     OR v_src NOT LIKE '%run_not_open%' OR v_src NOT LIKE '%company_blocked%'
+     OR v_src NOT LIKE '%too_many%' OR v_src NOT LIKE '%c_max     CONSTANT integer := 5;%'
+     OR v_src NOT LIKE '%FOR UPDATE%' OR v_src NOT LIKE '%SET placed_drivers = v_placed%' THEN
+    RAISE EXCEPTION 'certain link self-check 8: uber_pull_place_unlinked lost a gate, its answer, or does not pass NULL as the caller';
+  END IF;
+  SELECT prosrc INTO v_src FROM pg_proc WHERE oid = v_resolve;
+  IF v_src NOT LIKE '%partner_place_earners(v_company, p_partner, p_earners, ''inactive'', v_caller)%'
+     OR v_src NOT LIKE '%v_caller IS NULL OR v_company IS NULL%'
+     OR v_src NOT LIKE '%platform_session_not_allowed%'
+     OR v_src NOT LIKE '%public.is_company_admin()%' THEN
+    RAISE EXCEPTION 'certain link self-check 8: partner_earners_resolve lost a gate, or does not pass its administrator as the caller';
   END IF;
 
   RAISE NOTICE 'partner certain driver link: self-checks passed';
