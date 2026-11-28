@@ -50,11 +50,21 @@
 --  Every automatic link goes through app_private.partner_driver_link_apply, the
 --  core of partner_driver_link_confirm: status, driver, linked_by, linked_at,
 --  link_method, the decision reason cleared, and the waiting receipt and note
---  submissions claimed, all in one transaction. The confirm calls it with
---  'manual'. The claim is written out there for every caller, with or without
---  a session: partner_submission_claim_driver asks the SESSION's company and
---  role and so cannot run in the nightly job, and one copy of the two UPDATEs
---  is better than two. That function stays, for re-claiming after a correction.
+--  submissions claimed AND applied, all in one transaction. The confirm calls
+--  it with 'manual'. The claim is written out there for every caller, with or
+--  without a session: partner_submission_claim_driver asks the SESSION's
+--  company and role and so cannot run in the nightly job, and one copy is
+--  better than two. That function stays, for re-claiming after a correction.
+--
+--  "Claimed and applied" is the live claim of 20261013100000, not the two
+--  UPDATEs of 20261005140000: since 13.10.2026 there is no review, so a claimed
+--  note becomes a driver_notes row and a claimed, dated Beleg becomes a Beleg
+--  at once, through app_private.partner_note_apply and partner_receipt_apply,
+--  oldest first. This file's first version copied the older claim, and the kit
+--  caught it (partner-link-review.sql probe 26): a confirmed link left its
+--  waiting Beleg pending for ever, because the door applies only on arrival
+--  and nothing applies a submission later. 20261126110000's nightly branch had
+--  the same gap, written out the same way; it closes here with the rest.
 --
 --  What does not change: the human earnings resolve (partner_earners_resolve,
 --  mode 'inactive' of partner_place_earners) keeps its matching exactly, because
@@ -225,12 +235,31 @@ BEGIN
      AND driver_id IS NULL AND status = 'pending';
   GET DIAGNOSTICS v_n = ROW_COUNT;
 
+  -- And applied, as 20261013100000 made that function do: no review, so what
+  -- the link claimed is a Beleg or a note now. Oldest first, so the
+  -- Belegnummern of a backlog run in arrival order. The apply functions lock
+  -- each row and answer applied=false for one they cannot take (a Beleg with
+  -- no date stays pending rather than being given one), so this never raises
+  -- for a submission, and it reads no session.
+  PERFORM app_private.partner_receipt_apply(s.id)
+     FROM public.partner_receipt_submissions s
+    WHERE s.company_id = v_link.company_id AND s.partner = v_link.partner
+      AND s.external_driver_id = v_link.external_driver_id
+      AND s.driver_id = v_link.driver_id AND s.status = 'pending'
+    ORDER BY s.submitted_at;
+  PERFORM app_private.partner_note_apply(s.id)
+     FROM public.partner_note_submissions s
+    WHERE s.company_id = v_link.company_id AND s.partner = v_link.partner
+      AND s.external_driver_id = v_link.external_driver_id
+      AND s.driver_id = v_link.driver_id AND s.status = 'pending'
+    ORDER BY s.submitted_at;
+
   RETURN jsonb_build_object('ok', true, 'receipts', v_r, 'notes', v_n);
 END;
 $$;
 
 COMMENT ON FUNCTION app_private.partner_driver_link_apply(uuid, uuid, uuid, text) IS
-  'Links a pending partner driver to one of ours and claims the receipt and note submissions that waited for it, in the caller''s transaction. The core of partner_driver_link_confirm (manual) and of every automatic link (automatic_match, automatic_create); linked_by is the person who pressed the button, NULL for the nightly job. The caller has done the authorization and checked the driver belongs to the link''s company. 20261127120000.';
+  'Links a pending partner driver to one of ours and claims and applies the receipt and note submissions that waited for it (a dated Beleg becomes a Beleg, a note a driver note), in the caller''s transaction. The core of partner_driver_link_confirm (manual) and of every automatic link (automatic_match, automatic_create); linked_by is the person who pressed the button, NULL for the nightly job. The caller has done the authorization and checked the driver belongs to the link''s company. 20261127120000.';
 
 ALTER FUNCTION app_private.partner_driver_link_apply(uuid, uuid, uuid, text) OWNER TO CURRENT_USER;
 REVOKE ALL ON FUNCTION app_private.partner_driver_link_apply(uuid, uuid, uuid, text)
@@ -898,6 +927,12 @@ BEGIN
      OR v_src NOT LIKE '%UPDATE public.partner_receipt_submissions%'
      OR v_src NOT LIKE '%UPDATE public.partner_note_submissions%' THEN
     RAISE EXCEPTION 'certain link self-check 5: the apply lost a hint, the method, the reason reset or the claim';
+  END IF;
+  -- The claim applies what it claimed (13.10.2026), for every door.
+  IF v_src NOT LIKE '%PERFORM app_private.partner_receipt_apply(s.id)%'
+     OR v_src NOT LIKE '%PERFORM app_private.partner_note_apply(s.id)%'
+     OR v_src NOT LIKE '%s.driver_id = v_link.driver_id AND s.status = ''pending''%' THEN
+    RAISE EXCEPTION 'certain link self-check 5: the apply claims the waiting submissions but no longer applies them';
   END IF;
 
   -- 6. the rule lives in the decision function and nowhere else for the roster:

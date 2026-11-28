@@ -13,7 +13,8 @@
 --    §1  who may call the import (viewer, editor, anon), and that nothing moved.
 --    §2  the import, one probe per branch of the rule: a certain match links
 --        (automatic_match, linked_by the caller, the waiting note and Beleg are
---        claimed), no namesake creates (active, next staff number, German,
+--        claimed and applied: a driver note, a Beleg, an undated Beleg still
+--        waiting), no namesake creates (active, next staff number, German,
 --        automatic_create), a departed driver with no namesake is created
 --        inactive with no number, and every other case stays pending with the
 --        reason: two active (name_ambiguous), active plus inactive and inactive
@@ -25,7 +26,8 @@
 --        holds a link is still refused, reject clears the reason, and the three
 --        CHECKs refuse what they must.
 --    §5  the nightly placement (mode active) applies the same rule, with
---        linked_by NULL, the claim made with no session, and the reasons. A
+--        linked_by NULL, the claim made AND applied with no session, and the
+--        reasons. A
 --        subject is left set in the transaction ON PURPOSE while it runs, and
 --        through the job's own door (uber_pull_place_unlinked) as well: who
 --        made a link is said by the door, never read from the session.
@@ -266,6 +268,16 @@ BEGIN
   RETURN coalesce(v_answer->>'ok', 'null') || '|' || coalesce(v_out, 'no link');
 END $$;
 
+/* Like _pc_probe, but the note's STATUS: claimed is not enough, since
+   13.10.2026 a claimed note is applied (accepted) in the same transaction. */
+CREATE OR REPLACE FUNCTION _pc_probe_applied(p_ext text, p_note text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT format('SELECT _pc_import_then(%L)',
+    'SELECT (SELECT coalesce(link_method, ''null'') FROM partner_driver_links WHERE external_driver_id = ' || quote_literal(p_ext)
+    || ') || ''/'' || (SELECT status FROM partner_note_submissions WHERE external_submission_id = '
+    || quote_literal(p_note) || ')')
+$$;
+
 /* The roster import, then one read, in one function so the read sees the
    import's writes (a single statement would not, it keeps its snapshot). */
 CREATE OR REPLACE FUNCTION _pc_import_then(p_read text) RETURNS text
@@ -340,6 +352,15 @@ BEGIN
   INSERT INTO partner_receipt_submissions
          (id, company_id, partner, external_submission_id, external_driver_id, description)
   VALUES ('2e000000-0000-4000-8000-0000000d0001', co_a, 'reidey', 'pc-rec-1', '5001', 'Tanken');
+  -- Dated, complete Belege, which a link turns into a Beleg at once (13.10.2026):
+  -- one for the roster's certain match, one for the nightly placement's.
+  INSERT INTO partner_receipt_submissions
+         (id, company_id, partner, external_submission_id, external_driver_id,
+          receipt_date, category, amount, payment_method)
+  VALUES ('2e000000-0000-4000-8000-0000000d0002', co_a, 'reidey', 'pc-rec-2', '5001',
+          DATE '2026-10-01', 'Tanken', 12.50, 'bar'),
+         ('2e000000-0000-4000-8000-0000000d0003', co_a, 'reidey', 'pc-rec-3', '6001',
+          DATE '2026-10-02', 'Tanken', 7.25, 'bar');
 END $$;
 
 -- ─── 1. who may call it, refused before anything moves ──────────────────────
@@ -382,6 +403,15 @@ BEGIN
     || '/' ||
     (SELECT (driver_id = '2e000000-0000-4000-8000-0000000000d1')::text FROM partner_receipt_submissions WHERE external_submission_id = 'pc-rec-1'),
     'true/true');
+  PERFORM _pc_rec(25, '...and applied with it: the note is a driver note, the dated Beleg a Beleg, the undated one still waits',
+    (SELECT status || ' ' || (driver_note_id IS NOT NULL)::text FROM partner_note_submissions WHERE external_submission_id = 'pc-note-1')
+    || ' / ' ||
+    (SELECT s.status || ' ' || r.driver_name || ' ' || r.expense::text || ' ' || coalesce(r.created_by, 'no user')
+       FROM partner_receipt_submissions s JOIN receipts r ON r.id = s.receipt_id
+      WHERE s.external_submission_id = 'pc-rec-2')
+    || ' / ' ||
+    (SELECT status || ' ' || (receipt_id IS NULL)::text FROM partner_receipt_submissions WHERE external_submission_id = 'pc-rec-1'),
+    'accepted true / accepted Pc Eins 12.50 no user / pending true');
   PERFORM _pc_rec(13, 'the existing driver is not renamed or duplicated',
     (SELECT name FROM drivers WHERE id = '2e000000-0000-4000-8000-0000000000d1') || '/'
     || (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND lower(btrim(name)) = 'pc eins'),
@@ -532,6 +562,17 @@ BEGIN
     (SELECT (driver_id = '2e000000-0000-4000-8000-0000000000e1')::text
        FROM partner_note_submissions WHERE external_submission_id = 'pc-note-3'),
     'true');
+  -- And applied, as the confirm applies: until this file's second CI run the
+  -- nightly branch (20261126110000) claimed what waited and applied nothing,
+  -- so the note and the Beleg sat pending with a driver, and nothing takes a
+  -- submission up again later.
+  PERFORM _pc_rec(26, 'with no session the waiting note became a driver note and the dated Beleg a Beleg, by no user',
+    (SELECT status || ' ' || (driver_note_id IS NOT NULL)::text FROM partner_note_submissions WHERE external_submission_id = 'pc-note-3')
+    || ' / ' ||
+    (SELECT s.status || ' ' || r.driver_name || ' ' || r.expense::text || ' ' || coalesce(r.created_by, 'no user')
+       FROM partner_receipt_submissions s JOIN receipts r ON r.id = s.receipt_id
+      WHERE s.external_submission_id = 'pc-rec-3'),
+    'accepted true / accepted Pc N Eins 7.25 no user');
   PERFORM _pc_rec(55, 'the refused earners got no link row and nobody was created or linked for them',
     (SELECT count(*)::text FROM partner_driver_links WHERE external_driver_id IN ('6002', '6003', '6004', '6006'))
     || '/' || (SELECT count(*)::text FROM drivers WHERE company_id = co_a AND lower(btrim(name)) IN ('pc n zwei', 'pc n alt', 'pc n besetzt', 'unbekannter fahrer')),
@@ -714,6 +755,12 @@ BEGIN
     _pc_mutant(c_apply, 'AND driver_id IS NULL AND status = ''pending'';', 'AND driver_id IS NULL AND status = ''never'';',
                admin_a, _pc_probe('5902', 'pc-note-m2')),
     'automatic_match/false');
+  PERFORM _pc_rec(95, 'control: the apply as written applies the note it claimed',
+    _pc_undone(admin_a, _pc_probe_applied('5901', 'pc-note-m1')), 'automatic_match/accepted');
+  PERFORM _pc_rec(96, 'control: an apply that claims but no longer applies leaves the note pending',
+    _pc_mutant(c_apply, 'AND s.status = ''pending''', 'AND s.status = ''never''',
+               admin_a, _pc_probe_applied('5901', 'pc-note-m1')),
+    'automatic_match/pending');
   PERFORM _pc_rec(89, 'control: an apply that writes the wrong method is noticed',
     _pc_mutant(c_apply, 'link_method = p_method', 'link_method = ''manual''', admin_a, _pc_probe('5903', 'pc-note-m3')),
     'manual/true');
