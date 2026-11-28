@@ -43,7 +43,7 @@ export function FleetUpdateOutcome({ update }: { update: FleetUpdate }) {
   const { t } = useTranslation();
   const { outcome } = update;
   if (!outcome) return null;
-  if (outcome.scope === 'earnings' || outcome.status !== 'done') return <LegOutcomeView outcome={outcome} />;
+  if (outcome.status !== 'done') return <LegOutcomeView outcome={outcome} />;
   const figures = updateFigures(outcome.scope, outcome);
   return (
     <div className="space-y-3">

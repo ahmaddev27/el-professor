@@ -23,6 +23,6 @@ describe('updateFigures', () => {
   });
   it('shows skipped for vehicles', () => {
     const f = updateFigures('vehicles', leg({}, { skipped: [{ linkId: 'x', label: 'y', reason: 'name_missing' }] } as never));
-    expect(f.at(-1)).toEqual({ key: 'import.update.skipped', count: 1 });
+    expect(f[f.length - 1]).toEqual({ key: 'import.update.skipped', count: 1 });
   });
 });
