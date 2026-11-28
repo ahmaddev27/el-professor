@@ -47,10 +47,10 @@ Both SQL files are read from a checkout of `staging` at or after the commit that
    R8_E2E_ENV=~/workspace/el-professor/e2e/.env.local npx vite-node scripts/fleetbook-round8-month.mts --fetch --month 2026-09 --out ~/design-inputs/round8-out
    ```
    Then run the same command with `--month 2026-10`.
-   - Until `<this PR>` the command stopped at once with vite-node's `No files specified.`: the script runs itself again with staging's settings, and vite-node hands a script no path of its own in `process.argv`.
+   - Until #395 the command stopped at once with vite-node's `No files specified.`: the script runs itself again with staging's settings, and vite-node hands a script no path of its own in `process.argv`.
    - Since `a11c512` staging has `company_simulation_settings`, so the company's row decides the share and the return to base, and the script refuses `--share-percent` and `--return-to-base` (exit 2). Sheet 7 names the row as the source. The arguments only stand in on a stack without the table.
 4. Run `python3 scripts/fleetbook-report-verify.py <closing.xlsx>` and `R8_E2E_ENV=… npx vite-node scripts/fleetbook-route-check.mts --legs <closing.xlsx> --out ~/design-inputs/round8-out` on each closing.
-   - Until `<this PR>` the verifier rounded half to even where the workbook rounds half away from zero, so a drive of 7.185 km (718.5 hundredths) made it fail check 5 on a right total. Run both from a checkout at or after that PR.
+   - Until #395 the verifier rounded half to even where the workbook rounds half away from zero, so a drive of 7.185 km (718.5 hundredths) made it fail check 5 on a right total. Run both from a checkout at or after that PR.
 5. For the comparison, follow the commands in the header of `scripts/fleetbook-round8-before.mts`. They use a detached worktree at `c1de16a`.
 
 A month repeats without the network from its snapshot (`--from-inputs`), and the same seed gives byte-identical payloads.
