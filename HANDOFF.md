@@ -15,9 +15,23 @@ Last updated: **28.11.2026**
       - 88 and 89 read probe 87's links, because 87's unmutated import linked every pending proposal. 87 is rolled back now, and new controls 90–94 break each door's caller and the placement's;
       - the second run (46141197979) passed that file and then failed `partner-link-review.sql` probe 26, on a **product defect of this branch**. `partner_driver_link_apply` had copied the claim of `20261005140000` (two UPDATEs), not the live one of `20261013100000`, which also applies what it claimed. So a confirmed link left its dated Beleg pending for ever: the door applies only on arrival, and nothing applies a submission later. The core now applies, oldest first, as the live claim does, for every door. Self-check 5 pins it, and `partner-certain-link.sql` probes 25, 26, 95 and 96 cover it, with a mutation control. **Behaviour change on the nightly path:** `20261126110000`'s no-session branch claimed and never applied, so it had the same gap; it now applies too, which is the 13.10 rule;
       - the files that sort after `partner-link-review.sql` have never run on this branch, so more may fail. The two dblink files never ran locally;
-    - **nothing in the product unlinks a linked Reidey row**, so a wrong automatic link has no button to undo it (owner's question);
+    - **nothing in the product unlinks a linked Reidey row yet**, so a wrong automatic link has no button to undo it. **The owner answered on 28.11: yes, a person may undo a link.** That is a separate PR, started only after #394 is merged, from the coordinator's brief;
+    - **the delete points were accepted as built** (owner, 28.11): only the administrator deletes, a platform account in a support session included, and a Beleg or income row carrying the same name blocks the delete;
     - a driver whose name appears on another company's Beleg is blocked too when its own `company_id` is NULL (a defensive, wider scan).
-    - **the guard's cost is unmeasured.** It counts every reference column, and json columns by `LIKE`, once per deleted row; `uber_import_undo` deletes all of an import's drivers in one statement, under the API roles' 8 s timeout. Time `driver_delete_check` and an undo on staging's largest company before production;
+    - **the guard's cost, measured on staging on 28.11.2026.** The coordinator ran it as `supabase_admin` in ONE transaction that was rolled back: `BEGIN`, both migrations of `0fc57ec` (both self-checks passed on staging's real data), the timings, `ROLLBACK`. Afterwards `driver_delete_check` and the `drivers_delete_guard` trigger were confirmed absent, no temporary driver was left, and the ledger was unchanged. Nothing was run from this branch's session.
+
+      | | company with 17 drivers, 2,239 trips | the largest by data, 16 drivers, 11,720 trips |
+      |---|---|---|
+      | `driver_references`, once per driver | 17 calls, 416 ms in total, slowest 78 ms | 16 calls, 1,228 ms in total, slowest 502 ms |
+      | `driver_reference_counts` over all drivers | 41 ms | 135 ms |
+      | `uber_undo_plan` | 11 ms | 7 ms |
+      | `DELETE` of 25 fresh, unreferenced drivers in ONE statement (the trigger path) | 491 ms | 1,030 ms, about 41 ms per row |
+
+      **The limit, stated rather than fixed:**
+      - the API roles' statement timeout is 8 s, and an undo of 25 drivers in today's largest company takes about 1 s, so the headroom is about 8×;
+      - the cost per deleted row grows with the company's data, mostly its trips;
+      - a company with about ten times today's largest trip count that undoes 20 or more drivers in one statement would reach the timeout;
+      - this does not block anything today;
     - review follow-ups done on the branch:
       - a failed links read now says so instead of hiding the notice and every badge, and an older answer can no longer overwrite a newer company's;
       - a throw from the import RPC reads `importGeneric`, not "nothing was changed";
