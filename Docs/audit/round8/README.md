@@ -33,18 +33,24 @@ Both SQL files are read from a checkout of `staging` at or after the commit that
    - It is one `BEGIN READ ONLY … ROLLBACK`, so it cannot write.
    - Its three `ready` lines must all read `t`, or the seed stops and writes nothing.
    - It also shows the company's simulation settings row, or that it has none.
+   - Its two `month needs` lines must read `t` before step 3: a city for the address pool, and a base. Without either the month stops with `CONFIGURATION_REQUIRED` and writes nothing.
+   - Its `case:` lines list the deliberate cases the months must show: the refund (Emil, 20.10.2026, −12,50 EUR) and Uber activity on a day of leave (Anna, 08.10.2026). A third line, Uber activity on a forbidden weekday, appears only when a driver's weekdays leave one out; no DEMO driver's do today.
 2. As root, the DEMO seed: `git show <sha>:scripts/seed-demo-company.sql | $DB -v demo_share_percent=31 -v demo_return_to_base=on`.
    - It writes only DEMO Monatsplanung GmbH's rows, and every insert is guarded by `NOT EXISTS`, so a second run adds nothing.
    - `demo_share_percent` (30, 31, 32 or 33) writes the company's `company_simulation_settings` row, a fixed share, only when the company has none. A row an administrator saved on the screen is never changed. Leave both variables out to keep "no share, no return to base".
    - To set a base, add `-v demo_base_lat=<lat> -v demo_base_lon=<lon>`; it is written only when none is saved.
+   - To set the company's city, add `-v demo_city=<city> [-v demo_postal_code=<plz>]`; it is written only where the city is empty, and no street is written. The month builds its address pool for that city, so the city and the base belong together: the example months use Solingen, 42651, with the base on the Neumarkt square (`51.170324`, `7.081219`).
+   - A second run with only the new variables adds only what they name: every other insert is `INSERT 0 0`.
    - Then run step 1 again to see what the months will read.
 3. Build each month as the DEMO login:
    ```
    R8_E2E_ENV=~/workspace/el-professor/e2e/.env.local npx vite-node scripts/fleetbook-round8-month.mts --fetch --month 2026-09 --out ~/design-inputs/round8-out
    ```
    Then run the same command with `--month 2026-10`.
+   - Until `<this PR>` the command stopped at once with vite-node's `No files specified.`: the script runs itself again with staging's settings, and vite-node hands a script no path of its own in `process.argv`.
    - Since `a11c512` staging has `company_simulation_settings`, so the company's row decides the share and the return to base, and the script refuses `--share-percent` and `--return-to-base` (exit 2). Sheet 7 names the row as the source. The arguments only stand in on a stack without the table.
-4. Run `python3 scripts/fleetbook-report-verify.py <closing.xlsx>` and `npx vite-node scripts/fleetbook-route-check.mts --legs <closing.xlsx> --out ~/design-inputs/round8-out` on each closing.
+4. Run `python3 scripts/fleetbook-report-verify.py <closing.xlsx>` and `R8_E2E_ENV=… npx vite-node scripts/fleetbook-route-check.mts --legs <closing.xlsx> --out ~/design-inputs/round8-out` on each closing.
+   - Until `<this PR>` the verifier rounded half to even where the workbook rounds half away from zero, so a drive of 7.185 km (718.5 hundredths) made it fail check 5 on a right total. Run both from a checkout at or after that PR.
 5. For the comparison, follow the commands in the header of `scripts/fleetbook-round8-before.mts`. They use a detached worktree at `c1de16a`.
 
 A month repeats without the network from its snapshot (`--from-inputs`), and the same seed gives byte-identical payloads.

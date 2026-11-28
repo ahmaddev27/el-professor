@@ -2,7 +2,28 @@
 
 Last updated: **28.11.2026**
 
-- **28.11.2026 (latest) — round 8's four open items, decided under the owner's delegation** (branch `feat/fleetbook-round8-followup`, one PR into `staging`; no migration). He was asleep and delegated them through the peer session: *"ايش بدك سوي الي بتشوفو صح"*.
+- **28.11.2026 (latest) — round 8's months made runnable on DEMO** (branch `fix/round8-month-reexec`, one PR into `staging`, opened and not merged; no migration, no product code). The coordinator ran the DEMO seed on staging at `5d20d92` (`demo_share_percent=31`, `demo_return_to_base=on`) and asked three questions before the months are trusted.
+  1. **`--fetch` stopped at its second run** with vite-node's `No files specified.`: the script runs itself again with staging's settings, and vite-node leaves the script's own path out of `process.argv`. It now passes it (`377c566`).
+  2. **The month needs a city as well as a base.** With no `company_settings.city` the address pool is empty and the run exits 4 with `CONFIGURATION_REQUIRED`, whatever `return_to_base` says; DEMO had neither.
+     - The seed takes `-v demo_city=<city> [-v demo_postal_code=<plz>]` and writes it only where the city is empty.
+     - No street is written: an invented street would be geocoded into somebody's real address. The base comes from the existing `-v demo_base_lat/-v demo_base_lon`; proposed is the Neumarkt square in Solingen (`51.170324`, `7.081219`).
+     - The check file gains two `month needs:` lines.
+  3. **The leave day stands in for the forbidden weekday.** The auditor's list names "Driver leave and sickness", not a forbidden weekday. Narrowing Anna's weekdays would be an UPDATE of a Drivers-page setting, and with Uber rows on every day it would give about 17 forbidden days a month, not one.
+     - The seed adds one approved leave note, add-only: Anna, Thursday 08.10.2026, `vacation` / `exclude_from_plan`. Uber's regular row for that day stays.
+     - The closing then shows no shift for that day, the share computed on Uber's 83,49 €, and her 1,95 € tip unallocated, so the day reads INCOMPLETE. The leave itself is named in the Betriebsbericht's `O` ("Fahrer durch Notiz gesperrt"); sheet 4 names only the tip.
+     - The case is in October beside the refund, so September stays the month whose every row reconciles. The weekday rule stays pinned by `driverMonthPlan`'s unit tests.
+     - The check file names each deliberate case on a `case:` line.
+  4. **October's negative umsatz is deliberate:** Emil's refund on 20.10.2026, −12,50 € (W2).
+  5. **The verifier rounded half to even.** `cents()` in `scripts/fleetbook-report-verify.py` used Python's `round()`, but the workbook rounds half away from zero (`Math.round(km * 100)`, `toCents`).
+     - A drive of 7.185 km is exactly 718.5 hundredths as a double. The file wrote 719 and the verifier read 718, so check 5 failed three shifts of October-with-leave whose totals were right.
+     - `cents()` now rounds half away from zero. `scripts/fleetbook-report-verify.test.ts` runs the verifier's new `--cents` seam (stdlib only: openpyxl is imported on first use) against `toCents` over 220,004 values. Two mutations, half-even and rounding the decimal text, each fail it.
+     - On four preview closings, only that check moved.
+  6. `scripts/fleetbook-route-check.mts` reads `R8_E2E_ENV`, as the month script does, so it runs from a worktree.
+  - **Preview only:** both months were built here from staging's data, with the city, the base and the leave note injected in memory; nothing was written.
+    - **September:** `VERIFICATION_INCOMPLETE` (only `drivers_planned`, because Clara, Dieter and the Inhaber have no valid hours range), financial RECONCILED, 31 %.
+    - **October:** the same verdict, financial INCOMPLETE on 9 rows, 42 two-part duties.
+    - Both pass the verifier and the route check. The real months are run after the seed's second run.
+- **28.11.2026 — round 8's four open items, decided under the owner's delegation** (branch `feat/fleetbook-round8-followup`, one PR into `staging`; no migration). He was asleep and delegated them through the peer session: *"ايش بدك سوي الي بتشوفو صح"*.
   1. **Premiums (D1 point 2): none assumed, and the document says so.** The hours range stays salary ÷ hourly rate with no night, Sunday or holiday Zuschlag until he sends each driver's contract rates. Sheet 3's two hours headers name the rule (`Gehalt / Stundenlohn, ohne Zuschlaege`), and sheet 7 states it under `Regeln` and `Nicht verfuegbar`.
   2. **139 h: the working-time law decides it** (`full-month/4.2.0`). A day may hold 480 minutes of work (§3 ArbZG). The 10-hour extension is not used: it needs an 8-hour average over six months that a simulated month cannot show. A duty over 360 minutes is two parts on one vehicle, each at most 360, around one unpaid 30-minute break at the base (§4). Part 1 ends at the base even when the company does not require a return, and part 2 starts there. At most 48 h a week. A day of 360 minutes or less is unchanged, and a month whose goal fitted under 360 a day plans the same minutes as before.
      - Closing sheet 2 gains `Dienst-ID` and `Teil` and writes the break in `Pausen`. Sheet 7 gains an `Arbeitszeit` rule. The Betriebsbericht's `H2` and `O` gain `Dienst` and `Teil`.
